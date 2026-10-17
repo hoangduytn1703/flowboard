@@ -261,10 +261,15 @@ def set_override(value: Optional[str]) -> int:
             row.value = new_value
             row.updated_at = datetime.now(timezone.utc)
             s.add(row)
-        rebound = _rebind_boards(s, previous, current) if current != previous else 0
+        # Reconcile even when the effective id did not move. Editing `.env`
+        # between restarts moves it without touching a single binding, so
+        # pinning that same id then saw `current == previous` and left every
+        # board generating into the project from before the edit. Boards
+        # already on `current` are not touched, so a true no-op stays 0.
+        rebound = _rebind_boards(s, previous, current)
         s.commit()
 
-    if current != previous:
+    if current != previous or rebound:
         logger.info(
             "flow project override %s: effective project %s → %s (%d board(s) moved)",
             "cleared" if new_value is None else "set",
@@ -313,10 +318,14 @@ def _rebind_boards(s, old: str, new: str) -> int:
     rows = s.exec(
         select(BoardFlowProject).where(BoardFlowProject.flow_project_id != new)
     ).all()
+    # The rows' own ids, not `old`: after a `.env` edit `old` already equals
+    # `new`, and logging "from X to X" hides which project the boards left.
+    stale = sorted({row.flow_project_id for row in rows})
     for row in rows:
         row.flow_project_id = new
         s.add(row)
     count = len(rows)
     if count:
-        logger.info("rebound %d board(s) from flow project %s to %s", count, old, new)
+        logger.info("rebound %d board(s) from flow project %s to %s",
+                    count, ", ".join(stale), new)
     return count

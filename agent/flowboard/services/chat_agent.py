@@ -2,10 +2,11 @@
 
 ``POST /api/chat`` persists the user message and schedules
 :func:`run_chat_agent` as a FastAPI BackgroundTask. The loop runs HERE,
-not in the worker: only LLM reasoning goes through the muse provider
-queue (``run_llm("chat_agent", ...)``); every tool is a direct service
-call (create node/edge, ``run_muse_media`` for image/video, ffmpeg
-concat).
+not in the worker. Reasoning goes through the provider pinned for the
+**Planner** feature in Settings → AI Providers (``run_llm("planner")``);
+image / video tools enqueue the same ``gen_image`` / ``gen_video``
+Requests the Generate button does, so they render on Google Flow through
+the worker and the extension, and ffmpeg joins clips locally.
 
 :func:`run_chat_agent` never raises — any failure marks the ChatRun
 ``failed`` and writes an assistant message carrying the error.
@@ -23,21 +24,49 @@ from typing import Any, NamedTuple, Optional
 from sqlmodel import select
 
 from flowboard.db import get_session
-from flowboard.db.models import Asset, Board, ChatAttachment, ChatMessage, ChatRun, Edge, Node
+from flowboard.db.models import (
+    Asset,
+    Board,
+    BoardFlowProject,
+    ChatAttachment,
+    ChatMessage,
+    ChatRun,
+    Edge,
+    Node,
+    Request,
+)
+from flowboard.services import media as media_service
 from flowboard.services import video_concat
 from flowboard.services.activity import record_activity
+from flowboard.services.board_builder import BoardSpecError, build_board
+from flowboard.services.flow_project import effective_project_id
 from flowboard.services.llm.base import LLMError
-from flowboard.services.llm.muse import MuseProvider
 from flowboard.services.llm.registry import run_llm
-from flowboard.services.muse_media import run_muse_media
 from flowboard.short_id import generate_unique_short_id
 
 logger = logging.getLogger(__name__)
 
 MAX_TURNS = 12
 _LLM_TIMEOUT_S = 120.0
+# One Flow render through the worker: an image lands in ~30 s, a video
+# polls for up to 5 min inside the handler, plus queue time behind other
+# requests (the worker is single-consumer).
+_MEDIA_TIMEOUT_S = 900.0
+_MEDIA_POLL_S = 2.0
+_TERMINAL = ("done", "failed", "timeout", "canceled")
 
-_NODE_TYPES = {"character", "image", "video", "prompt", "note", "merge"}
+_IMAGE_ASPECTS = {
+    "portrait": "IMAGE_ASPECT_RATIO_PORTRAIT",
+    "landscape": "IMAGE_ASPECT_RATIO_LANDSCAPE",
+    "square": "IMAGE_ASPECT_RATIO_SQUARE",
+}
+_VIDEO_ASPECTS = {
+    "portrait": "VIDEO_ASPECT_RATIO_PORTRAIT",
+    "landscape": "VIDEO_ASPECT_RATIO_LANDSCAPE",
+}
+_VIDEO_QUALITIES = ("lite", "fast", "quality", "lite_relaxed", "fast_relaxed")
+
+_NODE_TYPES = {"character", "visual_asset", "image", "video", "prompt", "note", "merge", "export"}
 
 
 def _utcnow() -> datetime:
@@ -57,47 +86,99 @@ class ToolCall(NamedTuple):
 
 # ── system prompt ─────────────────────────────────────────────────────
 
-_SYSTEM_PROMPT = """You are the Flowboard build agent. You control an infinite-canvas
-workspace through tools to fulfil the user's media request end-to-end:
-create nodes, generate images/videos, wire edges, and concat videos.
+_SYSTEM_PROMPT = """You are the Flowboard build agent. You do not execute anything
+yourself: you answer with JSON tool calls, and the Flowboard server runs
+them on an infinite canvas (nodes for the model, the product, scene images,
+videos; edges = "use as reference").
 
 RULES
 - Respond with EXACTLY ONE JSON object per turn, no prose outside it.
 - Either a tool call: {"tool": "<name>", "args": {...}}
 - Or finish: {"done": true, "reply": "<summary for the user>"}
 - The reply must be in the same language as the user's message.
-- Node positions: x grows right, y grows down. Lay new content out
-  left-to-right starting near x=0, spacing nodes ~300px apart.
-- Prefer reusing existing nodes on follow-up turns ("sửa", "gen lại"):
-  regenerate into the same node instead of creating duplicates.
-- Keep prompts you send to gen_image/gen_video concrete and visual.
+- DEFAULT IS DRAFT MODE. Build the board — nodes with titles and prompts,
+  wired with edges — and stop. The user reviews the prompts and presses
+  Generate on each node themselves. Do NOT call gen_image, gen_video or
+  concat_videos unless the user explicitly asks you to render now
+  ("tạo ảnh luôn", "render luôn", "gen luôn", "làm video luôn", "generate").
+  Rendering spends the user's Google Flow credits.
+- Build a whole board in ONE build_board call; only use create_node /
+  add_edge / update_node for small follow-up edits.
+- Prefer reusing existing nodes on follow-up turns ("sửa", "đổi prompt"):
+  update_node their data instead of creating duplicates.
 - If a tool returns an error, adapt (fix args, try another tool) instead
   of repeating the identical call.
 
+NODE DATA (what the Generate button reads)
+- character (the model): {"title": "...", "charGender": "male|female",
+  "charCountry": "vn|jp|kr|cn|th|us|fr", "charVibe":
+  "clean|douyin|oldmoney|coldgirl|kpop|casual", "charExtras": "English,
+  <=200 chars: hair, face, age, expression — no clothing"}
+- visual_asset (the product): {"title": "Sản phẩm — upload ảnh thật"}.
+  Leave it empty for the user to upload the real product photo; only add a
+  "prompt" if the user wants the product generated.
+- image (one per scene): {"title": "Cảnh 1 - ...", "prompt": "English,
+  <=500 chars: shot size + action + setting + lighting + camera. Refer to
+  'the model' and 'the product shown in the reference photo' (never name
+  a product type the user did not give — it may be clothing, food, a
+  gadget, cosmetics) — never re-describe their looks,
+  the reference nodes carry that."}
+- video (one per scene image): {"title": "...", "prompt": "English motion
+  for 8 s in 2-3 beats (e.g. 0-3s / 3-6s / 6-8s). Locked-off camera unless
+  the user asks for movement. Natural real-time pace — do not write
+  'slowly' / 'slow motion' unless the user asks for a slow-motion effect."}
+- note (the script): {"title": "Kịch bản", "prompt": "<the script, in the
+  user's language>"}
+- Edges: every reference (character, product) → every scene image; each
+  scene image → exactly ONE video (a video uses only its first image).
+
 TOOLS
-- create_node: {"type": "character|image|video|prompt|note|merge",
+- build_board: {"nodes": [{"key": "model", "type": "character",
+  "data": {...}}, {"key": "s1", "type": "image", "data": {...}}, ...],
+  "edges": [["model", "s1"], ["product", "s1"], ["s1", "v1"], ...]}
+  Creates every node and edge at once and lays them out left to right
+  (references → scene images → videos). An edge end may also be an
+  existing node as "#abcd". → {"ok": true, "nodes": {"model": "abcd", ...}}
+- create_node: {"type": "character|visual_asset|image|video|prompt|note|merge",
   "x": float, "y": float, "data": {optional dict}}
   → {"ok": true, "short_id": "abcd", "id": 7}
 - add_edge: {"from_short_id": "abcd", "to_short_id": "efgh",
   "kind": "ref"}  (kind: "ref" = use as reference)
-- gen_image: {"prompt": "...", "node_short_id": "abcd" (optional),
-  "reference_asset_ids": [1, 2] (optional, uploaded/attached images)}
-  Generates an image and binds it to the node (creates an image node
-  if none given).
-- gen_video: {"prompt": "...", "source_asset_id": 3 (REQUIRED: image or
-  video asset id used as the start frame), "node_short_id": "abcd"
-  (optional)}  Generates a video and binds it to a video node.
-- concat_videos: {"video_asset_ids": [4, 5], "node_short_id": "abcd"
-  (optional)}  Joins videos in order with ffmpeg; binds the result to
-  a merge node (created if none given).
+- gen_image: {"prompt": "... (English, visual)",
+  "node_short_id": "abcd" (optional: render into this image node),
+  "reference_node_short_ids": ["ab12", "cd34"] (optional: character /
+  visual_asset / image nodes whose media is used as reference, e.g. to
+  keep the same person and the same product),
+  "reference_asset_ids": [1, 2] (optional: images attached to the chat),
+  "aspect": "portrait|landscape|square" (optional, default portrait)}
+  Renders on Google Flow (~30 s) and binds the image to the node
+  (creates an image node if none given). Returns media_ids.
+- gen_video: {"prompt": "... (English: motion, camera, lighting)",
+  "source_node_short_id": "abcd" (an image node with media — its first
+  image is the start frame) OR "source_asset_id": 3 (an attached image),
+  "node_short_id": "efgh" (optional), "aspect": "portrait|landscape"
+  (optional, default portrait), "quality": "lite|fast|quality"
+  (optional, default lite — cheapest)}
+  Renders an 8 s clip on Google Flow (1-5 min) and binds it to a video
+  node. Each call spends the user's Flow credits, so do not repeat one
+  that succeeded.
+- concat_videos: {"video_node_short_ids": ["ab12", "cd34"] (video nodes
+  with media, in order) OR "video_asset_ids": [4, 5],
+  "node_short_id": "abcd" (optional)}  Joins clips with ffmpeg; binds the
+  result to a video node (created if none given).
 - update_node: {"short_id": "abcd", "data_patch": {...}}  Shallow-merges
   data (a null value deletes the key).
 - refresh: {}  Re-reads the board (nodes/edges) after many mutations.
 
-Typical video job: upload/start images → create_node image ×N →
-gen_image each (or reuse attached images directly) → gen_video per image
-with source_asset_id → create_node merge → add_edge video→merge in order
-→ concat_videos → done with a short summary.
+Typical ad request ("tạo kịch bản quảng cáo …"): ONE build_board call
+with a note (the script), a character, a visual_asset (product), 3-4
+scene images and one video per image, edges as above → done, with a
+reply that lists the scenes and says what to press: upload the product
+photo, Generate the character, then each scene image, then each video.
+Only when asked to render: gen_image per scene with
+reference_node_short_ids=[model, product], then gen_video per image with
+source_node_short_id, then concat_videos in order. Never re-render media
+that already exists.
 """
 
 
@@ -210,41 +291,35 @@ def _dynamic_context(board_id: int) -> str:
     return "\n".join(lines)
 
 
-# ── LLM call (registry with muse fallback) ────────────────────────────
+# ── LLM call ──────────────────────────────────────────────────────────
 
 async def _chat_llm(
     user_prompt: str,
     attachments: Optional[list[str]],
     turn: int,
 ) -> str:
-    """Route through ``run_llm("chat_agent")``; on a fresh install with no
-    provider pinned, fall back to the muse provider directly (the dock is
-    specified Muse-compatible, and muse needs no configuration)."""
-    try:
-        return await run_llm(
-            "chat_agent",
-            user_prompt,
-            system_prompt=_SYSTEM_PROMPT,
-            attachments=attachments,
-            timeout=_LLM_TIMEOUT_S,
-        )
-    except LLMError as exc:
-        if "No AI provider configured for chat_agent" not in str(exc):
-            raise
-        logger.info("chat_agent: no provider pinned, falling back to muse")
-        provider = MuseProvider()
-        if not await provider.is_available():
-            raise LLMError(
-                "Muse chưa sẵn sàng — agent không thể suy nghĩ. "
-                "Đặt FLOWBOARD_MUSE2API_BASE trỏ tới muse2api, hoặc chạy: "
-                "python agent/scripts/muse_worker.py"
+    """The chat thinks with its own pin (Settings → AI Providers → Chat AI,
+    or the picker on the dock), else with the Planner's.
+
+    The planner is the fallback because it is the closest sibling — it
+    writes pipeline plans for the same canvas — and because Chat AI is
+    optional: an install configured before the row existed keeps working."""
+    for feature in ("chat_agent", "planner"):
+        try:
+            return await run_llm(
+                feature,
+                user_prompt,
+                system_prompt=_SYSTEM_PROMPT,
+                attachments=attachments,
+                timeout=_LLM_TIMEOUT_S,
             )
-        return await provider.run(
-            user_prompt,
-            system_prompt=_SYSTEM_PROMPT,
-            attachments=attachments,
-            timeout=_LLM_TIMEOUT_S,
-        )
+        except LLMError as exc:
+            if f"No AI provider configured for {feature}" not in str(exc):
+                raise
+    raise LLMError(
+        "Chưa chọn AI provider cho Chat AI / Planner — bấm chip provider trên "
+        "khung chat, hoặc mở 🤖 Setup AI (Settings → AI Providers), rồi gửi lại."
+    )
 
 
 # ── tool-call parsing ─────────────────────────────────────────────────
@@ -342,17 +417,115 @@ def _get_or_create_media_node(
     return node
 
 
-def _asset_media_id(s, asset_id: int, expect_kind: Optional[str] = None) -> str:
-    row = s.get(Asset, asset_id)
-    if row is None:
-        raise ChatAgentError(f"asset {asset_id} not found")
-    if expect_kind and (row.kind or "") != expect_kind:
+# ── Flow dispatch ─────────────────────────────────────────────────────
+#
+# The tools below render exactly the way the Generate button does: a
+# Request row the worker picks up, so the node shows "running", the
+# worker mirrors the result onto Node.data when it lands, and the
+# activity feed shows the render.
+
+def _flow_project_id(board_id: int) -> str:
+    with get_session() as s:
+        row = s.get(BoardFlowProject, board_id)
+    pid = row.flow_project_id if row is not None else effective_project_id()
+    if not pid:
         raise ChatAgentError(
-            f"asset {asset_id} has kind {row.kind!r}, expected {expect_kind!r}"
+            "no Flow project pinned — Settings → Google Flow project, or "
+            "FLOWBOARD_FLOW_PROJECT_ID in .env"
         )
-    if not row.uuid_media_id:
-        raise ChatAgentError(f"asset {asset_id} has no media id")
-    return row.uuid_media_id
+    return pid
+
+
+def _node_media_id(s, board_id: int, short_id: str, *, want: str) -> str:
+    node = _node_by_short(s, board_id, short_id)
+    if node is None:
+        raise ChatAgentError(f"node #{short_id} not found on this board")
+    mid = (node.data or {}).get("mediaId")
+    if not isinstance(mid, str) or not mid:
+        raise ChatAgentError(f"node #{short_id} has no {want} yet — generate it first")
+    return mid
+
+
+async def _attachment_to_flow(asset_id: int, project_id: str) -> str:
+    """A chat attachment is a local file with a made-up id; Flow can only
+    reference media inside the project, so upload it (images are free)."""
+    with get_session() as s:
+        row = s.get(Asset, asset_id)
+        if row is None:
+            raise ChatAgentError(f"asset {asset_id} not found")
+        if (row.kind or "") != "image":
+            raise ChatAgentError(f"asset {asset_id} is not an image")
+        if row.uuid_media_id and media_service.is_valid_media_id(row.uuid_media_id):
+            return row.uuid_media_id  # already a Flow media id
+        path = Path(row.local_path) if row.local_path else None
+        mime = row.mime or "image/png"
+    if path is None or not path.is_file():
+        raise ChatAgentError(f"asset {asset_id} has no local file")
+    from flowboard.routes.upload import _ingest_image_bytes  # late: route module
+
+    try:
+        out = await _ingest_image_bytes(path.read_bytes(), mime, project_id, path.name, None)
+    except Exception as exc:  # noqa: BLE001 — HTTPException or SDK error
+        detail = getattr(exc, "detail", None)
+        msg = detail.get("message") if isinstance(detail, dict) else str(exc)
+        raise ChatAgentError(f"upload of asset {asset_id} to Flow failed: {msg}") from exc
+    return out["media_id"]
+
+
+def _stamp_running(node_id: int) -> None:
+    with get_session() as s:
+        node = s.get(Node, node_id)
+        if node is not None:
+            node.status = "running"
+            s.add(node)
+            s.commit()
+
+
+async def _dispatch_flow(node_id: int, req_type: str, params: dict) -> list[str]:
+    """Enqueue a worker Request for ``node_id`` and wait for it to settle.
+
+    The worker writes the media onto the node itself (``_node_completion_patch``),
+    so on success only the media ids come back. Raises ChatAgentError with
+    the worker's error on failure, timeout or cancel."""
+    from flowboard.worker.processor import get_worker  # late: avoids an import cycle
+
+    _stamp_running(node_id)
+    with get_session() as s:
+        req = Request(node_id=node_id, type=req_type, params=dict(params), status="queued")
+        s.add(req)
+        s.commit()
+        s.refresh(req)
+        rid = req.id
+    get_worker().enqueue(rid)
+
+    waited = 0.0
+    while waited < _MEDIA_TIMEOUT_S:
+        await asyncio.sleep(_MEDIA_POLL_S)
+        waited += _MEDIA_POLL_S
+        with get_session() as s:
+            row = s.get(Request, rid)
+            if row is None:
+                raise ChatAgentError(f"request {rid} disappeared")
+            if row.status in _TERMINAL:
+                status, error, result = row.status, row.error, dict(row.result or {})
+                break
+    else:
+        raise ChatAgentError(
+            f"{req_type} request {rid} still running after {int(_MEDIA_TIMEOUT_S)}s"
+        )
+    if status != "done":
+        raise ChatAgentError(f"{req_type} {status}: {error or 'unknown error'}")
+    media_ids = [m for m in (result.get("media_ids") or []) if isinstance(m, str) and m]
+    if not media_ids:
+        raise ChatAgentError(f"{req_type} returned no media")
+    return media_ids
+
+
+def _aspect(args: dict, table: dict, default: str) -> str:
+    key = str(args.get("aspect") or default).strip().lower()
+    if key not in table:
+        raise ChatAgentError(f"aspect must be one of {sorted(table)}")
+    return table[key]
 
 
 async def _tool_create_node(board_id: int, args: dict) -> dict:
@@ -393,6 +566,21 @@ async def _tool_create_node(board_id: int, args: dict) -> dict:
         }
 
 
+async def _tool_build_board(board_id: int, args: dict) -> dict:
+    """Create a set of nodes and the edges between them in one call.
+
+    A board for one ad is ~8 nodes and ~9 edges; one tool call each would
+    blow through MAX_TURNS before the agent could reply. The layout and
+    validation live in services/board_builder, shared with the template
+    route."""
+    try:
+        created = build_board(board_id, args)
+    except BoardSpecError as exc:
+        raise ChatAgentError(str(exc)) from exc
+    return {"ok": True, "tool": "build_board", "nodes": created,
+            "edges": len(args.get("edges") or [])}
+
+
 async def _tool_add_edge(board_id: int, args: dict) -> dict:
     from_sid = args.get("from_short_id")
     to_sid = args.get("to_short_id")
@@ -423,27 +611,31 @@ async def _tool_gen_image(board_id: int, args: dict) -> dict:
     prompt = args.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
         raise ChatAgentError("prompt is required")
+    ref_shorts = args.get("reference_node_short_ids") or []
     ref_ids = args.get("reference_asset_ids") or []
-    if not isinstance(ref_ids, list):
-        raise ChatAgentError("reference_asset_ids must be a list")
+    if not isinstance(ref_shorts, list) or not isinstance(ref_ids, list):
+        raise ChatAgentError("reference_node_short_ids / reference_asset_ids must be lists")
+    project_id = _flow_project_id(board_id)
+    aspect = _aspect(args, _IMAGE_ASPECTS, "portrait")
     with get_session() as s:
-        ref_mids = [_asset_media_id(s, int(aid), "image") for aid in ref_ids]
-    result, error = await run_muse_media(
-        kind="image",
-        prompt=prompt,
-        reference_media_ids=ref_mids or None,
-    )
-    if error:
-        return {"ok": False, "tool": "gen_image", "error": error}
-    out = [m for m in (result.get("media_ids") or []) if m]
-    if not out:
-        return {"ok": False, "tool": "gen_image", "error": "worker returned no media"}
+        ref_mids = [_node_media_id(s, board_id, str(sid), want="image") for sid in ref_shorts]
+    for aid in ref_ids:
+        ref_mids.append(await _attachment_to_flow(int(aid), project_id))
     with get_session() as s:
         node = _get_or_create_media_node(
             s, board_id, args.get("node_short_id"), "image", prompt
         )
         node_id, short_id = node.id, node.short_id
-    _bind_media(node_id, out)
+    params: dict[str, Any] = {
+        "prompt": prompt.strip(),
+        "project_id": project_id,
+        "aspect_ratio": aspect,
+        "variant_count": 1,
+    }
+    if ref_mids:
+        params["ref_media_ids"] = list(dict.fromkeys(ref_mids))
+    out = await _dispatch_flow(node_id, "gen_image", params)
+    _bind_media(node_id, out)  # the worker patches the node too; this never relies on it
     return {
         "ok": True,
         "tool": "gen_image",
@@ -456,26 +648,35 @@ async def _tool_gen_video(board_id: int, args: dict) -> dict:
     prompt = args.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
         raise ChatAgentError("prompt is required")
+    project_id = _flow_project_id(board_id)
+    source_short = args.get("source_node_short_id")
     source_aid = args.get("source_asset_id")
-    if source_aid is None:
-        raise ChatAgentError("source_asset_id is required (start-frame asset)")
-    with get_session() as s:
-        src_mid = _asset_media_id(s, int(source_aid))
-    result, error = await run_muse_media(
-        kind="video",
-        prompt=prompt,
-        source_media_ids=[src_mid],
-    )
-    if error:
-        return {"ok": False, "tool": "gen_video", "error": error}
-    out = [m for m in (result.get("media_ids") or []) if m]
-    if not out:
-        return {"ok": False, "tool": "gen_video", "error": "worker returned no media"}
+    if source_short:
+        with get_session() as s:
+            src_mid = _node_media_id(s, board_id, str(source_short), want="image")
+    elif source_aid is not None:
+        src_mid = await _attachment_to_flow(int(source_aid), project_id)
+    else:
+        raise ChatAgentError(
+            "source_node_short_id (an image node) or source_asset_id is required"
+        )
+    aspect = _aspect(args, _VIDEO_ASPECTS, "portrait")
+    quality = str(args.get("quality") or "lite").strip().lower()
+    if quality not in _VIDEO_QUALITIES:
+        raise ChatAgentError(f"quality must be one of {_VIDEO_QUALITIES}")
     with get_session() as s:
         node = _get_or_create_media_node(
             s, board_id, args.get("node_short_id"), "video", prompt
         )
         node_id, short_id = node.id, node.short_id
+    params: dict[str, Any] = {
+        "prompt": prompt.strip(),
+        "project_id": project_id,
+        "start_media_id": src_mid,
+        "aspect_ratio": aspect,
+        "video_quality": quality,
+    }
+    out = await _dispatch_flow(node_id, "gen_video", params)
     _bind_media(node_id, out)
     return {
         "ok": True,
@@ -486,17 +687,34 @@ async def _tool_gen_video(board_id: int, args: dict) -> dict:
 
 
 async def _tool_concat_videos(board_id: int, args: dict) -> dict:
-    aids = args.get("video_asset_ids") or []
-    if not isinstance(aids, list) or len(aids) < 1:
-        raise ChatAgentError("video_asset_ids must be a non-empty list")
+    shorts = args.get("video_node_short_ids") or []
+    aids = list(args.get("video_asset_ids") or [])
+    if not isinstance(shorts, list) or not isinstance(aids, list):
+        raise ChatAgentError("video_node_short_ids / video_asset_ids must be lists")
+    for sid in shorts:
+        with get_session() as s:
+            mid = _node_media_id(s, board_id, str(sid), want="video")
+        # A Flow render is only a signed URL until something fetches it;
+        # ffmpeg needs the file, so pull it into the cache now.
+        if media_service.cached_path(mid) is None:
+            await media_service.fetch_and_cache(mid)
+        with get_session() as s:
+            row = s.exec(select(Asset).where(Asset.uuid_media_id == mid)).first()
+            if row is None or not row.local_path:
+                raise ChatAgentError(f"video of #{sid} is not available locally")
+            aids.append(row.id)
+    if not aids:
+        raise ChatAgentError("video_node_short_ids or video_asset_ids must be non-empty")
     new_id, error = await asyncio.to_thread(
         video_concat.concat_video_assets, [int(a) for a in aids]
     )
     if error or new_id is None:
         return {"ok": False, "tool": "concat_videos", "error": error or "unknown"}
     with get_session() as s:
+        # A video node, not "merge": the canvas has no renderer for merge,
+        # so the joined clip would have no preview and no download button.
         node = _get_or_create_media_node(
-            s, board_id, args.get("node_short_id"), "merge", "concat"
+            s, board_id, args.get("node_short_id"), "video", "concat"
         )
         node_id, short_id = node.id, node.short_id
         row = s.get(Asset, new_id)
@@ -540,6 +758,7 @@ async def _tool_refresh(board_id: int, args: dict) -> dict:
 
 
 _TOOLS = {
+    "build_board": _tool_build_board,
     "create_node": _tool_create_node,
     "add_edge": _tool_add_edge,
     "gen_image": _tool_gen_image,

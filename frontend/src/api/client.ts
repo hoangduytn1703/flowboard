@@ -144,7 +144,7 @@ export function getHealth() {
 
 // ── DTOs ────────────────────────────────────────────────────────────────────
 
-export type NodeType = "character" | "image" | "video" | "prompt" | "note" | "visual_asset" | "Storyboard" | "merge";
+export type NodeType = "character" | "image" | "video" | "prompt" | "note" | "visual_asset" | "Storyboard" | "merge" | "export";
 export type NodeStatus = "idle" | "queued" | "running" | "done" | "error";
 
 export interface Board {
@@ -735,7 +735,8 @@ export async function uploadImageFromUrl(
 // provider pinned; model/effort stay optional.
 
 export type LLMProviderName = "claude" | "gemini" | "openai" | "muse";
-export type LLMFeature = "auto_prompt" | "vision" | "planner";
+// chat_agent is optional: null provider = the dock uses the planner's pin.
+export type LLMFeature = "auto_prompt" | "vision" | "planner" | "chat_agent";
 export type LLMProviderMode = "cli" | "api" | "assistant" | "none";
 export type LLMLastError =
   | "not_installed"
@@ -785,7 +786,8 @@ export interface LLMConfig {
   auto_prompt: LLMFeatureConfig;
   vision: LLMFeatureConfig;
   planner: LLMFeatureConfig;
-  // True once every feature has a provider. Drives the forced-setup
+  chat_agent: LLMFeatureConfig;
+  // True once every required feature (not chat_agent) has a provider. Drives the forced-setup
   // gate. A feature with a provider but no model still counts as
   // configured — the backend falls back to that provider's default.
   configured: boolean;
@@ -1215,4 +1217,76 @@ export async function setPinnedFlowProject(
     );
   }
   return res.json() as Promise<PinnedFlowProjectUpdate>;
+}
+
+// ── Board templates ──────────────────────────────────────────────────────────
+// A ready-made flow (nodes + prompts + edges) per ad type; see
+// agent/flowboard/templates/*.json and services/templates.py.
+
+export interface TemplateInput {
+  key: string;
+  label: string;
+  placeholder?: string;
+  default?: string;
+  /** "select" renders a dropdown of [value, label] pairs; anything else a text field. */
+  type?: "text" | "select";
+  options?: [string, string][];
+}
+
+export interface BoardTemplate {
+  id: string;
+  title: string;
+  blurb: string;
+  scenes: number;
+  inputs: TemplateInput[];
+}
+
+export async function getTemplates(): Promise<BoardTemplate[]> {
+  const res = await fetch("/api/templates");
+  if (!res.ok) throw new Error(`getTemplates: ${res.status}`);
+  return res.json() as Promise<BoardTemplate[]>;
+}
+
+export async function createBoardFromTemplate(
+  templateId: string,
+  name: string,
+  inputs: Record<string, string>,
+): Promise<Board> {
+  const res = await fetch("/api/boards/from-template", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ template_id: templateId, name, inputs }),
+  });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  const body = (await res.json()) as Board & { nodes: Record<string, string> };
+  return { id: body.id, name: body.name, created_at: body.created_at };
+}
+
+/** The user's rough prompt → a polished English one (same rules as auto-prompt). */
+export async function refinePromptApi(
+  nodeId: number,
+  draft: string,
+  opts?: { camera?: string },
+): Promise<{ node_id: number; prompt: string }> {
+  const res = await fetch("/api/prompt/refine", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ node_id: nodeId, draft, camera: opts?.camera ?? null }),
+  });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
+}
+
+/** Drop every rendered image / video on the board; nodes and prompts stay. */
+export async function clearBoardMedia(
+  boardId: number,
+  includeRefs = false,
+): Promise<{ board_id: number; cleared: number; include_refs: boolean }> {
+  const res = await fetch(`/api/boards/${boardId}/clear-media`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ include_refs: includeRefs }),
+  });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
 }

@@ -1,13 +1,11 @@
 /**
- * Content script — bridge between background.js and injected.js.
- * Injects injected.js into MAIN world and forwards GET_CAPTCHA messages.
+ * Content script — bridge between background.js (ISOLATED world) and
+ * injected.js (MAIN world); forwards GET_CAPTCHA messages.
+ *
+ * injected.js is loaded by manifest.json as a "world": "MAIN" content script.
+ * It used to be injected a second time from here with a <script> tag, and that
+ * copy died on "Identifier 'SITE_KEY' has already been declared".
  */
-(function () {
-  const s = document.createElement('script');
-  s.src = chrome.runtime.getURL('injected.js');
-  s.onload = () => s.remove();
-  (document.head || document.documentElement).appendChild(s);
-})();
 
 chrome.runtime.onMessage.addListener((msg, _, reply) => {
   if (msg.type !== 'GET_CAPTCHA') return;

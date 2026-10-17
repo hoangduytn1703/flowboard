@@ -978,3 +978,50 @@ async def test_gen_video_rejects_unknown_tier_aspect_combo():
     assert out["error"].startswith("no_video_model_for_tier")
     # No HTTP call attempted.
     assert c.calls == []
+
+
+@pytest.mark.asyncio
+async def test_check_async_reports_a_dropped_job_instead_of_polling_forever():
+    """Flow accepted the job, the listing named its media once, then that media
+    answers NOT_FOUND and the operation leaves the listing: Flow dropped the
+    job (credits refunded — Veo's safety filter on the start frame, as seen on
+    2026-10-11). Three such rounds must settle the op as FAILED with a
+    readable reason; before, it was 5 minutes of "poll failed" then timeout."""
+    from flowboard.services.flow_sdk import DROP_DETECT_ROUNDS, FLOW_DROPPED_JOB
+
+    rec = BatchRecorder(responses={
+        fb.RPC_OPERATION: [batch_envelope(
+            fb.RPC_OPERATION,
+            operation_payload("op-1", status=None, detail=complaint_detail("Media not found.")),
+        )],
+        # Round 1 finds the pending media; the drop check later finds nothing.
+        fb.RPC_PROJECT_MEDIA: [listing_payload_text("op-1", MEDIA), ""],
+        fb.RPC_MEDIA: [batch_error_envelope(fb.RPC_MEDIA, 5)] * DROP_DETECT_ROUNDS,
+    })
+    sdk = FlowSDK(client=rec)
+    for _ in range(DROP_DETECT_ROUNDS - 1):
+        (op,) = (await sdk.check_async(["op-1"]))["operations"]
+        assert op["done"] is False and not op.get("error")
+    (op,) = (await sdk.check_async(["op-1"]))["operations"]
+    assert op["error"] == FLOW_DROPPED_JOB
+    assert len(rec.rpcs(fb.RPC_PROJECT_MEDIA)) == 2
+
+
+@pytest.mark.asyncio
+async def test_check_async_keeps_waiting_while_the_dropped_candidate_is_still_listed():
+    """Same NOT_FOUND streak, but the operation is still in the listing: the
+    clip may simply not be written yet, so no verdict."""
+    from flowboard.services.flow_sdk import DROP_DETECT_ROUNDS
+
+    rec = BatchRecorder(responses={
+        fb.RPC_OPERATION: [batch_envelope(
+            fb.RPC_OPERATION,
+            operation_payload("op-1", status=None, detail=complaint_detail("Media not found.")),
+        )],
+        fb.RPC_PROJECT_MEDIA: [listing_payload_text("op-1", MEDIA)] * 2,
+        fb.RPC_MEDIA: [batch_error_envelope(fb.RPC_MEDIA, 5)] * (DROP_DETECT_ROUNDS + 1),
+    })
+    sdk = FlowSDK(client=rec)
+    for _ in range(DROP_DETECT_ROUNDS + 1):
+        (op,) = (await sdk.check_async(["op-1"]))["operations"]
+        assert op["done"] is False and not op.get("error")

@@ -7,12 +7,15 @@ from flowboard.db.models import (
     Asset,
     Board,
     BoardFlowProject,
+    ChatAttachment,
     ChatMessage,
+    ChatRun,
     Edge,
     Node,
     PipelineRun,
     Plan,
     PlanRevision,
+    Reference,
     Request,
 )
 # Shared rather than re-implemented: `utc_iso` is the single place that
@@ -205,6 +208,58 @@ def update_board(board_id: int, body: BoardUpdate):
         return board
 
 
+# Node.data keys that describe a render (or an upload) rather than the
+# user's intent. Clearing them leaves prompt / title / character picks /
+# aspect / 60 fps toggle in place, so the board can be regenerated as-is.
+_MEDIA_KEYS = (
+    "mediaId", "mediaIds", "thumbnailUrl", "renderedAt", "slotErrors",
+    "error", "imageModel", "videoQuality", "aiBrief", "aiBriefStatus",
+    "autoPromptStatus",
+)
+_GENERATED_TYPES = {"image", "video", "Storyboard", "export", "merge"}
+_REFERENCE_TYPES = {"character", "visual_asset"}
+
+
+class ClearMediaBody(BaseModel):
+    """``include_refs``: also strip character / visual-asset media (uploads
+    and generated headshots). Off by default — those are usually the
+    expensive-to-redo inputs, not the outputs."""
+    include_refs: bool = False
+
+
+@router.post("/{board_id}/clear-media")
+def clear_board_media(board_id: int, body: ClearMediaBody | None = None):
+    """Drop every rendered image / video on the board, keep the nodes and
+    their prompts. Local only: Flow keeps its copies, the media cache is
+    untouched (the ids simply stop being referenced)."""
+    include_refs = bool(body and body.include_refs)
+    types = _GENERATED_TYPES | (_REFERENCE_TYPES if include_refs else set())
+    cleared = 0
+    with get_session() as s:
+        if not s.get(Board, board_id):
+            raise HTTPException(404, "board not found")
+        for node in s.exec(select(Node).where(Node.board_id == board_id)).all():
+            if node.type not in types:
+                continue
+            data = dict(node.data or {})
+            if not any(k in data for k in _MEDIA_KEYS) and node.status == "idle":
+                continue
+            for k in _MEDIA_KEYS:
+                data.pop(k, None)
+            node.data = data
+            node.status = "idle"
+            s.add(node)
+            cleared += 1
+        # A pinned variant points at media that no longer exists on the node.
+        node_ids = [n.id for n in s.exec(select(Node).where(Node.board_id == board_id)).all()]
+        for edge in s.exec(select(Edge).where(Edge.board_id == board_id)).all():
+            if edge.source_variant_idx is not None and edge.source_id in node_ids:
+                edge.source_variant_idx = None
+                s.add(edge)
+        s.commit()
+    return {"board_id": board_id, "cleared": cleared, "include_refs": include_refs}
+
+
 @router.delete("/{board_id}")
 def delete_board(board_id: int):
     """Cascade-delete a board and everything that hangs off it.
@@ -213,7 +268,10 @@ def delete_board(board_id: int):
     the parent. Order:
       Asset(node_id) → Request(node_id) → Node
       PipelineRun(plan_id) → PlanRevision(plan_id) → Plan
-      Edge → ChatMessage → BoardFlowProject → Board.
+      Edge → ChatRun / ChatAttachment → ChatMessage → BoardFlowProject → Board.
+    A saved Reference is cross-board by design, so it survives: only its
+    ``source_board_id`` is cleared (it was a FK to this board and made the
+    delete fail with 500 once anything had been ★ Saved).
 
     Note: this only removes the *local* mapping to a Google Flow project.
     The Flow project itself is NOT deleted — Flow exposes no delete-project
@@ -245,7 +303,18 @@ def delete_board(board_id: int):
         s.exec(sql_delete(Edge).where(Edge.board_id == board_id))
         s.exec(sql_delete(Node).where(Node.board_id == board_id))
         s.exec(sql_delete(Plan).where(Plan.board_id == board_id))
+        message_ids = [
+            m.id for m in s.exec(
+                select(ChatMessage).where(ChatMessage.board_id == board_id)
+            ).all()
+        ]
+        if message_ids:
+            s.exec(sql_delete(ChatAttachment).where(ChatAttachment.message_id.in_(message_ids)))
+        s.exec(sql_delete(ChatRun).where(ChatRun.board_id == board_id))
         s.exec(sql_delete(ChatMessage).where(ChatMessage.board_id == board_id))
+        for ref in s.exec(select(Reference).where(Reference.source_board_id == board_id)).all():
+            ref.source_board_id = None
+            s.add(ref)
         s.exec(sql_delete(BoardFlowProject).where(BoardFlowProject.board_id == board_id))
         s.delete(board)
         s.commit()

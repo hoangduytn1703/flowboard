@@ -3,8 +3,10 @@ import { useBoardStore } from "../store/board";
 import { AccountPanel } from "./AccountPanel";
 import {
   getFlowSyncStatus,
+  getTemplates,
   syncBoardsUpToFlow,
   type BoardFlowStatus,
+  type BoardTemplate,
   type FlowListingStatus,
   type SyncStatusResponse,
 } from "../api/client";
@@ -34,6 +36,12 @@ export function ProjectSidebar() {
   const newDialogInputRef = useRef<HTMLInputElement>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  // Template picker inside the new-project dialog. "" = blank board.
+  const [templates, setTemplates] = useState<BoardTemplate[] | null>(null);
+  const [templateId, setTemplateId] = useState("");
+  const [templateInputs, setTemplateInputs] = useState<Record<string, string>>({});
+  const createNewBoardFromTemplate = useBoardStore((s) => s.createNewBoardFromTemplate);
+  const selectedTemplate = templates?.find((t) => t.id === templateId) ?? null;
 
   // Flow project sync — one-way (local → Flow). The map tracks which local
   // boards still have a live Flow project; the sync button used to create a
@@ -130,8 +138,27 @@ export function ProjectSidebar() {
 
   function handleNew() {
     setNewDialogName("Untitled");
+    setTemplateId("");
+    setTemplateInputs({});
     setNewDialogOpen(true);
+    if (templates === null) {
+      getTemplates().then(setTemplates).catch(() => setTemplates([]));
+    }
     setTimeout(() => newDialogInputRef.current?.select(), 30);
+  }
+
+  function pickTemplate(id: string) {
+    setTemplateId(id);
+    const t = templates?.find((x) => x.id === id);
+    // Seed every field with the template default so Create works untouched.
+    setTemplateInputs(
+      Object.fromEntries((t?.inputs ?? []).map((i) => [i.key, i.default ?? ""])),
+    );
+    // The default name follows the template unless the user typed one.
+    if (!newDialogName.trim() || newDialogName === "Untitled" ||
+        templates?.some((x) => x.title === newDialogName)) {
+      setNewDialogName(t ? t.title : "Untitled");
+    }
   }
 
   function closeNewDialog() {
@@ -145,7 +172,8 @@ export function ProjectSidebar() {
     const name = newDialogName.trim() || "Untitled";
     setNewDialogBusy(true);
     try {
-      await createNewBoard(name);
+      if (templateId) await createNewBoardFromTemplate(templateId, name, templateInputs);
+      else await createNewBoard(name);
     } finally {
       setNewDialogBusy(false);
       setNewDialogOpen(false);
@@ -433,7 +461,7 @@ export function ProjectSidebar() {
           }}
         >
           <div
-            className="project-modal"
+            className="project-modal project-modal--wide"
             role="dialog"
             aria-modal="true"
             aria-labelledby="new-project-title"
@@ -442,23 +470,93 @@ export function ProjectSidebar() {
               New project
             </h2>
             <p className="project-modal__hint">
-              Tên project hiển thị trong sidebar. Có thể đổi sau.
+              Chọn một flow mẫu — board sẽ có sẵn các bước (người mẫu, sản phẩm,
+              cảnh, video) với prompt; bạn chỉ thêm ảnh thật rồi bấm Generate.
             </p>
-            <input
-              ref={newDialogInputRef}
-              className="project-modal__input"
-              type="text"
-              maxLength={80}
-              value={newDialogName}
-              onChange={(e) => setNewDialogName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") commitNewDialog();
-                if (e.key === "Escape") closeNewDialog();
-              }}
-              placeholder="Untitled"
-              disabled={newDialogBusy}
-              autoFocus
-            />
+            <div className="tpl-grid" role="radiogroup" aria-label="Flow mẫu">
+              <button
+                type="button"
+                className={`tpl-card${templateId === "" ? " tpl-card--active" : ""}`}
+                onClick={() => pickTemplate("")}
+                disabled={newDialogBusy}
+                role="radio"
+                aria-checked={templateId === ""}
+              >
+                <span className="tpl-card__title">Trống</span>
+                <span className="tpl-card__blurb">Bắt đầu từ canvas rỗng.</span>
+              </button>
+              {templates === null && (
+                <span className="project-modal__hint">Đang tải mẫu…</span>
+              )}
+              {(templates ?? []).map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={`tpl-card${templateId === t.id ? " tpl-card--active" : ""}`}
+                  onClick={() => pickTemplate(t.id)}
+                  disabled={newDialogBusy}
+                  role="radio"
+                  aria-checked={templateId === t.id}
+                >
+                  <span className="tpl-card__title">{t.title}</span>
+                  <span className="tpl-card__blurb">{t.blurb}</span>
+                  <span className="tpl-card__meta">{t.scenes} cảnh · {t.scenes} video</span>
+                </button>
+              ))}
+            </div>
+            {selectedTemplate && selectedTemplate.inputs.length > 0 && (
+              <div className="tpl-inputs">
+                {selectedTemplate.inputs.map((i) => (
+                  <label key={i.key} className="tpl-inputs__field">
+                    <span>{i.label}</span>
+                    {i.type === "select" ? (
+                      <select
+                        className="project-modal__input"
+                        value={templateInputs[i.key] ?? i.default ?? ""}
+                        onChange={(e) =>
+                          setTemplateInputs((p) => ({ ...p, [i.key]: e.target.value }))
+                        }
+                        disabled={newDialogBusy}
+                      >
+                        {(i.options ?? []).map(([value, label]) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        className="project-modal__input"
+                        type="text"
+                        maxLength={200}
+                        value={templateInputs[i.key] ?? ""}
+                        placeholder={i.placeholder ?? i.default ?? ""}
+                        onChange={(e) =>
+                          setTemplateInputs((p) => ({ ...p, [i.key]: e.target.value }))
+                        }
+                        disabled={newDialogBusy}
+                      />
+                    )}
+                  </label>
+                ))}
+              </div>
+            )}
+            <label className="tpl-inputs__field">
+              <span>Tên project</span>
+              <input
+                ref={newDialogInputRef}
+                className="project-modal__input"
+                type="text"
+                maxLength={80}
+                value={newDialogName}
+                onChange={(e) => setNewDialogName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitNewDialog();
+                  if (e.key === "Escape") closeNewDialog();
+                }}
+                placeholder="Untitled"
+                disabled={newDialogBusy}
+                autoFocus
+              />
+            </label>
             <div className="project-modal__actions">
               <button
                 type="button"

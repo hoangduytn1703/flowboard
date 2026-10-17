@@ -383,6 +383,18 @@ def _as_operation_envelope(operation_ids: list[str]) -> dict:
     }
 
 
+# A resolved media id answering NOT_FOUND this many polls in a row, while the
+# operation has left the project listing, means Flow dropped the job.
+DROP_DETECT_ROUNDS = 3
+FLOW_DROPPED_JOB = (
+    "FLOW_DROPPED_JOB: Flow accepted the video, then cancelled it and refunded "
+    "the credits. Flow gives no reason; this is what Veo's safety filter on the "
+    "start frame looks like (a person who reads as young, bare shoulders, a short "
+    "dress, a full-body shot). Try another image or outfit, a closer product "
+    "shot, or a different model."
+)
+
+
 class FlowSDK:
     """Flow semantics on top of ``flow_client.batch_rpc``.
 
@@ -405,6 +417,9 @@ class FlowSDK:
         self._operation_media: dict[str, str] = {}
         #: operation id -> how many rounds we have polled it
         self._operation_polls: dict[str, int] = {}
+        # Consecutive rounds a resolved media id answered NOT_FOUND; see
+        # _poll_operation for the drop detection built on it.
+        self._operation_missing: dict[str, int] = {}
 
     # ── transport plumbing ─────────────────────────────────────────────────
     async def _payload(
@@ -424,7 +439,17 @@ class FlowSDK:
             )
         if result.get("error"):
             raise fb.FlowBatchError(f"{rpcid}: {result['error']}")
-        return fb.first_payload(result.get("data") or "", rpcid)
+        body = result.get("data") or ""
+        try:
+            return fb.first_payload(body, rpcid)
+        except fb.FlowBatchError as exc:
+            # No envelope at all means Google refused the request itself (an
+            # `er` frame or an error page), and "0 others" alone says nothing
+            # about why. The status and the start of the body usually do.
+            snippet = " ".join(str(body)[:300].split()) or "(empty body)"
+            raise fb.FlowBatchError(
+                f"{exc} — HTTP {result.get('status')}: {snippet}"
+            ) from exc
 
     def _project_id(self, project_id: Any) -> str:
         """The Flow project this RPC is scoped to.
@@ -452,6 +477,7 @@ class FlowSDK:
             self._operation_projects.clear()
             self._operation_media.clear()
             self._operation_polls.clear()
+            self._operation_missing.clear()
         self._operation_projects[operation_id] = project_id
 
     # ── project listing / creation (both unported) ─────────────────────────
@@ -916,7 +942,44 @@ class FlowSDK:
                 return _pending_operation(operation_id, complaint=complaint)
             self._operation_media[operation_id] = media_id
 
-        urls = await self._media_urls(media_id)
+        try:
+            urls = await self._media_urls(media_id)
+        except fb.RpcError as exc:
+            detail = exc.detail
+            code = detail[0] if isinstance(detail, list) and detail else detail
+            if code != 5:  # NOT_FOUND; the live wire shape is [5]
+                raise
+            # Flow accepted the job, the listing briefly named its media, and
+            # now that media is NOT_FOUND: Flow dropped the job (the credits
+            # come back). Seen on start frames Veo's safety filter rejects.
+            # Flow never says why, so the alternative was 5 minutes of
+            # "poll failed" and a timeout. Three rounds in a row, with the
+            # operation gone from the listing too, is the signal.
+            misses = self._operation_missing.get(operation_id, 0) + 1
+            self._operation_missing[operation_id] = misses
+            if misses >= DROP_DETECT_ROUNDS:
+                project_id = self._operation_projects.get(operation_id) or effective_project_id()
+                still_listed = False
+                if project_id:
+                    try:
+                        still_listed = bool(await self._media_id_for(operation_id, project_id))
+                    except Exception:  # noqa: BLE001 — a listing hiccup must not fake a verdict
+                        still_listed = True
+                if not still_listed:
+                    self._operation_media.pop(operation_id, None)
+                    self._operation_missing.pop(operation_id, None)
+                    # Same shape as a Flow-side rejection (see
+                    # extract_video_operations): the worker reads
+                    # operation.error.message as the terminal reason.
+                    return {
+                        "operation": {
+                            "name": operation_id,
+                            "error": {"code": 5, "message": FLOW_DROPPED_JOB},
+                        },
+                        "status": "MEDIA_GENERATION_STATUS_FAILED",
+                    }
+            return _pending_operation(operation_id, complaint=f"media {media_id[:8]} not found yet", media_id=media_id)
+        self._operation_missing.pop(operation_id, None)
         if not urls.video:
             # The id landed but the clip is still being written. Downloading on
             # the id alone here saves the poster still, not the video.

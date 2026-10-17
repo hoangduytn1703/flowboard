@@ -18,7 +18,10 @@ def _load_dotenv(path: Path) -> None:
     dependency and the format worth supporting is three lines of parsing.
     """
     try:
-        raw = path.read_text()
+        # Explicit UTF-8: Windows' default is cp1252, and one non-ASCII
+        # character in a comment (a Vietnamese note, say) made the agent
+        # refuse to start with a UnicodeDecodeError at import time.
+        raw = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return
     for line in raw.splitlines():

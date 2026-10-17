@@ -11,10 +11,12 @@ import { useBoardStore } from "../store/board";
 import { useChatStore } from "../store/chat";
 import {
   getActivityList,
-  getLlmProviders,
+  getLlmConfig,
   uploadChatAttachments,
   type ChatMessageDTO,
+  type LLMFeatureConfig,
 } from "../api/client";
+import { ChatModelPicker } from "./ChatModelPicker";
 
 // ── Limits (mirror backend caps in routes/chat.py) ────────────────────────────
 const MAX_FILES = 5;
@@ -95,7 +97,13 @@ export function ChatDock() {
   const [text, setText] = useState("");
   const [files, setFiles] = useState<PickedFile[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [museAvailable, setMuseAvailable] = useState<boolean | null>(null);
+  // The agent thinks with the Chat AI pin, else the Planner's (Settings →
+  // AI Providers, or the picker on the pill below) and renders on Google
+  // Flow through the worker, like the Generate button.
+  // null = not checked yet; "" = nothing pinned for either.
+  const [aiProvider, setAiProvider] = useState<string | null>(null);
+  const [aiPin, setAiPin] = useState<{ pin: LLMFeatureConfig; inherited: boolean } | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [stepText, setStepText] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -108,15 +116,17 @@ export function ChatDock() {
     if (boardId !== null) void loadChat(boardId);
   }, [boardId, loadChat]);
 
-  // Muse worker presence — same endpoint/logic family as AiProviderBadge.
+  // Planner provider presence — same polling family as AiProviderBadge.
   useEffect(() => {
     let alive = true;
     const refresh = async () => {
       try {
-        const providers = await getLlmProviders();
+        const cfg = await getLlmConfig();
         if (!alive) return;
-        const muse = providers.find((p) => p.name === "muse");
-        setMuseAvailable(muse ? muse.available : false);
+        const own = cfg.chat_agent?.provider ? cfg.chat_agent : null;
+        const pin = own ?? cfg.planner;
+        setAiPin({ pin, inherited: own === null });
+        setAiProvider(pin.provider ?? "");
       } catch {
         // Network blip — keep stale state, retry next tick.
       }
@@ -125,9 +135,13 @@ export function ChatDock() {
     const timer = setInterval(() => {
       if (document.visibilityState === "visible") void refresh();
     }, 30_000);
+    // Saved from Settings or from the picker: refresh now, not in 30 s.
+    const onChange = () => void refresh();
+    window.addEventListener("flowboard:llm-config-changed", onChange);
     return () => {
       alive = false;
       clearInterval(timer);
+      window.removeEventListener("flowboard:llm-config-changed", onChange);
     };
   }, []);
 
@@ -210,7 +224,7 @@ export function ChatDock() {
     !pending &&
     !uploading &&
     activeRun === null &&
-    museAvailable === true &&
+    !!aiProvider &&
     (text.trim().length > 0 || files.length > 0);
 
   const handleSend = useCallback(async () => {
@@ -308,18 +322,37 @@ export function ChatDock() {
       />
       <div className="chat-dock__header">
         <span className="chat-dock__title">Chat AI</span>
-        <span
-          className={`chat-dock__presence chat-dock__presence--${
-            museAvailable === null ? "loading" : museAvailable ? "ok" : "bad"
-          }`}
-          title={
-            museAvailable
-              ? "Muse sẵn sàng (muse2api hoặc worker)"
-              : "Muse chưa sẵn sàng"
-          }
-        >
-          {museAvailable === null ? "○" : museAvailable ? "●" : "○"} Muse
-        </span>
+        <div className="chat-dock__picker-anchor">
+          <button
+            type="button"
+            className={`chat-dock__presence chat-dock__presence--${
+              aiProvider === null ? "loading" : aiProvider ? "ok" : "bad"
+            }`}
+            onClick={() => setPickerOpen((v) => !v)}
+            aria-expanded={pickerOpen}
+            title={
+              aiProvider
+                ? `Suy nghĩ bằng ${aiProvider}${aiPin?.pin.model ? ` · ${aiPin.pin.model}` : ""}` +
+                  `${aiPin?.inherited ? " (theo Planner)" : ""}, render trên Google Flow. Bấm để đổi.`
+                : "Chưa chọn AI provider — bấm để chọn"
+            }
+          >
+            {aiProvider ? `● ${aiProvider}` : "○ AI"}
+            {aiPin?.pin.model ? <span className="chat-dock__presence-model">{aiPin.pin.model}</span> : null}
+            <span aria-hidden="true">▾</span>
+          </button>
+          {pickerOpen && (
+            <ChatModelPicker
+              current={aiPin}
+              onClose={() => setPickerOpen(false)}
+              onSaved={() => {
+                // Same broadcast the Settings dialog sends: the badge, the
+                // setup gate and this dock all refresh at once.
+                window.dispatchEvent(new CustomEvent("flowboard:llm-config-changed"));
+              }}
+            />
+          )}
+        </div>
         <button
           type="button"
           className="chat-dock__collapse-btn"
@@ -330,11 +363,10 @@ export function ChatDock() {
         </button>
       </div>
 
-      {museAvailable === false && (
+      {aiProvider === "" && (
         <div className="chat-dock__notice">
-          Muse chưa sẵn sàng — đặt <code>FLOWBOARD_MUSE2API_BASE</code> trỏ
-          tới muse2api, hoặc chạy{" "}
-          <code>python agent/scripts/muse_worker.py</code>, rồi gửi lại.
+          Chưa chọn AI provider — bấm chip <strong>○ AI</strong> ở trên để chọn
+          provider cho Chat AI, rồi gửi lại.
         </div>
       )}
 

@@ -111,6 +111,83 @@ def test_delete_board_cascades_children(client):
         assert s.exec(select(Request).where(Request.node_id.in_([n1["id"], n2["id"]]))).all() == []
 
 
+def test_delete_board_with_saved_reference_and_chat_run(client):
+    """A ★ Saved reference points at its source board, and a chat run points
+    at the board and a message. Both are FKs, so the delete answered 500 the
+    first time anything had been saved. The reference is cross-board and
+    must survive, detached; the chat rows go with the board."""
+    from flowboard.db import get_session
+    from flowboard.db.models import Asset, ChatAttachment, ChatMessage, ChatRun, Reference
+    from sqlmodel import select
+
+    bid = client.post("/api/boards", json={"name": "saved-from"}).json()["id"]
+    media_id = "22222222-3333-4444-5555-666666666666"
+    with get_session() as s:
+        s.add(Reference(media_id=media_id, kind="character", source_board_id=bid))
+        msg = ChatMessage(board_id=bid, role="user", content="làm video")
+        asset = Asset(uuid_media_id="33333333-4444-5555-6666-777777777777", kind="image")
+        s.add(msg)
+        s.add(asset)
+        s.commit()
+        s.refresh(msg)
+        s.refresh(asset)
+        s.add(ChatAttachment(message_id=msg.id, asset_id=asset.id))
+        s.add(ChatRun(board_id=bid, user_message_id=msg.id, status="done"))
+        s.commit()
+
+    r = client.delete(f"/api/boards/{bid}")
+    assert r.status_code == 200, r.text
+
+    with get_session() as s:
+        ref = s.exec(select(Reference).where(Reference.media_id == media_id)).one()
+        assert ref.source_board_id is None, "the saved reference must survive, detached"
+        assert s.exec(select(ChatRun).where(ChatRun.board_id == bid)).all() == []
+        assert s.exec(select(ChatAttachment)).all() == []
+        assert s.exec(select(ChatMessage).where(ChatMessage.board_id == bid)).all() == []
+
+
 def test_delete_missing_board_returns_404(client):
     r = client.delete("/api/boards/999")
     assert r.status_code == 404
+
+
+def test_clear_media_keeps_nodes_and_prompts(client):
+    """Renders go, intent stays: prompt / title / character picks / 60 fps
+    toggle survive; references are kept unless asked for."""
+    from flowboard.db import get_session
+    from flowboard.db.models import Edge, Node
+    from sqlmodel import select
+
+    bid = client.post("/api/boards", json={"name": "clear-me"}).json()["id"]
+    def mk(ntype, data, status="done"):
+        n = client.post("/api/nodes", json={"board_id": bid, "type": ntype}).json()
+        client.patch(f"/api/nodes/{n['id']}", json={"data": data, "status": status})
+        return n["id"]
+    model = mk("character", {"title": "Mẫu", "charGender": "female", "mediaId": "m-1", "aiBrief": "a woman"})
+    scene = mk("image", {"title": "Cảnh 1", "prompt": "wide shot", "mediaId": "s-1",
+                         "mediaIds": ["s-1", "s-2"], "renderedAt": "t", "aiBrief": "scene"})
+    video = mk("video", {"title": "Video 1", "prompt": "0-3s …", "mediaId": "v-1", "videoQuality": "lite"})
+    export = mk("export", {"smooth60": True, "mediaId": "x-1"})
+    edge = client.post("/api/edges", json={"board_id": bid, "source_id": scene, "target_id": video}).json()
+    with get_session() as s:
+        e = s.get(Edge, edge["id"]); e.source_variant_idx = 1; s.add(e); s.commit()
+
+    r = client.post(f"/api/boards/{bid}/clear-media", json={"include_refs": False})
+    assert r.status_code == 200, r.text
+    assert r.json()["cleared"] == 3
+
+    with get_session() as s:
+        by_id = {n.id: n for n in s.exec(select(Node).where(Node.board_id == bid)).all()}
+        assert by_id[model].data["mediaId"] == "m-1" and by_id[model].status == "done"
+        sc = by_id[scene]
+        assert sc.status == "idle" and sc.data["prompt"] == "wide shot" and sc.data["title"] == "Cảnh 1"
+        assert not any(k in sc.data for k in ("mediaId", "mediaIds", "renderedAt", "aiBrief"))
+        assert by_id[video].data == {"title": "Video 1", "prompt": "0-3s …"}
+        assert by_id[export].data == {"smooth60": True}
+        assert s.get(Edge, edge["id"]).source_variant_idx is None
+
+    r = client.post(f"/api/boards/{bid}/clear-media", json={"include_refs": True})
+    assert r.json()["cleared"] == 1
+    with get_session() as s:
+        m = s.get(Node, model)
+        assert m.status == "idle" and m.data == {"title": "Mẫu", "charGender": "female"}

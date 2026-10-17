@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import subprocess
 from typing import Optional
 
@@ -37,6 +38,15 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = DEFAULT_SUBPROCESS_TIMEOUT
 _CLI_BIN = "claude"
+
+# On Windows the npm `claude.cmd` shim re-parses argv through cmd.exe, which
+# ends the command line at the first newline: `--append-system-prompt` then
+# delivers only the first line of a multi-line system prompt and every rule
+# below it is lost (auto-prompt batch mode came back as prose instead of a
+# JSON array; the chat agent would answer in prose instead of tool calls).
+# The user prompt already travels over stdin for the same reason; on Windows
+# the system prompt rides in front of it. Module-level so tests can pin it.
+SYSTEM_PROMPT_VIA_STDIN = os.name == "nt"
 
 # Cached availability probe. None = not probed yet.
 _available: Optional[bool] = None
@@ -137,6 +147,14 @@ async def run_claude(
         # `@<path>` syntax handled by the CLI for file attachments.
         suffix = " ".join(f"@{os.path.abspath(p)}" for p in attachments)
         full_prompt = f"{user_prompt}\n\n{suffix}" if user_prompt else suffix
+    system_in_stdin = bool(system_prompt) and SYSTEM_PROMPT_VIA_STDIN
+    if system_in_stdin:
+        full_prompt = (
+            "<system-instructions>\n"
+            f"{system_prompt}\n"
+            "</system-instructions>\n\n"
+            f"{full_prompt}"
+        )
 
     # Resolve claude binary path: try PATH first, then npm locations
     claude_bin = await asyncio.to_thread(
@@ -164,7 +182,7 @@ async def run_claude(
         args += ["--model", model]
     if effort:
         args += ["--effort", effort]
-    if system_prompt:
+    if system_prompt and not system_in_stdin:
         args += ["--append-system-prompt", system_prompt]
     if attachments:
         # Allow-list each attachment's parent dir so the Read tool can

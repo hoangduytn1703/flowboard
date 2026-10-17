@@ -4,6 +4,7 @@ import { useBoardStore, type FlowboardNodeData, type FlowNode } from "../store/b
 import { useGenerationStore } from "../store/generation";
 import { mediaUrl, patchEdge, patchNode, uploadImage, uploadImageFromUrl } from "../api/client";
 import { requestAutoBrief } from "../api/autoBrief";
+import { exportSources } from "../lib/exportOrder";
 import { useReferencesStore } from "../store/references";
 import {
   normaliseStoryboardGrid,
@@ -18,6 +19,7 @@ const ICON: Record<string, string> = {
   note: "✎",
   visual_asset: "◇",
   merge: "⧉",
+  export: "⏏",
 };
 
 const STATUS_COLOR: Record<string, string> = {
@@ -1381,7 +1383,7 @@ function EditableTextBody({
       <div className={`node-body node-body--${variant} node-body--${variant}-edit`}>
         <textarea
           ref={taRef}
-          className={`${variant}-editor`}
+          className={`${variant}-editor nodrag`}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={save}
@@ -1470,18 +1472,87 @@ function NodeBody({ rfId, data }: { rfId: string; data: FlowboardNodeData }) {
       return <VisualAssetBody rfId={rfId} data={data} />;
     case "Storyboard":
       return <StoryboardBody rfId={rfId} data={data} />;
+    case "export":
+    case "merge":
+      return <ExportBody rfId={rfId} data={data} />;
   }
 }
 
+/**
+ * "Xuất video": lists the upstream clips in join order (top-to-bottom on
+ * the canvas), a 60 fps toggle, and the joined result. ▶ in the header
+ * dispatches `export_video` — no dialog, no Flow.
+ */
+function ExportBody({ rfId, data }: { rfId: string; data: FlowboardNodeData }) {
+  const nodes = useBoardStore((s) => s.nodes);
+  const edges = useBoardStore((s) => s.edges);
+  const sources = exportSources(rfId, nodes, edges);
+  const ready = sources.filter((s) => s.mediaId);
+  const smooth60 = data.smooth60 === true;
+  const isProcessing = data.status === "queued" || data.status === "running";
+
+  function toggleSmooth(next: boolean) {
+    useBoardStore.getState().updateNodeData(rfId, { smooth60: next });
+    const dbId = parseInt(rfId, 10);
+    if (!isNaN(dbId)) patchNode(dbId, { data: { smooth60: next } }).catch(() => {});
+  }
+
+  return (
+    <div className="node-body node-body--export nodrag">
+      {data.mediaId ? (
+        <video
+          className="export-preview"
+          src={mediaUrl(data.mediaId)}
+          controls
+          preload="metadata"
+          playsInline
+        />
+      ) : (
+        <div className={`export-placeholder${isProcessing ? " export-placeholder--busy" : ""}`}>
+          {isProcessing
+            ? smooth60
+              ? "Đang ghép + nội suy 60 fps… (vài phút)"
+              : "Đang ghép…"
+            : sources.length === 0
+            ? "Nối các node Video vào đây, xếp từ trên xuống theo thứ tự muốn ghép."
+            : ready.length === 0
+            ? "Các video nối vào chưa render xong."
+            : "Bấm ▶ để ghép."}
+        </div>
+      )}
+      {sources.length > 0 && (
+        <ol className="export-sources">
+          {sources.map((s) => (
+            <li key={s.rfId} className={s.mediaId ? "" : "export-sources__missing"}>
+              {s.title} <span className="export-sources__id">#{s.shortId}</span>
+              {!s.mediaId && " · chưa có video"}
+            </li>
+          ))}
+        </ol>
+      )}
+      <label className="export-option">
+        <input
+          type="checkbox"
+          checked={smooth60}
+          disabled={isProcessing}
+          onChange={(e) => toggleSmooth(e.target.checked)}
+        />
+        Mượt 60 fps (nội suy khung hình, ~15 s xử lý cho mỗi giây video)
+      </label>
+      {data.error && <div className="export-error">{String(data.error)}</div>}
+    </div>
+  );
+}
+
 function downloadExt(type: string): string {
-  if (type === "video") return "mp4";
+  if (type === "video" || type === "export" || type === "merge") return "mp4";
   return "png";
 }
 
 export function NodeCard(props: NodeProps<FlowNode>) {
   const data = props.data;
   const isNote = data.type === "note";
-  const isGenerable = ["image", "prompt", "video", "visual_asset", "character", "Storyboard"].includes(data.type);
+  const isGenerable = ["image", "prompt", "video", "visual_asset", "character", "Storyboard", "export"].includes(data.type);
   const isRunning = data.status === "running";
   const llmBusy = isLLMBusy(data);
   const downloadable = !!data.mediaId && data.type !== "prompt" && data.type !== "note";
@@ -1489,6 +1560,12 @@ export function NodeCard(props: NodeProps<FlowNode>) {
   function handleGenerate(e: React.MouseEvent) {
     e.stopPropagation();
     if (llmBusy) return; // guard: backend still composing for this node
+    if (data.type === "export") {
+      // Nothing to ask: the clips come from the edges, the only option
+      // (60 fps) lives on the card. Straight to the worker.
+      void useGenerationStore.getState().dispatchExport(props.id);
+      return;
+    }
     useGenerationStore.getState().openGenerationDialog(props.id, data.prompt ?? "");
   }
 
@@ -1542,7 +1619,9 @@ export function NodeCard(props: NodeProps<FlowNode>) {
             {data.autoPromptStatus === "pending" ? "Composing…" : "Analyzing…"}
           </span>
         )}
-        <div className="node-header__actions">
+        {/* `nodrag`: React Flow never starts a node drag from these buttons,
+            so a click here is always a click (see nodeDragThreshold in Board). */}
+        <div className="node-header__actions nodrag">
           {downloadable && (
             <button
               className="node-header__btn"

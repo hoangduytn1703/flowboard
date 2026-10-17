@@ -1,7 +1,9 @@
-"""chat_agent ReAct loop — scripted LLM, mocked media.
+"""chat_agent ReAct loop — scripted LLM, mocked Flow dispatch.
 
-``run_llm`` is scripted per test; ``run_muse_media`` is mocked (no Muse
-worker needed). ``record_activity`` runs for real (Request rows).
+``run_llm`` is scripted per test; ``_dispatch_flow`` (the worker Request
+round-trip to Google Flow) is mocked, and the board's Flow project is
+pinned by patching ``_flow_project_id``. ``record_activity`` runs for real
+(Request rows).
 """
 import asyncio
 import json
@@ -11,6 +13,12 @@ from flowboard.db import get_session
 from flowboard.db.models import Asset, Board, ChatMessage, ChatRun, Edge, Node
 from flowboard.services import chat_agent
 from flowboard.services.llm.base import LLMError
+
+PROJECT = "e22fe3ef-902d-4248-8a65-f95d8b84f1b7"
+
+
+def _pinned():
+    return patch.object(chat_agent, "_flow_project_id", lambda board_id: PROJECT)
 
 
 def _mk_run(board_name="T", message="do it"):
@@ -93,14 +101,18 @@ def test_full_scripted_run_create_edge_gen_image():
     async def fake_llm(*args, **kwargs):
         return plan.pop(0)()
 
-    async def fake_media(**kwargs):
-        assert kwargs["kind"] == "image"
-        assert kwargs["prompt"] == "a red cat"
-        return {"media_ids": ["mid_cat"], "media_entries": []}, None
+    async def fake_dispatch(node_id, req_type, params):
+        assert req_type == "gen_image"
+        assert params["prompt"] == "a red cat"
+        assert params["project_id"] == PROJECT
+        assert params["aspect_ratio"] == "IMAGE_ASPECT_RATIO_PORTRAIT"
+        assert params["variant_count"] == 1
+        return ["mid_cat"]
 
     with (
         patch.object(chat_agent, "run_llm", fake_llm),
-        patch.object(chat_agent, "run_muse_media", fake_media),
+        patch.object(chat_agent, "_dispatch_flow", fake_dispatch),
+        _pinned(),
     ):
         asyncio.run(
             chat_agent.run_chat_agent(board_id, run_id, "do it", [], [])
@@ -137,18 +149,14 @@ def test_full_scripted_run_create_edge_gen_image():
 
 
 def test_gen_video_binds_to_new_video_node():
+    """The start frame is an image node's media; the clip renders on Flow
+    through the worker with the cheapest quality unless told otherwise."""
     board_id, run_id = _mk_run()
     with get_session() as s:
-        a = Asset(
-            kind="image",
-            uuid_media_id="srcmid1",
-            local_path="/tmp/frame.png",
-            mime="image/png",
-        )
-        s.add(a)
+        src = Node(board_id=board_id, short_id="img1", type="image", x=0, y=0,
+                   data={"mediaId": "srcmid1", "mediaIds": ["srcmid1"]}, status="done")
+        s.add(src)
         s.commit()
-        s.refresh(a)
-        aid = a.id
 
     async def fake_llm(*args, **kwargs):
         calls = getattr(fake_llm, "n", 0)
@@ -157,25 +165,29 @@ def test_gen_video_binds_to_new_video_node():
             return json.dumps(
                 {
                     "tool": "gen_video",
-                    "args": {"prompt": "slow push-in", "source_asset_id": aid},
+                    "args": {"prompt": "slow push-in", "source_node_short_id": "img1"},
                 }
             )
         return json.dumps({"done": True, "reply": "video xong"})
 
     seen = {}
 
-    async def fake_media(**kwargs):
-        seen.update(kwargs)
-        return {"media_ids": ["vid1"], "media_entries": []}, None
+    async def fake_dispatch(node_id, req_type, params):
+        seen.update(params, req_type=req_type)
+        return ["vid1"]
 
     with (
         patch.object(chat_agent, "run_llm", fake_llm),
-        patch.object(chat_agent, "run_muse_media", fake_media),
+        patch.object(chat_agent, "_dispatch_flow", fake_dispatch),
+        _pinned(),
     ):
         asyncio.run(chat_agent.run_chat_agent(board_id, run_id, "do it", [], []))
 
-    assert seen["kind"] == "video"
-    assert seen["source_media_ids"] == ["srcmid1"]
+    assert seen["req_type"] == "gen_video"
+    assert seen["start_media_id"] == "srcmid1"
+    assert seen["project_id"] == PROJECT
+    assert seen["video_quality"] == "lite"
+    assert seen["aspect_ratio"] == "VIDEO_ASPECT_RATIO_PORTRAIT"
     with get_session() as s:
         from sqlmodel import select
 
@@ -222,23 +234,25 @@ def test_concat_videos_creates_merge_node(monkeypatch):
             )
         return json.dumps({"done": True, "reply": "ghép xong"})
 
-    async def fake_media(**kwargs):  # pragma: no cover — not used here
-        raise AssertionError("should not be called")
+    async def fake_dispatch(*args, **kwargs):  # pragma: no cover — not used here
+        raise AssertionError("concat must not render anything on Flow")
 
     with (
         patch.object(chat_agent, "run_llm", fake_llm),
-        patch.object(chat_agent, "run_muse_media", fake_media),
+        patch.object(chat_agent, "_dispatch_flow", fake_dispatch),
     ):
         asyncio.run(chat_agent.run_chat_agent(board_id, run_id, "do it", [], []))
 
     with get_session() as s:
         from sqlmodel import select
 
-        merges = s.exec(
-            select(Node).where(Node.board_id == board_id, Node.type == "merge")
+        # A video node, not "merge": the canvas renders video nodes (preview,
+        # download); it has no renderer for merge.
+        outs = s.exec(
+            select(Node).where(Node.board_id == board_id, Node.type == "video")
         ).all()
-        assert len(merges) == 1
-        assert merges[0].data["mediaIds"] == ["concatmid"]
+        assert len(outs) == 1
+        assert outs[0].data["mediaIds"] == ["concatmid"]
     assert _run_row(run_id).status == "done"
 
 
@@ -255,6 +269,39 @@ def test_llm_error_fails_run_with_message():
     assert run.status == "failed"
     msgs = _assistant_messages(board_id)
     assert len(msgs) == 1 and "boom" in msgs[0].content
+
+
+def test_chat_uses_its_own_pin_else_the_planners():
+    """Chat AI is an optional feature: with no pin of its own it thinks with
+    the planner's provider; once pinned, the planner is not consulted."""
+    seen: list[str] = []
+
+    def scripted(unpinned: set[str]):
+        async def fake_llm(feature, *args, **kwargs):
+            seen.append(feature)
+            if feature in unpinned:
+                raise LLMError(f"No AI provider configured for {feature}; open settings")
+            return json.dumps({"done": True, "reply": "ok"})
+        return fake_llm
+
+    board_id, run_id = _mk_run()
+    with patch.object(chat_agent, "run_llm", scripted({"chat_agent"})):
+        asyncio.run(chat_agent.run_chat_agent(board_id, run_id, "do it", [], []))
+    assert seen == ["chat_agent", "planner"]
+    assert _run_row(run_id).status == "done"
+
+    seen.clear()
+    board_id, run_id = _mk_run()
+    with patch.object(chat_agent, "run_llm", scripted(set())):
+        asyncio.run(chat_agent.run_chat_agent(board_id, run_id, "do it", [], []))
+    assert seen == ["chat_agent"]
+
+    seen.clear()
+    board_id, run_id = _mk_run()
+    with patch.object(chat_agent, "run_llm", scripted({"chat_agent", "planner"})):
+        asyncio.run(chat_agent.run_chat_agent(board_id, run_id, "do it", [], []))
+    assert _run_row(run_id).status == "failed"
+    assert "Chat AI" in _assistant_messages(board_id)[0].content
 
 
 def test_unparseable_and_unknown_tool_recover():
@@ -331,3 +378,74 @@ def test_build_board_context_includes_history_and_nodes():
     assert "first" in ctx
     assert "previous reply" in ctx
     assert "#ab12" in ctx and "media=2" in ctx
+
+
+def _ad_board():
+    """What a draft for a 2-scene ad looks like: refs → images → videos."""
+    return {
+        "nodes": [
+            {"key": "script", "type": "note", "data": {"title": "Kịch bản", "prompt": "..."}},
+            {"key": "model", "type": "character",
+             "data": {"title": "Người mẫu", "charGender": "female", "charCountry": "kr",
+                      "charVibe": "clean", "charExtras": "long black hair"}},
+            {"key": "product", "type": "visual_asset", "data": {"title": "Sản phẩm"}},
+            {"key": "s1", "type": "image", "data": {"title": "Cảnh 1", "prompt": "wide shot"}},
+            {"key": "s2", "type": "image", "data": {"title": "Cảnh 2", "prompt": "close-up"}},
+            {"key": "v1", "type": "video", "data": {"title": "Video 1", "prompt": "0-3s ..."}},
+            {"key": "v2", "type": "video", "data": {"title": "Video 2", "prompt": "0-3s ..."}},
+        ],
+        "edges": [["model", "s1"], ["product", "s1"], ["model", "s2"], ["product", "s2"],
+                  ["s1", "v1"], ["s2", "v2"]],
+    }
+
+
+def test_build_board_drafts_a_whole_ad_in_one_turn():
+    """Draft mode: one build_board call, then done — nothing is rendered."""
+    board_id, run_id = _mk_run()
+    script = [
+        json.dumps({"tool": "build_board", "args": _ad_board()}),
+        json.dumps({"done": True, "reply": "Đã dựng board, review rồi bấm Generate."}),
+    ]
+
+    async def fake_llm(*args, **kwargs):
+        return script.pop(0)
+
+    async def no_render(*args, **kwargs):  # pragma: no cover
+        raise AssertionError("draft mode must not render")
+
+    with (
+        patch.object(chat_agent, "run_llm", fake_llm),
+        patch.object(chat_agent, "_dispatch_flow", no_render),
+    ):
+        asyncio.run(chat_agent.run_chat_agent(board_id, run_id, "tạo kịch bản", [], []))
+
+    assert script == [] and _run_row(run_id).status == "done"
+    with get_session() as s:
+        from sqlmodel import select
+
+        nodes = {n.data.get("title"): n for n in
+                 s.exec(select(Node).where(Node.board_id == board_id)).all()}
+        edges = s.exec(select(Edge).where(Edge.board_id == board_id)).all()
+    assert len(nodes) == 7 and len(edges) == 6
+    assert nodes["Người mẫu"].type == "character"
+    assert nodes["Người mẫu"].data["charCountry"] == "kr"
+    assert nodes["Sản phẩm"].type == "visual_asset"
+    assert all(n.status == "idle" for n in nodes.values())
+    # Columns follow the graph: references, then scene images, then videos.
+    assert nodes["Người mẫu"].x < nodes["Cảnh 1"].x < nodes["Video 1"].x
+    assert nodes["Cảnh 1"].x == nodes["Cảnh 2"].x and nodes["Cảnh 1"].y != nodes["Cảnh 2"].y
+    by_id = {n.id: n.data["title"] for n in nodes.values()}
+    pairs = {(by_id[e.source_id], by_id[e.target_id]) for e in edges}
+    assert ("Cảnh 1", "Video 1") in pairs and ("Sản phẩm", "Cảnh 2") in pairs
+
+
+def test_build_board_rejects_a_bad_edge_and_writes_nothing():
+    board_id, _ = _mk_run()
+    spec = _ad_board()
+    spec["edges"].append(["s1", "nope"])
+    obs = asyncio.run(chat_agent._execute_tool(board_id, "build_board", spec))
+    assert obs["ok"] is False and "nope" in obs["error"]
+    with get_session() as s:
+        from sqlmodel import select
+
+        assert s.exec(select(Node).where(Node.board_id == board_id)).all() == []

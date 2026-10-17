@@ -46,7 +46,10 @@ const REFRESH_INTERVAL_MS = 30_000;
 // Order matters — this is the option order in every provider select.
 // Gemini first (lowest install friction), Claude middle, Codex last.
 const SHOWN_PROVIDERS: LLMProviderName[] = ["gemini", "claude", "openai", "muse"];
-const FEATURES: LLMFeature[] = ["auto_prompt", "vision", "planner"];
+const FEATURES: LLMFeature[] = ["auto_prompt", "vision", "planner", "chat_agent"];
+// Chat AI may stay unset (it then thinks with the Planner's pin), so it
+// never blocks setup.
+const OPTIONAL_FEATURES: LLMFeature[] = ["chat_agent"];
 
 const FEATURE_META: Record<LLMFeature, { title: string; blurb: string }> = {
   auto_prompt: {
@@ -60,6 +63,10 @@ const FEATURE_META: Record<LLMFeature, { title: string; blurb: string }> = {
   planner: {
     title: "Planner",
     blurb: "Breaks a goal into a board of connected nodes. Runs rarely — favour quality.",
+  },
+  chat_agent: {
+    title: "Chat AI",
+    blurb: "The bottom chat agent — several calls per message. Optional: unset uses the Planner's choice.",
   },
 };
 
@@ -77,6 +84,7 @@ const INITIAL_TESTS: Record<LLMFeature, FeatureTest> = {
   auto_prompt: UNTESTED,
   vision: UNTESTED,
   planner: UNTESTED,
+  chat_agent: UNTESTED,
 };
 
 type Draft = Record<LLMFeature, LLMFeatureConfig>;
@@ -88,6 +96,7 @@ function draftFrom(config: LLMConfig): Draft {
     auto_prompt: { ...config.auto_prompt },
     vision: { ...config.vision },
     planner: { ...config.planner },
+    chat_agent: { ...config.chat_agent },
   };
 }
 
@@ -316,7 +325,9 @@ export function AiProvidersSection() {
   ).filter((p): p is LLMProviderInfo => p !== undefined);
   const visionCapable = ordered.filter((p) => p.supportsVision);
 
-  const missing = FEATURES.filter((f) => !currentDraft[f].provider);
+  const missing = FEATURES.filter(
+    (f) => !OPTIONAL_FEATURES.includes(f) && !currentDraft[f].provider,
+  );
   const dirty = FEATURES.some((f) => !sameFeature(currentDraft[f], config![f]));
 
   return (

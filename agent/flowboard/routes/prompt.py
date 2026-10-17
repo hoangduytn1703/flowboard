@@ -41,6 +41,23 @@ async def auto_prompt(body: AutoPromptBody) -> AutoPromptResponse:
     return AutoPromptResponse(node_id=body.node_id, prompt=text)
 
 
+class RefinePromptBody(BaseModel):
+    node_id: int
+    draft: str
+    camera: Optional[str] = None
+
+
+@router.post("/refine", response_model=AutoPromptResponse)
+async def refine_prompt(body: RefinePromptBody) -> AutoPromptResponse:
+    """The user's rough prompt (any language) → one polished English prompt
+    that follows the same rules as auto-prompt. Nothing is persisted."""
+    try:
+        text = await prompt_synth.refine_prompt(body.node_id, body.draft, camera=body.camera)
+    except prompt_synth.PromptSynthError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return AutoPromptResponse(node_id=body.node_id, prompt=text)
+
+
 class AutoPromptBatchBody(BaseModel):
     node_id: int
     count: int

@@ -1,0 +1,214 @@
+{
+  "id": "fashion_ad",
+  "title": "Quảng cáo quần áo",
+  "blurb": "Người mẫu mặc sản phẩm qua 4 cảnh: giới thiệu, cận chất liệu, dáng đứng, kết. Mỗi cảnh một clip 8 s.",
+  "scenes": 4,
+  "inputs": [
+    {
+      "key": "product",
+      "label": "Sản phẩm",
+      "placeholder": "để trống = dùng đúng món đồ trong ảnh đã upload; hoặc mô tả: áo thun trắng in chữ",
+      "default": "the garment shown in the uploaded product photo"
+    },
+    {
+      "key": "setting",
+      "label": "Bối cảnh",
+      "placeholder": "ví dụ: studio sáng, phía sau là tủ đồ gỗ",
+      "default": "a bright minimalist studio with wooden wardrobes behind the model"
+    },
+    {
+      "key": "charGender",
+      "label": "Giới tính mẫu",
+      "type": "select",
+      "options": [
+        [
+          "female",
+          "Nữ"
+        ],
+        [
+          "male",
+          "Nam"
+        ]
+      ],
+      "default": "female"
+    },
+    {
+      "key": "charCountry",
+      "label": "Quốc gia mẫu",
+      "type": "select",
+      "options": [
+        [
+          "vn",
+          "Việt Nam"
+        ],
+        [
+          "kr",
+          "Hàn Quốc"
+        ],
+        [
+          "jp",
+          "Nhật Bản"
+        ],
+        [
+          "cn",
+          "Trung Quốc"
+        ],
+        [
+          "th",
+          "Thái Lan"
+        ],
+        [
+          "us",
+          "Mỹ"
+        ],
+        [
+          "fr",
+          "Pháp"
+        ]
+      ],
+      "default": "vn"
+    }
+  ],
+  "character": {
+    "charVibe": "clean",
+    "charExtras": "early 20s, long hair, soft friendly smile"
+  },
+  "nodes": [
+    {
+      "key": "script",
+      "type": "note",
+      "data": {
+        "title": "Kịch bản",
+        "prompt": "Quảng cáo {{product}} — 4 cảnh × 8 s\n\n1. Giới thiệu: toàn thân, người mẫu bước vào khung hình và nhìn thẳng camera.\n2. Chất liệu: cận cảnh tay vuốt vải, thấy rõ chi tiết sản phẩm.\n3. Dáng: trung cảnh, xoay nhẹ người, tay đút túi.\n4. Kết: nụ cười, cử chỉ chào, khung hình sạch cho chữ/logo.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh sản phẩm thật → Generate Người mẫu → Generate từng Cảnh → Generate từng Video (Veo 3.1 Lite) → ghép bằng Chat AI."
+      }
+    },
+    {
+      "key": "model",
+      "type": "character",
+      "data": {
+        "title": "Người mẫu"
+      }
+    },
+    {
+      "key": "product",
+      "type": "visual_asset",
+      "data": {
+        "title": "Sản phẩm — upload ảnh thật"
+      }
+    },
+    {
+      "key": "s1",
+      "type": "image",
+      "data": {
+        "title": "Cảnh 1 - Giới thiệu",
+        "prompt": "Full-body editorial photo of the model wearing {{product}}, standing relaxed and facing the camera with direct eye contact, in {{setting}}. Soft even studio lighting, neutral background, knees-up framing, the product fully visible. The product must match the reference photo exactly (shape, colour, print, material)."
+      }
+    },
+    {
+      "key": "s2",
+      "type": "image",
+      "data": {
+        "title": "Cảnh 2 - Chất liệu",
+        "prompt": "Close-up of the model's hands gently smoothing the fabric of {{product}}, in {{setting}}. Shallow depth of field, crisp texture and stitching detail, warm soft light, face partially visible at the top of frame. The product must match the reference photo exactly (shape, colour, print, material)."
+      }
+    },
+    {
+      "key": "s3",
+      "type": "image",
+      "data": {
+        "title": "Cảnh 3 - Dáng",
+        "prompt": "Medium shot of the model wearing {{product}}, body turned three-quarters, one hand in pocket, chin slightly lifted, in {{setting}}. Clean editorial pose, product centered and fully framed. The product must match the reference photo exactly (shape, colour, print, material)."
+      }
+    },
+    {
+      "key": "s4",
+      "type": "image",
+      "data": {
+        "title": "Cảnh 4 - Kết",
+        "prompt": "Medium shot of the model wearing {{product}}, smiling warmly straight at the camera with a small friendly wave, in {{setting}}. Bright flattering light, generous empty space on one side for a logo. The product must match the reference photo exactly (shape, colour, print, material)."
+      }
+    },
+    {
+      "key": "v1",
+      "type": "video",
+      "data": {
+        "title": "Video 1 - Giới thiệu",
+        "prompt": "0-3s: the model takes a half step toward the camera and settles. 3-6s: she tucks her hair behind one ear and looks straight into the lens. 6-8s: she holds a confident smile. Locked-off camera, no zoom, product stays fully in frame."
+      }
+    },
+    {
+      "key": "v2",
+      "type": "video",
+      "data": {
+        "title": "Video 2 - Chất liệu",
+        "prompt": "0-3s: fingers run along the fabric. 3-6s: the hand lifts the hem slightly to show the texture. 6-8s: the hand rests, fabric settles. Locked-off macro camera, soft light, no zoom."
+      }
+    },
+    {
+      "key": "v3",
+      "type": "video",
+      "data": {
+        "title": "Video 3 - Dáng",
+        "prompt": "0-3s: the model pivots from three-quarter to front. 3-6s: she shifts her weight and adjusts the collar. 6-8s: a small confident smirk at the camera. Locked-off camera, product stays centered."
+      }
+    },
+    {
+      "key": "v4",
+      "type": "video",
+      "data": {
+        "title": "Video 4 - Kết",
+        "prompt": "0-3s: the model breaks into a warm smile. 3-6s: a small friendly wave toward the camera. 6-8s: she holds the pose, calm and bright. Locked-off camera, clean space on one side for text."
+      }
+    }
+  ],
+  "edges": [
+    [
+      "model",
+      "s1"
+    ],
+    [
+      "product",
+      "s1"
+    ],
+    [
+      "model",
+      "s2"
+    ],
+    [
+      "product",
+      "s2"
+    ],
+    [
+      "model",
+      "s3"
+    ],
+    [
+      "product",
+      "s3"
+    ],
+    [
+      "model",
+      "s4"
+    ],
+    [
+      "product",
+      "s4"
+    ],
+    [
+      "s1",
+      "v1"
+    ],
+    [
+      "s2",
+      "v2"
+    ],
+    [
+      "s3",
+      "v3"
+    ],
+    [
+      "s4",
+      "v4"
+    ]
+  ]
+}

@@ -14,11 +14,14 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Optional
 
+from sqlmodel import select
+
 from flowboard.db import get_session
-from flowboard.db.models import Request
+from flowboard.db.models import Asset, Request
 from flowboard.node_mirror import stage_node_patch
 from flowboard.request_types import MEDIA_PRODUCING_TYPES
 from flowboard import config
+from flowboard.services.video_prompt import ensure_realtime
 from flowboard.services import media as media_service
 from flowboard.services.flow_client import flow_client
 from flowboard.services.flow_sdk import get_flow_sdk, resolve_paygate_tier
@@ -261,6 +264,8 @@ async def _handle_gen_video(params: dict) -> tuple[dict, Optional[str]]:
 
     if not isinstance(prompt, str) or not prompt.strip():
         return {}, "missing_prompt"
+    # Veo defaults to slow motion; say real-time unless the prompt asks otherwise.
+    prompt = ensure_realtime(prompt)
     if _media_provider_of(params) == "muse":
         # i2v via the Pax worker: one job, one output per start frame.
         from flowboard.services.muse_media import run_muse_media
@@ -594,6 +599,8 @@ async def _handle_gen_video_omni(params: dict) -> tuple[dict, Optional[str]]:
 
     if not isinstance(prompt, str) or not prompt.strip():
         return {}, "missing_prompt"
+    # Veo defaults to slow motion; say real-time unless the prompt asks otherwise.
+    prompt = ensure_realtime(prompt)
     if _media_provider_of(params) == "muse":
         # r2v via the Pax worker: reference ingredients + duration.
         from flowboard.services.muse_media import run_muse_media
@@ -786,6 +793,42 @@ async def _handle_gen_video_omni(params: dict) -> tuple[dict, Optional[str]]:
     )
 
 
+
+async def _handle_export_video(params: dict) -> tuple[dict, Optional[str]]:
+    """Join the clips behind `source_media_ids` in order; optional 60 fps.
+
+    Local only (ffmpeg) — no Flow project, tier or extension involved. A
+    clip that is still just a signed Flow URL is fetched into the cache
+    first; the join needs files on disk.
+    """
+    from flowboard.services.video_export import export_video
+
+    raw = params.get("source_media_ids")
+    media_ids = [m for m in (raw if isinstance(raw, list) else []) if isinstance(m, str) and m]
+    if not media_ids:
+        return {}, "missing_source_media_ids"
+    smooth60 = bool(params.get("smooth60"))
+
+    asset_ids: list[int] = []
+    for mid in media_ids:
+        if media_service.cached_path(mid) is None:
+            await media_service.fetch_and_cache(mid)
+        with get_session() as s:
+            row = s.exec(select(Asset).where(Asset.uuid_media_id == mid)).first()
+            if row is None or not row.local_path:
+                return {}, f"clip_unavailable:{mid[:8]}"
+            asset_ids.append(row.id)
+
+    out_media, err = await asyncio.to_thread(export_video, asset_ids, smooth60=smooth60)
+    if err or not out_media:
+        return {}, err or "export_failed"
+    return {
+        "media_ids": [out_media],
+        "media_entries": [{"media_id": out_media, "kind": "video"}],
+        "clips": len(asset_ids),
+        "smooth60": smooth60,
+    }, None
+
 _DEFAULT_HANDLERS: dict[str, Handler] = {
     "proxy": _handle_proxy,
     "create_project": _handle_create_project,
@@ -793,6 +836,7 @@ _DEFAULT_HANDLERS: dict[str, Handler] = {
     "gen_video": _handle_gen_video,
     "gen_video_omni": _handle_gen_video_omni,
     "edit_image": _handle_edit_image,
+    "export_video": _handle_export_video,
 }
 
 

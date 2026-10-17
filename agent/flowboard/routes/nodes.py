@@ -18,6 +18,9 @@ NodeType = Literal[
     "note",
     "merge",
     "visual_asset",
+    # export = joins the upstream video nodes' clips in order (+ optional
+    # 60 fps); dispatches `export_video`, no Flow involved.
+    "export",
     # Storyboard = thin image-node wrapper. Backend treats it the same as
     # `image` for storage / dispatch — see frontend/src/lib/storyboardPrompt.ts
     # for the template that drives gen_image.

@@ -1,8 +1,8 @@
 import { useState, useRef, type KeyboardEvent } from "react";
 import { useBoardStore } from "../store/board";
+import { clearBoardMedia } from "../api/client";
 import { ActivityBell } from "./activity/ActivityBell";
 import { AiProviderBadge } from "./AiProviderBadge";
-import { SponsorButton } from "./SponsorDialog";
 
 export function Toolbar() {
   const boardName = useBoardStore((s) => s.boardName);
@@ -59,10 +59,54 @@ export function Toolbar() {
       )}
 
       <div className="toolbar-actions">
+        <ClearMediaButton />
         <ActivityBell />
         <AiProviderBadge />
-        <SponsorButton />
+        {/* <SponsorButton /> */}
       </div>
     </div>
+  );
+}
+
+/**
+ * "Xóa kết quả": drop every rendered image / video on the board, keep the
+ * nodes and their prompts (and, unless asked, the character / product
+ * references). Confirms first — it is not undoable yet (BUGLOG FB-016).
+ */
+function ClearMediaButton() {
+  const boardId = useBoardStore((s) => s.boardId);
+  const refreshBoardState = useBoardStore((s) => s.refreshBoardState);
+  const [busy, setBusy] = useState(false);
+
+  async function run(includeRefs: boolean) {
+    if (boardId === null || busy) return;
+    const sure = window.confirm(
+      includeRefs
+        ? "Xóa HẾT ảnh/video trên board, kể cả ảnh Nhân vật / Sản phẩm (tham chiếu)?\n\nNode và prompt được giữ lại."
+        : "Xóa ảnh cảnh, video và bản xuất đã tạo?\n\nNode, prompt và ảnh tham chiếu (Nhân vật / Sản phẩm) được giữ lại.\n(Giữ Shift khi bấm để xóa cả tham chiếu.)",
+    );
+    if (!sure) return;
+    setBusy(true);
+    try {
+      const res = await clearBoardMedia(boardId, includeRefs);
+      await refreshBoardState();
+      useBoardStore.setState({ error: res.cleared ? null : "Không có kết quả nào để xóa." });
+    } catch (err) {
+      useBoardStore.setState({ error: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      className="toolbar-clear-btn"
+      onClick={(e) => void run(e.shiftKey)}
+      disabled={boardId === null || busy}
+      title="Xóa ảnh/video đã tạo trên board, giữ node và prompt. Shift+bấm: xóa cả ảnh tham chiếu."
+    >
+      {busy ? "Đang xóa…" : "🗑 Xóa kết quả"}
+    </button>
   );
 }

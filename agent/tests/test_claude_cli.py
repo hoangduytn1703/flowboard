@@ -75,6 +75,7 @@ async def test_run_claude_pipes_prompt_via_stdin(monkeypatch):
     rather than ``-p <prompt>`` argv. This avoids cmd.exe re-parsing
     breaking long prompts on ``.cmd``-shimmed npm installs."""
     _stub_resolve(monkeypatch)
+    monkeypatch.setattr(claude_cli, "SYSTEM_PROMPT_VIA_STDIN", False)  # the POSIX layout
     state = _stub_run(monkeypatch, _FakeResult(returncode=0, stdout=_envelope("hello")))
     out = await claude_cli.run_claude(
         user_prompt="say hi", system_prompt="be brief"
@@ -92,6 +93,24 @@ async def test_run_claude_pipes_prompt_via_stdin(monkeypatch):
     # Other flags still wired through argv.
     assert "--output-format" in argv and "json" in argv
     assert "--append-system-prompt" in argv and "be brief" in argv
+
+
+@pytest.mark.asyncio
+async def test_run_claude_system_prompt_rides_stdin_on_windows(monkeypatch):
+    """The Windows layout: cmd.exe cuts `--append-system-prompt` at its first
+    newline, so a multi-line system prompt goes in front of the user prompt
+    on stdin and the flag is not passed at all."""
+    _stub_resolve(monkeypatch)
+    monkeypatch.setattr(claude_cli, "SYSTEM_PROMPT_VIA_STDIN", True)
+    state = _stub_run(monkeypatch, _FakeResult(returncode=0, stdout=_envelope("ok")))
+    system = "RULES\n- reply with JSON\n- nothing else"
+    await claude_cli.run_claude(user_prompt="say hi", system_prompt=system)
+    args, kwargs = state["calls"][0]
+    argv = list(args[0])
+    assert "--append-system-prompt" not in argv
+    sent = kwargs["input"].decode("utf-8")
+    assert system in sent and sent.endswith("say hi")
+    assert sent.index(system) < sent.index("say hi")
 
 
 @pytest.mark.asyncio

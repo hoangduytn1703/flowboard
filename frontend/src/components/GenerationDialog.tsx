@@ -18,6 +18,7 @@ import {
 import {
   autoPrompt as autoPromptApi,
   autoPromptBatch as autoPromptBatchApi,
+  refinePromptApi,
   mediaUrl,
   patchEdge,
   patchNode,
@@ -231,6 +232,8 @@ export function GenerationDialog() {
   // Auto-prompt state — set when the user submits an empty prompt and we
   // synthesise one from upstream context. Surfaced as a small ✨ badge.
   const [autoBuilding, setAutoBuilding] = useState(false);
+  // "✨ Viết lại chuẩn": the user's own text → polished English, in place.
+  const [refining, setRefining] = useState(false);
   const [autoPromptUsed, setAutoPromptUsed] = useState(false);
 
   // Per-variant selection for multi-source i2v. Default: all selected.
@@ -442,10 +445,17 @@ export function GenerationDialog() {
         .getState()
         .nodes.find((n) => n.id === rfId)?.data;
       setStoryboardGrid(normaliseStoryboardGrid(openNodeData?.storyboardGrid));
-      setCharGender(null);
-      setCharCountry(null);
-      setCharVibe("clean");
-      setCharExtras("");
+      // Character picks come back from the node: stamped by an earlier
+      // Generate, or written by the chat agent's draft so the user only
+      // has to review and press Generate. Unknown values fall back.
+      const d = (openNodeData ?? {}) as Record<string, unknown>;
+      const g = CHARACTER_GENDERS.find((x) => x.key === d.charGender)?.key ?? null;
+      const c = CHARACTER_COUNTRIES.find((x) => x.key === d.charCountry)?.key ?? null;
+      const v = CHARACTER_VIBES.find((x) => x.key === d.charVibe)?.key ?? "clean";
+      setCharGender(g);
+      setCharCountry(c);
+      setCharVibe(v);
+      setCharExtras(typeof d.charExtras === "string" ? d.charExtras.slice(0, 200) : "");
       setAutoBuilding(false);
       setAutoPromptUsed(false);
       // Default-select every upstream source variant for video targets so
@@ -567,6 +577,25 @@ export function GenerationDialog() {
     }
   }
 
+  async function handleRefine() {
+    if (!rfId) return;
+    const dbId = parseInt(rfId, 10);
+    const draft = (prompt ?? "").trim();
+    if (isNaN(dbId) || !draft || refining) return;
+    setRefining(true);
+    try {
+      const res = await refinePromptApi(dbId, draft, isVideo ? { camera } : undefined);
+      setPrompt(res.prompt);
+      setAutoPromptUsed(true);
+    } catch (err) {
+      useGenerationStore.setState({
+        error: err instanceof Error ? `Viết lại prompt thất bại: ${err.message}` : "Viết lại prompt thất bại",
+      });
+    } finally {
+      setRefining(false);
+    }
+  }
+
   async function handleSubmit() {
     if (!rfId) return;
     // Defense in depth — block submit if the LLM layer is still composing
@@ -645,6 +674,8 @@ export function GenerationDialog() {
       if (charCountry) charStamp.charCountry = charCountry;
       if (charVibe) charStamp.charVibe = charVibe;
       if (charGender) charStamp.charGender = charGender;
+      // Kept with the chips so a reopened dialog (regenerate) shows it too.
+      charStamp.charExtras = charExtras.trim();
       if (Object.keys(charStamp).length > 0) {
         useBoardStore.getState().updateNodeData(rfId, charStamp);
         const dbId = parseInt(rfId, 10);
@@ -818,6 +849,15 @@ export function GenerationDialog() {
                 )}
               </label>
               <span className="gen-dialog__char-count">{prompt.length}/500</span>
+              <button
+                type="button"
+                className="gen-dialog__refine-btn"
+                disabled={isWorking || refining || !prompt.trim()}
+                title="AI viết lại prompt bạn gõ (tiếng nào cũng được) thành prompt tiếng Anh chuẩn, giữ nguyên ý"
+                onClick={() => void handleRefine()}
+              >
+                {refining ? "Đang viết lại…" : "✨ Viết lại chuẩn"}
+              </button>
             </div>
             <textarea
               id="gen-prompt"

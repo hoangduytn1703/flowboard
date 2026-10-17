@@ -46,7 +46,8 @@ _SYNTH_SYSTEM_IMAGE = (
     "  • STANCE — pick ONE from this pool (rotate so generations stay "
     "diverse, do not repeat the same stance):\n"
     "    · both hands in pockets, weight on one leg, slight hip pop\n"
-    "    · one hand brushing the collar / sleeve / hem of the garment\n"
+    "    · one hand presenting the product (brushing the collar / sleeve / "
+    "hem of a garment; holding, lifting or pointing at any other product)\n"
     "    · hand-on-hip, body angled three-quarters to camera\n"
     "    · arms casually crossed at the chest, head tilted slightly\n"
     "    · hand running through hair, head turned slightly to the side\n"
@@ -57,13 +58,18 @@ _SYNTH_SYSTEM_IMAGE = (
     "as long as the face stays toward camera.\n"
     "  • ATTITUDE: confident, charismatic, distinctive personality and "
     "presence (model 'aura'). Never stiff or generic.\n\n"
-    "When a product / wardrobe asset is in the inputs AND no location "
-    "reference is present, the chosen pose must make the GARMENT the "
-    "visual hero — knees-up or full upper-body framing. When a location "
-    "reference IS present, balance the framing: the garment stays "
-    "readable but the environment must be visible in frame (wider shot, "
-    "knees-up to full-body so the setting reads).\n\n"
-    "Style: photoreal editorial fashion photography, sharp focus, soft "
+    "The PRODUCT is whatever the product / visual-asset reference shows — "
+    "a garment, a dish, a device, a cosmetic, anything. Call it 'the "
+    "product from the reference photo' and never rename it to a type the "
+    "brief does not state; it must match the reference exactly (shape, "
+    "colour, print, material). When a product asset is in the inputs AND "
+    "no location reference is present, the chosen pose must make the "
+    "PRODUCT the visual hero — knees-up or full upper-body framing for "
+    "worn items, a hands-and-product close framing for held items. When a "
+    "location reference IS present, balance the framing: the product "
+    "stays readable but the environment must be visible in frame (wider "
+    "shot, knees-up to full-body so the setting reads).\n\n"
+    "Style: photoreal editorial commercial photography, sharp focus, soft "
     "even key light. BACKGROUND PRIORITY — if any reference image's "
     "brief describes an environment, location, or scene (e.g. 'park', "
     "'street', 'café', 'jogging path', 'interior room', 'beach'), USE "
@@ -216,11 +222,24 @@ _SYNTH_SYSTEM_VIDEO_STATIC = (
 )
 
 
+# Veo drifts into slow motion on its own, and at its 24 fps slow motion is
+# what reads as choppy. The synthesised prompt therefore describes
+# real-time pacing and never asks for "slow"; a user who wants the effect
+# types it into the prompt themselves (video_prompt.ensure_realtime then
+# leaves it alone).
+_PACING_CLAUSE = (
+    "\n\nPacing: every action happens at natural real-time speed, like "
+    "footage shot at normal playback rate. Do NOT write 'slowly', 'slow "
+    "motion', 'in slow-mo' or similar — use ordinary verbs ('turns', "
+    "'lifts', 'tucks') instead of slowed-down ones."
+)
+
+
 def _video_system_prompt(camera: Optional[str], subject_count: int = 1) -> str:
     base = (
         _SYNTH_SYSTEM_VIDEO_STATIC if camera == "static"
         else _SYNTH_SYSTEM_VIDEO_DEFAULT
-    )
+    ) + _PACING_CLAUSE
     if subject_count >= 2:
         return base + _MULTI_SUBJECT_VIDEO_CLAUSE
     return base
@@ -572,6 +591,51 @@ async def auto_prompt_batch(
         # so that is what the node ends up holding either way.
         apply_node_patch(node_id, data_patch={"prompt": prompts[0]})
         return prompts
+
+
+_REFINE_SUFFIX = (
+    "\n\nREFINE MODE: the user typed their own description below (any "
+    "language, possibly rough). Keep every intent in it — subject, action, "
+    "setting, mood, props — and rewrite it as ONE production-ready prompt in "
+    "English that follows all the rules above and uses the upstream context. "
+    "Do not add ideas the user did not ask for. Output only the prompt."
+)
+
+
+async def refine_prompt(node_id: int, draft: str, *, camera: Optional[str] = None) -> str:
+    """Turn the user's own rough prompt into a polished English one.
+
+    Same system rules and upstream context as :func:`auto_prompt`; the
+    difference is the user's text is the brief to honour, not something to
+    invent. Nothing is written to the node — the dialog shows the result for
+    review and the dispatch persists whatever the user keeps."""
+    draft = (draft or "").strip()
+    if not draft:
+        raise PromptSynthError("draft is empty")
+    records, target = _collect_upstream(node_id)
+    if target is None:
+        raise PromptSynthError(f"node {node_id} not found")
+    is_video = target.type == "video"
+    subject_count = len(_distinct_subjects(records))
+    base = _video_system_prompt(camera, subject_count) if is_video else _image_system_prompt(subject_count)
+    user_msg = _format_user_message(records, target) + f"\n\nUSER'S OWN DESCRIPTION:\n{draft}"
+
+    async with record_activity(
+        "auto_prompt",
+        params={"node_id": node_id, "camera": camera, "mode": "refine", "draft": draft[:200]},
+        node_id=node_id,
+    ) as activity:
+        try:
+            text = await run_llm("auto_prompt", user_msg, system_prompt=base + _REFINE_SUFFIX, timeout=90.0)
+        except LLMError as exc:
+            raise PromptSynthError(f"auto-prompt provider failed: {exc}") from exc
+        text = (text or "").strip().strip('"').strip("'")
+        if not text:
+            raise PromptSynthError("empty response from auto-prompt provider")
+        if len(text) > 500:
+            text = text[:500].rstrip() + "…"
+        activity.set_result({"prompt": text, "draft": draft[:200]})
+        return text
 
 
 async def auto_prompt(node_id: int, *, camera: Optional[str] = None) -> str:

@@ -358,6 +358,7 @@ def test_get_config_fresh_install_has_no_providers(client, tmp_secrets_path):
         "auto_prompt": _EMPTY,
         "vision": _EMPTY,
         "planner": _EMPTY,
+        "chat_agent": _EMPTY,
         "configured": False,
     }
 
@@ -375,6 +376,7 @@ def test_get_config_returns_user_picks(client, tmp_secrets_path):
             "effort": "high",
         },
         "planner": {"provider": "openai", "model": None, "effort": None},
+        "chat_agent": _EMPTY,
         "configured": False,
     }
 
@@ -409,6 +411,28 @@ def test_get_config_reads_legacy_active_providers(client, tmp_secrets_path):
     body = client.get("/api/llm/config").json()
     assert body["vision"] == {"provider": "gemini", "model": None, "effort": None}
     assert body["configured"] is True
+
+
+def test_chat_agent_is_optional_for_configured(client, tmp_secrets_path):
+    """Chat AI falls back to the planner's pin, so an install configured
+    before the row existed must not be bounced back into forced setup."""
+    for f in ("auto_prompt", "vision", "planner"):
+        secrets.set_feature_provider(f, "claude")
+    body = client.get("/api/llm/config").json()
+    assert body["chat_agent"] == _EMPTY
+    assert body["configured"] is True
+
+
+def test_set_config_chat_agent(client, tmp_secrets_path):
+    resp = client.put(
+        "/api/llm/config",
+        json={"chat_agent": {"provider": "claude", "model": "sonnet", "effort": "low"}},
+    )
+    assert resp.status_code == 200, resp.text
+    cfg = client.get("/api/llm/config").json()
+    assert cfg["chat_agent"] == {"provider": "claude", "model": "sonnet", "effort": "low"}
+    assert cfg["planner"] == _EMPTY  # untouched
+    assert cfg["configured"] is False  # chat_agent alone never completes setup
 
 
 # ── PUT /api/llm/config ───────────────────────────────────────────────

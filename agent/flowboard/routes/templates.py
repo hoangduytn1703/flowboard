@@ -1,0 +1,51 @@
+"""Board templates: list them, and create a board from one."""
+from __future__ import annotations
+
+from typing import Optional
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
+
+from flowboard.db import get_session
+from flowboard.db.models import Board
+from flowboard.services.board_builder import BoardSpecError, build_board
+from flowboard.services.templates import get_template, list_templates, render
+
+router = APIRouter(prefix="/api", tags=["templates"])
+
+
+class FromTemplateBody(BaseModel):
+    template_id: str = Field(min_length=1, max_length=64)
+    name: Optional[str] = Field(default=None, max_length=80)
+    inputs: dict[str, str] = Field(default_factory=dict)
+
+
+@router.get("/templates")
+def get_templates() -> list[dict]:
+    return list_templates()
+
+
+@router.post("/boards/from-template")
+def create_board_from_template(body: FromTemplateBody) -> dict:
+    """A new board with the template's nodes, prompts and edges already on it."""
+    template = get_template(body.template_id)
+    if template is None:
+        raise HTTPException(404, f"unknown template {body.template_id!r}")
+    spec = render(template, body.inputs)
+    with get_session() as s:
+        board = Board(name=(body.name or "").strip() or template["title"])
+        s.add(board)
+        s.commit()
+        s.refresh(board)
+        board_id, name, created_at = board.id, board.name, board.created_at
+    try:
+        created = build_board(board_id, spec)
+    except BoardSpecError as exc:
+        # The template file itself is broken; take the empty board back.
+        with get_session() as s:
+            b = s.get(Board, board_id)
+            if b is not None:
+                s.delete(b)
+                s.commit()
+        raise HTTPException(500, f"template {body.template_id!r} is invalid: {exc}")
+    return {"id": board_id, "name": name, "created_at": created_at, "nodes": created}

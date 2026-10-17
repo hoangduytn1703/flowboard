@@ -320,7 +320,13 @@ const MAX_RPC_TEXT = 32000000; // the project listing alone is past 17 MB
 
 async function runBatchRpc(cmd) {
   const tabs = await chrome.tabs.query({ url: flowUrls });
-  let candidate = tabs.find((t) => !t.discarded) || tabs[0];
+  // Prefer a tab inside a project, then the one the user is looking at: a
+  // stray Flow home tab under another signed-in account would otherwise win.
+  let candidate =
+    tabs.find((t) => t.url && t.url.includes('/project/') && !t.discarded) ||
+    tabs.find((t) => t.active && !t.discarded) ||
+    tabs.find((t) => !t.discarded) ||
+    tabs[0];
   if (!candidate) {
     // No Flow tab — open one and give the app a moment to boot, otherwise
     // WIZ_global_data is not on the page yet and `at` comes back empty. Hold
@@ -362,9 +368,14 @@ async function runBatchRpc(cmd) {
       // image generation when source-path is missing, even where the lighter
       // models tolerate it.
       const sourcePath = location.pathname || '/';
+      // With several Google accounts signed in, the page lives under /u/N/ and
+      // its RPCs must too: without the prefix Google serves account 0, which
+      // rejects this account's `at` token and answers without an envelope
+      // ("no <rpcid> envelope in response (0 others)"). Ported from flowkit.
+      const accountPrefix = (sourcePath.match(/^\/u\/\d+(?=\/)/) || [''])[0];
       const hl = (document.documentElement.lang || navigator.language || 'en').split('-')[0];
       const url =
-        `/_/AiSandboxAngularFrontend/data/batchexecute?rpcids=${encodeURIComponent(rpcid)}` +
+        `${accountPrefix}/_/AiSandboxAngularFrontend/data/batchexecute?rpcids=${encodeURIComponent(rpcid)}` +
         `&source-path=${encodeURIComponent(sourcePath)}` +
         `&bl=${encodeURIComponent(bl || '')}&f.sid=${encodeURIComponent(sid || '')}` +
         `&hl=${encodeURIComponent(hl)}&_reqid=${reqid}&rt=c`;
@@ -383,11 +394,16 @@ async function runBatchRpc(cmd) {
       // the bridge on every poll — shipping it whole gets it truncated, which
       // loses roughly half of all lookups depending on where the id sorts.
       if (match) {
-        const found = text.indexOf(match);   // not `at` — that is the CSRF token above
+        // Case-insensitive, and the window starts 400 bytes BEFORE the hit:
+        // ids come back in either case, and in the current listing entry
+        // the media id sits before the second copy of the operation id.
+        // Same window flowkit's extension returns. (`match`, not `at` —
+        // that is the CSRF token above.)
+        const found = text.toLowerCase().indexOf(match.toLowerCase());
         return {
           status: resp.status,
           matched: found !== -1,
-          text: found === -1 ? '' : text.slice(found, found + 800),
+          text: found === -1 ? '' : text.slice(Math.max(0, found - 400), found + 800),
         };
       }
       return { status: resp.status, text: text.slice(0, maxText) };

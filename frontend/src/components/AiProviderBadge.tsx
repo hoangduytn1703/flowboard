@@ -40,6 +40,7 @@ const FEATURE_LABEL: Record<LLMFeature, string> = {
   auto_prompt: "Auto-prompt",
   vision: "Vision",
   planner: "Planner",
+  chat_agent: "Chat AI",
 };
 
 const FEATURES: LLMFeature[] = ["auto_prompt", "vision", "planner"];

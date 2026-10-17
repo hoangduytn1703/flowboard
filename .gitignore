@@ -21,6 +21,9 @@ dist-ssr/
 *.swp
 .DS_Store
 
+# start.ps1 state (last pinned Flow project + install fingerprints)
+.fb-start.json
+
 # Env
 .env
 .env.local

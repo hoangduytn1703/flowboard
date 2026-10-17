@@ -5737,6 +5737,117 @@ button:disabled {
   color: var(--muted);
 }
 
+/* The pill doubles as the Chat AI model picker (ChatModelPicker). */
+button.chat-dock__presence {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 2px 6px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+
+button.chat-dock__presence:hover,
+button.chat-dock__presence[aria-expanded="true"] {
+  border-color: var(--border);
+  background: var(--panel-high);
+}
+
+.chat-dock__presence-model {
+  color: var(--muted);
+}
+
+.chat-dock__picker-anchor {
+  position: relative;
+}
+
+/* Opens downward over the message list: the dock clips overflow, and the
+   message area below the header is always taller than this box. */
+.chat-model-picker {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 5;
+  width: 260px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--panel-higher);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.chat-model-picker__title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-weight: 600;
+}
+
+.chat-model-picker__hint {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 11px;
+}
+
+.chat-model-picker__field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.chat-model-picker__field select,
+.chat-model-picker__field input {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 6px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.chat-model-picker__error {
+  color: var(--error);
+  font-size: 11px;
+  word-break: break-word;
+}
+
+.chat-model-picker__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.chat-model-picker__btn {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.chat-model-picker__btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.chat-model-picker__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .chat-dock__collapse-btn {
   margin-left: auto;
   background: none;
@@ -5997,4 +6108,166 @@ button:disabled {
   margin-left: auto;
   color: var(--muted);
   font-size: 11px;
+}
+
+/* ── New-project template picker (ProjectSidebar) ───────────────────────── */
+.project-modal--wide {
+  width: min(92vw, 640px);
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+}
+.tpl-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 8px;
+}
+.tpl-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  transition: border-color 80ms ease, background 80ms ease;
+}
+.tpl-card:hover:not(:disabled) {
+  border-color: var(--muted);
+}
+.tpl-card--active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(124, 92, 255, 0.18);
+}
+.tpl-card:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.tpl-card__title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.tpl-card__blurb {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.tpl-card__meta {
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.03em;
+}
+.tpl-inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+}
+.tpl-inputs__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.tpl-inputs__field .project-modal__input {
+  width: 100%;
+}
+
+/* ── "Xuất video" node (ExportBody) ──────────────────────────────────────── */
+.node-body--export {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+}
+.export-preview {
+  width: 100%;
+  max-height: 220px;
+  border-radius: 8px;
+  background: #000;
+}
+.export-placeholder {
+  min-height: 90px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 12px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+  background: var(--panel);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+.export-placeholder--busy {
+  color: var(--text);
+  border-style: solid;
+}
+.export-sources {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 11px;
+  color: var(--text);
+  line-height: 1.6;
+}
+.export-sources__id,
+.export-sources__missing {
+  color: var(--muted);
+}
+.export-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.export-error {
+  font-size: 11px;
+  color: var(--error);
+  word-break: break-word;
+}
+
+/* ── "Viết lại chuẩn" in the Generate dialog ─────────────────────────────── */
+.gen-dialog__refine-btn {
+  margin-left: 8px;
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--accent);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.gen-dialog__refine-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.gen-dialog__refine-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ── "Xóa kết quả" in the toolbar ────────────────────────────────────────── */
+.toolbar-clear-btn {
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.toolbar-clear-btn:hover:not(:disabled) {
+  color: var(--error);
+  border-color: var(--error);
+}
+.toolbar-clear-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }

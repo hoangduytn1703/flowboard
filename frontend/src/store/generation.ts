@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { exportSources } from "../lib/exportOrder";
 import {
   ensureBoardProject,
   createRequest,
@@ -52,6 +53,9 @@ interface GenerationState {
   closeResultViewer(): void;
 
   ensureProjectId(): Promise<string | null>;
+
+  /** "Xuất video" node: join the upstream clips (+ optional 60 fps). */
+  dispatchExport(rfId: string): Promise<void>;
 
   dispatchGeneration(
     rfId: string,
@@ -148,6 +152,7 @@ const MEDIA_PRODUCING_TYPES = new Set([
   "gen_video",
   "gen_video_omni",
   "edit_image",
+  "export_video",
 ]);
 
 // ── Poll loop ────────────────────────────────────────────────────────────
@@ -625,6 +630,38 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
       set({ error: err instanceof Error ? err.message : String(err) });
       return null;
     }
+  },
+
+  async dispatchExport(rfId) {
+    const { nodes, edges } = useBoardStore.getState();
+    const sources = exportSources(rfId, nodes, edges);
+    const mediaIds = sources.map((s) => s.mediaId).filter((m) => m);
+    if (mediaIds.length === 0) {
+      set({ error: "Nối ít nhất một node Video đã render vào node Xuất video." });
+      return;
+    }
+    const node = nodes.find((n) => n.id === rfId);
+    const smooth60 = node?.data.smooth60 === true;
+    const nodeDbId = parseInt(rfId, 10);
+    useBoardStore.getState().updateNodeData(rfId, { status: "queued", error: undefined });
+    let reqDto;
+    try {
+      reqDto = await createRequest({
+        type: "export_video",
+        node_id: isNaN(nodeDbId) ? undefined : nodeDbId,
+        params: { source_media_ids: mediaIds, smooth60 },
+      });
+    } catch (err) {
+      useBoardStore.getState().updateNodeData(rfId, {
+        status: "error",
+        error: err instanceof Error ? err.message : "request failed",
+      });
+      set({ error: err instanceof Error ? err.message : "Export failed" });
+      return;
+    }
+    // Same poll as every other media request; the worker also writes the
+    // result onto the node itself, so a reload picks it up.
+    attachPoll(rfId, reqDto.id, { prompt: "" });
   },
 
   async dispatchGeneration(rfId, opts: {

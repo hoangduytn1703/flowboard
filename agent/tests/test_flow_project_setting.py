@@ -545,6 +545,18 @@ def test_pinning_the_env_value_itself_rebinds_nothing(client, env_pinned):
     assert _binding(board_id) == ENV_PID
 
 
+def test_pinning_the_env_value_moves_a_board_left_on_an_old_project(client, env_pinned):
+    """`.env` edited between restarts: the effective id is already ENV_PID, but
+    the board still carries the project it first generated into. Pinning the
+    env value is the user saying "use this one" — the id did not move, the
+    board is stale anyway, and leaving it there sends every upload and
+    generation to the old project."""
+    board_id = _bind(client, "Stale", OTHER_PID)
+    r = client.put("/api/flow/projects/pinned", json={"flow_project_id": ENV_PID})
+    assert r.json()["rebound_boards"] == 1
+    assert _binding(board_id) == ENV_PID
+
+
 def test_clearing_down_to_no_project_leaves_bindings_alone(client, no_env):
     """"" is not a project any board can generate into, so a board keeps the
     last real binding it had rather than being emptied into an unusable state."""

@@ -1,0 +1,182 @@
+{
+  "id": "unboxing_review",
+  "title": "Review / mở hộp",
+  "blurb": "3 cảnh: mở hộp, cầm sản phẩm xem kỹ, dùng thử. Hợp đồ gia dụng, đồ công nghệ, phụ kiện.",
+  "scenes": 3,
+  "inputs": [
+    {
+      "key": "product",
+      "label": "Sản phẩm",
+      "placeholder": "để trống = dùng đúng sản phẩm trong ảnh đã upload; hoặc mô tả: tai nghe không dây",
+      "default": "the product shown in the uploaded product photo"
+    },
+    {
+      "key": "setting",
+      "label": "Bối cảnh",
+      "placeholder": "ví dụ: bàn làm việc gỗ, ánh sáng cửa sổ",
+      "default": "a tidy wooden desk by a window with soft daylight"
+    },
+    {
+      "key": "charGender",
+      "label": "Giới tính người review",
+      "type": "select",
+      "options": [
+        [
+          "female",
+          "Nữ"
+        ],
+        [
+          "male",
+          "Nam"
+        ]
+      ],
+      "default": "male"
+    },
+    {
+      "key": "charCountry",
+      "label": "Quốc gia",
+      "type": "select",
+      "options": [
+        [
+          "vn",
+          "Việt Nam"
+        ],
+        [
+          "kr",
+          "Hàn Quốc"
+        ],
+        [
+          "jp",
+          "Nhật Bản"
+        ],
+        [
+          "cn",
+          "Trung Quốc"
+        ],
+        [
+          "th",
+          "Thái Lan"
+        ],
+        [
+          "us",
+          "Mỹ"
+        ],
+        [
+          "fr",
+          "Pháp"
+        ]
+      ],
+      "default": "vn"
+    }
+  ],
+  "character": {
+    "charVibe": "casual",
+    "charExtras": "late 20s, friendly, curious expression"
+  },
+  "nodes": [
+    {
+      "key": "script",
+      "type": "note",
+      "data": {
+        "title": "Kịch bản",
+        "prompt": "Review {{product}} — 3 cảnh × 8 s\n\n1. Mở hộp: tay mở nắp hộp, sản phẩm lộ ra.\n2. Xem kỹ: người review cầm sản phẩm xoay nhìn, gật gù.\n3. Dùng thử: dùng sản phẩm, biểu cảm hài lòng, nhìn camera.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh sản phẩm thật → Generate Người review → Generate từng Cảnh → Generate từng Video → ghép bằng Chat AI."
+      }
+    },
+    {
+      "key": "model",
+      "type": "character",
+      "data": {
+        "title": "Người review"
+      }
+    },
+    {
+      "key": "product",
+      "type": "visual_asset",
+      "data": {
+        "title": "Sản phẩm — upload ảnh thật"
+      }
+    },
+    {
+      "key": "s1",
+      "type": "image",
+      "data": {
+        "title": "Cảnh 1 - Mở hộp",
+        "prompt": "Top-down close-up of hands lifting the lid of a box to reveal {{product}} nestled inside, on {{setting}}. Soft daylight, clean composition, product sharp and centered. The product must match the reference photo exactly (shape, colour, print, material)."
+      }
+    },
+    {
+      "key": "s2",
+      "type": "image",
+      "data": {
+        "title": "Cảnh 2 - Xem kỹ",
+        "prompt": "Medium close-up of the reviewer holding {{product}} up and examining it closely, slight head tilt, in {{setting}}. Natural light, product in focus near the face. The product must match the reference photo exactly (shape, colour, print, material)."
+      }
+    },
+    {
+      "key": "s3",
+      "type": "image",
+      "data": {
+        "title": "Cảnh 3 - Dùng thử",
+        "prompt": "Medium shot of the reviewer using {{product}}, looking at the camera with a satisfied nod, in {{setting}}. Natural light, space on one side for text. The product must match the reference photo exactly (shape, colour, print, material)."
+      }
+    },
+    {
+      "key": "v1",
+      "type": "video",
+      "data": {
+        "title": "Video 1 - Mở hộp",
+        "prompt": "0-3s: hands lift the lid. 3-6s: fingers peel back the wrapping to reveal the product. 6-8s: the product is lifted slightly toward the camera. Locked-off top-down camera."
+      }
+    },
+    {
+      "key": "v2",
+      "type": "video",
+      "data": {
+        "title": "Video 2 - Xem kỹ",
+        "prompt": "0-3s: the reviewer turns the product over in his hands. 3-6s: he brings it closer to the camera and raises an eyebrow. 6-8s: an approving nod. Locked-off camera."
+      }
+    },
+    {
+      "key": "v3",
+      "type": "video",
+      "data": {
+        "title": "Video 3 - Dùng thử",
+        "prompt": "0-3s: the reviewer starts using the product. 3-6s: a pleased reaction, small smile. 6-8s: he looks at the camera and gives a thumbs-up. Locked-off camera, clean space on one side."
+      }
+    }
+  ],
+  "edges": [
+    [
+      "product",
+      "s1"
+    ],
+    [
+      "model",
+      "s2"
+    ],
+    [
+      "product",
+      "s2"
+    ],
+    [
+      "model",
+      "s3"
+    ],
+    [
+      "product",
+      "s3"
+    ],
+    [
+      "s1",
+      "v1"
+    ],
+    [
+      "s2",
+      "v2"
+    ],
+    [
+      "s3",
+      "v3"
+    ]
+  ]
+}

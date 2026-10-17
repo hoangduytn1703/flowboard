@@ -113,7 +113,9 @@ function snapshotPersist(get: () => SettingsState): PersistShape {
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
-  imageModel: persisted.imageModel ?? "NANO_BANANA_2",
+  // Pro, not 2: on 2026-10-11 Flow answered every NANO_BANANA_2 (NARWHAL)
+  // image request on a Pro account with [5] NOT_FOUND, while GEM_PIX_2 rendered.
+  imageModel: persisted.imageModel ?? "NANO_BANANA_PRO",
   videoQuality:
     persisted.videoQuality && VALID_VIDEO_QUALITIES.includes(persisted.videoQuality)
       ? persisted.videoQuality

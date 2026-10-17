@@ -124,9 +124,13 @@ def set_api_key(provider: str, key: Optional[str]) -> None:
 
 # ── Feature-config helpers ─────────────────────────────────────────────
 
-# Features the UI configures. Order matters only for display; iteration
-# order in this module is deterministic on Python 3.7+.
+# Features that must have a provider before setup counts as done. Order
+# matters only for display; iteration order is deterministic on 3.7+.
 _FEATURES: tuple[str, ...] = ("auto_prompt", "vision", "planner")
+# Configurable but optional: unset means "use the Planner's pin" (see
+# services/chat_agent.py), so adding it never re-opens the forced setup
+# gate on an install that was already configured.
+OPTIONAL_FEATURES: tuple[str, ...] = ("chat_agent",)
 
 
 def _clean_str(val: object) -> Optional[str]:

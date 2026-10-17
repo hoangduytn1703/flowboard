@@ -25,6 +25,7 @@ from dataclasses import dataclass
 
 import pytest
 
+from flowboard.services.llm import gemini
 from flowboard.services.llm.base import LLMError
 from flowboard.services.llm.gemini import GeminiProvider
 
@@ -284,6 +285,39 @@ async def test_run_raises_on_empty_response_with_denied_actions(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_retries_once_after_a_denied_tool(monkeypatch):
+    """Whether agy reaches for a shell command varies run to run (a chat
+    turn was denied once, then answered cleanly twice). One retry, with a
+    no-tools instruction in front of the same prompt, recovers it."""
+    p = GeminiProvider()
+    _stub_resolve(monkeypatch)
+    denied = _FakeResult(
+        returncode=0,
+        stdout=_envelope("", denied_actions=[{"action": "command", "display_name": "RunCommand"}]),
+    )
+    state = _stub_run(monkeypatch, [denied, _FakeResult(returncode=0, stdout=_envelope("ok"))])
+    assert await p.run("plan it", system_prompt="be terse") == "ok"
+    assert len(state["calls"]) == 2
+    first, second = _prompt_of(state, 0), _prompt_of(state, 1)
+    assert "do NOT run shell" not in first
+    assert second.startswith(gemini._NO_TOOLS_RETRY) and second.endswith(first)
+
+
+@pytest.mark.asyncio
+async def test_run_retries_a_denied_tool_only_once(monkeypatch):
+    p = GeminiProvider()
+    _stub_resolve(monkeypatch)
+    denied = _FakeResult(
+        returncode=0,
+        stdout=_envelope("", denied_actions=[{"action": "command", "display_name": "RunCommand"}]),
+    )
+    state = _stub_run(monkeypatch, denied)
+    with pytest.raises(LLMError, match="RunCommand"):
+        await p.run("plan it")
+    assert len(state["calls"]) == 2
+
+
+@pytest.mark.asyncio
 async def test_run_raises_on_whitespace_only_response(monkeypatch):
     """Same guard without denied_actions — whitespace is still nothing."""
     p = GeminiProvider()
@@ -325,13 +359,31 @@ async def test_run_no_system_prompt_omits_system_block(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_run_passes_model_and_effort_flags(monkeypatch):
+    """A model id with no reasoning suffix (agy also serves Claude / GPT
+    checkpoints) takes the effort flag as-is."""
     p = GeminiProvider()
     _stub_resolve(monkeypatch)
     state = _stub_run(monkeypatch, _FakeResult(returncode=0, stdout=_envelope("ok")))
-    await p.run("hi", model="gemini-3.8-flash-low", effort="low")
+    await p.run("hi", model="claude-sonnet-4-6", effort="low")
     argv = list(state["calls"][0][0][0])
-    assert argv[argv.index("--model") + 1] == "gemini-3.8-flash-low"
+    assert argv[argv.index("--model") + 1] == "claude-sonnet-4-6"
     assert argv[argv.index("--effort") + 1] == "low"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", ["gemini-3.8-flash-medium", "gemini-3.1-pro-high", "gpt-oss-120b-medium"])
+async def test_run_drops_effort_when_the_model_id_carries_it(monkeypatch, model):
+    """agy's catalog ids end in the reasoning level. Sending `--effort`
+    next to one exits 1 ("--model … conflicts with --effort=…") whenever
+    the two differ — which is exactly what a Settings row with model
+    `…-medium` and effort `high` produced. The id wins."""
+    p = GeminiProvider()
+    _stub_resolve(monkeypatch)
+    state = _stub_run(monkeypatch, _FakeResult(returncode=0, stdout=_envelope("ok")))
+    await p.run("hi", model=model, effort="high")
+    argv = list(state["calls"][0][0][0])
+    assert argv[argv.index("--model") + 1] == model
+    assert "--effort" not in argv
 
 
 @pytest.mark.asyncio

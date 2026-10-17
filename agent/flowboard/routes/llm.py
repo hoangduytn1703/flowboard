@@ -67,6 +67,7 @@ class _ConfigBody(BaseModel):
     auto_prompt: Optional[_FeatureConfigBody] = None
     vision: Optional[_FeatureConfigBody] = None
     planner: Optional[_FeatureConfigBody] = None
+    chat_agent: Optional[_FeatureConfigBody] = None
 
 
 class _TestBody(BaseModel):
@@ -81,7 +82,9 @@ class _TestBody(BaseModel):
 # secrets.json with garbage values is tolerated by `read_feature_config`,
 # but the HTTP surface must reject input that wouldn't route anywhere.
 _VALID_PROVIDER_NAMES = {"claude", "gemini", "openai", "muse"}
-_VALID_FEATURES = ("auto_prompt", "vision", "planner")
+# chat_agent is optional — unset falls back to the planner's pin, and it
+# does not count towards `configured` (secrets.OPTIONAL_FEATURES).
+_VALID_FEATURES = ("auto_prompt", "vision", "planner", "chat_agent")
 
 
 # ── GET /api/llm/providers ────────────────────────────────────────────

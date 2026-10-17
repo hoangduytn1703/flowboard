@@ -105,6 +105,27 @@ _ATTACHMENT_INSTRUCTION = (
     "Do NOT run any shell command."
 )
 
+# Prepended to the one retry after agy answered empty because it tried a
+# tool that is denied headlessly (module docstring, failure #2). Only on
+# the retry: an instruction in every prompt would just add noise to the
+# calls that never needed it.
+_NO_TOOLS_RETRY = (
+    "Your previous attempt tried to run a command, which is not allowed here. "
+    "You are being used as a plain text-completion API: do NOT run shell "
+    "commands or write files. Everything you need is in this message — "
+    "answer it directly in text."
+)
+
+
+class _ToolDenied(LLMError):
+    """agy answered SUCCESS with an empty response after a denied tool."""
+
+
+def _model_carries_effort(model: Optional[str]) -> bool:
+    """True for catalog ids like ``gemini-3.8-flash-medium`` whose suffix is
+    already a reasoning level — passing ``--effort`` next to one is an error."""
+    return bool(model) and model.rsplit("-", 1)[-1] in _EFFORTS
+
 
 class GeminiProvider:
     """Conforms to ``LLMProvider`` (structural typing).
@@ -296,20 +317,27 @@ class GeminiProvider:
         full_prompt = "\n\n".join(parts)
 
         agy_bin = await asyncio.to_thread(resolve_cli_binary, _CLI_BIN, _PROBE_TIMEOUT)
-        args: list[str] = [
-            agy_bin,
-            "--print", full_prompt,
-            "--output-format", "json",
-            # Give agy its own deadline just under ours so it can tear the
-            # turn down and still emit a JSON envelope, instead of being
-            # SIGKILLed mid-write by subprocess's timeout and leaving us
-            # with truncated stdout to parse.
-            "--print-timeout", f"{max(1, int(timeout))}s",
-        ]
-        if model:
-            args += ["--model", model]
-        if effort:
-            args += ["--effort", effort]
+
+        def argv(prompt: str) -> list[str]:
+            args: list[str] = [
+                agy_bin,
+                "--print", prompt,
+                "--output-format", "json",
+                # Give agy its own deadline just under ours so it can tear the
+                # turn down and still emit a JSON envelope, instead of being
+                # SIGKILLed mid-write by subprocess's timeout and leaving us
+                # with truncated stdout to parse.
+                "--print-timeout", f"{max(1, int(timeout))}s",
+            ]
+            if model:
+                args += ["--model", model]
+            # agy's own catalog encodes the reasoning level in the model id
+            # (`gemini-3.8-flash-medium`); given both, it exits 1 with
+            # "--model … conflicts with --effort=…" whenever they differ. The
+            # id wins: it is what the user picked from the live list.
+            if effort and not _model_carries_effort(model):
+                args += ["--effort", effort]
+            return args
 
         # Lazy-init the semaphore on the running loop. The wait + the
         # subprocess + communicate all live inside the lock so a second
@@ -317,7 +345,21 @@ class GeminiProvider:
         if self._call_lock is None:
             self._call_lock = asyncio.Semaphore(1)
         async with self._call_lock:
-            return await self._invoke_locked(args, timeout=timeout)
+            try:
+                return await self._invoke_locked(argv(full_prompt), timeout=timeout)
+            except _ToolDenied as first:
+                # Whether agy reaches for a shell command is a per-run
+                # choice, not a property of the prompt: the same chat turn
+                # answered cleanly twice in a row and was denied once. So
+                # retry once, telling it up front not to; if it still
+                # insists, surface the original, more specific error.
+                logger.info("gemini(agy): retrying after denied tool use: %s", first)
+                try:
+                    return await self._invoke_locked(
+                        argv(f"{_NO_TOOLS_RETRY}\n\n{full_prompt}"), timeout=timeout
+                    )
+                except _ToolDenied:
+                    raise first from None
 
     async def _invoke_locked(
         self, args: list[str], *, timeout: float
@@ -393,7 +435,7 @@ class GeminiProvider:
             # three layers downstream. See module docstring, failure #2.
             denied = _denied_action_names(envelope)
             if denied:
-                raise LLMError(
+                raise _ToolDenied(
                     f"agy returned an empty response after denying {', '.join(denied)}: "
                     f"the prompt triggered a tool agy cannot run headlessly. "
                     f"Rephrase the prompt so it only needs agy's built-in tools."

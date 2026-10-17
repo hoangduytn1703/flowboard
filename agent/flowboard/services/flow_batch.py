@@ -21,10 +21,13 @@ and the response is a ``)]}'`` sentinel followed by length-prefixed chunks of
 
 Ported verbatim from flowkit's ``agent/services/flow_batch.py`` (v1.2.0), which
 in turn came from postforge/bridges/flowgen — see that repo's MIGRATION.md for
-the traps behind each of the comments below. Kept byte-identical to flowkit's
-copy on purpose: it is the one module here that has been exercised against live
-Flow across three projects, so a future upstream fix should diff cleanly rather
-than needing a re-port. Flowboard's own model policy does NOT live here — it
+the traps behind each of the comments below. Kept as close to flowkit's copy as
+possible on purpose: it is the one module here that has been exercised against
+live Flow across three projects, so a future upstream fix should diff cleanly
+rather than needing a re-port. Last synced 2026-10-11 (image item layout,
+reference crop, text-to-video descriptor, media listing shape); what still
+differs is flowboard-only: the 4:3 aspect, the default VIDEO_MODEL, and the
+project-create / StreamChat builders flowboard does not use. Flowboard's own model policy does NOT live here — it
 stays in flow_sdk.py, which resolves a nickname to a wire id before calling in.
 """
 from __future__ import annotations
@@ -136,9 +139,9 @@ OUTCOME_COMPLAINT = 4
 #: Surface id the web client stamps on every call. Constant in every capture.
 SURFACE_ID = 22
 
-#: Crop box on the reference image, verbatim from the UI when nothing was
-#: reframed by hand: a hair inside the edges, spanning 128/129 of the frame.
-FULL_FRAME_CROP = [None, 0.0038759689922481244, 1, 0.9961240310077519]
+#: Crop box on the reference image, verbatim from the current Flow UI when
+#: nothing was reframed by hand (live-captured 2026-09-23, synced from flowkit).
+FULL_FRAME_CROP = [None, None, 1, 1]
 
 #: Image inputs put the media id first and the input type four slots later.
 #: Type 1 is a reference; type 2 is the image being edited (BASE_IMAGE).
@@ -339,9 +342,9 @@ def _client_uuid() -> str:
     return str(uuid.uuid4()).upper()
 
 
-def _context(project_id: str) -> list:
+def _context(project_id: str, asset_id: Optional[str] = None) -> list:
     """The surface/project/captcha envelope every generate call repeats."""
-    return [None, SURFACE_ID, None, None, None, project_id, None, None, None, None,
+    return [None, SURFACE_ID, None, None, asset_id, project_id, None, None, None, None,
             [CAPTCHA_SLOT, 1]]
 
 
@@ -362,7 +365,8 @@ def image_request(prompt: str, project_id: str, count: int = 1,
                   prompts: Optional[list[str]] = None,
                   model: str = IMAGE_MODEL,
                   ref_media_ids: Optional[list[str]] = None,
-                  base_media_id: Optional[str] = None) -> str:
+                  base_media_id: Optional[str] = None,
+                  asset_id: Optional[str] = None) -> str:
     """One request item per variant, exactly as the REST payload did it.
 
     There is no "how many" field: Flow returns one image per item in the list,
@@ -376,6 +380,10 @@ def image_request(prompt: str, project_id: str, count: int = 1,
     resolved_model = resolve_image_model(model)
     base = seed if seed is not None else random.randint(1, 10**9)
     items = []
+    # Current Flow, synced from flowkit: an edit names its asset in the
+    # context, and the item's second-to-last slot is empty. The older layout
+    # (a client uuid in that slot, no asset id) came back [5] NOT_FOUND.
+    target_asset = asset_id or base_media_id
     for index in range(count):
         text = prompts[index] if prompts and index < len(prompts) else prompt
         image_inputs = []
@@ -385,9 +393,9 @@ def image_request(prompt: str, project_id: str, count: int = 1,
             _reference(mid) for mid in (ref_media_ids or []) if mid != base_media_id
         )
         items.append([None, None, image_inputs or None, base + index * 9973, ratio,
-                      resolved_model, None, _context(project_id), [[[text]]],
-                      None, None, None, _client_uuid(), _client_uuid()])
-    return build_envelope(RPC_GEN_IMAGE, [None, items, 1, _context(project_id),
+                      resolved_model, None, _context(project_id, target_asset), [[[text]]],
+                      None, None, None, None, _client_uuid()])
+    return build_envelope(RPC_GEN_IMAGE, [None, items, 1, _context(project_id, target_asset),
                                           [_client_uuid()]])
 
 
@@ -515,19 +523,38 @@ def omni_reference_video_request(prompt: str, project_id: str,
 
 def text_video_request(prompt: str, project_id: str,
                        aspect: Any = VIDEO_ASPECT_LANDSCAPE,
-                       model: str = "abra_t2v_4s") -> str:
-    """Build the migrated text-to-video submit (YhhmEf)."""
+                       model: str = "abra_t2v_4s",
+                       resolution: str | None = None) -> str:
+    """Build the current text-to-video submit (YhhmEf).
+
+    Flow encodes 360p in both the model key (``*_360p``) and the low-resolution
+    option slot. Current UI also uses client descriptor type 2 for video submits.
+    """
+    resolved_model = str(model)
+    res = (
+        "360p" if resolution is None and resolved_model.endswith("_360p")
+        else "720p" if resolution is None
+        else str(resolution).strip().lower()
+    )
+    if res not in {"360p", "720p"}:
+        raise ValueError("Omni resolution must be 360p or 720p")
+    if res == "360p" and not resolved_model.endswith("_360p"):
+        resolved_model += "_360p"
+    if res == "720p" and resolved_model.endswith("_360p"):
+        resolved_model = resolved_model.removesuffix("_360p")
     request = [
         [None, None, [[[prompt]]]],
-        model,
+        resolved_model,
         resolve_video_aspect(aspect),
         None,
         [None, None, None, None, _client_uuid(), _client_uuid()],
     ]
+    if res == "360p":
+        request.extend([None, None, [4]])
     return build_envelope(RPC_GEN_VIDEO_TEXT, [
         [request],
         _context(project_id),
-        [_client_uuid(), 1],
+        [_client_uuid(), 2],
     ])
 
 
@@ -671,14 +698,23 @@ def find_media_id(payload: Any, operation_id: str) -> Optional[str]:
     """Look an operation up in the project listing and take its media id.
 
     Entries look like
-    ``[opId, null, null, [title, created, null, null, mediaId, clientUuid, done], projectId]``.
+    ``[assetId, folderId, null, [title, [sec, nanos], isVideo, null, mediaId, opId, done], projectId]``.
     """
+    op_lower = operation_id.lower()
     for node in _walk_lists(payload):
-        if len(node) < 4 or node[0] != operation_id:
+        if not isinstance(node, list) or len(node) < 4:
             continue
         detail = node[3]
-        if isinstance(detail, list) and len(detail) > 4 and isinstance(detail[4], str):
-            return detail[4]
+        if not isinstance(detail, list) or len(detail) <= 4:
+            continue
+        # 1. Match assetId directly
+        if isinstance(node[0], str) and node[0].lower() == op_lower:
+            if isinstance(detail[4], str):
+                return detail[4]
+        # 2. Match opId in detail[5]
+        if len(detail) > 5 and isinstance(detail[5], str) and detail[5].lower() == op_lower:
+            if isinstance(detail[4], str):
+                return detail[4]
     return None
 
 
@@ -696,10 +732,11 @@ def find_media_id_in_text(text: str, operation_id: str) -> Optional[str]:
     truncated tail cannot be JSON-decoded even though the entry we want is
     sitting in it intact. Scanning the text finds it anyway.
     """
-    start = text.find(operation_id)
+    lower_text = text.lower()
+    start = lower_text.find(operation_id.lower())   # ids come back in either case
     if start == -1:
         return None
-    match = _MEDIA_SLOT.search(text, start, start + 800)
+    match = _MEDIA_SLOT.search(text, start, min(len(text), start + 800))
     return match.group(1) if match else None
 
 

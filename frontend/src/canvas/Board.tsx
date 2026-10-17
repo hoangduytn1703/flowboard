@@ -28,6 +28,10 @@ const nodeTypes = {
   note: NodeCard,
   visual_asset: NodeCard,
   Storyboard: NodeCard,
+  // merge: made by the chat agent's concat; export: the "Xuất video" node.
+  // Unregistered types fall back to React Flow's bare default node.
+  merge: NodeCard,
+  export: NodeCard,
 };
 
 // Single edge type used for everything — VariantEdge renders the
@@ -364,6 +368,11 @@ export function Board() {
         // Larger connection-drop radius so users don't have to land
         // pixel-perfect on the handle to complete an edge.
         connectionRadius={32}
+        // React Flow's default is 1px: a click whose pointer drifts a pixel
+        // between down and up becomes a node drag and the button under it
+        // never fires — ▶ / Generate / Upload on a card needed 2-3 tries.
+        // 8px keeps every real drag and turns jittery clicks back into clicks.
+        nodeDragThreshold={8}
         fitView
         proOptions={{ hideAttribution: true }}
       >

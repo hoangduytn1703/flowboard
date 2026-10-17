@@ -1243,3 +1243,36 @@ def test_route_auto_prompt_persists_through_the_service(client, monkeypatch):
     r = client.post("/api/prompt/auto", json={"node_id": ids["target_id"]})
     assert r.status_code == 200, r.text
     assert _node_data(ids["target_id"])["prompt"] == "composed via the route"
+
+
+@pytest.mark.asyncio
+async def test_refine_prompt_keeps_the_users_draft_in_the_brief(client, monkeypatch):
+    """The user's rough text (any language) rides into the LLM call next to
+    the upstream briefs, under the same system rules; nothing is written to
+    the node — the dialog shows the result for review."""
+    from flowboard.db import get_session
+    from flowboard.db.models import Node
+
+    ids = _seed_board_with_chain()
+    captured: dict = {}
+
+    async def stub_run(feature, prompt, *, system_prompt=None, timeout=0):
+        captured["feature"], captured["prompt"], captured["system"] = feature, prompt, system_prompt
+        return '"Editorial photo of the model in the white t-shirt, strolling past a wooden wardrobe"'
+
+    monkeypatch.setattr(prompt_synth, "run_llm", stub_run)
+    out = await prompt_synth.refine_prompt(ids["target_id"], "cô gái đi dạo trước tủ đồ gỗ")
+
+    assert out.startswith("Editorial photo") and '"' not in out
+    assert captured["feature"] == "auto_prompt"
+    assert "cô gái đi dạo trước tủ đồ gỗ" in captured["prompt"]
+    assert "REFINE MODE" in captured["system"]
+    with get_session() as s:
+        assert (s.get(Node, ids["target_id"]).data or {}).get("prompt") != out
+
+
+@pytest.mark.asyncio
+async def test_refine_prompt_rejects_an_empty_draft(client):
+    ids = _seed_board_with_chain()
+    with pytest.raises(prompt_synth.PromptSynthError):
+        await prompt_synth.refine_prompt(ids["target_id"], "   ")

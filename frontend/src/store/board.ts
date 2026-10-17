@@ -3,6 +3,7 @@ import type { Edge, Node } from "@xyflow/react";
 import {
   listBoards,
   createBoard,
+  createBoardFromTemplate,
   getBoard,
   patchBoard as apiPatchBoard,
   deleteBoard as apiDeleteBoard,
@@ -164,6 +165,7 @@ const TYPE_TITLE: Record<NodeType, string> = {
   visual_asset: "Visual asset",
   Storyboard: "Storyboard",
   merge: "Merge",
+  export: "Xuất video",
 };
 
 // ── Persisted active-board id ─────────────────────────────────────────────
@@ -212,6 +214,12 @@ interface BoardState {
   switchBoard(id: number): Promise<void>;
   // Create a new board, switch to it, return id.
   createNewBoard(name: string): Promise<number | null>;
+  /** A board that already carries a template's nodes, prompts and edges. */
+  createNewBoardFromTemplate(
+    templateId: string,
+    name: string,
+    inputs: Record<string, string>,
+  ): Promise<number | null>;
   // Delete a board. If it's the active one, switch to first remaining
   // board (or create a fresh "Untitled" if list ends up empty).
   deleteBoardById(id: number): Promise<void>;
@@ -411,6 +419,19 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       // Add to list (front of list so the newly-created project shows up
       // at the top of the sidebar) and switch to it.
       set((s) => ({ boards: [board, ...s.boards] }));
+      await get().switchBoard(board.id);
+      return board.id;
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : String(err) });
+      return null;
+    }
+  },
+
+  async createNewBoardFromTemplate(templateId, name, inputs) {
+    try {
+      const board = await createBoardFromTemplate(templateId, name, inputs);
+      set((s) => ({ boards: [board, ...s.boards] }));
+      // switchBoard loads the nodes the template already put on it.
       await get().switchBoard(board.id);
       return board.id;
     } catch (err) {
