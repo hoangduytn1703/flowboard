@@ -10,7 +10,9 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    // 5173 belongs to Flow Kit's dashboard; strictPort so the two never swap.
+    port: 5174,
+    strictPort: true,
     proxy: {
       "/api": "http://localhost:8434",
       "/media": "http://localhost:8434",

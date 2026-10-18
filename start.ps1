@@ -149,7 +149,7 @@ if ($tier -notin @('PAYGATE_TIER_ONE', 'PAYGATE_TIER_TWO')) {
 Stop-OldCopy $agentPort '*flowboard.main*' -Required
 Stop-OldCopy $wsPort '*flowboard.main*' -Required
 if (-not $NoFrontend) {
-    Stop-OldCopy 5173 "*$frontDir*"   # a copy started by hand with `npm run dev`
+    Stop-OldCopy 5173 "*$frontDir*"   # an old hand-started copy from before Vite was pinned to 5174
     Stop-OldCopy $frontPort "*$frontDir*" -Required
 }
 

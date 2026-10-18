@@ -20,7 +20,7 @@ help:
 	@echo "  make update       - upgrade existing deps (agent + frontend)"
 	@echo "  make dev          - hint: run agent + frontend in separate terminals"
 	@echo "  make agent        - run agent only (FastAPI on :$(FLOWBOARD_HTTP_PORT))"
-	@echo "  make frontend     - run frontend only (Vite on :5173)"
+	@echo "  make frontend     - run frontend only (Vite on :5174)"
 	@echo "  make extension    - package extension (unpacked: load from ./extension)"
 	@echo "  make clean        - remove build + cache"
 

@@ -327,7 +327,7 @@ matching vocab from the system prompt.
         └───── Google Flow  │  React + Vite      │
               labs.google   │  ReactFlow canvas  │
               (i2v / image) │  Zustand store     │
-                            │  127.0.0.1:5173    │
+                            │  127.0.0.1:5174    │
                             └────────────────────┘
 ```
 
@@ -377,7 +377,7 @@ make install        # agent venv + frontend deps (uses uv if available, else pip
 make install-dev    # same, but adds ruff + pytest extras
 make update         # upgrade agent + frontend deps in place
 make agent          # run FastAPI on :8434
-make frontend       # run Vite on :5173
+make frontend       # run Vite on :5174
 ```
 
 `uv` is auto-detected (~10× faster installs). Install it once with
@@ -467,7 +467,7 @@ curl http://127.0.0.1:8434/api/health
 cd frontend
 npm install
 npm run dev
-# → http://localhost:5173
+# → http://localhost:5174
 ```
 
 Open the URL. The first board ("Untitled") auto-creates if the DB is
