@@ -224,6 +224,13 @@ VIDEO_MODEL_KEYS: dict[str, dict[str, dict[str, str]]] = {
 
 DEFAULT_VIDEO_QUALITY = "fast"
 
+# Batch-path model id -> the dialog's quality nickname (see flow_batch.VIDEO_MODELS).
+_BATCH_VIDEO_QUALITY: dict[str, str] = {
+    "veo_3_1_i2v_lite": "lite",
+    "veo_3_1_i2v_lite_low_priority": "lite_relaxed",
+    "veo_3_1_i2v_s_fast_ultra": "fast",
+}
+
 
 def resolve_video_model(
     paygate_tier: str, aspect_ratio: str, quality: Optional[str] = None
@@ -323,7 +330,26 @@ def _batch_failure(exc: Exception) -> dict:
     """
     message = str(exc) if isinstance(exc, (fb.FlowBatchError, ValueError)) \
         else f"{type(exc).__name__}: {exc}"
+    if MODEL_ACCESS_DENIED in message:
+        # `[7, …, PUBLIC_ERROR_MODEL_ACCESS_DENIED]` is Flow saying the plan
+        # doesn't include the model. The raw envelope is unreadable (and the
+        # marker can sit past the 200-char cut), so the user-facing error is
+        # a sentence; the raw text stays in `raw` for the detail viewer.
+        return {
+            "raw": {"status": 403, "error": message},
+            "error": MODEL_ACCESS_DENIED_MESSAGE[:200],
+        }
     return {"raw": {"status": 502, "error": message}, "error": message[:200]}
+
+
+MODEL_ACCESS_DENIED = "PUBLIC_ERROR_MODEL_ACCESS_DENIED"
+# Node cards render request errors verbatim, and the UI around them is
+# Vietnamese. Keeps the Flow code as a prefix so it stays greppable.
+MODEL_ACCESS_DENIED_MESSAGE = (
+    f"{MODEL_ACCESS_DENIED}: Model này không có trong gói Flow của bạn. "
+    "Gói Pro chỉ có Veo 3.1 Lite / Omni Flash cho video — chọn lại model "
+    "rồi Generate lại."
+)
 
 
 def _as_media_envelope(images: list) -> dict:
@@ -744,6 +770,23 @@ class FlowSDK:
                 ),
             }
         model = fb.resolve_video_model(legacy_key)
+        # Nothing of the requested key survived (Fast / Quality: no batch id
+        # captured for them yet), so the default renders instead. Say so in
+        # the result rather than letting a "Quality" clip quietly be Lite.
+        downgrade: Optional[dict[str, Any]] = None
+        if fb.match_video_model(legacy_key) is None:
+            downgrade = {
+                "requested_quality": video_quality or DEFAULT_VIDEO_QUALITY,
+                "requested_model": legacy_key,
+                "model": model,
+                # The quality nickname of what actually renders, for the
+                # node's model stamp.
+                "quality": _BATCH_VIDEO_QUALITY.get(model),
+            }
+            logger.warning(
+                "gen_video: %s has no batch-path model; rendering with %s",
+                legacy_key, model,
+            )
 
         sources = [
             mid for mid in (start_media_ids or []) if isinstance(mid, str) and mid
@@ -770,9 +813,12 @@ class FlowSDK:
             self._remember_operation(operation.operation_id, pid)
             operation_ids.append(operation.operation_id)
 
-        return self._video_submit_result(
+        result = self._video_submit_result(
             operation_ids, failures, model=model, sources=len(sources)
         )
+        if downgrade is not None:
+            result["model_downgrade"] = downgrade
+        return result
 
     async def gen_video_omni(
         self,

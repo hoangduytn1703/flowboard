@@ -499,6 +499,8 @@ async def test_run_muse_media_imports_file_output(tmp_path):
         threading.Thread(target=worker, daemon=True).start()
         return job
 
+    # A worker is listening — otherwise the dispatch is refused up front.
+    worker_presence.touch("muse", "w1")
     with patch.object(pq, "create_provider_job", fake_create), patch.object(
         muse_media.config, "MUSE_MEDIA_TIMEOUT_S", 10
     ):
@@ -523,3 +525,128 @@ async def test_run_muse_media_no_worker_error():
             kind="image", prompt="a cat"
         )
     assert error is not None and "muse_no_worker" in error
+
+
+# ── FB-004: no worker / cancel must not hold the request worker ───────
+
+
+@pytest.mark.asyncio
+async def test_run_muse_media_refuses_up_front_without_a_worker():
+    """No muse2api, no Pax worker: fail at once, queue nothing. This used
+    to wait MUSE_MEDIA_TIMEOUT_S (1800s) on a job nobody would claim."""
+    from flowboard.services import muse_media
+
+    started = time.monotonic()
+    result, error = await muse_media.run_muse_media(kind="image", prompt="a cat")
+    assert time.monotonic() - started < 2
+    assert result == {}
+    assert error == muse_media.MUSE_UNAVAILABLE_ERROR
+    assert pq.list_provider_jobs(provider="muse") == []
+
+
+@pytest.mark.asyncio
+async def test_wait_for_provider_job_should_stop_returns_the_live_row():
+    job = pq.create_provider_job(provider="muse", kind="image")
+    seen = []
+
+    def stop(current):
+        seen.append(current.status)
+        return True
+
+    final = await pq.wait_for_provider_job(job.id, timeout_s=30, should_stop=stop)
+    assert final is not None and final.status == "QUEUED"
+    assert seen == ["QUEUED"]
+
+
+@pytest.mark.asyncio
+async def test_run_muse_media_honours_cancel_and_withdraws_the_job():
+    from flowboard.services import muse_media
+
+    worker_presence.touch("muse", "w1")
+    flag = {"canceled": False}
+
+    def cancel_soon():
+        time.sleep(0.3)
+        flag["canceled"] = True
+
+    threading.Thread(target=cancel_soon, daemon=True).start()
+    started = time.monotonic()
+    result, error = await muse_media.run_muse_media(
+        kind="image", prompt="a cat", should_cancel=lambda: flag["canceled"]
+    )
+    assert time.monotonic() - started < 10
+    assert error == "canceled"
+    assert result["canceled"] is True
+    job = pq.get_provider_job(result["provider_job_id"])
+    assert job.status == "CANCELLED"
+
+
+@pytest.mark.asyncio
+async def test_run_muse_media_gives_up_when_the_worker_leaves():
+    from flowboard.services import muse_media
+
+    worker_presence.touch("muse", "w1")
+
+    def leave_soon():
+        time.sleep(0.3)
+        worker_presence._seen.clear()
+
+    threading.Thread(target=leave_soon, daemon=True).start()
+    result, error = await muse_media.run_muse_media(kind="image", prompt="a cat")
+    assert result == {}
+    assert error.startswith("muse_no_worker: the Pax worker went away")
+    [job] = pq.list_provider_jobs(provider="muse")
+    assert job.status == "CANCELLED"
+
+
+@pytest.mark.asyncio
+async def test_canceling_a_muse_request_frees_the_worker_queue(client):
+    """End to end: a canceled Muse request must release the single-consumer
+    worker, so the Flow request queued behind it runs."""
+    import asyncio
+
+    from flowboard.worker import processor as proc
+
+    worker_presence.touch("muse", "w1")
+    ran: list[str] = []
+
+    async def flow_handler(params):
+        ran.append(params["prompt"])
+        return {"media_ids": ["f1"]}, None
+
+    async def gen_image(params):
+        if params.get("media_provider") == "muse":
+            return await proc._handle_gen_image(params)
+        return await flow_handler(params)
+
+    muse_row = client.post("/api/requests", json={
+        "type": "gen_image",
+        "params": {"prompt": "muse cat", "media_provider": "muse"},
+    }).json()
+    flow_row = client.post("/api/requests", json={
+        "type": "gen_image",
+        "params": {"prompt": "flow cat", "media_provider": "flow"},
+    }).json()
+
+    w = proc.WorkerController(handlers={"gen_image": gen_image})
+    task = asyncio.create_task(w.start())
+    try:
+        w.enqueue(muse_row["id"])
+        w.enqueue(flow_row["id"])
+        for _ in range(40):
+            await asyncio.sleep(0.05)
+            if client.get(f"/api/requests/{muse_row['id']}").json()["status"] == "running":
+                break
+        assert client.post(f"/api/requests/{muse_row['id']}/cancel").status_code == 200
+        for _ in range(200):
+            await asyncio.sleep(0.05)
+            if client.get(f"/api/requests/{flow_row['id']}").json()["status"] == "done":
+                break
+        assert client.get(f"/api/requests/{muse_row['id']}").json()["status"] == "canceled"
+        assert client.get(f"/api/requests/{flow_row['id']}").json()["status"] == "done"
+        assert ran == ["flow cat"]
+        [job] = pq.list_provider_jobs(provider="muse")
+        assert job.status == "CANCELLED"
+    finally:
+        w.request_shutdown()
+        await asyncio.wait_for(task, timeout=2.0)

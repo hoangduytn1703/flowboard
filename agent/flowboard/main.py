@@ -11,8 +11,10 @@ from flowboard.db import get_session, init_db
 from flowboard.db.models import Node, Request
 from flowboard.routes import activity, auth, boards, chat, edges, flow_debug, flow_projects, llm, media, nodes, plans, projects, prompt, templates, upload, vision
 from flowboard.routes import provider_jobs as provider_jobs_route
+from flowboard.routes import products as products_route
 from flowboard.routes import references as references_route
 from flowboard.routes import requests as requests_route
+from flowboard.routes import storyboard as storyboard_route
 from flowboard.services.flow_client import flow_client
 from flowboard.services.ws_server import run_ws_server
 from flowboard.worker.processor import get_worker
@@ -94,6 +96,10 @@ async def lifespan(app: FastAPI):
     recovered = _recover_orphan_running_requests()
     if recovered:
         logger.info("recovered %d orphan in-flight request(s) → failed", recovered)
+    # Media generated before per-project bookkeeping existed would otherwise
+    # be re-uploaded into the project it already lives in on first reuse.
+    from flowboard.services.media_project_sync import backfill_identity_mappings
+    backfill_identity_mappings()
     worker = get_worker()
     ws_task = asyncio.create_task(run_ws_server(), name="ext-ws-server")
     worker_task = asyncio.create_task(worker.start(), name="request-worker")
@@ -125,12 +131,14 @@ app.add_middleware(
 app.include_router(boards.router)
 app.include_router(templates.router)
 app.include_router(nodes.router)
+app.include_router(storyboard_route.router)
 app.include_router(edges.router)
 app.include_router(chat.router)
 app.include_router(projects.router)
 app.include_router(flow_projects.router)
 app.include_router(flow_debug.router)
 app.include_router(references_route.router)
+app.include_router(products_route.router)
 app.include_router(requests_route.router)
 app.include_router(media.bytes_router)
 app.include_router(media.api_router)

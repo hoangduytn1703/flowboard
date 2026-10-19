@@ -183,10 +183,10 @@ def test_gen_video_binds_to_new_video_node():
     ):
         asyncio.run(chat_agent.run_chat_agent(board_id, run_id, "do it", [], []))
 
-    assert seen["req_type"] == "gen_video"
-    assert seen["start_media_id"] == "srcmid1"
+    # Omni Flash by default: the source image is the ingredient, 8 s.
+    assert seen["req_type"] == "gen_video_omni"
+    assert seen["ref_media_ids"] == ["srcmid1"] and seen["duration_s"] == 8
     assert seen["project_id"] == PROJECT
-    assert seen["video_quality"] == "lite"
     assert seen["aspect_ratio"] == "VIDEO_ASPECT_RATIO_PORTRAIT"
     with get_session() as s:
         from sqlmodel import select
@@ -449,3 +449,28 @@ def test_build_board_rejects_a_bad_edge_and_writes_nothing():
         from sqlmodel import select
 
         assert s.exec(select(Node).where(Node.board_id == board_id)).all() == []
+
+
+def test_gen_video_renders_on_veo_only_when_asked():
+    board_id, _ = _mk_run()
+    with get_session() as s:
+        s.add(Node(board_id=board_id, short_id="img1", type="image", x=0, y=0,
+                   data={"mediaId": "srcmid1", "mediaIds": ["srcmid1"]}, status="done"))
+        s.commit()
+    seen = {}
+
+    async def fake_dispatch(node_id, req_type, params):
+        seen.update(params, req_type=req_type)
+        return ["vid1"]
+
+    with patch.object(chat_agent, "_dispatch_flow", fake_dispatch), _pinned():
+        obs = asyncio.run(chat_agent._execute_tool(
+            board_id, "gen_video",
+            {"prompt": "push-in", "source_node_short_id": "img1", "model": "veo", "quality": "fast"}))
+    assert obs["ok"] is True
+    assert seen["req_type"] == "gen_video" and seen["start_media_id"] == "srcmid1"
+    assert seen["video_quality"] == "fast"
+
+    bad = asyncio.run(chat_agent._execute_tool(
+        board_id, "gen_video", {"prompt": "x", "source_node_short_id": "img1", "duration_s": 7}))
+    assert bad["ok"] is False and "duration_s" in bad["error"]

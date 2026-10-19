@@ -95,6 +95,13 @@ export interface FlowboardNodeData extends Record<string, unknown> {
   // missing (true for fresh nodes + legacy pre-1.2.15 nodes whose
   // multi-shot data is now ignored).
   storyboardGrid?: StoryboardGrid;
+  // Video node: the Vietnamese voice-over line spoken over this clip when
+  // the board is exported. Export node: how that voice is rendered.
+  narration?: string;
+  voice?: string;
+  voiceRate?: number;
+  subtitles?: boolean;
+  originalAudio?: "duck" | "keep" | "mute";
 }
 
 export type FlowNode = Node<FlowboardNodeData>;
@@ -219,6 +226,7 @@ interface BoardState {
     templateId: string,
     name: string,
     inputs: Record<string, string>,
+    productId?: number | null,
   ): Promise<number | null>;
   // Delete a board. If it's the active one, switch to first remaining
   // board (or create a fresh "Untitled" if list ends up empty).
@@ -313,6 +321,12 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           charVibe: n.data["charVibe"] as string | undefined,
           charGender: n.data["charGender"] as string | undefined,
           storyboardGrid: n.data["storyboardGrid"] as StoryboardGrid | undefined,
+          smooth60: n.data["smooth60"] as boolean | undefined,
+          narration: n.data["narration"] as string | undefined,
+          voice: n.data["voice"] as string | undefined,
+          voiceRate: n.data["voiceRate"] as number | undefined,
+          subtitles: n.data["subtitles"] as boolean | undefined,
+          originalAudio: n.data["originalAudio"] as "duck" | "keep" | "mute" | undefined,
           // The worker persists the partial-failure summary onto the
           // node now, so a cold load has to read it back — otherwise a
           // batch where some variants were blocked reloads looking
@@ -383,6 +397,12 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           charVibe: n.data["charVibe"] as string | undefined,
           charGender: n.data["charGender"] as string | undefined,
           storyboardGrid: n.data["storyboardGrid"] as StoryboardGrid | undefined,
+          smooth60: n.data["smooth60"] as boolean | undefined,
+          narration: n.data["narration"] as string | undefined,
+          voice: n.data["voice"] as string | undefined,
+          voiceRate: n.data["voiceRate"] as number | undefined,
+          subtitles: n.data["subtitles"] as boolean | undefined,
+          originalAudio: n.data["originalAudio"] as "duck" | "keep" | "mute" | undefined,
           // The worker persists the partial-failure summary onto the
           // node now, so a cold load has to read it back — otherwise a
           // batch where some variants were blocked reloads looking
@@ -427,9 +447,9 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     }
   },
 
-  async createNewBoardFromTemplate(templateId, name, inputs) {
+  async createNewBoardFromTemplate(templateId, name, inputs, productId) {
     try {
-      const board = await createBoardFromTemplate(templateId, name, inputs);
+      const board = await createBoardFromTemplate(templateId, name, inputs, productId);
       set((s) => ({ boards: [board, ...s.boards] }));
       // switchBoard loads the nodes the template already put on it.
       await get().switchBoard(board.id);
@@ -493,6 +513,12 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           charVibe: n.data["charVibe"] as string | undefined,
           charGender: n.data["charGender"] as string | undefined,
           storyboardGrid: n.data["storyboardGrid"] as StoryboardGrid | undefined,
+          smooth60: n.data["smooth60"] as boolean | undefined,
+          narration: n.data["narration"] as string | undefined,
+          voice: n.data["voice"] as string | undefined,
+          voiceRate: n.data["voiceRate"] as number | undefined,
+          subtitles: n.data["subtitles"] as boolean | undefined,
+          originalAudio: n.data["originalAudio"] as "duck" | "keep" | "mute" | undefined,
           error: n.data["error"] as string | undefined,
         },
       }));

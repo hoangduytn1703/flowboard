@@ -17,7 +17,10 @@ Cache semantics:
     bytes can have multiple entries — one per project the user has
     dispatched against.
   - Identity mapping (original == project-local) is recorded too, so
-    in-project refs short-circuit without a lookup miss.
+    in-project refs short-circuit without a lookup miss — see
+    ``remember_media_in_project``, called when a generation or upload
+    lands in a project. Media from before that existed costs one
+    redundant re-upload the first time it is referenced.
   - Mapping is permanent for the lifetime of the database. If Flow
     eventually GCs a project's assets, the cache becomes stale; a
     dispatch failure surfaces and the operator can clear the row.
@@ -158,6 +161,91 @@ async def ensure_media_ids_in_project(
                 mid, project_id, exc,
             )
     return synced, failures
+
+
+def remember_media_in_project(media_ids: list, project_id: str) -> int:
+    """Record identity mappings for media that was born under ``project_id``.
+
+    Called when a generation or upload lands in a project, so a later
+    dispatch that references the same media there hits the cache in
+    :func:`ensure_media_in_project` instead of re-uploading bytes Flow
+    already has. Best-effort: returns the number of rows added and never
+    raises — a missing row only costs one redundant upload later.
+    """
+    if not project_id:
+        return 0
+    ids = [m for m in media_ids or [] if isinstance(m, str) and m]
+    if not ids:
+        return 0
+    added = 0
+    try:
+        with get_session() as s:
+            known = set(
+                s.exec(
+                    select(MediaProjectMapping.original_media_id)
+                    .where(MediaProjectMapping.project_id == project_id)
+                    .where(MediaProjectMapping.original_media_id.in_(ids))
+                ).all()
+            )
+            for mid in dict.fromkeys(ids):
+                if mid in known:
+                    continue
+                s.add(
+                    MediaProjectMapping(
+                        original_media_id=mid,
+                        project_id=project_id,
+                        project_local_media_id=mid,
+                    )
+                )
+                added += 1
+            s.commit()
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "media_sync: could not record %d media id(s) under project %s",
+            len(ids), project_id,
+        )
+        return 0
+    return added
+
+
+#: Request types whose result media were born in ``params.project_id``.
+_GENERATING_TYPES = ("gen_image", "gen_video", "gen_video_omni", "edit_image")
+
+
+def backfill_identity_mappings() -> int:
+    """Record every finished generation's media under the project it ran in.
+
+    ``remember_media_in_project`` only covers generations made since it
+    existed; older media had no mapping, so the first dispatch that
+    referenced one re-uploaded bytes Flow already had in that very project
+    — and Flow sometimes refuses that upload (``maseQ [4]``). The request
+    history already says where each generation ran, so this fills those
+    rows in once at startup. Idempotent and best-effort.
+    """
+    from flowboard.db.models import Request
+
+    added = 0
+    try:
+        with get_session() as s:
+            rows = s.exec(
+                select(Request.params, Request.result)
+                .where(Request.status == "done")
+                .where(Request.type.in_(_GENERATING_TYPES))
+            ).all()
+    except Exception:  # noqa: BLE001
+        logger.exception("media_sync: could not read request history for the backfill")
+        return 0
+    by_project: dict[str, list[str]] = {}
+    for params, result in rows:
+        project_id = (params or {}).get("project_id")
+        media_ids = (result or {}).get("media_ids")
+        if isinstance(project_id, str) and project_id and isinstance(media_ids, list):
+            by_project.setdefault(project_id, []).extend(media_ids)
+    for project_id, media_ids in by_project.items():
+        added += remember_media_in_project(media_ids, project_id)
+    if added:
+        logger.info("media_sync: backfilled %d media/project mapping(s) from history", added)
+    return added
 
 
 # ── helpers ───────────────────────────────────────────────────────────────

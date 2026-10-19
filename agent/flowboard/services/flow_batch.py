@@ -26,7 +26,8 @@ possible on purpose: it is the one module here that has been exercised against
 live Flow across three projects, so a future upstream fix should diff cleanly
 rather than needing a re-port. Last synced 2026-10-11 (image item layout,
 reference crop, text-to-video descriptor, media listing shape); what still
-differs is flowboard-only: the 4:3 aspect, the default VIDEO_MODEL, and the
+differs is flowboard-only: the 4:3 aspect, ``match_video_model`` (split out of
+``resolve_video_model`` so a downgrade can be reported), and the
 project-create / StreamChat builders flowboard does not use. Flowboard's own model policy does NOT live here — it
 stays in flow_sdk.py, which resolves a nickname to a wire id before calling in.
 """
@@ -107,7 +108,13 @@ ASPECT_BY_NAME = {
 #: [tier][quality][aspect] and carried `…_portrait` / `…_fl` / `…_relaxed`
 #: variants; those are gone — aspect is its own slot now, and the suffixed
 #: names are rejected.
-VIDEO_MODEL = "veo_3_1_i2v_lite_low_priority"
+#:
+#: The default is what an unmatched key falls back to, so it must be a model
+#: every plan can render. It used to be `…_lite_low_priority`, which is
+#: Ultra-only: a Pro account asking for Fast / Quality (no batch-path id has
+#: been captured for either on Pro) fell through to it and got
+#: PUBLIC_ERROR_MODEL_ACCESS_DENIED. Plain Lite matches flowkit.
+VIDEO_MODEL = "veo_3_1_i2v_lite"
 VIDEO_MODELS = {
     "veo_3_1_i2v_lite_low_priority",
     "veo_3_1_i2v_lite",
@@ -222,14 +229,12 @@ def resolve_image_model(key: Optional[str]) -> str:
     return IMAGE_MODEL
 
 
-def resolve_video_model(key: Optional[str]) -> str:
-    """Map a REST-era model key onto one the batch path accepts.
+def match_video_model(key: Optional[str]) -> Optional[str]:
+    """The batch model a REST-era key's intent maps to, or None.
 
-    The old keys encoded tier, quality, aspect and chaining in the name
-    (``veo_3_1_i2v_s_fast_ultra_relaxed``, ``…_portrait``, ``…_fl``). Aspect
-    and chaining are their own slots now and the suffixed names are rejected,
-    so the tier/quality intent is all that survives: anything that asked for
-    "ultra" gets the ultra model, anything else lands on the lite default.
+    None means nothing in the key survives the move to the batch path, and
+    :func:`resolve_video_model` will substitute the ``VIDEO_MODEL`` default
+    — callers that want to report that downgrade check this first.
     """
     if isinstance(key, str):
         if key in VIDEO_MODELS:
@@ -240,7 +245,19 @@ def resolve_video_model(key: Optional[str]) -> str:
             return "veo_3_1_i2v_lite_low_priority"
         if "lite" in key:
             return "veo_3_1_i2v_lite"
-    return VIDEO_MODEL
+    return None
+
+
+def resolve_video_model(key: Optional[str]) -> str:
+    """Map a REST-era model key onto one the batch path accepts.
+
+    The old keys encoded tier, quality, aspect and chaining in the name
+    (``veo_3_1_i2v_s_fast_ultra_relaxed``, ``…_portrait``, ``…_fl``). Aspect
+    and chaining are their own slots now and the suffixed names are rejected,
+    so the tier/quality intent is all that survives: anything that asked for
+    "ultra" gets the ultra model, anything else lands on the lite default.
+    """
+    return match_video_model(key) or VIDEO_MODEL
 
 
 def resolve_aspect(aspect: Any) -> int:

@@ -2807,7 +2807,10 @@ button:disabled {
   position: fixed;
   top: 24px;
   right: 24px;
-  z-index: 100;
+  /* Above every modal backdrop (dialogs sit at 200–1100). At 100 it hid
+     under the Generate dialog, so errors raised while it was open were
+     never seen (FB-001). */
+  z-index: 1200;
   max-width: 320px;
   min-width: 280px;
   background: var(--panel-higher);
@@ -3277,6 +3280,19 @@ button:disabled {
   font-size: 11px;
   color: var(--muted);
   line-height: 1.5;
+}
+
+/* Submit failure, shown right above the Generate button. */
+.gen-dialog__error {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--error);
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 /* Locked-prompt banner — video target sees this when its upstream is a
@@ -5341,6 +5357,36 @@ button:disabled {
   font-variant-numeric: tabular-nums;
 }
 
+/* "✂ Cắt thành N cảnh" under the composite, once one is rendered. */
+.storyboard-split {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 10px 8px;
+}
+.storyboard-split__btn {
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--accent);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.storyboard-split__btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.storyboard-split__btn:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+.storyboard-split__error {
+  font-size: 11px;
+  color: var(--error);
+  word-break: break-word;
+}
+
 /* ── References panel (right sidebar) ──────────────────────────────────── */
 
 .references-panel {
@@ -6270,4 +6316,297 @@ button.chat-dock__presence[aria-expanded="true"] {
 .toolbar-clear-btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* ── Product library (ProductsPanel + new-project product pick) ─────────── */
+.product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+.product-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.product-card--add {
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  border-style: dashed;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+.product-card--add:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.product-card__plus {
+  font-size: 26px;
+  line-height: 1;
+}
+.product-card__main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.product-card__thumb {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 6px;
+  background: var(--panel-high);
+}
+.product-card__thumb--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--muted);
+}
+.product-card__name {
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.product-card__meta {
+  font-size: 11px;
+  color: var(--muted);
+}
+.product-card__clip {
+  padding: 5px 8px;
+}
+.product-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.product-photos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.product-photo {
+  position: relative;
+  width: 84px;
+  height: 84px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+  background: var(--panel);
+}
+.product-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.product-photo--main {
+  border-color: var(--accent);
+}
+.product-photo--add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-style: dashed;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+.product-photo--add:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.product-photo__badge {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  padding: 1px 5px;
+  font-size: 9px;
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--bg);
+}
+.product-photo__btn {
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 11px;
+  line-height: 20px;
+  cursor: pointer;
+}
+.product-photo__btn--remove {
+  left: auto;
+  right: 4px;
+}
+.product-form__textarea {
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.45;
+}
+.product-form__label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.product-form__mini-btn {
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 11px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--panel-high);
+  color: var(--text);
+  cursor: pointer;
+}
+.product-form__mini-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.product-form__error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--error);
+}
+.product-form__delete {
+  margin-right: auto;
+}
+.product-pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.product-pick .project-modal__input {
+  flex: 1;
+}
+.product-pick__thumb {
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+}
+
+/* ── Voice-over: narration on video nodes, voice options on the export node ── */
+.narration {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  cursor: text;
+}
+.narration__label {
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.03em;
+}
+.narration__input {
+  width: 100%;
+  resize: vertical;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.45;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  outline: none;
+  box-sizing: border-box;
+}
+.narration__input:focus {
+  border-color: var(--accent);
+}
+.narration__add {
+  margin-top: 6px;
+  align-self: flex-start;
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 10px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.narration__add:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.export-voice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.export-voice__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.export-voice__title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+}
+.export-voice__count {
+  flex: 1;
+  font-size: 10px;
+  color: var(--muted);
+}
+.export-voice__write {
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-high);
+  color: var(--text);
+  cursor: pointer;
+}
+.export-voice__write:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.export-voice__select {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  font: inherit;
+  font-size: 10px;
+  background: var(--panel-high);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+}
+.export-voice__hint {
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 1.4;
 }

@@ -2,7 +2,17 @@ import { useEffect, useRef, useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { useBoardStore, type FlowboardNodeData, type FlowNode } from "../store/board";
 import { useGenerationStore } from "../store/generation";
-import { mediaUrl, patchEdge, patchNode, uploadImage, uploadImageFromUrl } from "../api/client";
+import {
+  DEFAULT_VOICE,
+  VOICES,
+  mediaUrl,
+  patchEdge,
+  patchNode,
+  splitStoryboard,
+  uploadImage,
+  uploadImageFromUrl,
+  writeNarrationApi,
+} from "../api/client";
 import { requestAutoBrief } from "../api/autoBrief";
 import { exportSources } from "../lib/exportOrder";
 import { useReferencesStore } from "../store/references";
@@ -1033,7 +1043,56 @@ function VideoBody({ rfId, data }: { rfId: string; data: FlowboardNodeData }) {
           {data.error}
         </p>
       )}
+      <NarrationField rfId={rfId} data={data} />
     </div>
+  );
+}
+
+/**
+ * The voice-over line for one clip. Lives on the video node so the export
+ * node can read every clip's line in join order; "✨ Viết lời thoại" on the
+ * export node fills these in one go.
+ */
+function NarrationField({ rfId, data }: { rfId: string; data: FlowboardNodeData }) {
+  const saved = typeof data.narration === "string" ? data.narration : "";
+  const [draft, setDraft] = useState(saved);
+  const [open, setOpen] = useState(saved.length > 0);
+  useEffect(() => {
+    setDraft(saved);
+    if (saved) setOpen(true);
+  }, [saved]);
+
+  function save() {
+    const next = draft.trim();
+    if (next === saved) return;
+    useBoardStore.getState().updateNodeData(rfId, { narration: next });
+    const dbId = parseInt(rfId, 10);
+    if (!isNaN(dbId)) patchNode(dbId, { data: { narration: next } }).catch(() => {});
+  }
+
+  if (!open) {
+    return (
+      <button type="button" className="narration__add nodrag" onClick={() => setOpen(true)}>
+        🎙 Thêm lời thoại
+      </button>
+    );
+  }
+  return (
+    <label className="narration nodrag">
+      <span className="narration__label">🎙 Lời thoại (đọc khi xuất video)</span>
+      <textarea
+        className="narration__input nodrag"
+        rows={2}
+        maxLength={400}
+        value={draft}
+        placeholder="Mọi người ơi, hôm nay mình giới thiệu…"
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") (e.target as HTMLTextAreaElement).blur();
+        }}
+      />
+    </label>
   );
 }
 
@@ -1443,6 +1502,29 @@ function StoryboardBody({ rfId, data }: { rfId: string; data: FlowboardNodeData 
   const g = normaliseStoryboardGrid(data.storyboardGrid);
   const { rows, cols } = resolveStoryboardLayout(g, data.aspectRatio);
   const label = `${rows}×${cols}`;
+  // "Cắt thành N cảnh": the server crops the composite into its tiles and
+  // lands an image + video node per tile behind this one; a board refresh
+  // is what makes them show up.
+  const [splitting, setSplitting] = useState(false);
+  const [splitError, setSplitError] = useState<string | null>(null);
+  const isProcessing = data.status === "queued" || data.status === "running";
+  const canSplit = Boolean(data.mediaId) && !isProcessing;
+
+  async function split() {
+    const dbId = parseInt(rfId, 10);
+    if (isNaN(dbId) || splitting) return;
+    setSplitting(true);
+    setSplitError(null);
+    try {
+      await splitStoryboard(dbId);
+      await useBoardStore.getState().refreshBoardState();
+    } catch (err) {
+      setSplitError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSplitting(false);
+    }
+  }
+
   return (
     <div className="storyboard-wrap">
       <span
@@ -1452,6 +1534,20 @@ function StoryboardBody({ rfId, data }: { rfId: string; data: FlowboardNodeData 
         {label}
       </span>
       <ImageBody rfId={rfId} data={data} />
+      {canSplit && (
+        <div className="storyboard-split">
+          <button
+            type="button"
+            className="storyboard-split__btn nodrag"
+            disabled={splitting}
+            onClick={split}
+            title="Cắt ảnh storyboard thành từng cảnh, mỗi cảnh một node ảnh + một node video"
+          >
+            {splitting ? "Đang cắt…" : `✂ Cắt thành ${rows * cols} cảnh`}
+          </button>
+          {splitError && <div className="storyboard-split__error">{splitError}</div>}
+        </div>
+      )}
     </div>
   );
 }
@@ -1490,11 +1586,43 @@ function ExportBody({ rfId, data }: { rfId: string; data: FlowboardNodeData }) {
   const ready = sources.filter((s) => s.mediaId);
   const smooth60 = data.smooth60 === true;
   const isProcessing = data.status === "queued" || data.status === "running";
+  // Voice-over: the lines live on the video nodes, the voice here.
+  const voice = typeof data.voice === "string" && data.voice in VOICES ? data.voice : DEFAULT_VOICE;
+  const subtitles = data.subtitles !== false;
+  const originalAudio = data.originalAudio ?? "duck";
+  const voiced = sources.filter((s) => {
+    const n = nodes.find((x) => x.id === s.rfId);
+    return typeof n?.data.narration === "string" && n.data.narration.trim().length > 0;
+  }).length;
+  const [writing, setWriting] = useState(false);
+  const [writeError, setWriteError] = useState<string | null>(null);
+
+  function setOption(patch: Partial<FlowboardNodeData>) {
+    useBoardStore.getState().updateNodeData(rfId, patch);
+    const dbId = parseInt(rfId, 10);
+    if (!isNaN(dbId)) patchNode(dbId, { data: patch }).catch(() => {});
+  }
 
   function toggleSmooth(next: boolean) {
-    useBoardStore.getState().updateNodeData(rfId, { smooth60: next });
-    const dbId = parseInt(rfId, 10);
-    if (!isNaN(dbId)) patchNode(dbId, { data: { smooth60: next } }).catch(() => {});
+    setOption({ smooth60: next });
+  }
+
+  async function writeNarration() {
+    const boardId = useBoardStore.getState().boardId;
+    const ids = sources.map((s) => parseInt(s.rfId, 10)).filter((n) => !isNaN(n));
+    if (boardId === null || ids.length === 0 || writing) return;
+    setWriting(true);
+    setWriteError(null);
+    try {
+      const res = await writeNarrationApi(boardId, ids);
+      for (const [nodeId, line] of Object.entries(res.narrations)) {
+        useBoardStore.getState().updateNodeData(String(nodeId), { narration: line });
+      }
+    } catch (err) {
+      setWriteError(err instanceof Error ? err.message : "không viết được lời thoại");
+    } finally {
+      setWriting(false);
+    }
   }
 
   return (
@@ -1539,6 +1667,60 @@ function ExportBody({ rfId, data }: { rfId: string; data: FlowboardNodeData }) {
         />
         Mượt 60 fps (nội suy khung hình, ~15 s xử lý cho mỗi giây video)
       </label>
+      <div className="export-voice">
+        <div className="export-voice__row">
+          <span className="export-voice__title">🎙 Lồng tiếng</span>
+          <span className="export-voice__count">
+            {sources.length === 0 ? "" : `${voiced}/${sources.length} clip có lời thoại`}
+          </span>
+          <button
+            type="button"
+            className="export-voice__write"
+            onClick={writeNarration}
+            disabled={writing || isProcessing || sources.length === 0}
+            title="AI viết một câu thoại tiếng Việt cho từng clip, theo kịch bản và sản phẩm trên board"
+          >
+            {writing ? "Đang viết…" : "✨ Viết lời thoại"}
+          </button>
+        </div>
+        {writeError && <div className="export-error">{writeError}</div>}
+        <div className="export-voice__row">
+          <select
+            className="export-voice__select"
+            value={voice}
+            disabled={isProcessing}
+            onChange={(e) => setOption({ voice: e.target.value })}
+            aria-label="Giọng đọc"
+          >
+            {Object.entries(VOICES).map(([key, label]) => (
+              <option key={key} value={key}>{label}</option>
+            ))}
+          </select>
+          <select
+            className="export-voice__select"
+            value={originalAudio}
+            disabled={isProcessing}
+            onChange={(e) => setOption({ originalAudio: e.target.value as "duck" | "keep" | "mute" })}
+            aria-label="Âm thanh gốc của clip"
+          >
+            <option value="duck">Tiếng gốc: nhỏ lại</option>
+            <option value="mute">Tiếng gốc: tắt</option>
+            <option value="keep">Tiếng gốc: giữ nguyên</option>
+          </select>
+        </div>
+        <label className="export-option">
+          <input
+            type="checkbox"
+            checked={subtitles}
+            disabled={isProcessing}
+            onChange={(e) => setOption({ subtitles: e.target.checked })}
+          />
+          Phụ đề tiếng Việt theo lời thoại
+        </label>
+        <span className="export-voice__hint">
+          Clip không có lời thoại thì giữ tiếng gốc. Lời dài hơn clip thì clip được giữ hình cuối cho tới hết câu.
+        </span>
+      </div>
       {data.error && <div className="export-error">{String(data.error)}</div>}
     </div>
   );

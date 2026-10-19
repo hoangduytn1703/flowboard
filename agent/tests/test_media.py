@@ -238,3 +238,19 @@ def test_media_bytes_accepts_media_prefix(client, tmp_path, monkeypatch):
     r = client.get(f"/media/media/{mid}")
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("image/jpeg")
+
+
+def test_cached_path_falls_back_to_the_asset_row_for_locally_made_media(tmp_path):
+    """Exports are files named after the job (export_<hex>.mp4) registered
+    under their own media id; the cache glob cannot find them, the row can."""
+    from flowboard.db import get_session
+    from flowboard.db.models import Asset
+    from flowboard.services import media as media_service
+
+    f = tmp_path / "export_abc.mp4"
+    f.write_bytes(b"\x00")
+    with get_session() as s:
+        s.add(Asset(kind="video", uuid_media_id="15b9304932634c7aa06cb9f75375f554", local_path=str(f), mime="video/mp4"))
+        s.commit()
+    assert media_service.cached_path("15b9304932634c7aa06cb9f75375f554") == f
+    assert media_service.cached_path("15b9304932634c7aa06cb9f75375f555") is None

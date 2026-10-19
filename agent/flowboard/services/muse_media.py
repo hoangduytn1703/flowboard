@@ -45,7 +45,7 @@ import logging
 import mimetypes
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 from urllib.parse import urlparse
 
 import httpx
@@ -54,6 +54,7 @@ from flowboard import config
 from flowboard.services import media as media_service
 from flowboard.services import muse2api
 from flowboard.services import provider_jobs as pq
+from flowboard.services import worker_presence
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +150,25 @@ async def _resolve_media_input_url(media_id: str) -> Optional[str]:
     return None
 
 
+MUSE_UNAVAILABLE_ERROR = (
+    "muse_no_worker: Muse is not available — muse2api is not configured "
+    "(or not ready) and no Pax worker is polling. Switch Backend to Flow, or "
+    "start a worker: python agent/scripts/muse_worker.py"
+)
+
+
+async def muse_media_available() -> bool:
+    """Whether a Muse dispatch has anything to answer it.
+
+    Same test as the Muse LLM provider's ``is_available`` — muse2api's
+    ``/readyz`` when configured, otherwise a Pax worker polled recently —
+    which is also what the frontend's Muse chip is gated on.
+    """
+    from flowboard.services.llm.muse import MuseProvider
+
+    return await MuseProvider().is_available()
+
+
 async def run_muse_media(
     *,
     kind: str,
@@ -157,13 +177,24 @@ async def run_muse_media(
     source_media_ids: Optional[list[str]] = None,
     reference_media_ids: Optional[list[str]] = None,
     extra: Optional[dict] = None,
+    should_cancel: Optional[Callable[[], bool]] = None,
 ) -> tuple[dict, Optional[str]]:
     """Dispatch one media job to the muse queue; import the outputs.
 
     Returns (result, error) in the worker-handler convention. `error`
     None means the request row goes `done` with `media_ids` mirrored.
+
+    Refuses up front when nothing can answer (see `muse_media_available`):
+    a queued job with no worker used to block for MUSE_MEDIA_TIMEOUT_S
+    (30 min) — and with it the single-consumer request worker, so every
+    Flow request behind it sat queued too. `should_cancel` (sync, may read
+    the DB) is polled while waiting on the queue; True cancels the job and
+    returns the `canceled` sentinel the worker leaves alone.
     """
     media_type = _kind_media_type(kind)
+
+    if not await muse_media_available():
+        return {}, MUSE_UNAVAILABLE_ERROR
 
     if muse2api.is_configured():
         return await _run_via_muse2api(
@@ -206,9 +237,38 @@ async def run_muse_media(
     logger.info(
         "muse media: %s job %s queued — waiting for worker", kind, job.id[:12]
     )
+    stop_reason: list[str] = []
+
+    def _should_stop(current) -> bool:
+        if should_cancel is not None and should_cancel():
+            stop_reason.append("canceled")
+            return True
+        # Still unclaimed and the worker that made us accept it is gone:
+        # nothing will ever pick it up, so don't sit out the full timeout.
+        if current.status == "QUEUED" and not worker_presence.any_recent(
+            "muse", within_s=config.MUSE_WORKER_PRESENCE_TTL_S
+        ):
+            stop_reason.append("no_worker")
+            return True
+        return False
+
     final = await pq.wait_for_provider_job(
-        job.id, timeout_s=config.MUSE_MEDIA_TIMEOUT_S
+        job.id, timeout_s=config.MUSE_MEDIA_TIMEOUT_S, should_stop=_should_stop
     )
+    if final is not None and final.status not in pq.TERMINAL_STATUSES:
+        # Stopped early — withdraw the job so a worker that turns up later
+        # doesn't render (and bill) something nobody is waiting for.
+        pq.cancel_provider_job(job.id)
+        if stop_reason and stop_reason[0] == "canceled":
+            return (
+                {"provider": "muse", "provider_job_id": job.id, "canceled": True},
+                "canceled",
+            )
+        return {}, (
+            f"muse_no_worker: the Pax worker went away before claiming job "
+            f"{job.id[:12]}. Start one (python agent/scripts/muse_worker.py) "
+            f"or switch Backend to Flow."
+        )
     if final is None:
         return {}, (
             f"muse_no_worker: no Pax worker answered within "

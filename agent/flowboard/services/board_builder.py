@@ -52,7 +52,12 @@ def _parse(spec: dict) -> tuple[dict[str, dict], list[tuple[str, str]]]:
             raise BoardSpecError(f"nodes[{i}].data must be an object")
         if n.get("title") and "title" not in data:
             data = {**data, "title": str(n["title"])}
-        specs[key] = {"type": ntype, "data": data}
+        # "done" lets a template land a node that already holds media
+        # (a saved product photo); everything else starts idle.
+        status = n.get("status") or "idle"
+        if status not in ("idle", "done"):
+            raise BoardSpecError(f"nodes[{i}]: status must be 'idle' or 'done'")
+        specs[key] = {"type": ntype, "data": data, "status": status}
 
     edges: list[tuple[str, str]] = []
     for i, e in enumerate(raw_edges):
@@ -100,7 +105,7 @@ def build_board(board_id: int, spec: dict) -> dict[str, str]:
                 x=x0 + col * COL_W,
                 y=row * ROW_H,
                 data=node_spec["data"],
-                status="idle",
+                status=node_spec["status"],
             )
             s.add(node)
             s.flush()  # short ids must stay unique within this batch

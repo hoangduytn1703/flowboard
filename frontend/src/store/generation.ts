@@ -74,8 +74,11 @@ interface GenerationState {
       // prompt — required for batch auto-prompt to keep poses distinct
       // across the 4 generated images.
       prompts?: string[];
+      // Per-dispatch backend override; defaults to the sticky settings
+      // choice. GenerationDialog passes Flow when Muse isn't available.
+      mediaProvider?: MediaProviderKey;
     },
-  ): Promise<void>;
+  ): Promise<boolean>; // true once the request exists and is polled; false = failed, reason in `error`
 
   refineImage(
     rfId: string,
@@ -269,9 +272,14 @@ function attachPoll(rfId: string, requestId: number, opts: PollOpts) {
           // that ran (mirrors backend's resolve_omni_flash_model).
           let stampedVideoQuality: string | undefined;
           if (req.type === "gen_video") {
-            stampedVideoQuality = req.params["video_quality"] as
-              | string
+            // A quality with no batch-path model renders as a lower one;
+            // the backend reports that as `model_downgrade` — stamp what ran.
+            const downgrade = req.result["model_downgrade"] as
+              | { quality?: string | null }
               | undefined;
+            stampedVideoQuality =
+              downgrade?.quality
+              ?? (req.params["video_quality"] as string | undefined);
           } else if (req.type === "gen_video_omni") {
             const d = req.params["duration_s"] as number | undefined;
             if (d === 4 || d === 6 || d === 8 || d === 10) {
@@ -642,6 +650,14 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     }
     const node = nodes.find((n) => n.id === rfId);
     const smooth60 = node?.data.smooth60 === true;
+    // One voice line per clip, aligned with source_media_ids (clips without
+    // media are skipped above, so align on the same filter).
+    const narrations = sources
+      .filter((s) => s.mediaId)
+      .map((s) => {
+        const v = nodes.find((n) => n.id === s.rfId);
+        return typeof v?.data.narration === "string" ? v.data.narration.trim() : "";
+      });
     const nodeDbId = parseInt(rfId, 10);
     useBoardStore.getState().updateNodeData(rfId, { status: "queued", error: undefined });
     let reqDto;
@@ -649,7 +665,15 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
       reqDto = await createRequest({
         type: "export_video",
         node_id: isNaN(nodeDbId) ? undefined : nodeDbId,
-        params: { source_media_ids: mediaIds, smooth60 },
+        params: {
+          source_media_ids: mediaIds,
+          smooth60,
+          narrations,
+          voice: node?.data.voice,
+          voice_rate: node?.data.voiceRate ?? 0,
+          subtitles: node?.data.subtitles !== false,
+          original_audio: node?.data.originalAudio ?? "duck",
+        },
       });
     } catch (err) {
       useBoardStore.getState().updateNodeData(rfId, {
@@ -681,7 +705,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
       opts.mediaProvider ?? useSettingsStore.getState().mediaProvider;
     const useMuse = mediaProvider === "muse";
     const projectId = useMuse ? "" : await get().ensureProjectId();
-    if (projectId === null) return;
+    if (projectId === null) return false;
 
     // Pre-flight: refuse to dispatch if the paygate tier is unknown.
     // The backend would reject with `paygate_tier_unknown` anyway (since
@@ -699,7 +723,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
         status: "error",
         error: "paygate_tier_unknown",
       });
-      return;
+      return false;
     }
 
     // Release this node from whatever poll was watching it. Dropping the
@@ -751,7 +775,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
               error:
                 "Omni Flash needs at least one ingredient (connect an upstream Character / Image / Visual asset).",
             });
-            return;
+            return false;
           }
           reqDto = await createRequest({
             type: "gen_video_omni",
@@ -778,7 +802,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
           if (!hasMulti && !opts.sourceMediaId) {
             useBoardStore.getState().updateNodeData(rfId, { status: "error", error: "no source media" });
             set({ error: "Veo i2v requires a source image (connect an upstream image node)" });
-            return;
+            return false;
           }
           const videoParams: Record<string, unknown> = {
             prompt: opts.prompt,
@@ -835,7 +859,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     } catch (err) {
       useBoardStore.getState().updateNodeData(rfId, { status: "error", error: err instanceof Error ? err.message : "request failed" });
       set({ error: err instanceof Error ? err.message : "Generation failed" });
-      return;
+      return false;
     }
 
     // Start polling — same machinery the reload-resume path re-attaches.
@@ -843,6 +867,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
       prompt: opts.prompt,
       aspectRatio: opts.aspectRatio,
     });
+    return true;
   },
 
   async resumeActiveRequests(boardId) {

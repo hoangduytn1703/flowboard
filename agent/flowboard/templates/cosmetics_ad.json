@@ -1,5 +1,6 @@
 {
   "id": "cosmetics_ad",
+  "category": "cosmetics",
   "title": "Quảng cáo mỹ phẩm",
   "blurb": "3 cảnh: sản phẩm trên nền sạch, người mẫu dùng thử, kết da đẹp + sản phẩm. Phong cách beauty editorial.",
   "scenes": 3,
@@ -9,6 +10,12 @@
       "label": "Sản phẩm",
       "placeholder": "để trống = dùng đúng sản phẩm trong ảnh đã upload; hoặc mô tả: serum vitamin C",
       "default": "the product shown in the uploaded product photo"
+    },
+    {
+      "key": "product_name",
+      "label": "Tên gọi trong lời thoại",
+      "placeholder": "ví dụ: áo thun SAIGON",
+      "default": "sản phẩm này"
     },
     {
       "key": "setting",
@@ -79,7 +86,7 @@
       "type": "note",
       "data": {
         "title": "Kịch bản",
-        "prompt": "Quảng cáo {{product}} — 3 cảnh × 8 s\n\n1. Sản phẩm: cận chai trên nền sạch, giọt nước, ánh sáng mềm — không có người.\n2. Dùng thử: người mẫu nhỏ/thoa sản phẩm lên má, nhẹ nhàng.\n3. Kết: cận mặt da căng bóng, tay cầm sản phẩm cạnh mặt, chừa chỗ cho logo.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh sản phẩm thật → Generate Người mẫu → Generate từng Cảnh → Generate từng Video → ghép bằng Chat AI."
+        "prompt": "Quảng cáo {{product}} — 3 cảnh × 8 s\n\n1. Sản phẩm: cận chai trên nền sạch, giọt nước, ánh sáng mềm — không có người.\n2. Dùng thử: người mẫu nhỏ/thoa sản phẩm lên má, nhẹ nhàng.\n3. Kết: cận mặt da căng bóng, tay cầm sản phẩm cạnh mặt, chừa chỗ cho logo.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh sản phẩm thật → Generate Người mẫu → Generate từng Cảnh → Generate từng Video → ghép bằng Chat AI.\nLồng tiếng: mỗi Video có sẵn một câu thoại (sửa tuỳ ý); node Xuất video đọc giọng Việt + phụ đề khi ghép."
       }
     },
     {
@@ -101,7 +108,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 1 - Sản phẩm",
-        "prompt": "Luxury beauty product shot of {{product}} standing on a clean surface with a few water droplets, in {{setting}}. Soft diffused light, subtle reflections, minimal composition, no people. The product must match the reference photo exactly (shape, colour, print, material)."
+        "prompt": "Luxury beauty product shot of {{product}} standing on a clean surface with a few water droplets, in {{setting}}. Soft diffused light, subtle reflections, minimal composition, no people. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -109,7 +116,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 2 - Dùng thử",
-        "prompt": "Close-up of the model gently applying {{product}} to her cheek with her fingertips, eyes softly closed, in {{setting}}. Dewy skin, soft beauty lighting, product visible in the other hand. The product must match the reference photo exactly (shape, colour, print, material)."
+        "prompt": "Close-up of the model gently applying {{product}} to her cheek with her fingertips, eyes softly closed, in {{setting}}. Dewy skin, soft beauty lighting, product visible in the other hand. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -117,7 +124,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 3 - Kết",
-        "prompt": "Beauty close-up of the model with glowing skin, looking at the camera and holding {{product}} next to her face, in {{setting}}. Clean bright light, space on one side for a logo. The product must match the reference photo exactly (shape, colour, print, material)."
+        "prompt": "Beauty close-up of the model with glowing skin, looking at the camera and holding {{product}} next to her face, in {{setting}}. Clean bright light, space on one side for a logo. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -125,7 +132,8 @@
       "type": "video",
       "data": {
         "title": "Video 1 - Sản phẩm",
-        "prompt": "0-3s: a single water droplet slides down the bottle. 3-6s: soft light sweeps across the glass. 6-8s: the product sits still, glossy. Locked-off macro camera, no zoom."
+        "prompt": "0-3s: a single water droplet slides down the bottle. 3-6s: soft light sweeps across the glass. 6-8s: the product sits still, glossy. Locked-off macro camera, no zoom.",
+        "narration": "Mọi người ơi, đây là {{product_name}} mình đang dùng mỗi ngày nè."
       }
     },
     {
@@ -133,7 +141,8 @@
       "type": "video",
       "data": {
         "title": "Video 2 - Dùng thử",
-        "prompt": "0-3s: fingertips glide the product across the cheek in a small circle. 3-6s: eyes open gently, a soft satisfied breath. 6-8s: a calm serene smile. Locked-off camera, soft beauty light."
+        "prompt": "0-3s: fingertips glide the product across the cheek in a small circle. 3-6s: eyes open gently, a soft satisfied breath. 6-8s: a calm serene smile. Locked-off camera, soft beauty light.",
+        "narration": "Chất kem mịn, thấm nhanh, không bết dính chút nào luôn."
       }
     },
     {
@@ -141,7 +150,8 @@
       "type": "video",
       "data": {
         "title": "Video 3 - Kết",
-        "prompt": "0-3s: the model tilts her head slightly, skin catching the light. 3-6s: she lifts the product beside her face. 6-8s: a gentle smile held for the logo. Locked-off camera."
+        "prompt": "0-3s: the model tilts her head slightly, skin catching the light. 3-6s: she lifts the product beside her face. 6-8s: a gentle smile held for the logo. Locked-off camera.",
+        "narration": "Da mình lên tông thấy rõ, ghé giỏ hàng bên dưới thử ngay nha."
       }
     }
   ],

@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { useBoardStore } from "../store/board";
 import { AccountPanel } from "./AccountPanel";
+import { ProductsPanel } from "./ProductsPanel";
 import {
   getFlowSyncStatus,
   getTemplates,
+  listProducts,
+  mediaUrl,
   syncBoardsUpToFlow,
   type BoardFlowStatus,
   type BoardTemplate,
+  type Product,
   type FlowListingStatus,
   type SyncStatusResponse,
 } from "../api/client";
@@ -42,6 +46,11 @@ export function ProjectSidebar() {
   const [templateInputs, setTemplateInputs] = useState<Record<string, string>>({});
   const createNewBoardFromTemplate = useBoardStore((s) => s.createNewBoardFromTemplate);
   const selectedTemplate = templates?.find((t) => t.id === templateId) ?? null;
+  // Product library: the panel, and the product a new board is made for.
+  const [productsOpen, setProductsOpen] = useState(false);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [productId, setProductId] = useState<number | null>(null);
+  const selectedProduct = products.find((p) => p.id === productId) ?? null;
 
   // Flow project sync — one-way (local → Flow). The map tracks which local
   // boards still have a live Flow project; the sync button used to create a
@@ -136,29 +145,50 @@ export function ProjectSidebar() {
     return () => document.removeEventListener("mousedown", onClick);
   }, [openMenuId]);
 
-  function handleNew() {
+  async function handleNew(product: Product | null = null) {
     setNewDialogName("Untitled");
     setTemplateId("");
     setTemplateInputs({});
+    setProductId(null);
     setNewDialogOpen(true);
-    if (templates === null) {
-      getTemplates().then(setTemplates).catch(() => setTemplates([]));
+    // A product handed over from the panel must be in the list before the
+    // select can show it; the fetch refreshes it with everything else.
+    setProducts((cur) => (product && !cur.some((p) => p.id === product.id) ? [product, ...cur] : cur));
+    listProducts().then(setProducts).catch(() => {});
+    let list = templates;
+    if (list === null) {
+      list = await getTemplates().catch(() => [] as BoardTemplate[]);
+      setTemplates(list);
     }
+    if (product) pickProduct(product, list);
     setTimeout(() => newDialogInputRef.current?.select(), 30);
   }
 
-  function pickTemplate(id: string) {
+  /** The name the dialog suggests; a name the user typed is never replaced. */
+  function isSuggestedName(name: string, list: BoardTemplate[] | null) {
+    return !name.trim() || name === "Untitled" ||
+      !!list?.some((x) => name === x.title || name.endsWith(` — ${x.title}`));
+  }
+
+  function pickTemplate(id: string, list = templates, product = selectedProduct) {
     setTemplateId(id);
-    const t = templates?.find((x) => x.id === id);
+    const t = list?.find((x) => x.id === id);
     // Seed every field with the template default so Create works untouched.
     setTemplateInputs(
       Object.fromEntries((t?.inputs ?? []).map((i) => [i.key, i.default ?? ""])),
     );
-    // The default name follows the template unless the user typed one.
-    if (!newDialogName.trim() || newDialogName === "Untitled" ||
-        templates?.some((x) => x.title === newDialogName)) {
-      setNewDialogName(t ? t.title : "Untitled");
-    }
+    setNewDialogName((cur) => {
+      if (!isSuggestedName(cur, list)) return cur;
+      if (!t) return "Untitled";
+      return product ? `${product.name} — ${t.title}` : t.title;
+    });
+  }
+
+  function pickProduct(product: Product | null, list = templates) {
+    setProductId(product?.id ?? null);
+    // A product brings its category's template; "no product" keeps the pick.
+    const next = product ? (product.template_id ?? templateId) : templateId;
+    pickTemplate(next, list, product);
   }
 
   function closeNewDialog() {
@@ -172,8 +202,12 @@ export function ProjectSidebar() {
     const name = newDialogName.trim() || "Untitled";
     setNewDialogBusy(true);
     try {
-      if (templateId) await createNewBoardFromTemplate(templateId, name, templateInputs);
-      else await createNewBoard(name);
+      if (templateId) {
+        // With a product the backend fills {{product}} from its description.
+        const inputs = productId === null ? templateInputs
+          : Object.fromEntries(Object.entries(templateInputs).filter(([k]) => k !== "product"));
+        await createNewBoardFromTemplate(templateId, name, inputs, productId);
+      } else await createNewBoard(name);
     } finally {
       setNewDialogBusy(false);
       setNewDialogOpen(false);
@@ -267,9 +301,18 @@ export function ProjectSidebar() {
             <button
               type="button"
               className="project-sidebar__new"
-              onClick={handleNew}
+              onClick={() => handleNew()}
             >
               <span aria-hidden="true">+</span> New project
+            </button>
+            <button
+              type="button"
+              className="project-sidebar__sync"
+              onClick={() => setProductsOpen(true)}
+              title="Sản phẩm đang bán — lưu ảnh, mô tả, điểm bán để tạo clip nhanh"
+              aria-label="Sản phẩm"
+            >
+              📦
             </button>
             {/* Only rendered while Flow can actually be listed / written to.
                 On the current transport it never can, and sync-up answers
@@ -407,6 +450,16 @@ export function ProjectSidebar() {
         }}
       />
 
+      {productsOpen && (
+        <ProductsPanel
+          onClose={() => setProductsOpen(false)}
+          onMakeClip={(p) => {
+            setProductsOpen(false);
+            handleNew(p);
+          }}
+        />
+      )}
+
       {deleteTarget && (
         <div
           className="project-modal-backdrop"
@@ -473,6 +526,29 @@ export function ProjectSidebar() {
               Chọn một flow mẫu — board sẽ có sẵn các bước (người mẫu, sản phẩm,
               cảnh, video) với prompt; bạn chỉ thêm ảnh thật rồi bấm Generate.
             </p>
+            <label className="tpl-inputs__field">
+              <span>Sản phẩm (tuỳ chọn — lấy sẵn ảnh, mô tả, điểm bán)</span>
+              <div className="product-pick">
+                {selectedProduct?.media_ids[0] && (
+                  <img className="product-pick__thumb" src={mediaUrl(selectedProduct.media_ids[0])} alt="" />
+                )}
+                <select
+                  className="project-modal__input"
+                  value={productId ?? ""}
+                  onChange={(e) =>
+                    pickProduct(products.find((p) => p.id === Number(e.target.value)) ?? null)
+                  }
+                  disabled={newDialogBusy}
+                >
+                  <option value="">— Không chọn —</option>
+                  {products.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}{p.price ? ` · ${p.price}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </label>
             <div className="tpl-grid" role="radiogroup" aria-label="Flow mẫu">
               <button
                 type="button"
@@ -504,9 +580,16 @@ export function ProjectSidebar() {
                 </button>
               ))}
             </div>
+            {selectedProduct && templateId === "" && (
+              <p className="project-modal__hint">
+                Board trống không dùng sản phẩm — chọn một mẫu để gắn ảnh và mô tả.
+              </p>
+            )}
             {selectedTemplate && selectedTemplate.inputs.length > 0 && (
               <div className="tpl-inputs">
-                {selectedTemplate.inputs.map((i) => (
+                {selectedTemplate.inputs
+                  .filter((i) => !(selectedProduct && i.key === "product"))
+                  .map((i) => (
                   <label key={i.key} className="tpl-inputs__field">
                     <span>{i.label}</span>
                     {i.type === "select" ? (

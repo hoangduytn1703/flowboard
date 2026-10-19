@@ -83,3 +83,29 @@ async def auto_prompt_batch(body: AutoPromptBatchBody) -> AutoPromptBatchRespons
     except prompt_synth.PromptSynthError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
     return AutoPromptBatchResponse(node_id=body.node_id, prompts=prompts)
+
+
+class NarrationBody(BaseModel):
+    board_id: int
+    # Video nodes in clip order (the export node's join order).
+    node_ids: list[int]
+    instructions: Optional[str] = None
+
+
+class NarrationResponse(BaseModel):
+    narrations: dict[int, str]
+
+
+@router.post("/narration", response_model=NarrationResponse)
+async def write_narration(body: NarrationBody) -> NarrationResponse:
+    """One Vietnamese voice-over line per video node, written onto the nodes
+    (``data.narration``) so the export picks them up."""
+    from flowboard.services import narration as narration_service
+
+    try:
+        lines = await narration_service.write_narrations(
+            body.board_id, body.node_ids, instructions=body.instructions
+        )
+    except narration_service.NarrationError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return NarrationResponse(narrations=lines)

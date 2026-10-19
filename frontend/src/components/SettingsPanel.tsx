@@ -54,9 +54,11 @@ const IMAGE_MODELS: { key: ImageModelKey; label: string; hint: string }[] = [
 ];
 
 // Order: lite → fast → quality (paid), then the Ultra-only relaxed
-// variants (0-credit low-priority queue). Lite/Fast/Quality are
-// available on both Pro (Tier 1) and Ultra (Tier 2); the *_relaxed
-// entries are Ultra-only — Pro users see them locked.
+// variants (0-credit low-priority queue). Only Lite renders on Pro
+// (Tier 1): the batch path has no Pro id captured for Fast / Quality, and
+// Flow rejected them with PUBLIC_ERROR_MODEL_ACCESS_DENIED (FB-007) — so
+// everything but Lite is Ultra-only and Pro users see it locked. Same
+// gating as GenerationDialog's model picker.
 const VIDEO_QUALITIES: {
   key: VideoQuality;
   label: string;
@@ -73,13 +75,13 @@ const VIDEO_QUALITIES: {
     key: "fast",
     label: "Veo 3.1 Fast",
     hint: "Default — balanced fidelity and speed. Applies to both 16:9 and 9:16.",
-    ultraOnly: false,
+    ultraOnly: true,
   },
   {
     key: "quality",
     label: "Veo 3.1 Quality",
     hint: "Highest fidelity, slowest. Best for hero shots. Applies to both 16:9 and 9:16.",
-    ultraOnly: false,
+    ultraOnly: true,
   },
   {
     key: "lite_relaxed",
@@ -452,11 +454,13 @@ export function SettingsPanel({
             <div>
               <div className="settings-panel__radio-label">
                 Omni Flash (r2v)
+                <span className="model-badge">Mặc định</span>
               </div>
               <div className="settings-panel__radio-hint">
                 Reference-image to video. Variable duration (4 / 6 / 8 / 10s)
                 picked per dispatch — 15 / 20 / 25 / 30 credits. Portrait +
-                landscape supported.
+                landscape supported. Khuyên dùng: Veo 3.1 Lite hiện bị Flow
+                nhận rồi huỷ trên tài khoản Pro thường.
               </div>
             </div>
           </label>

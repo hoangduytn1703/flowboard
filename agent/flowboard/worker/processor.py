@@ -60,6 +60,59 @@ def _orientation_from_aspect(aspect: object) -> Optional[str]:
     return None
 
 
+async def _sync_media_into_project(
+    media_ids: list[str], project_id: str, *, what: str
+) -> tuple[list[str], list[dict]]:
+    """Make `media_ids` usable under `project_id` before a Flow dispatch.
+
+    Flow scopes a media id to the project it was created in, so a reference
+    image or Veo start frame made before the user switched Flow project (or
+    Google account) comes back `[5]` NOT_FOUND. Same re-upload +
+    MediaProjectMapping cache `_handle_gen_video_omni` uses, with one
+    difference: an id that can't be synced is passed through unchanged
+    rather than dropped. The usual reason a sync fails is that the bytes
+    were never cached locally, which is also the normal state of media that
+    already lives in this project — so the original id is the best guess,
+    and if it is wrong Flow says so. Dropping it would render without the
+    ref, and for Veo would shift the start-frame ↔ clip slot alignment.
+
+    Returns `(ids, failures)`: `ids` is positionally aligned with the input;
+    `failures` lists `{media_id, error}` for the ids passed through as-is.
+    """
+    from flowboard.services import media_project_sync as sync_mod
+
+    out: list[str] = []
+    failures: list[dict] = []
+    for mid in media_ids:
+        try:
+            out.append(await sync_mod.ensure_media_in_project(mid, project_id))
+        except sync_mod.MediaSyncError as exc:
+            out.append(mid)
+            failures.append({"media_id": mid, "error": str(exc)[:200]})
+    if failures:
+        logger.warning(
+            "%s: %d of %d media id(s) could not be synced into project %s; "
+            "sending them unchanged",
+            what, len(failures), len(media_ids), project_id,
+        )
+    return out, failures
+
+
+def _remember_project_media(project_id: str, result: dict) -> None:
+    """Record freshly rendered media as native to `project_id` (best-effort),
+    so referencing it later in the same project needs no re-upload."""
+    from flowboard.services.media_project_sync import remember_media_in_project
+
+    media_ids = result.get("media_ids")
+    if not isinstance(media_ids, list):
+        media_ids = [
+            e.get("media_id")
+            for e in (result.get("media_entries") or [])
+            if isinstance(e, dict)
+        ]
+    remember_media_in_project(media_ids, project_id)
+
+
 # The `proxy` request type is a manual escape hatch, not part of any
 # generation path. Its host is the PRE-MIGRATION one: aisandbox-pa needed the
 # `Bearer ya29.…` that flow.google.com no longer mints, so a proxy call now
@@ -143,6 +196,7 @@ async def _handle_gen_image(params: dict) -> tuple[dict, Optional[str]]:
                 "variant_count": variant_count,
                 "prompts": per_variant_prompts,
             },
+            should_cancel=_cancel_check(params),
         )
     if not isinstance(project_id, str) or not project_id.strip():
         return {}, "missing_project_id"
@@ -198,6 +252,14 @@ async def _handle_gen_image(params: dict) -> tuple[dict, Optional[str]]:
     image_model = params.get("image_model")
     if not isinstance(image_model, str) or not image_model.strip():
         image_model = None
+    # Refs made under another Flow project (after a project / account
+    # switch) are unknown here — re-home them first. See
+    # _sync_media_into_project.
+    sync_failures: list[dict] = []
+    if ref_media_ids:
+        ref_media_ids, sync_failures = await _sync_media_into_project(
+            ref_media_ids, project_id, what="gen_image"
+        )
     resp = await get_flow_sdk().gen_image(
         prompt=prompt.strip(),
         project_id=project_id,
@@ -208,8 +270,11 @@ async def _handle_gen_image(params: dict) -> tuple[dict, Optional[str]]:
         prompts=per_variant_prompts,
         image_model=image_model,
     )
+    if sync_failures:
+        resp["sync_failures"] = sync_failures
     if resp.get("error"):
         return resp, str(resp["error"])[:200]
+    _remember_project_media(project_id, resp)
     # Flow returns signed fifeUrls directly in the response — persist them
     # immediately so `/media/:id` can serve bytes without any extra round-trip.
     entries_with_urls = [
@@ -250,6 +315,12 @@ def _is_request_canceled(rid: Optional[int]) -> bool:
         return req.status == "canceled"
 
 
+def _cancel_check(params: dict) -> Callable[[], bool]:
+    """`should_cancel` for run_muse_media: has this request been canceled?"""
+    rid = params.get("__request_id")
+    return lambda: _is_request_canceled(rid)
+
+
 async def _handle_gen_video(params: dict) -> tuple[dict, Optional[str]]:
     from flowboard.services.flow_sdk import is_valid_project_id
 
@@ -283,6 +354,7 @@ async def _handle_gen_video(params: dict) -> tuple[dict, Optional[str]]:
             orientation=_orientation_from_aspect(params.get("aspect_ratio")),
             source_media_ids=starts,
             extra={"video_quality": params.get("video_quality")},
+            should_cancel=_cancel_check(params),
         )
     if not isinstance(project_id, str) or not project_id.strip():
         return {}, "missing_project_id"
@@ -309,18 +381,37 @@ async def _handle_gen_video(params: dict) -> tuple[dict, Optional[str]]:
     if not isinstance(video_quality, str) or not video_quality.strip():
         video_quality = None
 
+    # Start frames from another Flow project are unknown here — re-home
+    # them first. The sync keeps list positions, so start frame i still
+    # yields clip slot i.
+    single_start = (
+        start_media_id.strip()
+        if isinstance(start_media_id, str) and start_media_id.strip()
+        else None
+    )
+    sync_failures: list[dict] = []
+    if start_media_ids:
+        start_media_ids, sync_failures = await _sync_media_into_project(
+            start_media_ids, project_id, what="gen_video"
+        )
+    elif single_start:
+        synced, sync_failures = await _sync_media_into_project(
+            [single_start], project_id, what="gen_video"
+        )
+        single_start = synced[0]
+
     sdk = get_flow_sdk()
     dispatch = await sdk.gen_video(
         prompt=prompt.strip(),
         project_id=project_id,
-        start_media_id=start_media_id.strip()
-        if isinstance(start_media_id, str) and start_media_id.strip()
-        else None,
+        start_media_id=single_start,
         start_media_ids=start_media_ids,
         aspect_ratio=aspect,
         paygate_tier=tier,
         video_quality=video_quality,
     )
+    if sync_failures:
+        dispatch["sync_failures"] = sync_failures
     if dispatch.get("error"):
         return dispatch, str(dispatch["error"])[:200]
 
@@ -478,19 +569,24 @@ async def _handle_gen_video(params: dict) -> tuple[dict, Optional[str]]:
             f"{len(op_errors)}/{total} variants blocked: {', '.join(unique_errs)}"
         )
 
-    return (
-        {
-            "raw_dispatch": dispatch,
-            "last_poll": last_poll,
-            "operation_names": op_names,
-            "media_ids": positional_ids,
-            "media_entries": succeeded_entries,
-            "op_errors": op_errors,
-            "slot_errors": slot_errors,
-            "partial_error": partial_error,
-        },
-        None,
-    )
+    _remember_project_media(project_id, {"media_ids": positional_ids})
+    result: dict = {
+        "raw_dispatch": dispatch,
+        "last_poll": last_poll,
+        "operation_names": op_names,
+        "media_ids": positional_ids,
+        "media_entries": succeeded_entries,
+        "op_errors": op_errors,
+        "slot_errors": slot_errors,
+        "partial_error": partial_error,
+    }
+    # The requested quality had no batch-path model and a lower one
+    # rendered (flow_sdk.gen_video). Lifted to the top level so the node
+    # stamp and the activity detail say what really ran.
+    downgrade = dispatch.get("model_downgrade")
+    if isinstance(downgrade, dict):
+        result["model_downgrade"] = downgrade
+    return result, None
 
 
 async def _handle_edit_image(params: dict) -> tuple[dict, Optional[str]]:
@@ -519,6 +615,7 @@ async def _handle_edit_image(params: dict) -> tuple[dict, Optional[str]]:
             orientation=_orientation_from_aspect(params.get("aspect_ratio")),
             source_media_ids=[source_media_id.strip()],
             reference_media_ids=ref_media_ids,
+            should_cancel=_cancel_check(params),
         )
     if not isinstance(project_id, str) or not project_id.strip():
         return {}, "missing_project_id"
@@ -545,17 +642,27 @@ async def _handle_edit_image(params: dict) -> tuple[dict, Optional[str]]:
     if not isinstance(image_model, str) or not image_model.strip():
         image_model = None
 
+    # Source + refs from another Flow project are unknown here — re-home
+    # them first (one pass; the source is slot 0).
+    synced, sync_failures = await _sync_media_into_project(
+        [source_media_id.strip(), *(ref_ids or [])], project_id, what="edit_image"
+    )
+    source_id, ref_ids = synced[0], (synced[1:] or None)
+
     resp = await get_flow_sdk().edit_image(
         prompt=prompt.strip(),
         project_id=project_id,
-        source_media_id=source_media_id.strip(),
+        source_media_id=source_id,
         ref_media_ids=ref_ids,
         aspect_ratio=aspect,
         paygate_tier=tier,
         image_model=image_model,
     )
+    if sync_failures:
+        resp["sync_failures"] = sync_failures
     if resp.get("error"):
         return resp, str(resp["error"])[:200]
+    _remember_project_media(project_id, resp)
     entries_with_urls = [
         e for e in (resp.get("media_entries") or []) if isinstance(e, dict) and e.get("url")
     ]
@@ -613,6 +720,7 @@ async def _handle_gen_video_omni(params: dict) -> tuple[dict, Optional[str]]:
             orientation=_orientation_from_aspect(params.get("aspect_ratio")),
             reference_media_ids=ref_media_ids,
             extra={"duration_s": duration_s},
+            should_cancel=_cancel_check(params),
         )
     if not isinstance(project_id, str) or not project_id.strip():
         return {}, "missing_project_id"
@@ -778,6 +886,7 @@ async def _handle_gen_video_omni(params: dict) -> tuple[dict, Optional[str]]:
         except Exception:  # noqa: BLE001
             logger.exception("inline ingest from omni workflow poll failed for %s", mid)
 
+    _remember_project_media(project_id, {"media_ids": positional_ids})
     return (
         {
             "raw_dispatch": dispatch,
@@ -801,13 +910,31 @@ async def _handle_export_video(params: dict) -> tuple[dict, Optional[str]]:
     clip that is still just a signed Flow URL is fetched into the cache
     first; the join needs files on disk.
     """
-    from flowboard.services.video_export import export_video
+    from flowboard.services import tts
+    from flowboard.services.video_export import NarrationOptions, export_video
 
     raw = params.get("source_media_ids")
     media_ids = [m for m in (raw if isinstance(raw, list) else []) if isinstance(m, str) and m]
     if not media_ids:
         return {}, "missing_source_media_ids"
     smooth60 = bool(params.get("smooth60"))
+    # Voice-over: one line per clip, aligned with source_media_ids.
+    raw_lines = params.get("narrations")
+    narration = None
+    if isinstance(raw_lines, list) and any(isinstance(t, str) and t.strip() for t in raw_lines):
+        voice = params.get("voice") if params.get("voice") in tts.VOICES else tts.DEFAULT_VOICE
+        try:
+            rate = int(params.get("voice_rate") or 0)
+        except (TypeError, ValueError):
+            rate = 0
+        original = params.get("original_audio")
+        narration = NarrationOptions(
+            lines=[t if isinstance(t, str) else "" for t in raw_lines],
+            voice=voice,
+            rate=rate,
+            subtitles=params.get("subtitles", True) is not False,
+            original_audio=original if original in ("duck", "keep", "mute") else "duck",
+        )
 
     asset_ids: list[int] = []
     for mid in media_ids:
@@ -819,14 +946,17 @@ async def _handle_export_video(params: dict) -> tuple[dict, Optional[str]]:
                 return {}, f"clip_unavailable:{mid[:8]}"
             asset_ids.append(row.id)
 
-    out_media, err = await asyncio.to_thread(export_video, asset_ids, smooth60=smooth60)
+    out_media, err, report = await asyncio.to_thread(
+        export_video, asset_ids, smooth60=smooth60, narration=narration
+    )
     if err or not out_media:
-        return {}, err or "export_failed"
+        return {"report": report}, err or "export_failed"
     return {
         "media_ids": [out_media],
         "media_entries": [{"media_id": out_media, "kind": "video"}],
         "clips": len(asset_ids),
         "smooth60": smooth60,
+        "report": report,
     }, None
 
 _DEFAULT_HANDLERS: dict[str, Handler] = {
@@ -972,8 +1102,12 @@ def _node_completion_patch(req: Request, result: dict) -> dict:
         if isinstance(image_model, str) and image_model:
             patch["imageModel"] = image_model
     elif req.type == "gen_video":
-        # For Veo the dispatched quality IS the model selector.
+        # For Veo the dispatched quality IS the model selector — unless the
+        # SDK had to render a lower one, in which case stamp what ran.
         video_quality = params.get("video_quality")
+        downgrade = result.get("model_downgrade")
+        if isinstance(downgrade, dict) and isinstance(downgrade.get("quality"), str):
+            video_quality = downgrade["quality"]
         if isinstance(video_quality, str) and video_quality:
             patch["videoQuality"] = video_quality
     elif req.type == "gen_video_omni":

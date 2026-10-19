@@ -73,7 +73,20 @@ def _cache_glob(media_id: str) -> Optional[Path]:
 
 
 def cached_path(media_id: str) -> Optional[Path]:
-    return _cache_glob(media_id)
+    found = _cache_glob(media_id)
+    if found is not None:
+        return found
+    # Locally made media (joined / voiced / smoothed exports) is registered
+    # under a made-up id with a file named after the job, not the id, so the
+    # glob misses it; the Asset row still knows where the bytes are.
+    with get_session() as s:
+        row = s.exec(select(Asset).where(Asset.uuid_media_id == media_id)).first()
+        local = row.local_path if row is not None else None
+    if local:
+        p = Path(local)
+        if p.is_file():
+            return p
+    return None
 
 
 def ingest_urls(urls: list[dict[str, Any]]) -> int:

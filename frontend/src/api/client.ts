@@ -1238,7 +1238,73 @@ export interface BoardTemplate {
   title: string;
   blurb: string;
   scenes: number;
+  /** Product category this template is made for (product library). */
+  category?: ProductCategory;
   inputs: TemplateInput[];
+}
+
+// ── Product library ──────────────────────────────────────────────────────────
+
+export type ProductCategory = "fashion" | "cosmetics" | "food" | "other";
+
+export const PRODUCT_CATEGORIES: [ProductCategory, string][] = [
+  ["fashion", "Thời trang"],
+  ["cosmetics", "Mỹ phẩm"],
+  ["food", "Đồ ăn / uống"],
+  ["other", "Khác"],
+];
+
+export interface Product {
+  id: number;
+  name: string;
+  /** English phrase that goes into prompts as {{product}}. */
+  description: string;
+  category: ProductCategory;
+  price: string;
+  /** Vietnamese, one selling point per line. */
+  selling_points: string;
+  link: string;
+  notes: string;
+  /** Flow media ids, first = main photo. */
+  media_ids: string[];
+  aspect_ratio: string | null;
+  /** Template a board for this product starts from by default. */
+  template_id: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export type ProductDraft = Partial<Omit<Product, "id" | "template_id" | "created_at" | "updated_at">>;
+
+export async function listProducts(): Promise<Product[]> {
+  const res = await fetch("/api/products");
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
+}
+
+export async function createProduct(draft: ProductDraft): Promise<Product> {
+  const res = await fetch("/api/products", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(draft),
+  });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
+}
+
+export async function updateProduct(id: number, draft: ProductDraft): Promise<Product> {
+  const res = await fetch(`/api/products/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(draft),
+  });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
+}
+
+export async function deleteProduct(id: number): Promise<void> {
+  const res = await fetch(`/api/products/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
 }
 
 export async function getTemplates(): Promise<BoardTemplate[]> {
@@ -1251,11 +1317,12 @@ export async function createBoardFromTemplate(
   templateId: string,
   name: string,
   inputs: Record<string, string>,
+  productId?: number | null,
 ): Promise<Board> {
   const res = await fetch("/api/boards/from-template", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ template_id: templateId, name, inputs }),
+    body: JSON.stringify({ template_id: templateId, name, inputs, product_id: productId ?? null }),
   });
   if (!res.ok) throw new Error(await extractErrorMessage(res));
   const body = (await res.json()) as Board & { nodes: Record<string, string> };
@@ -1272,6 +1339,47 @@ export async function refinePromptApi(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ node_id: nodeId, draft, camera: opts?.camera ?? null }),
+  });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
+}
+
+export interface SplitStoryboardResult {
+  storyboard: string;
+  panels: number;
+  rows: number;
+  cols: number;
+  /** spec key (`s1`, `v1`, …) → short id of the node created for it */
+  nodes: Record<string, string>;
+}
+
+/** Cut a rendered Storyboard composite into one image + video node per tile. */
+export async function splitStoryboard(nodeId: number): Promise<SplitStoryboardResult> {
+  const res = await fetch(`/api/nodes/${nodeId}/storyboard/split`, { method: "POST" });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
+}
+
+// ── Voice-over ───────────────────────────────────────────────────────────────
+
+/** Edge neural voices the agent offers (`services/tts.py::VOICES`). */
+export const VOICES: Record<string, string> = {
+  "vi-VN-HoaiMyNeural": "Hoài My (nữ)",
+  "vi-VN-NamMinhNeural": "Nam Minh (nam)",
+};
+export const DEFAULT_VOICE = "vi-VN-HoaiMyNeural";
+
+/** AI writes one Vietnamese voice line per video node (in clip order) and
+ * stores it on each node's `data.narration`. */
+export async function writeNarrationApi(
+  boardId: number,
+  nodeIds: number[],
+  instructions?: string,
+): Promise<{ narrations: Record<string, string> }> {
+  const res = await fetch("/api/prompt/narration", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ board_id: boardId, node_ids: nodeIds, instructions: instructions ?? null }),
   });
   if (!res.ok) throw new Error(await extractErrorMessage(res));
   return res.json();

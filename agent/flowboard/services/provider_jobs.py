@@ -26,7 +26,7 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Callable, Optional
 
 from sqlalchemy import or_, and_
 from sqlmodel import select, update
@@ -316,9 +316,20 @@ def cancel_provider_job(job_id: str) -> Optional[ProviderJob]:
 
 
 async def wait_for_provider_job(
-    job_id: str, timeout_s: float = 600, poll_interval_s: float = 2.0
+    job_id: str,
+    timeout_s: float = 600,
+    poll_interval_s: float = 2.0,
+    should_stop: Optional[Callable[[ProviderJob], bool]] = None,
 ) -> Optional[ProviderJob]:
-    """Block until the job reaches a terminal status. None on timeout."""
+    """Block until the job reaches a terminal status. None on timeout.
+
+    ``should_stop`` is consulted (in a thread — it may read the DB) between
+    polls with the job's current row; returning True ends the wait early and
+    hands back that still-live row, so the caller can tell "stopped" from
+    "finished" by its status. Media waits use it to honour a cancelled
+    Request, which otherwise held the single-consumer worker for the whole
+    timeout.
+    """
     import time as _time
 
     deadline = _time.monotonic() + timeout_s
@@ -327,6 +338,8 @@ async def wait_for_provider_job(
         if job is None:
             return None
         if job.status in TERMINAL_STATUSES:
+            return job
+        if should_stop is not None and await asyncio.to_thread(should_stop, job):
             return job
         if _time.monotonic() >= deadline:
             return None

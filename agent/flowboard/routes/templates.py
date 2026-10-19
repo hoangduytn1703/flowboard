@@ -9,7 +9,8 @@ from pydantic import BaseModel, Field
 from flowboard.db import get_session
 from flowboard.db.models import Board
 from flowboard.services.board_builder import BoardSpecError, build_board
-from flowboard.services.templates import get_template, list_templates, render
+from flowboard.services.products import TemplateBuildError, template_board_spec
+from flowboard.services.templates import list_templates
 
 router = APIRouter(prefix="/api", tags=["templates"])
 
@@ -18,6 +19,9 @@ class FromTemplateBody(BaseModel):
     template_id: str = Field(min_length=1, max_length=64)
     name: Optional[str] = Field(default=None, max_length=80)
     inputs: dict[str, str] = Field(default_factory=dict)
+    # A saved product: its photo lands on the product node, its description
+    # and selling points fill the prompts and the script note.
+    product_id: Optional[int] = None
 
 
 @router.get("/templates")
@@ -28,12 +32,13 @@ def get_templates() -> list[dict]:
 @router.post("/boards/from-template")
 def create_board_from_template(body: FromTemplateBody) -> dict:
     """A new board with the template's nodes, prompts and edges already on it."""
-    template = get_template(body.template_id)
-    if template is None:
-        raise HTTPException(404, f"unknown template {body.template_id!r}")
-    spec = render(template, body.inputs)
+    try:
+        template, spec, product = template_board_spec(body.template_id, body.inputs, body.product_id)
+    except TemplateBuildError as exc:
+        raise HTTPException(404, str(exc))
+    default_name = template["title"] if product is None else f"{product['name']} — {template['title']}"
     with get_session() as s:
-        board = Board(name=(body.name or "").strip() or template["title"])
+        board = Board(name=(body.name or "").strip() or default_name)
         s.add(board)
         s.commit()
         s.refresh(board)

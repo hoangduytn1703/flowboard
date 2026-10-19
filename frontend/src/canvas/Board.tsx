@@ -118,8 +118,20 @@ export function Board() {
   const addNodeOfType = useBoardStore((s) => s.addNodeOfType);
   const deleteNodeByRfId = useBoardStore((s) => s.deleteNodeByRfId);
   const deleteEdgeByRfId = useBoardStore((s) => s.deleteEdgeByRfId);
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, fitView } = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement>(null);
+
+  // `fitView` on <ReactFlow> only runs on first mount, so switching to
+  // another board (or one a template just built) kept the previous board's
+  // pan/zoom and could show an empty-looking canvas. Fit once per board,
+  // as soon as its nodes are in.
+  const boardId = useBoardStore((s) => s.boardId);
+  const fittedBoardRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (boardId === null || nodes.length === 0 || fittedBoardRef.current === boardId) return;
+    fittedBoardRef.current = boardId;
+    requestAnimationFrame(() => fitView({ padding: 0.15, duration: 200 }));
+  }, [boardId, nodes.length, fitView]);
 
   const [dropPopover, setDropPopover] = useState<
     { clientX: number; clientY: number; sourceId: string } | null

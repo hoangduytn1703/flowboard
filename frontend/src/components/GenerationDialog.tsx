@@ -18,6 +18,7 @@ import {
 import {
   autoPrompt as autoPromptApi,
   autoPromptBatch as autoPromptBatchApi,
+  getLlmProviders,
   refinePromptApi,
   mediaUrl,
   patchEdge,
@@ -113,8 +114,10 @@ type CameraKey = (typeof CAMERA_MOVEMENTS)[number]["key"];
 // store (same pattern as the Omni-duration chips below), so the choice
 // is sticky for subsequent dispatches.
 // Each chip is either a Veo quality combo or Omni Flash. `ultraOnly`
-// chips are locked when the detected paygate tier isn't TIER_TWO —
-// the backend would silently fall back to Fast otherwise.
+// chips are locked when the detected paygate tier isn't TIER_TWO. Fast
+// and Quality count: on the batch path the only Veo ids are lite,
+// lite_low_priority and s_fast_ultra, so a Pro account asking for either
+// was rejected with PUBLIC_ERROR_MODEL_ACCESS_DENIED (FB-007).
 type VeoChip = {
   kind: "veo";
   quality: VideoQuality;
@@ -126,11 +129,15 @@ type VideoModelChip = VeoChip | OmniChip;
 
 const VIDEO_MODEL_CHIPS: readonly VideoModelChip[] = [
   { kind: "veo", quality: "lite", label: "Veo 3.1 Lite", ultraOnly: false },
-  { kind: "veo", quality: "fast", label: "Veo 3.1 Fast", ultraOnly: false },
-  { kind: "veo", quality: "quality", label: "Veo 3.1 Quality", ultraOnly: false },
+  { kind: "veo", quality: "fast", label: "Veo 3.1 Fast", ultraOnly: true },
+  { kind: "veo", quality: "quality", label: "Veo 3.1 Quality", ultraOnly: true },
   { kind: "veo", quality: "lite_relaxed", label: "Veo 3.1 Lite (Low Priority)", ultraOnly: true },
   { kind: "omni", label: "Omni Flash" },
 ];
+
+function isUltraOnlyQuality(q: VideoQuality): boolean {
+  return VIDEO_MODEL_CHIPS.some((c) => c.kind === "veo" && c.quality === q && c.ultraOnly);
+}
 
 function cameraInstruction(key: CameraKey): string {
   return CAMERA_MOVEMENTS.find((c) => c.key === key)?.instruction ?? "";
@@ -235,6 +242,17 @@ export function GenerationDialog() {
   // "✨ Viết lại chuẩn": the user's own text → polished English, in place.
   const [refining, setRefining] = useState(false);
   const [autoPromptUsed, setAutoPromptUsed] = useState(false);
+  // Submit lifecycle, shown in the dialog itself: building the prompt
+  // (`autoBuilding`) → creating the request (`sending`) → dialog closes once
+  // it is queued, or stays open with `submitError` beside the Generate
+  // button. Errors used to go only to the Toaster, which sat under this
+  // dialog's backdrop and hid itself after 5s, so a failed auto-prompt
+  // looked like nothing happened (FB-001). The error stays until the user
+  // edits the prompt or retries. `submittingRef` is the synchronous
+  // double-submit guard — state updates land too late to stop a second ⌘↵.
+  const [sending, setSending] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const submittingRef = useRef(false);
 
   // Per-variant selection for multi-source i2v. Default: all selected.
   // Stored as a Set of indices so the UI can toggle individual variants
@@ -269,10 +287,57 @@ export function GenerationDialog() {
   // Generation backend — sticky choice; dispatch reads it from here.
   const mediaProvider = useSettingsStore((s) => s.mediaProvider);
   const setMediaProvider = useSettingsStore((s) => s.setMediaProvider);
+  // Whether Muse can answer at all (muse2api ready, or a Pax worker
+  // polling) — the same `available` the AI Providers panel shows. null
+  // while the check is in flight. Re-checked each time the dialog opens.
+  const [museAvailable, setMuseAvailable] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (openDialog.rfId === null) return;
+    let alive = true;
+    setMuseAvailable(null);
+    getLlmProviders()
+      .then((ps) => {
+        if (alive) setMuseAvailable(ps.find((p) => p.name === "muse")?.available === true);
+      })
+      .catch(() => {
+        if (alive) setMuseAvailable(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [openDialog.rfId]);
+  // A Muse dispatch with nothing to answer it used to sit 30 minutes in the
+  // provider queue and block every Flow request behind it (FB-004). The
+  // choice is sticky in localStorage, so it can be left on from an earlier
+  // session without the user noticing: drop it back to Flow once Muse is
+  // known to be down, and never dispatch to Muse unless it is known up.
+  const [museFellBack, setMuseFellBack] = useState(false);
+  useEffect(() => {
+    if (museAvailable === false && mediaProvider === "muse") {
+      setMediaProvider("flow");
+      setMuseFellBack(true);
+    }
+  }, [museAvailable, mediaProvider, setMediaProvider]);
+  const effectiveProvider = mediaProvider === "muse" && museAvailable === true ? "muse" : "flow";
   // Auto-detected paygate tier (PAYGATE_TIER_ONE / TIER_TWO). Used to
   // lock the Ultra-only model chips (lite_relaxed) for Pro users — same
   // gating as the SettingsPanel.
   const paygateTier = useGenerationStore((s) => s.paygateTier);
+  const isUltra = paygateTier === "PAYGATE_TIER_TWO";
+
+  // A sticky Fast / Quality choice (Fast is the store default) can't render
+  // on Pro — move it to Lite once the plan is known to be Pro, rather than
+  // leave a locked option selected. Unknown tier: leave it alone, an Ultra
+  // user's choice must survive the moment before detection.
+  useEffect(() => {
+    if (
+      paygateTier === "PAYGATE_TIER_ONE"
+      && videoModelFamily === "veo"
+      && isUltraOnlyQuality(videoQuality)
+    ) {
+      setVideoQuality("lite");
+    }
+  }, [paygateTier, videoModelFamily, videoQuality, setVideoQuality]);
 
   const targetType = node?.data.type ?? "image";
   const isVideo = targetType === "video";
@@ -458,6 +523,8 @@ export function GenerationDialog() {
       setCharExtras(typeof d.charExtras === "string" ? d.charExtras.slice(0, 200) : "");
       setAutoBuilding(false);
       setAutoPromptUsed(false);
+      setSending(false);
+      setSubmitError(null);
       // Default-select every upstream source variant for video targets so
       // the user just hits Generate when they want all videos.
       const upstreamEdge = useBoardStore
@@ -583,20 +650,57 @@ export function GenerationDialog() {
     const draft = (prompt ?? "").trim();
     if (isNaN(dbId) || !draft || refining) return;
     setRefining(true);
+    setSubmitError(null);
     try {
       const res = await refinePromptApi(dbId, draft, isVideo ? { camera } : undefined);
       setPrompt(res.prompt);
       setAutoPromptUsed(true);
     } catch (err) {
-      useGenerationStore.setState({
-        error: err instanceof Error ? `Viết lại prompt thất bại: ${err.message}` : "Viết lại prompt thất bại",
-      });
+      setSubmitError(
+        err instanceof Error ? `Viết lại prompt thất bại: ${err.message}` : "Viết lại prompt thất bại",
+      );
     } finally {
       setRefining(false);
     }
   }
 
   async function handleSubmit() {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitError(null);
+    try {
+      await submitOnce();
+    } finally {
+      submittingRef.current = false;
+    }
+  }
+
+  /** Create the request; close on success, otherwise keep the dialog open
+   * with the reason inline. `dispatchGeneration` reports failures through
+   * the store's `error` (the Toaster) — move it here, where the user is
+   * looking, rather than show it twice. */
+  async function dispatchAndClose(run: () => Promise<boolean>) {
+    setSending(true);
+    let ok = false;
+    try {
+      ok = await run();
+    } finally {
+      setSending(false);
+    }
+    const store = useGenerationStore.getState();
+    // Closed (or switched node) while sending: nothing here to show it
+    // in, so the Toaster keeps it.
+    if (store.openDialog.rfId !== rfId) return;
+    if (ok) {
+      closeGenerationDialog();
+      return;
+    }
+    const reason = (store.error ?? "tạo request thất bại").replace(/\.\s*$/, "");
+    setSubmitError(`Chưa gửi được: ${reason}. Sửa lại rồi bấm Generate lần nữa.`);
+    store.clearError();
+  }
+
+  async function submitOnce() {
     if (!rfId) return;
     // Defense in depth — block submit if the LLM layer is still composing
     // for this node from a prior dialog session. The Generate button is
@@ -630,13 +734,15 @@ export function GenerationDialog() {
           data: { storyboardGrid, aiBrief: prompt },
         }).catch(() => {});
       }
-      dispatchGeneration(rfId, {
-        prompt: wrapped,
-        aspectRatio,
-        kind: "image",
-        variantCount: variants,
-      });
-      closeGenerationDialog();
+      await dispatchAndClose(() =>
+        dispatchGeneration(rfId, {
+          prompt: wrapped,
+          aspectRatio,
+          kind: "image",
+          variantCount: variants,
+          mediaProvider: effectiveProvider,
+        }),
+      );
       return;
     }
     if (isPrompt) {
@@ -683,12 +789,14 @@ export function GenerationDialog() {
           patchNode(dbId, { data: charStamp }).catch(() => {});
         }
       }
-      dispatchGeneration(rfId, {
-        prompt: built,
-        aspectRatio,
-        variantCount: variants,
-      });
-      closeGenerationDialog();
+      await dispatchAndClose(() =>
+        dispatchGeneration(rfId, {
+          prompt: built,
+          aspectRatio,
+          variantCount: variants,
+          mediaProvider: effectiveProvider,
+        }),
+      );
       return;
     }
     // Image / video branch — if user left the prompt blank, synthesise
@@ -728,11 +836,12 @@ export function GenerationDialog() {
       } catch (err) {
         setAutoBuilding(false);
         useBoardStore.getState().updateNodeData(rfId, { autoPromptStatus: "failed" });
-        useGenerationStore.setState({
-          error: err instanceof Error
-            ? `Auto-prompt failed: ${err.message}`
-            : "Auto-prompt failed",
-        });
+        // Nothing reached Flow, so no credit was spent — say that, or the
+        // user assumes it is running and keeps clicking.
+        setSubmitError(
+          `Không tự dựng được prompt${err instanceof Error ? `: ${err.message}` : ""}. `
+          + "Chưa gửi request nào (không tốn credit) — tự gõ prompt hoặc bấm Generate để thử lại.",
+        );
         return;
       }
       setAutoBuilding(false);
@@ -750,26 +859,31 @@ export function GenerationDialog() {
       // shows one toggleable thumbnail per variant + an All/None action.
       const picked = sourceMediaIds.filter((_, i) => selectedSourceIdx.has(i));
       const useMulti = picked.length > 1;
-      dispatchGeneration(rfId, {
-        prompt: videoPrompt,
-        aspectRatio,
-        kind: "video",
-        sourceMediaId: useMulti ? undefined : picked[0],
-        sourceMediaIds: useMulti ? picked : undefined,
-        // Tell the node UI how many video tiles to reserve while pending —
-        // otherwise it defaults to 1 placeholder even though we're
-        // dispatching N i2v ops.
-        variantCount: picked.length,
-      });
+      await dispatchAndClose(() =>
+        dispatchGeneration(rfId, {
+          prompt: videoPrompt,
+          aspectRatio,
+          kind: "video",
+          sourceMediaId: useMulti ? undefined : picked[0],
+          sourceMediaIds: useMulti ? picked : undefined,
+          // Tell the node UI how many video tiles to reserve while pending —
+          // otherwise it defaults to 1 placeholder even though we're
+          // dispatching N i2v ops.
+          variantCount: picked.length,
+          mediaProvider: effectiveProvider,
+        }),
+      );
     } else {
-      dispatchGeneration(rfId, {
-        prompt: finalPrompt,
-        aspectRatio,
-        variantCount: variants,
-        prompts: perVariantPrompts,
-      });
+      await dispatchAndClose(() =>
+        dispatchGeneration(rfId, {
+          prompt: finalPrompt,
+          aspectRatio,
+          variantCount: variants,
+          prompts: perVariantPrompts,
+          mediaProvider: effectiveProvider,
+        }),
+      );
     }
-    closeGenerationDialog();
   }
 
   // The dialog's local `autoBuilding` flag covers the in-flight window
@@ -785,8 +899,11 @@ export function GenerationDialog() {
   // Both image and video allow empty prompt — we'll auto-synth on submit.
   // Veo i2v needs at least one selected source variant; Omni Flash
   // needs at least one ingredient (any upstream image-bearing node).
-  // Other targets just need the LLM not be busy.
-  const canGenerate = isCharacter
+  // Other targets just need the LLM not be busy. Nothing while a request
+  // is being created.
+  const canGenerate = sending
+    ? false
+    : isCharacter
     ? charGender !== null || charCountry !== null || charExtras.trim().length > 0
     : isOmniVideo
     ? refSourceNodes.length > 0 && !isWorking
@@ -869,6 +986,7 @@ export function GenerationDialog() {
               onChange={(e) => {
                 setPrompt(e.target.value);
                 if (autoPromptUsed) setAutoPromptUsed(false);
+                if (submitError) setSubmitError(null);
               }}
               placeholder={
                 isVideo
@@ -970,7 +1088,10 @@ export function GenerationDialog() {
                 rows={3}
                 maxLength={200}
                 value={charExtras}
-                onChange={(e) => setCharExtras(e.target.value)}
+                onChange={(e) => {
+                  setCharExtras(e.target.value);
+                  if (submitError) setSubmitError(null);
+                }}
                 placeholder="Tuổi, kiểu tóc, trang phục, biểu cảm…"
               />
             </div>
@@ -1197,7 +1318,7 @@ export function GenerationDialog() {
               <button
                 key="flow"
                 type="button"
-                className={`aspect-chip${mediaProvider === "flow" ? " aspect-chip--active" : ""}`}
+                className={`aspect-chip${effectiveProvider === "flow" ? " aspect-chip--active" : ""}`}
                 onClick={() => setMediaProvider("flow")}
               >
                 Flow
@@ -1205,12 +1326,25 @@ export function GenerationDialog() {
               <button
                 key="muse"
                 type="button"
-                className={`aspect-chip${mediaProvider === "muse" ? " aspect-chip--active" : ""}`}
+                className={`aspect-chip${effectiveProvider === "muse" ? " aspect-chip--active" : ""}`}
                 onClick={() => setMediaProvider("muse")}
+                disabled={museAvailable !== true}
+                title={
+                  museAvailable === null
+                    ? "Đang kiểm tra Muse…"
+                    : museAvailable
+                    ? undefined
+                    : "Muse chưa sẵn sàng — cần cấu hình muse2api hoặc có Pax worker đang chạy (AI Providers → Muse)."
+                }
               >
                 Muse
               </button>
             </div>
+            {museFellBack && effectiveProvider === "flow" && (
+              <p className="gen-dialog__hint">
+                Muse chưa sẵn sàng (không có muse2api hay Pax worker) — đang dùng Flow.
+              </p>
+            )}
           </div>
         )}
 
@@ -1302,8 +1436,7 @@ export function GenerationDialog() {
                     </option>
                   );
                 }
-                const locked =
-                  m.ultraOnly && paygateTier !== "PAYGATE_TIER_TWO";
+                const locked = m.ultraOnly && !isUltra;
                 return (
                   <option
                     key={`veo:${m.quality}`}
@@ -1316,6 +1449,12 @@ export function GenerationDialog() {
                 );
               })}
             </select>
+            {!isUltra && (
+              <p className="gen-dialog__hint">
+                Gói Pro chỉ có Veo 3.1 Lite / Omni Flash trên đường batch — Fast,
+                Quality và Low Priority cần gói Ultra.
+              </p>
+            )}
           </div>
         )}
 
@@ -1410,6 +1549,18 @@ export function GenerationDialog() {
           </div>
         )}
 
+        {/* Submit status / error — right above the Generate button, where
+            the user is looking. The error stays until they edit or retry. */}
+        {submitError ? (
+          <p className="gen-dialog__error" role="alert">
+            {submitError}
+          </p>
+        ) : sending ? (
+          <p className="gen-dialog__hint" role="status">
+            Đang gửi request lên {effectiveProvider === "muse" ? "Muse" : "Flow"}…
+          </p>
+        ) : null}
+
         {/* Footer */}
         <div className="gen-dialog__footer">
           <span className="gen-dialog__board-ctx">
@@ -1428,6 +1579,8 @@ export function GenerationDialog() {
           >
             {isWorking
               ? "Building…"
+              : sending
+              ? "Sending…"
               : isPrompt
               ? "Save ⌘↵"
               : "Generate ⌘↵"}

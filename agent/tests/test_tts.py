@@ -1,0 +1,43 @@
+"""Voice-over helpers: subtitle cue timing and the ASS file. edge-tts itself
+is not called."""
+from pathlib import Path
+
+from flowboard.services import tts
+
+
+def _narration(words, duration):
+    return tts.Narration(Path("x.mp3"), duration, [tts.Word(s, e, t) for s, e, t in words])
+
+
+def test_cues_follow_word_timings_and_wrap_lines():
+    text = "Áo thun cotton dày dặn mặc rất mát mẻ và thoải mái cả ngày dài"
+    tokens = text.split()
+    words = [(i * 0.4, i * 0.4 + 0.35, t) for i, t in enumerate(tokens)]
+    cues = tts.subtitle_cues(_narration(words, 6.0), text, max_chars=20)
+    assert all(len(line) <= 20 for _, _, line in cues)
+    assert " ".join(line for _, _, line in cues) == text
+    assert cues[0][0] == 0.0 and cues[0][1] >= 0.3
+    for (s1, e1, _), (s2, _, _) in zip(cues, cues[1:]):
+        assert s2 >= e1  # cues never overlap
+    assert cues[-1][1] == 6.0  # the last cue hangs until the audio ends
+
+
+def test_cues_spread_evenly_without_word_timings():
+    text = "một hai ba bốn năm sáu"
+    cues = tts.subtitle_cues(_narration([], 3.0), text, max_chars=11)
+    assert [c[2] for c in cues] == ["một hai ba", "bốn năm sáu"]
+    assert cues[0][0] == 0.0 and abs(cues[0][1] - 1.5) < 0.2 and cues[1][1] == 3.0
+
+
+def test_write_ass_scales_to_the_frame(tmp_path):
+    out = tts.write_ass([(0.0, 1.5, "Xin chào"), (1.5, 3.0, "mọi người")], tmp_path / "s.ass",
+                        width=720, height=1280)
+    text = out.read_text(encoding="utf-8")
+    assert "PlayResX: 720" in text and "PlayResY: 1280" in text
+    assert "Dialogue: 0,0:00:00.00,0:00:01.50,Default,,0,0,0,,Xin chào" in text
+    assert "Dialogue: 0,0:00:01.50,0:00:03.00,Default,,0,0,0,,mọi người" in text
+
+
+def test_filter_path_escapes_windows_drive():
+    from flowboard.services.video_export import _filter_path
+    assert _filter_path(Path(r"D:\a b\s.ass")) == "'D\:/a b/s.ass'"

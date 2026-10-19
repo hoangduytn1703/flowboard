@@ -31,6 +31,7 @@ from flowboard.db import get_session
 from flowboard.db.models import Asset
 from flowboard.services import media as media_service
 from flowboard.services.flow_sdk import get_flow_sdk, is_valid_project_id
+from flowboard.services.media_project_sync import remember_media_in_project
 
 logger = logging.getLogger(__name__)
 
@@ -226,6 +227,9 @@ async def _ingest_image_bytes(
                 row.node_id = node_id
         s.add(row)
         s.commit()
+    # Born in this project: a later dispatch here can reference it without
+    # the cross-project re-upload (services/media_project_sync.py).
+    remember_media_in_project([media_id], project_id)
     out: dict = {"media_id": media_id, "mime": mime, "size": len(raw)}
     dims = _sniff_image_dimensions(raw)
     if dims is not None:

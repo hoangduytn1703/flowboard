@@ -370,6 +370,61 @@ async def test_gen_video_maps_tier_and_quality_onto_a_batch_model(tier, quality,
     assert out["model"] == expected
     assert video_item(rec.payload(fb.RPC_GEN_VIDEO))[VID_MODEL] == expected
     assert expected in fb.VIDEO_MODELS
+    # Intent survived, so nothing was downgraded.
+    assert "model_downgrade" not in out
+
+
+def test_unmatched_video_keys_fall_back_to_a_model_every_plan_has():
+    """FB-007: the default used to be the Ultra-only low-priority Lite, so a
+    Pro key with no batch id (Fast / Quality) was denied by Flow."""
+    assert fb.VIDEO_MODEL == "veo_3_1_i2v_lite"
+    for key in ("veo_3_1_i2v_s_fast_portrait", "veo_3_1_i2v_s", None):
+        assert fb.match_video_model(key) is None
+        assert fb.resolve_video_model(key) == "veo_3_1_i2v_lite"
+    assert fb.match_video_model("veo_3_1_i2v_s_fast_ultra") == "veo_3_1_i2v_s_fast_ultra"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("quality", ["fast", "quality"])
+async def test_gen_video_reports_a_downgraded_quality(quality):
+    rec = _video_recorder(["op-1"])
+    out = await FlowSDK(client=rec).gen_video(
+        prompt="x", project_id=PID, start_media_id="m",
+        aspect_ratio="VIDEO_ASPECT_RATIO_PORTRAIT",
+        paygate_tier="PAYGATE_TIER_ONE", video_quality=quality,
+    )
+    assert out["model"] == "veo_3_1_i2v_lite"
+    assert video_item(rec.payload(fb.RPC_GEN_VIDEO))[VID_MODEL] == "veo_3_1_i2v_lite"
+    assert out["model_downgrade"] == {
+        "requested_quality": quality,
+        "requested_model": (
+            "veo_3_1_i2v_s_fast_portrait" if quality == "fast" else "veo_3_1_i2v_s_portrait"
+        ),
+        "model": "veo_3_1_i2v_lite",
+        "quality": "lite",
+    }
+
+
+@pytest.mark.asyncio
+async def test_model_access_denied_becomes_a_readable_error():
+    rec = BatchRecorder(responses={
+        fb.RPC_GEN_VIDEO: [
+            batch_error_envelope(
+                fb.RPC_GEN_VIDEO,
+                code=[7, None, "x" * 300, "PUBLIC_ERROR_MODEL_ACCESS_DENIED"],
+            ),
+        ],
+    })
+    out = await FlowSDK(client=rec).gen_video(
+        prompt="x", project_id=PID, start_media_id="m", paygate_tier=TIER,
+        video_quality="lite",
+    )
+    # The marker sits past the 200-char cut in the raw text; the readable
+    # sentence replaces it, the raw text is kept for the detail viewer.
+    assert out["error"].startswith("PUBLIC_ERROR_MODEL_ACCESS_DENIED: ")
+    assert "không có trong gói Flow" in out["error"]
+    assert len(out["error"]) <= 200
+    assert "PUBLIC_ERROR_MODEL_ACCESS_DENIED" in out["raw"]["error"]
 
 
 @pytest.mark.asyncio

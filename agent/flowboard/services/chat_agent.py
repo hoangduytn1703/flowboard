@@ -40,6 +40,7 @@ from flowboard.services import video_concat
 from flowboard.services.activity import record_activity
 from flowboard.services.board_builder import BoardSpecError, build_board
 from flowboard.services.flow_project import effective_project_id
+from flowboard.services.products import TemplateBuildError, list_products, template_board_spec
 from flowboard.services.llm.base import LLMError
 from flowboard.services.llm.registry import run_llm
 from flowboard.short_id import generate_unique_short_id
@@ -133,6 +134,15 @@ NODE DATA (what the Generate button reads)
   scene image → exactly ONE video (a video uses only its first image).
 
 TOOLS
+- build_from_template: {"product_id": 3 (optional: a saved product from
+  "Saved products"), "template_id": "fashion_ad|cosmetics_ad|fast_food_ad|
+  unboxing_review" (optional when product_id is given — the product's
+  category picks it), "inputs": {"setting": "English scene setting",
+  "charGender": "female|male", "charCountry": "vn|kr|jp|cn|th|us|fr"}
+  (optional)}  Builds a ready-made ad flow on this board. With a product,
+  its real photo(s) are already on the product node and its description
+  is in every scene prompt, so the user can Generate right away.
+  → {"ok": true, "nodes": {"product": "abcd", "s1": ...}}
 - build_board: {"nodes": [{"key": "model", "type": "character",
   "data": {...}}, {"key": "s1", "type": "image", "data": {...}}, ...],
   "edges": [["model", "s1"], ["product", "s1"], ["s1", "v1"], ...]}
@@ -157,8 +167,10 @@ TOOLS
   "source_node_short_id": "abcd" (an image node with media — its first
   image is the start frame) OR "source_asset_id": 3 (an attached image),
   "node_short_id": "efgh" (optional), "aspect": "portrait|landscape"
-  (optional, default portrait), "quality": "lite|fast|quality"
-  (optional, default lite — cheapest)}
+  (optional, default portrait), "model": "omni_flash|veo" (optional,
+  default omni_flash — Veo is currently dropped by Flow on most
+  accounts), "duration_s": 4|6|8|10 (Omni only, default 8),
+  "quality": "lite|fast|quality" (Veo only, default lite)}
   Renders an 8 s clip on Google Flow (1-5 min) and binds it to a video
   node. Each call spends the user's Flow credits, so do not repeat one
   that succeeded.
@@ -169,6 +181,11 @@ TOOLS
 - update_node: {"short_id": "abcd", "data_patch": {...}}  Shallow-merges
   data (a null value deletes the key).
 - refresh: {}  Re-reads the board (nodes/edges) after many mutations.
+
+When the user names an item from "Saved products" (or says "sản phẩm
+#3"), use build_from_template with its product_id, then update_node the
+scene prompts only if the user asked for a different story. A custom
+build_board does not carry the product's photos.
 
 Typical ad request ("tạo kịch bản quảng cáo …"): ONE build_board call
 with a note (the script), a character, a visual_asset (product), 3-4
@@ -260,7 +277,26 @@ def build_board_context(
             "Attached images (asset id → absolute path, readable by your tools):\n"
             + "\n".join(paths)
         )
+    lines.append(_products_context())
     lines.append(_dynamic_context(board_id))
+    return "\n".join(lines)
+
+
+def _products_context() -> str:
+    """The product library, so "làm clip cho áo thun" can find the item."""
+    lines = ["## Saved products (use with build_from_template)"]
+    products = list_products(limit=30)
+    if not products:
+        lines.append("(none saved)")
+    for p in products:
+        points = "; ".join(x.strip(" -•\t") for x in p["selling_points"].splitlines() if x.strip())
+        lines.append(
+            f"product_id={p['id']} {p['name']!r} [{p['category']}]"
+            + (f" price={p['price']!r}" if p["price"] else "")
+            + f" photos={len(p['media_ids'])}"
+            + (f" description={p['description'][:160]!r}" if p["description"] else "")
+            + (f" selling_points={points[:200]!r}" if points else "")
+        )
     return "\n".join(lines)
 
 
@@ -581,6 +617,29 @@ async def _tool_build_board(board_id: int, args: dict) -> dict:
             "edges": len(args.get("edges") or [])}
 
 
+async def _tool_build_from_template(board_id: int, args: dict) -> dict:
+    """A shipped ad template on this board, optionally made for a saved
+    product — the same spec ``POST /api/boards/from-template`` builds."""
+    product_id = args.get("product_id")
+    if product_id is not None:
+        try:
+            product_id = int(product_id)
+        except (TypeError, ValueError) as exc:
+            raise ChatAgentError(f"product_id must be an integer, got {product_id!r}") from exc
+    inputs = args.get("inputs") or {}
+    if not isinstance(inputs, dict):
+        raise ChatAgentError("inputs must be an object")
+    try:
+        template, spec, product = template_board_spec(
+            args.get("template_id"), {str(k): str(v) for k, v in inputs.items()}, product_id
+        )
+        created = build_board(board_id, spec)
+    except (TemplateBuildError, BoardSpecError) as exc:
+        raise ChatAgentError(str(exc)) from exc
+    return {"ok": True, "tool": "build_from_template", "template_id": template["id"],
+            "product": product["name"] if product else None, "nodes": created}
+
+
 async def _tool_add_edge(board_id: int, args: dict) -> dict:
     from_sid = args.get("from_short_id")
     to_sid = args.get("to_short_id")
@@ -661,9 +720,17 @@ async def _tool_gen_video(board_id: int, args: dict) -> dict:
             "source_node_short_id (an image node) or source_asset_id is required"
         )
     aspect = _aspect(args, _VIDEO_ASPECTS, "portrait")
+    # Omni Flash unless Veo is asked for by name: Veo Lite is accepted and
+    # then dropped on ordinary accounts (BUGLOG FB-025).
+    model = str(args.get("model") or "omni_flash").strip().lower()
+    if model not in ("omni_flash", "veo"):
+        raise ChatAgentError("model must be omni_flash or veo")
     quality = str(args.get("quality") or "lite").strip().lower()
     if quality not in _VIDEO_QUALITIES:
         raise ChatAgentError(f"quality must be one of {_VIDEO_QUALITIES}")
+    duration = args.get("duration_s", 8)
+    if duration not in (4, 6, 8, 10):
+        raise ChatAgentError("duration_s must be 4, 6, 8 or 10")
     with get_session() as s:
         node = _get_or_create_media_node(
             s, board_id, args.get("node_short_id"), "video", prompt
@@ -672,11 +739,16 @@ async def _tool_gen_video(board_id: int, args: dict) -> dict:
     params: dict[str, Any] = {
         "prompt": prompt.strip(),
         "project_id": project_id,
-        "start_media_id": src_mid,
         "aspect_ratio": aspect,
-        "video_quality": quality,
     }
-    out = await _dispatch_flow(node_id, "gen_video", params)
+    if model == "omni_flash":
+        params["ref_media_ids"] = [src_mid]
+        params["duration_s"] = duration
+        out = await _dispatch_flow(node_id, "gen_video_omni", params)
+    else:
+        params["start_media_id"] = src_mid
+        params["video_quality"] = quality
+        out = await _dispatch_flow(node_id, "gen_video", params)
     _bind_media(node_id, out)
     return {
         "ok": True,
@@ -758,6 +830,7 @@ async def _tool_refresh(board_id: int, args: dict) -> dict:
 
 
 _TOOLS = {
+    "build_from_template": _tool_build_from_template,
     "build_board": _tool_build_board,
     "create_node": _tool_create_node,
     "add_edge": _tool_add_edge,

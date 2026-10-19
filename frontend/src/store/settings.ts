@@ -71,6 +71,10 @@ interface SettingsState {
 const STORAGE_KEY = "flowboard.settings.v1";
 
 interface PersistShape {
+  // Bumped when a default changes in a way a stored value should follow.
+  // 2: Omni Flash became the default video model — a stored "veo" from
+  // before that is the old default, not a choice, so it is dropped once.
+  v?: number;
   imageModel?: ImageModelKey;
   videoQuality?: VideoQuality;
   videoModel?: VideoModelFamily;
@@ -78,12 +82,19 @@ interface PersistShape {
   mediaProvider?: MediaProviderKey;
 }
 
+const PERSIST_VERSION = 2;
+
 function loadPersisted(): PersistShape {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
-    return typeof parsed === "object" && parsed !== null ? parsed : {};
+    if (typeof parsed !== "object" || parsed === null) return {};
+    if ((parsed.v ?? 1) < 2) {
+      delete parsed.videoModel;
+      delete parsed.omniFlashDuration;
+    }
+    return parsed;
   } catch {
     return {};
   }
@@ -104,6 +115,7 @@ const VALID_MEDIA_PROVIDERS: MediaProviderKey[] = ["flow", "muse"];
 
 function snapshotPersist(get: () => SettingsState): PersistShape {
   return {
+    v: PERSIST_VERSION,
     imageModel: get().imageModel,
     videoQuality: get().videoQuality,
     videoModel: get().videoModel,
@@ -120,8 +132,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     persisted.videoQuality && VALID_VIDEO_QUALITIES.includes(persisted.videoQuality)
       ? persisted.videoQuality
       : "fast",
-  videoModel: persisted.videoModel ?? "veo",
-  omniFlashDuration: persisted.omniFlashDuration ?? 4,
+  // Omni Flash, not Veo: since mid-October 2026 Veo 3.1 Lite is accepted
+  // and then dropped on ordinary Pro accounts (BUGLOG FB-025), while Omni
+  // Flash renders. 8 s matches the templates' three-beat motion prompts.
+  videoModel: persisted.videoModel ?? "omni_flash",
+  omniFlashDuration: persisted.omniFlashDuration ?? 8,
   mediaProvider:
     persisted.mediaProvider && VALID_MEDIA_PROVIDERS.includes(persisted.mediaProvider)
       ? persisted.mediaProvider

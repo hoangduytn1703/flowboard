@@ -1,5 +1,6 @@
 {
   "id": "fast_food_ad",
+  "category": "food",
   "title": "Quảng cáo thức ăn nhanh",
   "blurb": "3 cảnh: món ăn hero shot, người mẫu thưởng thức, kết với logo. Cận sản phẩm không cần người mẫu.",
   "scenes": 3,
@@ -9,6 +10,12 @@
       "label": "Món ăn",
       "placeholder": "để trống = dùng đúng món trong ảnh đã upload; hoặc mô tả: burger bò phô mai",
       "default": "the dish shown in the uploaded product photo"
+    },
+    {
+      "key": "product_name",
+      "label": "Tên gọi trong lời thoại",
+      "placeholder": "ví dụ: áo thun SAIGON",
+      "default": "sản phẩm này"
     },
     {
       "key": "setting",
@@ -79,7 +86,7 @@
       "type": "note",
       "data": {
         "title": "Kịch bản",
-        "prompt": "Quảng cáo {{product}} — 3 cảnh × 8 s\n\n1. Hero shot: cận món ăn, hơi nóng bốc lên, nước sốt chảy — không có người.\n2. Thưởng thức: người mẫu cắn miếng đầu tiên, biểu cảm sướng.\n3. Kết: người mẫu giơ sản phẩm về phía camera, chừa chỗ cho logo.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh món thật → Generate Người mẫu → Generate từng Cảnh → Generate từng Video → ghép bằng Chat AI."
+        "prompt": "Quảng cáo {{product}} — 3 cảnh × 8 s\n\n1. Hero shot: cận món ăn, hơi nóng bốc lên, nước sốt chảy — không có người.\n2. Thưởng thức: người mẫu cắn miếng đầu tiên, biểu cảm sướng.\n3. Kết: người mẫu giơ sản phẩm về phía camera, chừa chỗ cho logo.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh món thật → Generate Người mẫu → Generate từng Cảnh → Generate từng Video → ghép bằng Chat AI.\nLồng tiếng: mỗi Video có sẵn một câu thoại (sửa tuỳ ý); node Xuất video đọc giọng Việt + phụ đề khi ghép."
       }
     },
     {
@@ -101,7 +108,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 1 - Hero shot",
-        "prompt": "Appetizing close-up of {{product}} on a tray, steam rising, glossy sauce, melted cheese, fresh ingredients, in {{setting}}. Shallow depth of field, warm golden light, commercial food photography, no people. The product must match the reference photo exactly (shape, colour, print, material)."
+        "prompt": "Appetizing close-up of {{product}} on a tray, steam rising, glossy sauce, melted cheese, fresh ingredients, in {{setting}}. Shallow depth of field, warm golden light, commercial food photography, no people. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -109,7 +116,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 2 - Thưởng thức",
-        "prompt": "Medium close-up of the model holding {{product}} with both hands, about to take a bite, eyes bright with anticipation, in {{setting}}. Warm natural light, product sharp and prominent in frame. The product must match the reference photo exactly (shape, colour, print, material)."
+        "prompt": "Medium close-up of the model holding {{product}} with both hands, about to take a bite, eyes bright with anticipation, in {{setting}}. Warm natural light, product sharp and prominent in frame. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -117,7 +124,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 3 - Kết",
-        "prompt": "Medium shot of the model smiling at the camera and holding {{product}} up toward the lens, in {{setting}}. Bright cheerful light, clean space on one side for a logo. The product must match the reference photo exactly (shape, colour, print, material)."
+        "prompt": "Medium shot of the model smiling at the camera and holding {{product}} up toward the lens, in {{setting}}. Bright cheerful light, clean space on one side for a logo. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -125,7 +132,8 @@
       "type": "video",
       "data": {
         "title": "Video 1 - Hero shot",
-        "prompt": "0-3s: steam curls up from the food, sauce drips down the side. 3-6s: a hand lifts the top bun slightly to reveal melted cheese. 6-8s: it settles back, glossy and fresh. Locked-off macro camera, warm light."
+        "prompt": "0-3s: steam curls up from the food, sauce drips down the side. 3-6s: a hand lifts the top bun slightly to reveal melted cheese. 6-8s: it settles back, glossy and fresh. Locked-off macro camera, warm light.",
+        "narration": "Mọi người ơi nhìn {{product_name}} này đi, thèm chưa."
       }
     },
     {
@@ -133,7 +141,8 @@
       "type": "video",
       "data": {
         "title": "Video 2 - Thưởng thức",
-        "prompt": "0-3s: the model takes a big satisfying bite. 3-6s: eyes close in delight, a happy nod. 6-8s: she looks at the food and grins. Locked-off camera, product stays in frame."
+        "prompt": "0-3s: the model takes a big satisfying bite. 3-6s: eyes close in delight, a happy nod. 6-8s: she looks at the food and grins. Locked-off camera, product stays in frame.",
+        "narration": "Cắn một miếng là ghiền luôn, vị đậm đà, nóng hổi mới ra lò."
       }
     },
     {
@@ -141,7 +150,8 @@
       "type": "video",
       "data": {
         "title": "Video 3 - Kết",
-        "prompt": "0-3s: the model raises the product toward the camera. 3-6s: a thumbs-up with the other hand. 6-8s: a bright smile held for the logo. Locked-off camera, clean space on one side."
+        "prompt": "0-3s: the model raises the product toward the camera. 3-6s: a thumbs-up with the other hand. 6-8s: a bright smile held for the logo. Locked-off camera, clean space on one side.",
+        "narration": "Đói thì ghé giỏ hàng bên dưới đặt liền nha."
       }
     }
   ],

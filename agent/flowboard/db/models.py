@@ -151,6 +151,35 @@ class Reference(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_utcnow)
 
 
+class Product(SQLModel, table=True):
+    """A product the user sells, saved once and reused across ad boards.
+
+    Creating a board from a template with a product puts its photo on the
+    template's ``product`` node and its description into every prompt, so
+    the user does not re-upload and re-describe the same item per clip.
+
+    ``media_ids`` are Flow media ids from ``/api/upload``, first = main
+    photo. They belong to the project that was pinned at upload time; the
+    bytes stay in the local media cache, which is what lets a dispatch into
+    another project re-upload them (``media_project_sync``).
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    # English phrase dropped into prompts as {{product}}, e.g. "a white
+    # cotton t-shirt with a small red logo on the chest".
+    description: str = ""
+    category: str = "other"  # fashion | cosmetics | food | other
+    price: str = ""
+    # Vietnamese selling points, one per line — the script note and caption.
+    selling_points: str = ""
+    link: str = ""
+    notes: str = ""
+    media_ids: list = Field(default_factory=list, sa_column=Column(JSON))
+    aspect_ratio: Optional[str] = None
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
 class ChatMessage(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     board_id: int = Field(foreign_key="board.id", index=True)
