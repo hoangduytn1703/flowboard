@@ -25,7 +25,7 @@
     },
     {
       "key": "charGender",
-      "label": "Giới tính người review",
+      "label": "Giới tính mẫu",
       "type": "select",
       "options": [
         [
@@ -35,6 +35,14 @@
         [
           "male",
           "Nam"
+        ],
+        [
+          "hands_female",
+          "Tay nữ (không lộ mặt)"
+        ],
+        [
+          "hands_male",
+          "Tay nam (không lộ mặt)"
         ]
       ],
       "default": "male"

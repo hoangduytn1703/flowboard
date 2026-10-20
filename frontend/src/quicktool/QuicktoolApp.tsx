@@ -203,10 +203,15 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
   const step = stepOf(stepSlug);
 
   // URL → board: a deep link or the back button loads the board it names.
+  // A board that is not in the list (just deleted, or a stale link) is not
+  // fetched: that answered 404 and put an error toast on a clean delete.
+  const loadingBoard = useBoardStore((s) => s.loading);
+  const boardsLoaded = useBoardStore((s) => s.boardsLoaded);
   useEffect(() => {
-    if (isNaN(routeId)) return;
-    if (routeId !== boardId) void switchBoard(routeId);
-  }, [routeId, boardId, switchBoard]);
+    if (isNaN(routeId) || routeId === boardId || !boardsLoaded) return;
+    if (boards.some((b) => b.id === routeId)) void switchBoard(routeId);
+    else if (!loadingBoard) navigate("/clips", { replace: true });
+  }, [routeId, boardId, boards, boardsLoaded, loadingBoard, switchBoard, navigate]);
 
   // No step in the URL: continue where this clip was left.
   useEffect(() => {
@@ -325,7 +330,7 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
         <aside className="qt-locked">
           <div className="qt-card__eyebrow">Thông tin đã chốt</div>
           <div className="qt-locked__row"><span>Sản phẩm</span><strong>{roles.products.filter((p) => p.data.mediaId).length}/{roles.products.length} ảnh</strong></div>
-          <div className="qt-locked__row"><span>Người mẫu</span><strong>{roles.model ? (roles.model.data.mediaId ? "đã có" : "chưa tạo") : "—"}</strong></div>
+          <div className="qt-locked__row"><span>Người mẫu</span><strong>{roles.model ? (roles.model.data.mediaId ? "đã có" : "chưa tạo") : qt.hands ? "chỉ bàn tay" : "không có"}</strong></div>
           <div className="qt-locked__row"><span>Cảnh</span><strong>{roles.scenes.filter((s) => s.image.data.mediaId).length}/{roles.scenes.length} ảnh</strong></div>
           <div className="qt-locked__row"><span>Video</span><strong>{roles.scenes.filter((s) => s.video?.data.mediaId).length}/{roles.scenes.length} clip</strong></div>
           <div className="qt-locked__row"><span>Clip cuối</span><strong>{roles.export?.data.mediaId ? "đã ghép" : "chưa"}</strong></div>
@@ -334,7 +339,15 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
           )}
         </aside>
         <main className="qt-main">
-          {step === 1 && <StepSetup roles={roles} sourceMediaId={(qt as { source_media_id?: string }).source_media_id ?? null} />}
+          {step === 1 && (
+            <StepSetup
+              key={routeId}
+              roles={roles}
+              sourceMediaId={(qt as { source_media_id?: string }).source_media_id ?? null}
+              personRequired={!!template?.person_required || qt.reference?.category === "fashion"}
+              hands={qt.hands ?? null}
+            />
+          )}
           {step === 2 && <StepScript roles={roles} />}
           {step === 3 && <StepMedia roles={roles} kind="image" />}
           {step === 4 && <StepMedia roles={roles} kind="video" />}

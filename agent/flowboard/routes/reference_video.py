@@ -25,6 +25,7 @@ from flowboard.services import media as media_service
 from flowboard.services import product_link, reference_video
 from flowboard.services.llm import gemini_api
 from flowboard.services.products import get_product
+from flowboard.services.templates import PersonRequiredError
 from flowboard.services.video_export import probe_clip
 
 logger = logging.getLogger(__name__)
@@ -149,6 +150,8 @@ class BuildBody(BaseModel):
     analysis: dict
     name: Optional[str] = Field(default=None, max_length=80)
     force: bool = False
+    # The model the user picked on the review screen; None keeps the AI's suggestion.
+    character: Optional[dict] = None
 
 
 @router.post("/build")
@@ -164,11 +167,14 @@ def build_from_reference(body: BuildBody) -> dict[str, Any]:
         raise HTTPException(400, str(exc))
     if analysis["blocked"] and not body.force:
         raise HTTPException(409, analysis.get("block_reason") or "sản phẩm không khớp video mẫu")
-    return reference_video.build_board(
-        analysis, product, name=body.name,
-        source_media_id=media_service.normalize_media_id(body.media_id) if body.media_id else None,
-        source_url=body.source_url,
-    )
+    try:
+        return reference_video.build_board(
+            analysis, product, name=body.name,
+            source_media_id=media_service.normalize_media_id(body.media_id) if body.media_id else None,
+            source_url=body.source_url, character_pick=body.character,
+        )
+    except PersonRequiredError as exc:
+        raise HTTPException(400, str(exc))
 
 
 # ── from a link (TikTok / YouTube / …) ────────────────────────────────────

@@ -1024,3 +1024,128 @@
   border-top: 1px solid var(--border);
   z-index: 2;
 }
+
+/* ── Start-up loading screen ───────────────────────────────────────────── */
+.app-loading {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  background: var(--bg);
+  color: var(--text);
+  text-align: center;
+}
+.app-loading__brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.app-loading__logo {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  font-size: 24px;
+  background: linear-gradient(135deg, #ff8a3d, #ff5a1f);
+  box-shadow: 0 8px 28px rgba(255, 106, 43, 0.35);
+  animation: app-loading-pulse 1.8s ease-in-out infinite;
+}
+.app-loading__spinner {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 3px solid var(--border);
+  border-top-color: #ff6a2b;
+  animation: qt-spin 0.8s linear infinite;
+}
+.app-loading__text {
+  margin: 0;
+  font-size: 16px;
+  color: var(--muted);
+}
+.app-loading__slow {
+  max-width: 420px;
+  padding: 14px 18px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--muted);
+  animation: app-loading-fade 300ms ease-out;
+}
+.app-loading__slow p {
+  margin: 0 0 10px;
+}
+.app-loading__slow code {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--panel-high);
+  color: var(--text);
+}
+.app-loading__btn {
+  padding: 8px 18px;
+  font: inherit;
+  font-size: 15px;
+  color: var(--text);
+  background: var(--panel-high);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.app-loading__btn:hover { border-color: #ff6a2b; }
+@keyframes app-loading-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+@keyframes app-loading-fade {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-loading__logo, .app-loading__spinner, .app-loading__slow { animation: none; }
+}
+
+/* Step 1: person ⇄ hands switch. */
+.qt-mode {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  width: fit-content;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+.qt-mode__opt {
+  padding: 7px 14px;
+  font: inherit;
+  font-size: 15px;
+  color: var(--muted);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.qt-mode__opt--active {
+  color: var(--text);
+  background: var(--panel-higher);
+  border-color: var(--border);
+}
+.qt-mode__opt:disabled { cursor: progress; opacity: 0.7; }
+.qt-mode__busy { padding: 0 8px; font-size: 14px; color: var(--muted); }
+.qt-ref__model { margin-top: 10px; }
+
+.qt-row--tight { gap: 10px; }
+.qt-link--danger { color: #f87171; }
+.qt-photo__empty--add { border-style: dashed; }

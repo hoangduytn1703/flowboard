@@ -63,3 +63,52 @@ def test_create_board_from_template_route(client):
 def test_create_board_from_unknown_template_is_404(client):
     r = client.post("/api/boards/from-template", json={"template_id": "nope"})
     assert r.status_code == 404
+
+
+def test_hands_only_drops_the_model_and_keeps_the_scenes():
+    full = tpl.get_template("fast_food_ad")
+    person = tpl.render(full, {"charGender": "female"})
+    hands = tpl.render(full, {"charGender": "hands_male", "charCountry": "vn", "handLook": "chubby hands"})
+    assert any(n["type"] == "character" for n in person["nodes"])
+    assert not any(n["type"] == "character" for n in hands["nodes"])
+    # nothing still points at the dropped model node
+    keys = {n["key"] for n in hands["nodes"]}
+    assert all(set(e) <= keys for e in hands["edges"])
+    assert len([n for n in hands["nodes"] if n["type"] == "image"]) == full["scenes"]
+    for n in hands["nodes"]:
+        if n["type"] in ("image", "video"):
+            assert "HANDS-ONLY SHOT" in n["data"]["prompt"]
+            assert "Vietnamese male hands" in n["data"]["prompt"] and "chubby hands" in n["data"]["prompt"]
+    # the default look is a pretty one
+    default = tpl.render(full, {"charGender": "hands_female"})
+    assert "beautiful, well-groomed hands" in default["nodes"][3]["data"]["prompt"]
+
+
+def test_templates_offer_hands_except_where_a_person_is_required():
+    for meta in tpl.list_templates():
+        gender = next(i for i in meta["inputs"] if i["key"] == "charGender")
+        offered = {o[0] for o in gender["options"]}
+        assert {"female", "male"} <= offered
+        if meta.get("person_required"):
+            assert not offered & {"hands_female", "hands_male"}
+        else:
+            assert {"hands_female", "hands_male"} <= offered
+
+
+def test_clothes_ad_refuses_hands_only():
+    import pytest
+
+    fashion = tpl.get_template("fashion_ad")
+    assert fashion["person_required"] is True
+    with pytest.raises(tpl.PersonRequiredError, match="cần người mẫu"):
+        tpl.render(fashion, {"charGender": "hands_female"})
+    # a person is still fine, and other kinds still take hands
+    tpl.render(fashion, {"charGender": "male"})
+    tpl.render(tpl.get_template("fast_food_ad"), {"charGender": "hands_male"})
+
+
+def test_from_template_route_rejects_hands_for_clothes(client):
+    r = client.post("/api/boards/from-template", json={"template_id": "fashion_ad", "inputs": {"charGender": "hands_male"}})
+    assert r.status_code == 400 and "người mẫu" in r.json()["detail"]
+    r = client.post("/api/boards/from-template", json={"template_id": "fast_food_ad", "inputs": {"charGender": "hands_male"}})
+    assert r.status_code == 200

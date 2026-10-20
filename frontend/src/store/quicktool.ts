@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { autoPrompt, patchBoardData, patchNode, uploadImage, writeNarrationApi, type QuicktoolState } from "../api/client";
+import { autoPrompt, createEdge, createNode, patchBoardData, patchNode, uploadImage, writeNarrationApi, type QuicktoolState } from "../api/client";
 import { requestAutoBrief } from "../api/autoBrief";
 import { buildCharacterPrompt } from "../lib/characterPrompt";
 import { deriveRoles, hasMedia, isBusy, type ClipRoles } from "../quicktool/roles";
@@ -36,6 +36,11 @@ interface QuicktoolStore {
   ensureExportNode(): Promise<string | null>;
   /** A real photo onto a product / model node (Flow upload + vision brief). */
   uploadToNode(rfId: string, file: File): Promise<boolean>;
+  /** Another product photo (back, texture, in hand…): a new photo node wired
+   * to the same scenes as the main one, with `file` uploaded onto it. */
+  addProductPhoto(file: File): Promise<boolean>;
+  /** Remove an extra product photo (never the main one). */
+  removeProductPhoto(rfId: string): Promise<void>;
   exportClip(): Promise<boolean>;
   runAuto(): Promise<void>;
   stopAuto(): void;
@@ -43,6 +48,10 @@ interface QuicktoolStore {
 }
 
 const IMAGE_AR = "IMAGE_ASPECT_RATIO_PORTRAIT";
+/** Product photos per clip, main one included. Every one is fed to every
+ * scene as a reference; past a few the item gets no sharper and the
+ * request only gets heavier. */
+export const MAX_PRODUCT_PHOTOS = 4;
 const VIDEO_AR = "VIDEO_ASPECT_RATIO_PORTRAIT";
 
 function nodeById(id: string): FlowNode | undefined {
@@ -230,6 +239,37 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
     useBoardStore.getState().updateNodeData(id, { title });
     if (!isNaN(dbId)) patchNode(dbId, { data: { title } }).catch(() => {});
     return id;
+  },
+
+  async addProductPhoto(file) {
+    const { boardId, edges } = useBoardStore.getState();
+    const products = get().roles().products;
+    const main = products[0];
+    if (boardId === null || !main) return false;
+    if (products.length >= MAX_PRODUCT_PHOTOS) {
+      set({ error: `Tối đa ${MAX_PRODUCT_PHOTOS} ảnh sản phẩm cho một clip.` });
+      return false;
+    }
+    const targets = edges.filter((e) => e.source === main.id).map((e) => e.target);
+    try {
+      const dto = await createNode({
+        board_id: boardId, type: "visual_asset",
+        x: Math.round(main.position.x), y: Math.round(main.position.y + 320 * products.length),
+        data: { title: `Sản phẩm — ảnh ${products.length + 1}` },
+      });
+      await Promise.all(targets.map((t) => createEdge({ board_id: boardId, source_id: dto.id, target_id: parseInt(t, 10) })));
+      await useBoardStore.getState().refreshBoardState();
+      return await get().uploadToNode(String(dto.id), file);
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "không thêm được ảnh" });
+      return false;
+    }
+  },
+
+  async removeProductPhoto(rfId) {
+    const products = get().roles().products;
+    if (products[0]?.id === rfId) return;
+    await useBoardStore.getState().deleteNodeByRfId(rfId);
   },
 
   async uploadToNode(rfId, file) {

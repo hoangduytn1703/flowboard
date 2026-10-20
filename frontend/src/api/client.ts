@@ -162,6 +162,33 @@ export interface QuicktoolState {
   inputs?: Record<string, string>;
   /** 1 setup · 2 script · 3 images · 4 videos · 5 export */
   step?: number;
+  /** Hands-only clip (no model): who the hands belong to and how they look. */
+  hands?: { gender: "hands_female" | "hands_male"; country: string; look: string } | null;
+  /** What a link / video clip was analysed as. */
+  reference?: { category?: string | null } | null;
+}
+
+/** The model picked on the review screen of a link / video clip, or on
+ * step 1 of the wizard. `gender` "none" = no person at all. */
+export interface CharacterPick {
+  gender: "female" | "male" | "hands_female" | "hands_male" | "none";
+  country?: string;
+  vibe?: string;
+  hand_look?: string;
+}
+
+/** Switch an existing clip between a model and hands-only. */
+export async function setBoardModelMode(
+  boardId: number,
+  body: { mode: "person" | "hands"; gender: "female" | "male"; country?: string; vibe?: string; hand_look?: string },
+): Promise<{ hands: QuicktoolState["hands"] }> {
+  const res = await fetch(`/api/boards/${boardId}/model-mode`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
 }
 
 export interface BoardSummary extends Board {
@@ -1274,6 +1301,8 @@ export interface BoardTemplate {
   scenes: number;
   /** Product category this template is made for (product library). */
   category?: ProductCategory;
+  /** The clip must show a person (clothes are judged on a body): no hands-only option. */
+  person_required?: boolean;
   inputs: TemplateInput[];
 }
 
@@ -1603,13 +1632,15 @@ export async function buildFromReferenceVideo(input: {
   analysis: ReferenceAnalysis;
   name?: string;
   force?: boolean;
+  /** Overrides the analysis' suggested character; omit to keep it. */
+  character?: CharacterPick | null;
 }): Promise<Board & { nodes: Record<string, string> }> {
   const res = await fetch("/api/reference-video/build", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       media_id: input.mediaId, source_url: input.sourceUrl ?? null, product_id: input.productId, analysis: input.analysis,
-      name: input.name ?? null, force: input.force ?? false,
+      name: input.name ?? null, force: input.force ?? false, character: input.character ?? null,
     }),
   });
   if (!res.ok) throw new Error(await extractErrorMessage(res));

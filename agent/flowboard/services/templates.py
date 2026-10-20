@@ -69,6 +69,54 @@ def _fill(value: Any, inputs: dict[str, str]) -> Any:
     return value
 
 
+#: ``charGender`` values that mean "no person, only hands". The model picker
+#: offers them next to female / male, so every template can be shot hands-only.
+HANDS_GENDERS = {"hands_female": "female", "hands_male": "male"}
+DEFAULT_HAND_LOOK = "beautiful, well-groomed hands with smooth skin, slim fingers and clean natural nails"
+_NATIONALITY = {"vn": "Vietnamese", "kr": "Korean", "jp": "Japanese", "cn": "Chinese",
+                "th": "Thai", "us": "American", "fr": "French"}
+
+
+class PersonRequiredError(ValueError):
+    """The template needs a person (clothes are judged on a body), so the
+    hands-only mode is refused. The message is meant for the user."""
+
+
+_MODEL_STEP = re.compile(r"Generate Người [^→\n]*→ ")
+
+
+#: Starts the sentence hands mode appends, so it can be found and removed again.
+HANDS_MARKER = "HANDS-ONLY SHOT:"
+
+
+def hands_instruction(gender: str, country: str | None = None, look: str | None = None) -> str:
+    """Appended to every scene and clip prompt in hands mode. The prompts are
+    written around a model, so rather than rewriting each one it overrides
+    them: wherever a person appears, only their hands do. ``gender`` is
+    ``female`` / ``male`` or one of :data:`HANDS_GENDERS`."""
+    gender = HANDS_GENDERS.get(gender, gender)
+    nationality = _NATIONALITY.get(country or "vn", "")
+    look = (look or "").strip() or DEFAULT_HAND_LOOK
+    return (f" {HANDS_MARKER} show only {nationality} {gender} hands and forearms ({look}) handling the product, "
+            "shot straight-on at the product. No face and no other part of a person is visible; wherever "
+            "this prompt describes a person or model, show just their hands instead.").replace("  ", " ")
+
+
+def strip_hands(prompt: str) -> str:
+    """``prompt`` without a hands-mode sentence, if one was appended."""
+    i = prompt.find(HANDS_MARKER)
+    return prompt if i < 0 else prompt[:i].rstrip()
+
+
+def with_hands(prompt: str, gender: str, country: str | None = None, look: str | None = None) -> str:
+    """``prompt`` ending in exactly one hands-mode sentence (replacing an older one)."""
+    return strip_hands(prompt) + hands_instruction(gender, country, look)
+
+
+def _hands_instruction(values: dict[str, str]) -> str:
+    return hands_instruction(values["charGender"], values.get("charCountry"), values.get("handLook"))
+
+
 def render(template: dict, inputs: dict[str, str] | None) -> dict:
     """The template's board spec with placeholders and character picks applied."""
     given = {k: str(v).strip() for k, v in (inputs or {}).items() if v is not None}
@@ -81,13 +129,31 @@ def render(template: dict, inputs: dict[str, str] | None) -> dict:
         if values.get(key):
             character[key] = values[key]
 
+    hands = values.get("charGender") in HANDS_GENDERS
+    if hands and template.get("person_required"):
+        raise PersonRequiredError(
+            f"{template.get('title') or 'Kiểu clip này'} cần người mẫu mặc để thấy form và độ vừa, "
+            "nên không dùng được chế độ chỉ quay bàn tay. Hãy chọn Nữ hoặc Nam."
+        )
+    hands_text = _hands_instruction(values) if hands else ""
     nodes = []
+    dropped: set[str] = set()
     for n in template.get("nodes", []):
+        if hands and n.get("type") == "character":
+            dropped.add(str(n.get("key")))  # no person: no model to generate or reference
+            continue
         data = _fill(dict(n.get("data") or {}), values)
         if n.get("type") == "character":
             data = {**character, **data}
+        elif hands and n.get("type") in ("image", "video") and data.get("prompt"):
+            data["prompt"] = str(data["prompt"]).rstrip() + hands_text
+        elif hands and n.get("type") == "note" and data.get("prompt"):
+            # The how-to line names a model step that does not exist here.
+            data["prompt"] = (_MODEL_STEP.sub("", str(data["prompt"])).rstrip()
+                              + "\nChế độ chỉ quay bàn tay: không có người mẫu, không lộ mặt.")
         nodes.append({**n, "data": data})
-    return {"nodes": nodes, "edges": list(template.get("edges", []))}
+    edges = [e for e in template.get("edges", []) if not (set(_edge_pair(e)) & dropped)]
+    return {"nodes": nodes, "edges": edges}
 
 
 def template_for_category(category: str) -> str | None:

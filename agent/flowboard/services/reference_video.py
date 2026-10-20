@@ -14,7 +14,7 @@ from flowboard.db import get_session
 from flowboard.db.models import Board
 from flowboard.services.board_builder import build_board as _build_board
 from flowboard.services.llm import gemini_api
-from flowboard.services.templates import apply_product
+from flowboard.services.templates import PersonRequiredError, apply_product, with_hands
 
 logger = logging.getLogger(__name__)
 
@@ -201,9 +201,41 @@ def normalize(data: dict[str, Any], product: Optional[dict]) -> dict[str, Any]:
     return out
 
 
-def board_spec(analysis: dict[str, Any], product: Optional[dict]) -> dict:
+#: ``character`` override from the review screen. ``gender`` is what the
+#: user picked over the AI's suggestion: female / male, hands_female /
+#: hands_male (no person, only hands), or "none" (no person at all).
+CharacterPick = Optional[dict]
+
+
+def _character_for(analysis: dict[str, Any], product: Optional[dict], pick: CharacterPick) -> tuple[Optional[dict], Optional[dict]]:
+    """``(character node data or None, hands {gender, country, look} or None)``."""
+    suggested = analysis.get("character") or None
+    pick = pick or {}
+    gender = str(pick.get("gender") or "")
+    country = str(pick.get("country") or (suggested or {}).get("country") or "vn")
+    category = (product or {}).get("category") if product else analysis.get("category")
+    if gender.startswith("hands_"):
+        if category == "fashion":
+            raise PersonRequiredError(
+                "Quần áo cần người mẫu mặc để thấy form và độ vừa, nên không dùng được chế độ chỉ quay bàn tay. "
+                "Hãy chọn Nữ hoặc Nam."
+            )
+        return None, {"gender": gender, "country": country, "look": str(pick.get("hand_look") or "")}
+    if gender == "none":
+        return None, None
+    if gender in ("female", "male"):
+        return {"gender": gender, "country": country,
+                "vibe": str(pick.get("vibe") or (suggested or {}).get("vibe") or "casual"),
+                "extras_en": (suggested or {}).get("extras_en") if gender == (suggested or {}).get("gender") else ""}, None
+    return suggested, None
+
+
+def board_spec(analysis: dict[str, Any], product: Optional[dict], character_pick: CharacterPick = None) -> dict:
     """A board spec in the same shape the templates use."""
     plan = analysis["plan"]
+    character, hands = _character_for(analysis, product, character_pick)
+    def shot(prompt: str) -> str:
+        return with_hands(prompt, hands["gender"], hands["country"], hands["look"]) if hands else prompt
     nodes: list[dict] = []
     edges: list[list[str]] = []
     scene_lines = "\n".join(
@@ -215,9 +247,10 @@ def board_spec(analysis: dict[str, Any], product: Optional[dict]) -> dict:
         f"Phong cách: {analysis.get('style') or ''} · {analysis.get('tone') or ''}\n\n"
         f"{len(plan)} cảnh × 8 s:\n{scene_lines}"
     ).strip()
+    if hands:
+        script += "\nChế độ chỉ quay bàn tay: không có người mẫu, không lộ mặt."
     nodes.append({"key": "script", "type": "note", "data": {"title": "Kịch bản", "prompt": script}})
     refs: list[str] = []
-    character = analysis.get("character")
     if character:
         nodes.append({"key": "model", "type": "character", "data": {
             "title": "Người mẫu",
@@ -234,11 +267,11 @@ def board_spec(analysis: dict[str, Any], product: Optional[dict]) -> dict:
     for i, p in enumerate(plan, start=1):
         nodes.append({"key": f"s{i}", "type": "image", "data": {
             "title": f"Cảnh {i} - {p['title_vi']}"[:80],
-            "prompt": (p["image_prompt_en"].rstrip(".") + "." + rule)[:900],
+            "prompt": shot((p["image_prompt_en"].rstrip(".") + "." + rule)[:900]),
         }})
         nodes.append({"key": f"v{i}", "type": "video", "data": {
             "title": f"Video {i} - {p['title_vi']}"[:80],
-            "prompt": p.get("motion_prompt_en") or "",
+            "prompt": shot(p.get("motion_prompt_en") or ""),
             "narration": p.get("narration_vi") or "",
         }})
         for r in refs:
@@ -249,12 +282,16 @@ def board_spec(analysis: dict[str, Any], product: Optional[dict]) -> dict:
 
 
 def build_board(analysis: dict[str, Any], product: Optional[dict], *, name: Optional[str],
-                source_media_id: Optional[str], source_url: Optional[str] = None) -> dict[str, Any]:
+                source_media_id: Optional[str], source_url: Optional[str] = None,
+                character_pick: CharacterPick = None) -> dict[str, Any]:
     """Create the board for the plan. Returns ``{id, name, nodes}``."""
-    spec = board_spec(analysis, product)
+    spec = board_spec(analysis, product, character_pick)
+    _, hands = _character_for(analysis, product, character_pick)
     base = (product.get("name") if product else None) or analysis.get("product_seen") or "Clip"
     from_link = source_media_id is None
-    board_name = (name or "").strip() or f"{base} — {'theo link sản phẩm' if from_link else 'theo video mẫu'}"
+    # From a link the product's own name is the clip name; "theo video mẫu"
+    # stays on video clips, where it says what the clip was built from.
+    board_name = (name or "").strip() or (base if from_link else f"{base} — theo video mẫu")
     with get_session() as s:
         board = Board(name=board_name, data={"quicktool": {
             "template_id": "product_link" if from_link else "reference_video",
@@ -262,6 +299,7 @@ def build_board(analysis: dict[str, Any], product: Optional[dict], *, name: Opti
             "step": 1,
             "source_media_id": source_media_id,
             "source_url": source_url,
+            "hands": hands,
             "reference": {
                 "category": analysis.get("category"),
                 "hook": analysis.get("hook"),

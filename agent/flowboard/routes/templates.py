@@ -10,6 +10,7 @@ from flowboard.db import get_session
 from flowboard.db.models import Board
 from flowboard.services.board_builder import BoardSpecError, build_board
 from flowboard.services.products import TemplateBuildError, template_board_spec
+from flowboard.services.templates import PersonRequiredError
 from flowboard.services.templates import list_templates
 
 router = APIRouter(prefix="/api", tags=["templates"])
@@ -34,6 +35,8 @@ def create_board_from_template(body: FromTemplateBody) -> dict:
     """A new board with the template's nodes, prompts and edges already on it."""
     try:
         template, spec, product = template_board_spec(body.template_id, body.inputs, body.product_id)
+    except PersonRequiredError as exc:
+        raise HTTPException(400, str(exc))
     except TemplateBuildError as exc:
         raise HTTPException(404, str(exc))
     default_name = template["title"] if product is None else f"{product['name']} — {template['title']}"

@@ -207,6 +207,8 @@ interface BoardState {
   // Lightweight summary list rendered by the ProjectSidebar — full node /
   // edge content lives only on the active board to keep memory bounded.
   boards: Board[];
+  /** True once the board list has been read at least once (even if empty). */
+  boardsLoaded: boolean;
   nodes: FlowNode[];
   edges: Edge[];
   loading: boolean;
@@ -281,6 +283,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   boardId: null,
   boardName: "",
   boards: [],
+  boardsLoaded: false,
   nodes: [],
   edges: [],
   loading: false,
@@ -290,6 +293,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       let boards = await listBoards();
+      set({ boards, boardsLoaded: true });
       // Prefer the user's last-active board if it still exists; fall back
       // to the first board in the list. Without this, refresh always
       // snapped back to boards[0] regardless of what was selected before.

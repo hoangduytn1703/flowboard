@@ -217,7 +217,14 @@ def _bigger_image(url: str) -> str:
     return url
 
 
-async def extract_product(url: str, *, model: str = gemini_api.DEFAULT_MODEL) -> dict[str, Any]:
+#: Filling a product card is plain extraction, so it runs on the light model:
+#: measured on the same page, gemini-3.1-flash-lite answered in ~4 s while
+#: gemini-3.7/3.8-flash timed out past 40 s (and 3.5-flash took ~21 s, mostly
+#: thinking tokens). The ad plan below stays on the default model.
+EXTRACT_MODEL = "gemini-3.1-flash-lite"
+
+
+async def extract_product(url: str, *, model: str = EXTRACT_MODEL) -> dict[str, Any]:
     """A product-library draft read from the page at ``url``:
     ``{draft: {name, description, category, price, selling_points, link},
     image_url}``."""

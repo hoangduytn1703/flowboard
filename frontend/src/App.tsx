@@ -10,6 +10,7 @@ import { ChatDock } from "./components/ChatDock";
 import { ProjectSidebar } from "./components/ProjectSidebar";
 import { ReferencesPanel } from "./components/ReferencesPanel";
 import { Toaster } from "./components/Toaster";
+import { AppLoading } from "./components/AppLoading";
 import { GenerationDialog } from "./components/GenerationDialog";
 import { ResultViewer } from "./components/ResultViewer";
 import { ForcedSetupGate } from "./components/ForcedSetupGate";
@@ -43,7 +44,7 @@ export function App() {
   }, [loadInitialBoard, loadReferences]);
 
   if (loading && boardId === null) {
-    return <div className="canvas-loading">Loading…</div>;
+    return <AppLoading />;
   }
 
   return (

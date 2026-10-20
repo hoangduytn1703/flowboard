@@ -10,6 +10,7 @@ import {
   mediaUrl,
   uploadReferenceVideo,
   type BoardTemplate,
+  type CharacterPick,
   type Product,
   type ReferenceAnalysis,
   type ReferenceUpload,
@@ -87,6 +88,10 @@ export function NewClipDialog({
   const [kind, setKind] = useState<string>(initialTemplateId ?? templates[0]?.id ?? "");
   const [inputs, setInputs] = useState<Record<string, string>>({});
   const [name, setName] = useState("");
+  // Review screen of a link / video clip: the model, over the AI's suggestion.
+  const [pickGender, setPickGender] = useState<"auto" | CharacterPick["gender"]>("auto");
+  const [pickCountry, setPickCountry] = useState("");
+  const [pickHandLook, setPickHandLook] = useState("");
   // One product, several clips: clip 1 uses the "Bối cảnh" field, the others
   // these backdrops.
   const [clipCount, setClipCount] = useState(1);
@@ -185,7 +190,7 @@ export function NewClipDialog({
     setLinkPhase("building");
     try {
       const board = await buildFromReferenceVideo({
-        mediaId: null, sourceUrl: analyzedUrl, productId, analysis: linkAnalysis, name: name.trim() || undefined, force,
+        mediaId: null, sourceUrl: analyzedUrl, productId, analysis: linkAnalysis, name: name.trim() || undefined, force, character: characterPick,
       });
       useBoardStore.setState((s) => ({
         boards: [{ id: board.id, name: board.name, created_at: board.created_at, data: board.data }, ...s.boards],
@@ -297,7 +302,7 @@ export function NewClipDialog({
     setRefPhase("building");
     try {
       const board = await buildFromReferenceVideo({
-        mediaId: upload.media_id, productId, analysis, name: name.trim() || undefined, force,
+        mediaId: upload.media_id, productId, analysis, name: name.trim() || undefined, force, character: characterPick,
       });
       useBoardStore.setState((s) => ({
         boards: [{ id: board.id, name: board.name, created_at: board.created_at, data: board.data }, ...s.boards],
@@ -310,7 +315,15 @@ export function NewClipDialog({
     }
   }
 
-  const refNamePlaceholder = `${product?.name ?? shown?.product_seen ?? "Clip"} — ${isLink ? "theo link sản phẩm" : "theo video mẫu"}`;
+  const refBase = product?.name ?? shown?.product_seen ?? "Clip";
+  // Clothes are judged on a body: no hands-only option for them.
+  const pickPersonRequired = (product?.category ?? shown?.category) === "fashion";
+  const characterPick: CharacterPick | null = pickGender === "auto" && !pickCountry ? null : {
+    gender: pickGender === "auto" ? (shown?.character ? shown.character.gender as "female" | "male" : "none") : pickGender,
+    country: pickCountry || shown?.character?.country || "vn",
+    hand_look: pickHandLook.trim() || undefined,
+  };
+  const refNamePlaceholder = isLink ? refBase : `${refBase} — theo video mẫu`;
 
   const review = shown && (
     <>
@@ -326,8 +339,47 @@ export function NewClipDialog({
                 <div className="qt-ref__summary">
                   <div><span>Hook</span><strong>{shown.hook}</strong></div>
                   {shown.style && <div><span>Phong cách</span><strong>{shown.style}{shown.tone ? ` · ${shown.tone}` : ""}</strong></div>}
-                  <div><span>Người mẫu</span><strong>{shown.character ? `${shown.character.gender === "male" ? "nam" : "nữ"} · ${shown.character.country} · ${shown.character.vibe}` : "không có người"}</strong></div>
                   <div><span>Cảnh</span><strong>{shown.plan.length} cảnh × 8 s</strong></div>
+                </div>
+                <div className="tpl-inputs qt-ref__model">
+                  <label className="tpl-inputs__field">
+                    <span>Người mẫu</span>
+                    <select className="project-modal__input" value={pickGender} disabled={locked}
+                            onChange={(e) => setPickGender(e.target.value as typeof pickGender)}>
+                      <option value="auto">
+                        {shown.character
+                          ? `AI gợi ý: ${shown.character.gender === "male" ? "nam" : "nữ"} · ${shown.character.country.toUpperCase()}`
+                          : "AI gợi ý: không có người"}
+                      </option>
+                      <option value="female">Nữ</option>
+                      <option value="male">Nam</option>
+                      {!pickPersonRequired && <option value="hands_female">Tay nữ (không lộ mặt)</option>}
+                      {!pickPersonRequired && <option value="hands_male">Tay nam (không lộ mặt)</option>}
+                      <option value="none">Không có người (chỉ sản phẩm)</option>
+                    </select>
+                  </label>
+                  {pickGender !== "none" && (
+                    <label className="tpl-inputs__field">
+                      <span>Quốc gia</span>
+                      <select className="project-modal__input" value={pickCountry || shown.character?.country || "vn"} disabled={locked}
+                              onChange={(e) => setPickCountry(e.target.value)}>
+                        {[["vn", "Việt Nam"], ["kr", "Hàn Quốc"], ["jp", "Nhật Bản"], ["cn", "Trung Quốc"], ["th", "Thái Lan"], ["us", "Mỹ"], ["fr", "Pháp"]].map(([v, l]) => (
+                          <option key={v} value={v}>{l}</option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  {pickGender.startsWith("hands_") && (
+                    <label className="tpl-inputs__field qt-field--wide">
+                      <span>Mô tả bàn tay (tiếng Anh, tuỳ chọn)</span>
+                      <input className="project-modal__input" type="text" maxLength={200} value={pickHandLook} disabled={locked}
+                             placeholder="để trống = tay đẹp, da mịn, móng sạch. Ví dụ: chubby hands"
+                             onChange={(e) => setPickHandLook(e.target.value)} />
+                    </label>
+                  )}
+                  {pickPersonRequired && (
+                    <p className="qt-new__hint qt-field--wide">Sản phẩm thời trang cần người mẫu mặc, nên không có lựa chọn chỉ quay bàn tay.</p>
+                  )}
                 </div>
                 <ol className="qt-ref__plan">
                   {shown.plan.map((p, i) => (
@@ -464,6 +516,20 @@ export function NewClipDialog({
                     )}
                   </label>
                 ))}
+              {template.person_required && (
+                <p className="qt-new__hint qt-field--wide">
+                  Quảng cáo quần áo cần người mẫu mặc để thấy form và độ vừa, nên không có lựa chọn chỉ quay bàn tay.
+                </p>
+              )}
+              {(inputs.charGender ?? "").startsWith("hands_") && !template.person_required && (
+                <label className="tpl-inputs__field qt-field--wide">
+                  <span>Mô tả bàn tay (tiếng Anh, tuỳ chọn)</span>
+                  <input className="project-modal__input" type="text" maxLength={200}
+                         value={inputs.handLook ?? ""}
+                         placeholder="để trống = tay đẹp, da mịn, móng sạch. Ví dụ: chubby hands"
+                         onChange={(e) => setInputs((p) => ({ ...p, handLook: e.target.value }))} disabled={locked} />
+                </label>
+              )}
               <label className="tpl-inputs__field">
                 <span>Tên clip</span>
                 <input className="project-modal__input" type="text" maxLength={80} value={name}
