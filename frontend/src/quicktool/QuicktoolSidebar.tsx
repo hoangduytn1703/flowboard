@@ -2,27 +2,13 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { AccountPanel } from "../components/AccountPanel";
 import { useBoardStore } from "../store/board";
 import { useSettingsStore } from "../store/settings";
-import type { BoardTemplate } from "../api/client";
-
-const TEMPLATE_ICONS: Record<string, string> = {
-  fashion_ad: "👗",
-  cosmetics_ad: "💄",
-  fast_food_ad: "🍔",
-  unboxing_review: "📦",
-};
 
 /**
  * Left rail of the Quicktool screen, modelled on the reference app: a
- * brand block, the quick tools (one per ad template), the libraries, and
- * the switch to the node canvas underneath.
+ * brand block, the one "Công cụ nhanh" entry (its dialog picks the clip
+ * kind), the libraries, and the switch to the node canvas underneath.
  */
-export function QuicktoolSidebar({
-  templates,
-  activeTemplateId,
-}: {
-  templates: BoardTemplate[];
-  activeTemplateId: string | null;
-}) {
+export function QuicktoolSidebar() {
   const setUiMode = useSettingsStore((s) => s.setUiMode);
   const boardId = useBoardStore((s) => s.boardId);
   const navigate = useNavigate();
@@ -46,31 +32,13 @@ export function QuicktoolSidebar({
           <span className="qt-nav__icon">🎬</span> Clip của tôi
         </button>
 
-        <div className="qt-nav__group">Công cụ nhanh</div>
-        {templates.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            className={`qt-nav__item${activeTemplateId === t.id && !homeActive ? " qt-nav__item--active" : ""}`}
-            onClick={() => navigate(`/clips/new?template=${t.id}`)}
-            title={t.blurb}
-          >
-            <span className="qt-nav__icon">{TEMPLATE_ICONS[t.id] ?? "✨"}</span>
-            {t.title}
-            <span className="qt-nav__meta">{t.scenes} cảnh</span>
-          </button>
-        ))}
-        {templates.length === 0 && <div className="qt-nav__empty">Đang tải mẫu…</div>}
-        <button type="button" className={`qt-nav__item${is("/clips/from-video") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/clips/from-video")}
-                title="Bỏ video quảng cáo có sẵn vào, AI viết lại kịch bản theo nhịp đó cho sản phẩm của bạn">
-          <span className="qt-nav__icon">🎞️</span> Clip từ video mẫu
-          <span className="qt-nav__meta">Gemini</span>
-        </button>
-
-        <button type="button" className="qt-nav__item" onClick={() => navigate("/clips/new?template=product_link")}
-                title="Dán link trang sản phẩm, AI đọc thông tin và viết kịch bản quảng cáo">
-          <span className="qt-nav__icon">🔗</span> Clip từ link sản phẩm
-          <span className="qt-nav__meta">Gemini</span>
+        <button
+          type="button"
+          className={`qt-nav__item${is("/clips/new") || is("/clips/from-video") ? " qt-nav__item--active" : ""}`}
+          onClick={() => navigate("/clips/new")}
+          title="Tạo clip quảng cáo mới: chọn sản phẩm và kiểu clip (mỹ phẩm, quần áo, đồ ăn, review, theo video mẫu, theo link)"
+        >
+          <span className="qt-nav__icon">⚡</span> Công cụ nhanh
         </button>
 
         <div className="qt-nav__group">Thư viện</div>

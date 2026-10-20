@@ -49,11 +49,8 @@ function stepOf(slug: string | undefined): number | null {
  * /clips/:id/:step is the wizard.
  */
 export function QuicktoolApp() {
-  const boardId = useBoardStore((s) => s.boardId);
-  const boards = useBoardStore((s) => s.boards);
   const setUiMode = useSettingsStore((s) => s.setUiMode);
   const [templates, setTemplates] = useState<BoardTemplate[]>([]);
-  const qt = (boards.find((b) => b.id === boardId)?.data?.quicktool ?? {}) as QuicktoolState;
 
   useEffect(() => {
     setUiMode("quicktool");
@@ -62,7 +59,7 @@ export function QuicktoolApp() {
 
   return (
     <div className="qt-app">
-      <QuicktoolSidebar templates={templates} activeTemplateId={qt.template_id ?? null} />
+      <QuicktoolSidebar />
       <div className="qt-content">
         <Routes>
           {/* Static paths first so "new" / "from-video" are never read as a clip id. */}
@@ -130,7 +127,6 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
             <h3 className="qt-card__title">Clip của tôi</h3>
           </div>
           <div className="qt-row">
-            <button type="button" className="qt-btn qt-btn--ghost" onClick={() => navigate("/clips/from-video")}>🎞️ Từ video mẫu</button>
             <button type="button" className="qt-btn qt-btn--accent" onClick={() => navigate("/clips/new")}>+ Clip mới</button>
           </div>
         </div>
