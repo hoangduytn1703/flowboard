@@ -34,7 +34,7 @@ export function StepSetup({ roles, sourceMediaId = null }: { roles: ClipRoles; s
   return (
     <div className="qt-step qt-step--two">
       <section className="qt-card">
-        <div className="qt-card__eyebrow">Input 1/2 · Bước 1</div>
+        <div className="qt-card__eyebrow">Bước 1 · Sản phẩm</div>
         <h3 className="qt-card__title">Ảnh & nội dung sản phẩm</h3>
         <p className="qt-card__hint">
           Ảnh thật của sản phẩm. Nên có <strong>một ảnh người cầm sản phẩm trên tay</strong> để AI hiểu đúng
@@ -84,7 +84,7 @@ export function StepSetup({ roles, sourceMediaId = null }: { roles: ClipRoles; s
       </section>
 
       <section className="qt-card">
-        <div className="qt-card__eyebrow">Input 2/2 · Bước 1</div>
+        <div className="qt-card__eyebrow">Bước 1 · Người mẫu</div>
         <h3 className="qt-card__title">Người mẫu & thiết lập bản dựng</h3>
         {model ? (
           <div className="qt-model">

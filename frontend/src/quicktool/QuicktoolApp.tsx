@@ -45,7 +45,7 @@ function stepOf(slug: string | undefined): number | null {
  * so the canvas stays available as the advanced view of the same clip.
  *
  * Pages have their own URLs: /clips (library), /clips/new,
- * /clips/from-video, /products and /settings open over the library;
+ * /clips/from-video and /settings open over the library; /products is a page;
  * /clips/:id/:step is the wizard.
  */
 export function QuicktoolApp() {
@@ -69,7 +69,7 @@ export function QuicktoolApp() {
           <Route path="/clips" element={<Library templates={templates} />} />
           <Route path="/clips/new" element={<Library templates={templates} />} />
           <Route path="/clips/from-video" element={<Library templates={templates} />} />
-          <Route path="/products" element={<Library templates={templates} />} />
+          <Route path="/products" element={<ProductsPage />} />
           <Route path="/settings" element={<Library templates={templates} />} />
           <Route path="/clips/:id/:step" element={<Wizard templates={templates} />} />
           <Route path="/clips/:id" element={<Wizard templates={templates} />} />
@@ -77,6 +77,25 @@ export function QuicktoolApp() {
         </Routes>
       </div>
     </div>
+  );
+}
+
+/** /products — the product library as a page of its own. */
+function ProductsPage() {
+  const navigate = useNavigate();
+  return (
+    <>
+      <header className="qt-header">
+        <span className="qt-header__crumb">Sản phẩm đang bán</span>
+      </header>
+      <div className="qt-home">
+        <ProductsPanel
+          asPage
+          onClose={() => navigate("/clips")}
+          onMakeClip={(p) => navigate(`/clips/new?product=${p.id}${p.template_id ? `&template=${p.template_id}` : ""}`)}
+        />
+      </div>
+    </>
   );
 }
 
@@ -95,7 +114,6 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
 
   const dialog = pathname === "/clips/new" ? "new"
     : pathname === "/clips/from-video" ? "reference"
-    : pathname === "/products" ? "products"
     : pathname === "/settings" ? "settings"
     : null;
   const productParam = params.get("product");
@@ -103,7 +121,7 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
   return (
     <>
       <header className="qt-header">
-        <span className="qt-header__crumb">Clip của tôi</span>
+        <span className="qt-header__crumb">Công cụ nhanh</span>
       </header>
       <div className="qt-home">
         <div className="qt-card__head">
@@ -146,12 +164,7 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
           initialProductId={productParam ? Number(productParam) : null}
           onClose={() => navigate("/clips")}
           onCreated={(id) => navigate(`/clips/${id}/setup`)}
-        />
-      )}
-      {dialog === "products" && (
-        <ProductsPanel
-          onClose={() => navigate("/clips")}
-          onMakeClip={(p) => navigate(`/clips/new?product=${p.id}${p.template_id ? `&template=${p.template_id}` : ""}`)}
+          onCreatedMany={() => navigate("/clips")}
         />
       )}
       <SettingsPanel open={dialog === "settings"} onClose={() => navigate("/clips")} logoutPending={false} />
@@ -254,7 +267,6 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
     <>
       <header className="qt-header">
         <span className="qt-header__crumb">Công cụ nhanh · {kindLabel}</span>
-        <span className="qt-header__name">{boardName}</span>
       </header>
 
       <div className="qt-project">
@@ -315,7 +327,7 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
 
       <div className="qt-body">
         <aside className="qt-locked">
-          <div className="qt-card__eyebrow">Input · đã chốt</div>
+          <div className="qt-card__eyebrow">Thông tin đã chốt</div>
           <div className="qt-locked__row"><span>Sản phẩm</span><strong>{roles.products.filter((p) => p.data.mediaId).length}/{roles.products.length} ảnh</strong></div>
           <div className="qt-locked__row"><span>Người mẫu</span><strong>{roles.model ? (roles.model.data.mediaId ? "đã có" : "chưa tạo") : "—"}</strong></div>
           <div className="qt-locked__row"><span>Cảnh</span><strong>{roles.scenes.filter((s) => s.image.data.mediaId).length}/{roles.scenes.length} ảnh</strong></div>

@@ -244,6 +244,10 @@ def update_board(board_id: int, body: BoardUpdate):
             for key, value in body.data.items():
                 if value is None:
                     merged.pop(key, None)
+                elif isinstance(value, dict) and isinstance(merged.get(key), dict):
+                    # One level deep: a caller that only knows `{"quicktool": {"step": 3}}`
+                    # must not erase the template / product the board was made from.
+                    merged[key] = {**merged[key], **value}
                 else:
                     merged[key] = value
             board.data = merged

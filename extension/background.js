@@ -233,6 +233,8 @@ function connectToAgent() {
         }
       } else if (msg.method === 'batch_rpc') {
         await handleBatchRpc(msg);
+      } else if (msg.method === 'scrape_page') {
+        await handleScrapePage(msg);
       } else if (msg.method === 'api_request') {
         await handleApiRequest(msg);
       } else if (msg.method === 'trpc_request') {
@@ -465,6 +467,138 @@ async function handleBatchRpc(msg) {
 
   chrome.storage.local.set({ metrics });
   setState('idle');
+}
+
+// ─── Page scrape (TikTok showcase → product library) ────────
+//
+// Reads the product cards off a TikTok page the user already has open and
+// signed in to (the affiliate showcase, a shop page). Nothing is clicked or
+// submitted; the page is only scrolled so lazy cards render. The extraction
+// is heuristic — TikTok's markup is not a contract — so the result carries
+// `diag` (counts and a couple of card samples) to tune it against the real
+// page instead of guessing.
+
+async function handleScrapePage(msg) {
+  const { id, params } = msg;
+  const { urlPatterns, scrolls, maxItems } = params || {};
+  const patterns = Array.isArray(urlPatterns) && urlPatterns.length
+    ? urlPatterns : ['https://*.tiktok.com/*'];
+  try {
+    const tabs = await chrome.tabs.query({ url: patterns });
+    if (!tabs.length) {
+      sendToAgent({ id, status: 404, error: 'NO_TIKTOK_TAB' });
+      return;
+    }
+    // The tab the user is looking at wins; otherwise the most recently used.
+    const tab = tabs.find((t) => t.active) || tabs.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0];
+    const [res] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: scrapeProductCardsInPage,
+      args: [{ scrolls: scrolls || 12, maxItems: maxItems || 200 }],
+    });
+    sendToAgent({ id, status: 200, data: JSON.stringify({ tabUrl: tab.url, tabTitle: tab.title, ...(res?.result || {}) }) });
+  } catch (e) {
+    sendToAgent({ id, status: 500, error: e?.message || 'SCRAPE_FAILED' });
+  }
+}
+
+// Runs inside the page: must be self-contained (no closure over this file).
+async function scrapeProductCardsInPage(opts) {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const PRICE = /(?:₫|đ)\s?\d[\d.,]*|\d{1,3}(?:[.,]\d{3})+\s?(?:₫|đ|d\b|VND)|\d+\s?(?:₫|đ)(?![a-zà-ỹ])/i;
+  const PRODUCT_ID = /product[\/=](\d{10,})/i;
+  const NOISE = /^(đã bán|sold|hoa hồng|commission|thêm|add|xem|chia sẻ|share|-?\d+%|miễn phí|free|freeship)/i;
+
+  const found = new Map();
+  const seenCards = new WeakSet();
+  const samples = [];
+  let anchorHits = 0;
+
+  const bigImg = (el) => Array.from(el.querySelectorAll('img'))
+    .filter((i) => (i.naturalWidth || i.width || 0) >= 60 && (i.currentSrc || i.src));
+
+  function titleOf(card) {
+    const lines = (card.innerText || '').split('\n').map((l) => l.trim()).filter(Boolean);
+    const cands = lines.filter((l) => l.length >= 6 && !PRICE.test(l) && !NOISE.test(l));
+    cands.sort((a, b) => b.length - a.length);
+    return cands[0] || '';
+  }
+
+  function add(card, href, pid) {
+    if (seenCards.has(card)) return;
+    const imgs = bigImg(card);
+    const title = titleOf(card);
+    const priceMatch = PRICE.exec(card.innerText || '');
+    if (!title || !imgs.length) return;
+    const image = imgs[0].currentSrc || imgs[0].src;
+    const key = pid || href || `${image}|${title}`;
+    if (found.has(key)) return;
+    seenCards.add(card);
+    found.set(key, {
+      id: pid || '',
+      title: title.slice(0, 200),
+      price: priceMatch ? priceMatch[0].trim() : '',
+      image,
+      url: href || '',
+    });
+    if (samples.length < 2) samples.push(card.outerHTML.slice(0, 600));
+  }
+
+  function climb(node) {
+    // The smallest ancestor that holds an image and a price: the card.
+    let el = node;
+    for (let i = 0; i < 8 && el && el !== document.body; i++, el = el.parentElement) {
+      if (PRICE.test(el.innerText || '') && bigImg(el).length) return el;
+    }
+    return null;
+  }
+
+  function harvest() {
+    for (const a of document.querySelectorAll('a[href]')) {
+      const m = PRODUCT_ID.exec(a.href);
+      if (!m) continue;
+      anchorHits++;
+      const card = climb(a);
+      if (card) add(card, a.href.split('?')[0], m[1]);
+    }
+    // Cards that are not links: start from images with a price nearby.
+    for (const img of document.querySelectorAll('img')) {
+      if ((img.naturalWidth || img.width || 0) < 80) continue;
+      const card = climb(img);
+      if (card) add(card, '', '');
+    }
+  }
+
+  function scrollables() {
+    return Array.from(document.querySelectorAll('*')).filter((el) => {
+      if (el.scrollHeight <= el.clientHeight + 80) return false;
+      const oy = getComputedStyle(el).overflowY;
+      return oy === 'auto' || oy === 'scroll';
+    });
+  }
+
+  let stable = 0;
+  for (let round = 0; round < opts.scrolls && stable < 3 && found.size < opts.maxItems; round++) {
+    const before = found.size;
+    harvest();
+    window.scrollTo(0, document.body.scrollHeight);
+    for (const el of scrollables()) el.scrollTop = el.scrollHeight;
+    await sleep(900);
+    harvest();
+    stable = found.size === before ? stable + 1 : 0;
+  }
+  window.scrollTo(0, 0);
+
+  return {
+    items: Array.from(found.values()).slice(0, opts.maxItems),
+    diag: {
+      anchorHits,
+      imgs: document.images.length,
+      scrollables: scrollables().length,
+      samples,
+      bodyText: (document.body.innerText || '').slice(0, 400),
+    },
+  };
 }
 
 // ─── API Request Proxy (legacy) ─────────────────────────────

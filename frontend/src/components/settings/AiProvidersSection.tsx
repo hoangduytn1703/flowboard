@@ -54,19 +54,19 @@ const OPTIONAL_FEATURES: LLMFeature[] = ["chat_agent"];
 const FEATURE_META: Record<LLMFeature, { title: string; blurb: string }> = {
   auto_prompt: {
     title: "Auto-prompt",
-    blurb: "Expands a short idea into a full image / video prompt. Runs often — favour speed.",
+    blurb: "Mở rộng ý tưởng ngắn thành prompt ảnh / video đầy đủ. Chạy thường xuyên — nên ưu tiên tốc độ.",
   },
   vision: {
     title: "Vision",
-    blurb: "Describes uploaded images. Only vision-capable providers are listed.",
+    blurb: "Mô tả các ảnh đã tải lên. Chỉ liệt kê provider đọc được ảnh.",
   },
   planner: {
     title: "Planner",
-    blurb: "Breaks a goal into a board of connected nodes. Runs rarely — favour quality.",
+    blurb: "Chia mục tiêu thành một board gồm các node liên kết. Ít khi chạy — nên ưu tiên chất lượng.",
   },
   chat_agent: {
     title: "Chat AI",
-    blurb: "The bottom chat agent — several calls per message. Optional: unset uses the Planner's choice.",
+    blurb: "Chat agent ở dưới cùng — mỗi tin nhắn gọi nhiều lần. Không bắt buộc: để trống sẽ dùng lựa chọn của Planner.",
   },
 };
 
@@ -219,12 +219,12 @@ export function AiProvidersSection() {
       setCatalogs((prev) => ({ ...prev, [name]: models }));
       showToast(
         models.length > 0
-          ? `${PROVIDER_LABEL[name]}: ${models.length} models.`
-          : `${PROVIDER_LABEL[name]} returned no models — type a model id instead.`,
+          ? `${PROVIDER_LABEL[name]}: ${models.length} model.`
+          : `${PROVIDER_LABEL[name]} không trả về model nào — hãy nhập ID model.`,
       );
     } catch (err) {
       showToast(
-        `Couldn't refresh models: ${err instanceof Error ? err.message : String(err)}`,
+        `Không làm mới được danh sách model: ${err instanceof Error ? err.message : String(err)}`,
       );
     } finally {
       if (aliveRef.current) {
@@ -248,7 +248,7 @@ export function AiProvidersSection() {
       ...prev,
       [feature]: result.ok
         ? { state: "ok", latencyMs: result.latencyMs }
-        : { state: "fail", error: result.error || "test failed" },
+        : { state: "fail", error: result.error || "kiểm tra thất bại" },
     }));
   }
 
@@ -268,7 +268,7 @@ export function AiProvidersSection() {
         body[feature] = { provider: pin.provider, model: pin.model, effort: pin.effort };
       }
       await setLlmConfig(body);
-      showToast("AI provider settings saved.");
+      showToast("Đã lưu cài đặt AI provider.");
       const fresh = await refresh();
       if (fresh && aliveRef.current) setDraft(draftFrom(fresh));
       // Broadcast so the badge + ForcedSetupGate refresh immediately
@@ -278,7 +278,7 @@ export function AiProvidersSection() {
       window.dispatchEvent(new CustomEvent("flowboard:llm-config-changed"));
     } catch (err) {
       showToast(
-        `Couldn't apply: ${err instanceof Error ? err.message : String(err)}`,
+        `Không áp dụng được: ${err instanceof Error ? err.message : String(err)}`,
       );
     } finally {
       if (aliveRef.current) setApplying(false);
@@ -303,13 +303,13 @@ export function AiProvidersSection() {
     return (
       <div className="ai-providers-section">
         <div className="ai-providers-section__error" role="alert">
-          ⚠ Couldn't load AI provider state.
+          ⚠ Không tải được trạng thái AI provider.
           <button
             type="button"
             className="ai-providers-section__retry"
             onClick={() => void refresh()}
           >
-            Retry
+            Thử lại
           </button>
           <div className="ai-providers-section__error-detail">{loadError}</div>
         </div>
@@ -333,8 +333,9 @@ export function AiProvidersSection() {
   return (
     <div className="ai-providers-section">
       <div className="ai-providers-section__intro">
-        Each feature picks its own provider, model and effort. Cheap and
-        fast where it runs often, slow and strong where it matters.
+        Mỗi tính năng tự chọn provider, model và effort riêng. Chọn loại rẻ
+        và nhanh cho tính năng chạy thường xuyên, loại chậm mà mạnh cho tính
+        năng cần chất lượng.
       </div>
 
       {missing.length > 0 && (
@@ -342,8 +343,8 @@ export function AiProvidersSection() {
         // that's exactly what the backend's `configured` flag (and the
         // forced-setup gate) keys off.
         <div className="ai-providers-section__mixed-notice" role="alert">
-          ⓘ Still unset: {missing.map((f) => FEATURE_META[f].title).join(", ")}.
-          Pick a provider for each, then Apply.
+          ⓘ Chưa chọn: {missing.map((f) => FEATURE_META[f].title).join(", ")}.
+          Hãy chọn provider cho từng mục, rồi bấm Áp dụng.
         </div>
       )}
 
@@ -388,11 +389,11 @@ export function AiProvidersSection() {
           disabled={!dirty || applying}
           title={
             dirty
-              ? "Save these provider / model / effort pins."
-              : "Nothing changed since the last save."
+              ? "Lưu các lựa chọn provider / model / effort này."
+              : "Chưa có thay đổi nào kể từ lần lưu trước."
           }
         >
-          {applying ? "Applying…" : dirty ? "Apply changes" : "Saved"}
+          {applying ? "Đang áp dụng…" : dirty ? "Áp dụng thay đổi" : "Đã lưu"}
         </button>
       </div>
 

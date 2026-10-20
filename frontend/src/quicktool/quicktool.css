@@ -9,7 +9,7 @@
 
 .qt-app {
   display: grid;
-  grid-template-columns: 232px 1fr;
+  grid-template-columns: 280px 1fr;
   height: 100vh;
   width: 100vw;
   background: var(--bg);
@@ -39,15 +39,16 @@
   border-radius: 8px;
   background: var(--qt-accent);
   color: #fff;
-  font-size: 15px;
+  font-size: 18px;
 }
 .qt-brand__name {
   font-weight: 700;
-  font-size: 14px;
+  font-size: 17px;
 }
 .qt-brand__badge {
   margin-left: auto;
-  font-size: 9px;
+  white-space: nowrap;
+  font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   padding: 2px 6px;
@@ -65,7 +66,7 @@
 }
 .qt-nav__group {
   margin: 12px 8px 4px;
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
@@ -77,7 +78,7 @@
   width: 100%;
   padding: 8px 10px;
   font: inherit;
-  font-size: 12px;
+  font-size: 14px;
   text-align: left;
   border: 1px solid transparent;
   border-radius: 8px;
@@ -98,12 +99,12 @@
 }
 .qt-nav__meta {
   margin-left: auto;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
 }
 .qt-nav__empty {
   padding: 8px 10px;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--muted);
 }
 
@@ -126,13 +127,13 @@
   z-index: 5;
 }
 .qt-header__crumb {
-  font-size: 11px;
+  font-size: 13px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted);
 }
 .qt-header__name {
-  font-size: 14px;
+  font-size: 17px;
   font-weight: 600;
 }
 
@@ -153,7 +154,7 @@
   min-width: 260px;
   padding: 6px 10px;
   font: inherit;
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 600;
   background: var(--panel-high);
   border: 1px solid var(--border);
@@ -170,7 +171,7 @@
   margin: 10px 22px 0;
   padding: 8px 12px;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: 14px;
   background: var(--panel-high);
   border: 1px solid var(--border);
   display: flex;
@@ -233,7 +234,7 @@
   place-items: center;
   border-radius: 50%;
   background: var(--panel-high);
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
 }
 .qt-stepper__item--current .qt-stepper__num {
@@ -247,12 +248,12 @@
 .qt-stepper__text {
   display: flex;
   flex-direction: column;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   line-height: 1.2;
 }
 .qt-stepper__text small {
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -262,7 +263,7 @@
 /* body: locked inputs + main */
 .qt-body {
   display: grid;
-  grid-template-columns: 200px 1fr;
+  grid-template-columns: 240px 1fr;
   gap: 14px;
   padding: 14px 22px 24px;
   align-items: start;
@@ -281,7 +282,7 @@
 .qt-locked__row {
   display: flex;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--muted);
 }
 .qt-locked__row strong {
@@ -331,26 +332,26 @@
   gap: 12px;
 }
 .qt-card__eyebrow {
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--qt-accent);
 }
 .qt-card__title {
   margin: 0;
-  font-size: 15px;
+  font-size: 18px;
   font-weight: 700;
 }
 .qt-card__hint {
   margin: 0;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.55;
   color: var(--muted);
 }
 .qt-card__hint strong { color: var(--text); }
 .qt-empty {
   padding: 12px;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--muted);
   border: 1px dashed var(--border);
   border-radius: 8px;
@@ -359,7 +360,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--muted);
 }
 .qt-field > span {
@@ -373,7 +374,7 @@
   width: 100%;
   padding: 7px 10px;
   font: inherit;
-  font-size: 12px;
+  font-size: 14px;
   background: var(--panel-high);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -384,6 +385,10 @@
 .qt-textarea {
   resize: vertical;
   line-height: 1.45;
+  /* Grow with the text instead of hiding the second half behind a scrollbar. */
+  field-sizing: content;
+  min-height: 3.2em;
+  max-height: 22em;
 }
 .qt-field select:focus,
 .qt-field input:focus,
@@ -396,7 +401,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: 14px;
 }
 .qt-form {
   display: flex;
@@ -411,7 +416,7 @@
 .qt-link {
   padding: 0;
   font: inherit;
-  font-size: 10px;
+  font-size: 12px;
   border: none;
   background: none;
   color: var(--qt-accent);
@@ -422,7 +427,7 @@
 .qt-btn {
   padding: 8px 14px;
   font: inherit;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -445,8 +450,8 @@
 .qt-btn--accent:hover:not(:disabled) { filter: brightness(1.08); border-color: var(--qt-accent); }
 .qt-btn--ghost { background: none; }
 .qt-btn--danger { border-color: #ef4444; color: #fca5a5; }
-.qt-btn--small { padding: 5px 10px; font-size: 11px; }
-.qt-btn--big { padding: 12px 18px; font-size: 13px; }
+.qt-btn--small { padding: 5px 10px; font-size: 13px; }
+.qt-btn--big { padding: 12px 18px; font-size: 16px; }
 .project-modal__btn--primary.qt-btn--accent { background: var(--qt-accent); border-color: var(--qt-accent); color: #fff; }
 
 /* step 1 */
@@ -474,7 +479,7 @@
   display: grid;
   place-items: center;
   font: inherit;
-  font-size: 11px;
+  font-size: 13px;
   border: 1px dashed var(--border);
   border-radius: 8px;
   background: var(--panel-high);
@@ -483,9 +488,9 @@
 }
 .qt-photo__empty--static { cursor: default; }
 .qt-busy { border-style: solid; border-color: var(--qt-accent); }
-.qt-photo__name { font-size: 11px; font-weight: 600; }
+.qt-photo__name { font-size: 13px; font-weight: 600; }
 .qt-photo__brief {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -498,7 +503,7 @@
 }
 .qt-model__form {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 8px;
 }
 .qt-settings {
@@ -513,10 +518,10 @@
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
 }
-.qt-setting strong { font-size: 12px; color: var(--text); }
+.qt-setting strong { font-size: 14px; color: var(--text); }
 
 /* step 2 */
 .qt-scenes {
@@ -542,14 +547,14 @@
   background: var(--qt-accent);
   color: #fff;
   font-weight: 700;
-  font-size: 12px;
+  font-size: 14px;
 }
 .qt-scene-row__fields {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
-.qt-scene-row__title { font-size: 12px; font-weight: 600; }
+.qt-scene-row__title { font-size: 14px; font-weight: 600; }
 .qt-scene-row .qt-textarea { background: var(--panel); }
 
 /* steps 3-4 */
@@ -566,8 +571,8 @@
   border: 1px solid var(--border);
   border-radius: 8px;
 }
-.qt-stat strong { font-size: 18px; color: var(--qt-accent); }
-.qt-stat span { font-size: 10px; color: var(--muted); }
+.qt-stat strong { font-size: 21px; color: var(--qt-accent); }
+.qt-stat span { font-size: 12px; color: var(--muted); }
 .qt-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
@@ -586,7 +591,7 @@
 .qt-tile__head {
   display: flex;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: 13px;
 }
 .qt-tile__num { font-weight: 700; }
 .qt-tile__status { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
@@ -612,15 +617,17 @@
   display: grid;
   place-items: center;
   color: var(--muted);
-  font-size: 20px;
+  font-size: 24px;
 }
 .qt-tile--busy .qt-tile__empty::after,
 .qt-tile--busy .qt-tile__poster + * { content: ""; }
 .qt-tile__caption {
-  font-size: 10px;
+  font-size: 14px;
   line-height: 1.4;
   color: var(--muted);
-  max-height: 42px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
   overflow: hidden;
 }
 .qt-tile__actions { display: flex; gap: 6px; }
@@ -641,7 +648,7 @@
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  font-size: 11px;
+  font-size: 13px;
 }
 .qt-cliplist__num { font-weight: 700; color: var(--qt-accent); grid-row: span 2; }
 .qt-cliplist__title { font-weight: 600; }
@@ -660,7 +667,7 @@
   place-items: center;
   padding: 16px;
   text-align: center;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
   border: 1px dashed var(--border);
   background: var(--panel-high);
@@ -700,7 +707,7 @@
   color: var(--muted);
   min-height: 220px;
 }
-.qt-clip__plus { font-size: 32px; line-height: 1; }
+.qt-clip__plus { font-size: 36px; line-height: 1; }
 .qt-clip__thumb {
   width: 100%;
   aspect-ratio: 9 / 16;
@@ -712,16 +719,16 @@
 .qt-clip__thumb--empty {
   display: grid;
   place-items: center;
-  font-size: 28px;
+  font-size: 32px;
 }
-.qt-clip__name { font-size: 12px; font-weight: 600; }
-.qt-clip__meta { font-size: 10px; color: var(--muted); }
+.qt-clip__name { font-size: 14px; font-weight: 600; }
+.qt-clip__meta { font-size: 12px; color: var(--muted); }
 
 /* new-clip dialog */
 .qt-new { width: min(94vw, 760px); }
 .qt-new__section { display: flex; flex-direction: column; gap: 8px; }
 .qt-new__label {
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--qt-accent);
@@ -739,7 +746,7 @@
   gap: 4px;
   padding: 6px;
   font: inherit;
-  font-size: 11px;
+  font-size: 13px;
   text-align: left;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -760,13 +767,26 @@
   display: grid;
   place-items: center;
   color: var(--muted);
-  font-size: 18px;
+  font-size: 21px;
 }
 
 @media (max-width: 1100px) {
   .qt-step--two { grid-template-columns: 1fr; }
   .qt-body { grid-template-columns: 1fr; }
   .qt-locked { position: static; }
+  /* The locked-inputs card is no longer a side column: keep its photo small. */
+  .qt-locked__thumb {
+    width: auto;
+    max-width: 100%;
+    max-height: 200px;
+    object-fit: contain;
+  }
+}
+
+@media (max-width: 900px) {
+  .qt-app { grid-template-columns: 220px 1fr; }
+  .qt-brand__badge { display: none; }
+  .qt-stepper { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 }
 
 /* reference-video dialog */
@@ -783,13 +803,13 @@
   cursor: pointer;
 }
 .qt-ref__drop:hover { border-color: var(--qt-accent); }
-.qt-ref__placeholder { padding: 28px 10px; font-size: 12px; color: var(--muted); }
+.qt-ref__placeholder { padding: 28px 10px; font-size: 14px; color: var(--muted); }
 .qt-ref__preview { max-height: 260px; max-width: 100%; border-radius: 8px; background: #000; }
-.qt-ref__meta { font-size: 11px; color: var(--muted); }
+.qt-ref__meta { font-size: 13px; color: var(--muted); }
 .qt-ref__verdict {
   padding: 10px 12px;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.5;
   background: rgba(110, 231, 183, 0.1);
   border: 1px solid rgba(110, 231, 183, 0.4);
@@ -808,9 +828,9 @@
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  font-size: 11px;
+  font-size: 13px;
 }
-.qt-ref__summary span { color: var(--muted); font-size: 10px; }
+.qt-ref__summary span { color: var(--muted); font-size: 12px; }
 .qt-ref__plan {
   margin: 0;
   padding: 0;
@@ -827,9 +847,9 @@
   border-radius: 8px;
   background: var(--panel);
 }
-.qt-ref__plan-title { font-size: 12px; font-weight: 600; }
-.qt-ref__plan-line { font-size: 12px; color: var(--qt-accent); margin: 2px 0; }
-.qt-ref__plan-prompt { font-size: 10px; color: var(--muted); line-height: 1.4; }
+.qt-ref__plan-title { font-size: 14px; font-weight: 600; }
+.qt-ref__plan-line { font-size: 14px; color: var(--qt-accent); margin: 2px 0; }
+.qt-ref__plan-prompt { font-size: 12px; color: var(--muted); line-height: 1.4; }
 
 /* source video on step 1 */
 .qt-source { display: flex; flex-direction: column; gap: 6px; }
@@ -844,7 +864,7 @@
   padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  font-size: 11px;
+  font-size: 13px;
 }
 .gemini-keys__row--parked { opacity: 0.6; }
 .gemini-keys__state { color: var(--muted); text-align: right; }
@@ -853,7 +873,7 @@
   margin-top: 6px;
   padding: 8px;
   font: inherit;
-  font-size: 11px;
+  font-size: 13px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -865,7 +885,7 @@
 .gemini-keys__btn {
   padding: 5px 10px;
   font: inherit;
-  font-size: 11px;
+  font-size: 13px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--panel-high);
@@ -878,4 +898,129 @@
 .tpl-card--reference.tpl-card--active { border-style: solid; }
 .qt-ref__link { display: flex; gap: 6px; }
 .qt-ref__link .project-modal__input { flex: 1; }
-.qt-ref__or { text-align: center; font-size: 10px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; }
+.qt-ref__or { text-align: center; font-size: 12px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; }
+
+/* ── Products page ─────────────────────────────────────────────────────── */
+.qt-products .project-modal__title {
+  margin: 0 0 8px;
+}
+.qt-products .product-grid {
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 14px;
+}
+.qt-products .project-modal__actions {
+  margin-top: 16px;
+}
+.qt-products .product-form {
+  max-width: 880px;
+}
+.product-card {
+  position: relative;
+}
+.product-card__check {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 1;
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+.product-card--selected {
+  border-color: var(--accent, #ff6b35);
+  box-shadow: 0 0 0 1px var(--accent, #ff6b35) inset;
+}
+.product-bulk {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 16px;
+}
+.product-bulk__all {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.product-bulk__count {
+  opacity: 0.75;
+}
+
+/* Form controls follow the page's type instead of the browser's 13px. */
+.qt-app input,
+.qt-app select,
+.qt-app textarea,
+.qt-app button {
+  font-family: inherit;
+}
+.qt-nav__meta {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.qt-app select {
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+
+/* Product list as a page: the import / action row sits under the title. */
+.qt-products--list {
+  display: flex;
+  flex-direction: column;
+}
+.qt-products--list .project-modal__actions {
+  order: 2;
+  justify-content: flex-start;
+  margin: 4px 0 14px;
+}
+.qt-products--list .product-linkrow,
+.qt-products--list .project-modal__hint:not(:nth-child(2)),
+.qt-products--list .product-bulk,
+.qt-products--list .product-grid,
+.qt-products--list .product-form__error {
+  order: 3;
+}
+
+/* Clip-kind cards: three to a row, so six cards make two full rows. */
+.qt-new .tpl-grid {
+  grid-template-columns: repeat(3, 1fr);
+}
+.qt-new__hint {
+  margin: 0;
+  font-size: 14px;
+  opacity: 0.75;
+}
+.qt-empty-state {
+  grid-column: 1 / -1;
+  padding: 28px 8px;
+  text-align: center;
+  font-size: 16px;
+  opacity: 0.8;
+}
+
+/* Status pill on a scene tile. */
+.qt-tile__status {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: var(--panel-high);
+}
+.qt-tile__status--done { color: #4ade80; background: rgba(74, 222, 128, 0.12); }
+.qt-tile__status--busy { color: #fbbf24; background: rgba(251, 191, 36, 0.12); }
+.qt-tile__status--error { color: #f87171; background: rgba(248, 113, 113, 0.14); }
+
+/* New-clip dialog: keep the buttons in view while the long form scrolls. */
+.qt-new .project-modal__actions {
+  position: sticky;
+  bottom: -18px;
+  margin: 4px -22px -18px;
+  padding: 12px 22px 18px;
+  background: var(--panel-higher);
+  border-top: 1px solid var(--border);
+  z-index: 2;
+}

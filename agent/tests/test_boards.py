@@ -210,3 +210,12 @@ def test_board_data_merges_and_summary_counts_progress(client):
     assert row["summary"] == {"scenes": 2, "scenes_done": 1, "clips": 1, "clips_done": 0,
                               "exported": False, "thumbnail": "m1"}
     assert "summary" not in client.get("/api/boards").json()[0]
+
+
+def test_patching_quicktool_step_keeps_the_template_and_product(client):
+    """A caller that only knows the step must not erase what the board was
+    made from: the wizard's title, product and "+ Clip mới" read it."""
+    bid = client.post("/api/boards", json={"name": "Clip"}).json()["id"]
+    client.patch(f"/api/boards/{bid}", json={"data": {"quicktool": {"template_id": "fashion_ad", "product_id": 7, "step": 1}}})
+    r = client.patch(f"/api/boards/{bid}", json={"data": {"quicktool": {"step": 4}}})
+    assert r.json()["data"]["quicktool"] == {"template_id": "fashion_ad", "product_id": 7, "step": 4}

@@ -45,12 +45,12 @@ const IMAGE_MODELS: { key: ImageModelKey; label: string; hint: string }[] = [
   {
     key: "NANO_BANANA_PRO",
     label: "Nano Banana Pro",
-    hint: "GEM_PIX_2 — premium, higher fidelity, slightly slower",
+    hint: "GEM_PIX_2 — cao cấp, ảnh nét hơn, chậm hơn một chút",
   },
   {
     key: "NANO_BANANA_2",
     label: "Nano Banana 2",
-    hint: "NARWHAL — faster, lighter checkpoint",
+    hint: "NARWHAL — nhanh hơn, bản nhẹ hơn",
   },
 ];
 
@@ -69,25 +69,25 @@ const VIDEO_QUALITIES: {
   {
     key: "lite",
     label: "Veo 3.1 Lite",
-    hint: "Fastest generation, lightest model. Applies to both 16:9 and 9:16.",
+    hint: "Nhanh nhất, model nhẹ nhất. Áp dụng cho cả 16:9 và 9:16.",
     ultraOnly: false,
   },
   {
     key: "fast",
     label: "Veo 3.1 Fast",
-    hint: "Default — balanced fidelity and speed. Applies to both 16:9 and 9:16.",
+    hint: "Mặc định — cân bằng giữa chất lượng và tốc độ. Áp dụng cho cả 16:9 và 9:16.",
     ultraOnly: true,
   },
   {
     key: "quality",
     label: "Veo 3.1 Quality",
-    hint: "Highest fidelity, slowest. Best for hero shots. Applies to both 16:9 and 9:16.",
+    hint: "Chất lượng cao nhất, chậm nhất. Hợp cho cảnh chính. Áp dụng cho cả 16:9 và 9:16.",
     ultraOnly: true,
   },
   {
     key: "lite_relaxed",
-    label: "Veo 3.1 Lite (Low Priority)",
-    hint: "Same Lite checkpoint, low-priority queue — 0 credits. Slower turnaround when Flow is busy.",
+    label: "Veo 3.1 Lite (Ưu tiên thấp)",
+    hint: "Cùng bản Lite nhưng xếp hàng ưu tiên thấp — 0 credit. Chậm hơn khi Flow đang bận.",
     ultraOnly: true,
   },
 ];
@@ -179,7 +179,7 @@ export function SettingsPanel({
       .catch((err: unknown) => {
         if (!alive) return;
         setFlowProjectError(
-          err instanceof Error ? err.message : "Could not read the pinned project",
+          err instanceof Error ? err.message : "Không đọc được project đã ghim",
         );
       });
     return () => {
@@ -211,13 +211,13 @@ export function SettingsPanel({
       useGenerationStore.setState({ projectId: null });
       setProjectNotice(
         res.rebound_boards > 0
-          ? `Saved — ${res.rebound_boards} board${res.rebound_boards === 1 ? "" : "s"} re-pointed at this project`
-          : "Saved",
+          ? `Đã lưu — ${res.rebound_boards} board đã chuyển sang project này`
+          : "Đã lưu",
       );
       onFlowProjectChange?.();
     } catch (err) {
       // 400 detail arrives verbatim from the backend (see setPinnedFlowProject).
-      setProjectSaveError(err instanceof Error ? err.message : "Save failed");
+      setProjectSaveError(err instanceof Error ? err.message : "Lưu thất bại");
     } finally {
       setProjectSaving(false);
     }
@@ -253,7 +253,7 @@ export function SettingsPanel({
     ? "Ultra"
     : tier === "PAYGATE_TIER_ONE"
       ? "Pro"
-      : "Detecting…";
+      : "Đang nhận diện…";
 
   return (
     <div
@@ -268,28 +268,28 @@ export function SettingsPanel({
         className="settings-panel"
         role="dialog"
         aria-modal="true"
-        aria-label="Settings"
+        aria-label="Cài đặt"
       >
         <div className="settings-panel__header">
-        <span className="settings-panel__title">Settings</span>
+        <span className="settings-panel__title">Cài đặt</span>
         <button
           type="button"
           className="settings-panel__close"
           onClick={onClose}
-          aria-label="Close settings"
+          aria-label="Đóng cài đặt"
         >
           ×
         </button>
       </div>
 
       <div className="settings-panel__section">
-        <div className="settings-panel__label">Account tier</div>
+        <div className="settings-panel__label">Gói tài khoản</div>
         <div className="settings-panel__value settings-panel__value--readonly">
           {tierLabel}
         </div>
         <div className="settings-panel__hint">
-          Set by FLOWBOARD_PAYGATE_TIER in the agent's .env — Flow stopped
-          reporting the plan, so it is declared rather than detected.
+          Đặt bằng FLOWBOARD_PAYGATE_TIER trong file .env của agent — Flow
+          không còn báo gói tài khoản nữa nên phải khai báo thủ công.
         </div>
       </div>
 
@@ -298,24 +298,24 @@ export function SettingsPanel({
           way to pick one from a list — the user pastes it, and until they do
           nothing can generate. */}
       <div className="settings-panel__section">
-        <div className="settings-panel__label">Google Flow project</div>
+        <div className="settings-panel__label">Project Google Flow</div>
         {flowProjectError ? (
           <>
             <div className="settings-panel__project-error">{flowProjectError}</div>
             <div className="settings-panel__hint">
-              Close and re-open Settings to retry.
+              Đóng rồi mở lại Cài đặt để thử lại.
             </div>
           </>
         ) : !flowProject ? (
           <div className="settings-panel__value settings-panel__value--readonly">
-            Loading…
+            Đang tải…
           </div>
         ) : (
           <>
             {flowProject.source === "none" ? (
               <div className="settings-panel__project-error">
-                No Flow project is configured, so every generation will fail.
-                Open a project at{" "}
+                Chưa có project Flow nào được cấu hình nên mọi lần tạo đều sẽ lỗi.
+                Hãy mở một project tại{" "}
                 <a
                   className="settings-panel__about-link"
                   href="https://flow.google.com/"
@@ -324,7 +324,7 @@ export function SettingsPanel({
                 >
                   flow.google.com
                 </a>
-                , copy its uuid out of the address bar, and paste it below.
+                , copy uuid trên thanh địa chỉ rồi dán vào ô bên dưới.
               </div>
             ) : (
               <>
@@ -333,8 +333,8 @@ export function SettingsPanel({
                 </div>
                 <div className="settings-panel__hint">
                   {flowProject.source === "override"
-                    ? "Set here in Settings — overrides .env."
-                    : "Pinned by FLOWBOARD_FLOW_PROJECT_ID in the agent's .env."}
+                    ? "Đặt tại Cài đặt — ghi đè .env."
+                    : "Ghim bằng FLOWBOARD_FLOW_PROJECT_ID trong file .env của agent."}
                 </div>
               </>
             )}
@@ -348,7 +348,7 @@ export function SettingsPanel({
                 spellCheck={false}
                 autoComplete="off"
                 disabled={projectSaving}
-                aria-label="Flow project uuid"
+                aria-label="uuid project Flow"
                 onChange={(e) => setProjectDraft(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && canSaveProject) {
@@ -362,15 +362,15 @@ export function SettingsPanel({
                 disabled={projectSaving || !canSaveProject}
                 onClick={() => saveFlowProject(trimmedDraft)}
               >
-                {projectSaving ? "Saving…" : "Save"}
+                {projectSaving ? "Đang lưu…" : "Lưu"}
               </button>
             </div>
 
             {legacyEnvId && (
               <div className="settings-panel__hint">
-                The id in <code>.env</code> is not a uuid. It still works —
-                anything already pinned keeps working — but pinning it from
-                here would need a uuid, so Save stays off until you paste one.
+                ID trong <code>.env</code> không phải uuid. Nó vẫn dùng được —
+                những gì đã ghim vẫn chạy bình thường — nhưng muốn ghim lại
+                từ đây thì cần uuid, nên nút Lưu sẽ tắt cho đến khi bạn dán uuid.
               </div>
             )}
 
@@ -381,10 +381,10 @@ export function SettingsPanel({
                 disabled={projectSaving}
                 onClick={() => saveFlowProject(null)}
               >
-                Clear override —{" "}
+                Xoá ghi đè —{" "}
                 {flowProject.env_project_id
-                  ? `fall back to ${flowProject.env_project_id} from .env`
-                  : "leaves no project configured, so generation stops working"}
+                  ? `quay về ${flowProject.env_project_id} trong .env`
+                  : "sẽ không còn project nào, nên không tạo được nữa"}
               </button>
             )}
 
@@ -396,8 +396,8 @@ export function SettingsPanel({
             )}
 
             <div className="settings-panel__hint">
-              Every board generates into this project. Saving re-points the
-              boards that were on the old one.
+              Mọi board đều tạo vào project này. Khi lưu, các board đang ở project
+              cũ sẽ được chuyển sang project mới.
             </div>
           </>
         )}
@@ -409,7 +409,7 @@ export function SettingsPanel({
           stamps videoModel="omni_flash" (duration is picked per dispatch
           in the GenerationDialog). */}
       <div className="settings-panel__section">
-        <div className="settings-panel__label">Video model</div>
+        <div className="settings-panel__label">Model video</div>
         <div className="settings-panel__radio-group">
           {VIDEO_QUALITIES.map((q) => {
             const locked = q.ultraOnly && tier !== "PAYGATE_TIER_TWO";
@@ -434,7 +434,7 @@ export function SettingsPanel({
                   <div className="settings-panel__radio-label">
                     {q.label}
                     {q.ultraOnly && (
-                      <span className="model-badge">Ultra only</span>
+                      <span className="model-badge">Chỉ Ultra</span>
                     )}
                   </div>
                   <div className="settings-panel__radio-hint">{q.hint}</div>
@@ -458,9 +458,9 @@ export function SettingsPanel({
                 <span className="model-badge">Mặc định</span>
               </div>
               <div className="settings-panel__radio-hint">
-                Reference-image to video. Variable duration (4 / 6 / 8 / 10s)
-                picked per dispatch — 15 / 20 / 25 / 30 credits. Portrait +
-                landscape supported. Khuyên dùng: Veo 3.1 Lite hiện bị Flow
+                Tạo video từ ảnh tham chiếu. Thời lượng linh hoạt (4 / 6 / 8 / 10s)
+                chọn cho mỗi lần tạo — 15 / 20 / 25 / 30 credit. Hỗ trợ cả dọc
+                lẫn ngang. Khuyên dùng: Veo 3.1 Lite hiện bị Flow
                 nhận rồi huỷ trên tài khoản Pro thường.
               </div>
             </div>
@@ -471,7 +471,7 @@ export function SettingsPanel({
       <GeminiKeysSection />
 
       <div className="settings-panel__section">
-        <div className="settings-panel__label">Image model</div>
+        <div className="settings-panel__label">Model ảnh</div>
         <div className="settings-panel__radio-group">
           {IMAGE_MODELS.map((m) => (
             <label
@@ -495,9 +495,9 @@ export function SettingsPanel({
       </div>
 
       <div className="settings-panel__section">
-        <div className="settings-panel__label">About</div>
+        <div className="settings-panel__label">Thông tin</div>
         <div className="settings-panel__about-row">
-          <span className="settings-panel__about-key">Version</span>
+          <span className="settings-panel__about-key">Phiên bản</span>
           <span className="settings-panel__about-value">
             <code>v{APP_VERSION}</code>
             {updateAvailable && latestRelease && (
@@ -506,22 +506,22 @@ export function SettingsPanel({
                 href={latestRelease.htmlUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                title={`Latest: ${latestRelease.tagName}`}
+                title={`Mới nhất: ${latestRelease.tagName}`}
               >
-                New version {latestRelease.tagName} →
+                Có bản mới {latestRelease.tagName} →
               </a>
             )}
           </span>
         </div>
         <div className="settings-panel__about-row">
-          <span className="settings-panel__about-key">Community</span>
+          <span className="settings-panel__about-key">Cộng đồng</span>
           <a
             className="settings-panel__about-link"
             href={COMMUNITY_URL}
             target="_blank"
             rel="noopener noreferrer"
           >
-            FlowKit & Flowboard on Facebook →
+            FlowKit & Flowboard trên Facebook →
           </a>
         </div>
       </div>
@@ -537,12 +537,12 @@ export function SettingsPanel({
             onClick={onLogout}
             disabled={logoutPending}
           >
-            {logoutPending ? "Signing out…" : "Sign out from Flow account"}
+            {logoutPending ? "Đang đăng xuất…" : "Đăng xuất khỏi tài khoản Flow"}
           </button>
           <div className="settings-panel__hint">
-            Clears the cached identity and tells the extension to drop
-            its in-memory token. The WebSocket stays open so signing
-            back in doesn't require a Chrome restart.
+            Xoá thông tin tài khoản đã lưu và báo extension bỏ token đang giữ
+            trong bộ nhớ. Kết nối WebSocket vẫn mở nên đăng nhập lại không
+            cần khởi động lại Chrome.
           </div>
         </div>
       )}

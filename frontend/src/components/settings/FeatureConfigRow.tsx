@@ -111,18 +111,18 @@ export function FeatureConfigRow({
           >
             {!value.provider && (
               <option value="" disabled>
-                Choose…
+                Chọn…
               </option>
             )}
             {options.map((p) => (
               <option key={p.name} value={p.name}>
                 {providerLabel(p.name)}
-                {p.available && p.configured ? "" : " · setup needed"}
+                {p.available && p.configured ? "" : " · cần thiết lập"}
               </option>
             ))}
             {offListProvider && (
               <option value={offListProvider}>
-                {providerLabel(offListProvider)} · no vision support
+                {providerLabel(offListProvider)} · không hỗ trợ vision
               </option>
             )}
           </select>
@@ -139,8 +139,8 @@ export function FeatureConfigRow({
             >
               <option value="">
                 {selected?.defaultModel
-                  ? `Default · ${selected.defaultModel}`
-                  : "Provider default"}
+                  ? `Mặc định · ${selected.defaultModel}`
+                  : "Mặc định của provider"}
               </option>
               {models.map((m) => (
                 <option key={m.id} value={m.id}>
@@ -148,7 +148,7 @@ export function FeatureConfigRow({
                 </option>
               ))}
               {offListModel && (
-                <option value={offListModel}>{offListModel} · not in catalog</option>
+                <option value={offListModel}>{offListModel} · không có trong danh sách</option>
               )}
             </select>
           ) : (
@@ -160,7 +160,7 @@ export function FeatureConfigRow({
               className="feature-config-row__model-input"
               value={value.model ?? ""}
               disabled={!hasProvider}
-              placeholder={selected?.defaultModel ?? "provider default"}
+              placeholder={selected?.defaultModel ?? "mặc định của provider"}
               onChange={(e) => onPatch({ model: e.target.value.trim() || null })}
             />
           )}
@@ -174,7 +174,7 @@ export function FeatureConfigRow({
               value={value.effort ?? ""}
               onChange={(e) => onPatch({ effort: e.target.value || null })}
             >
-              <option value="">Default</option>
+              <option value="">Mặc định</option>
               {efforts.map((level) => (
                 <option key={level} value={level}>
                   {level}
@@ -186,8 +186,8 @@ export function FeatureConfigRow({
               className="feature-config-row__na"
               title={
                 hasProvider
-                  ? `${providerLabel(selected.name)} doesn't expose effort levels.`
-                  : "Pick a provider first."
+                  ? `${providerLabel(selected.name)} không có các mức effort.`
+                  : "Hãy chọn provider trước."
               }
             >
               —
@@ -201,8 +201,8 @@ export function FeatureConfigRow({
             className="feature-test-row__btn"
             onClick={onRefreshModels}
             disabled={!hasProvider || modelsRefreshing}
-            title="Re-fetch this provider's model list from the CLI."
-            aria-label="Refresh model list"
+            title="Lấy lại danh sách model của provider này từ CLI."
+            aria-label="Làm mới danh sách model"
           >
             {modelsRefreshing ? "⟳…" : "⟳"}
           </button>
@@ -211,13 +211,13 @@ export function FeatureConfigRow({
             className="feature-test-row__btn"
             onClick={onTest}
             disabled={!hasProvider || test.state === "testing"}
-            title="Send one tiny prompt through this exact provider/model/effort."
+            title="Gửi một prompt nhỏ qua đúng provider/model/effort này."
           >
             {test.state === "testing"
-              ? "Testing…"
+              ? "Đang kiểm tra…"
               : test.state === "untested"
-                ? "Test"
-                : "Re-test"}
+                ? "Kiểm tra"
+                : "Kiểm tra lại"}
           </button>
         </div>
       </div>
@@ -225,23 +225,23 @@ export function FeatureConfigRow({
       <div className="feature-config-row__status">
         {test.state === "ok" && (
           <span className="feature-test-row__latency">
-            ✓ Connected · {test.latencyMs ?? "?"}ms
+            ✓ Đã kết nối · {test.latencyMs ?? "?"}ms
           </span>
         )}
         {test.state === "fail" && (
           <span className="feature-test-row__error">✗ {test.error}</span>
         )}
         {test.state === "testing" && (
-          <span className="feature-test-row__hint">Pinging the CLI…</span>
+          <span className="feature-test-row__hint">Đang gọi CLI…</span>
         )}
         {test.state === "untested" && !hasProvider && (
           <span className="feature-test-row__hint">
-            No provider pinned — this feature can't run yet.
+            Chưa chọn provider — tính năng này chưa chạy được.
           </span>
         )}
         {test.state === "untested" && ready && (
           <span className="feature-test-row__hint">
-            Not tested. Testing is optional — Apply saves either way.
+            Chưa kiểm tra. Kiểm tra là tùy chọn — bấm Áp dụng vẫn lưu được.
           </span>
         )}
         {hasProvider && !ready && (
@@ -250,15 +250,15 @@ export function FeatureConfigRow({
           <span className="feature-config-row__setup">
             <span className="feature-test-row__error">
               {selected.lastError === "not_authenticated"
-                ? `${providerLabel(selected.name)} CLI is installed but not signed in.`
-                : `${providerLabel(selected.name)} CLI isn't ready.`}
+                ? `${providerLabel(selected.name)} CLI đã cài nhưng chưa đăng nhập.`
+                : `${providerLabel(selected.name)} CLI chưa sẵn sàng.`}
             </span>
             <button
               type="button"
               className="selection-panel__setup-btn"
               onClick={onSetupHelp}
             >
-              Setup help →
+              Hướng dẫn thiết lập →
             </button>
           </span>
         )}

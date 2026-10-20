@@ -12,6 +12,14 @@ function statusLabel(n: FlowNode | null): string {
   return "chưa tạo";
 }
 
+/** Colour of the status pill: done, working, failed, or not started. */
+function statusTone(n: FlowNode | null): string {
+  if (!n) return "idle";
+  if (isBusy(n)) return "busy";
+  if (n.data.status === "error") return "error";
+  return hasMedia(n) ? "done" : "idle";
+}
+
 /** Steps 3 and 4 — the same grid, once for scene images, once for clips. */
 export function StepMedia({ roles, kind }: { roles: ClipRoles; kind: "image" | "video" }) {
   const generateScene = useQuicktoolStore((s) => s.generateScene);
@@ -58,7 +66,7 @@ export function StepMedia({ roles, kind }: { roles: ClipRoles; kind: "image" | "
             <div key={scene.image.id} className={`qt-tile${node && isBusy(node) ? " qt-tile--busy" : ""}`}>
               <div className="qt-tile__head">
                 <span className="qt-tile__num">Cảnh {scene.index}</span>
-                <span className="qt-tile__status">{statusLabel(node)}</span>
+                <span className={`qt-tile__status qt-tile__status--${statusTone(node)}`} title={statusLabel(node)}>{statusLabel(node)}</span>
               </div>
               <div className="qt-tile__media" onClick={() => node && hasMedia(node) && useGenerationStore.getState().openResultViewer(node.id)}>
                 {node && hasMedia(node) ? (

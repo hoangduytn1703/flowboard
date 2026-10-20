@@ -168,3 +168,81 @@ async def analyze(url: str, product: Optional[dict], *, scenes: Optional[int] = 
         raise ProductLinkError(str(exc)) from exc
     analysis["page"] = {"url": page["url"], "title": page["title"], "image_url": page["image_url"]}
     return analysis
+
+
+# ── one product, for the product library ───────────────────────────────────
+
+_PRODUCT_SYSTEM = (
+    "You fill in a product-library card for a Vietnamese TikTok Shop affiliate from the text of "
+    "a product page. Use only facts stated on the page — never invent specs, materials, prices "
+    "or promises. name: the product's name in Vietnamese, tidied (drop keyword stuffing, "
+    "hashtags and repeated words), <= 80 chars. description: ENGLISH, <= 300 chars, what the "
+    "item physically looks like (type, colour, material, shape, distinctive details, size cues) "
+    "so an image model can draw it; no marketing words. category: fashion for clothing, shoes, "
+    "bags and accessories; cosmetics for beauty and skincare; food for food and drink; else "
+    "other. price: the current selling price exactly as the page shows it (e.g. '79.434đ'), "
+    "empty if absent. selling_points: 3-5 short Vietnamese lines, one per line, the real "
+    "benefits and facts from the page, each <= 90 chars. Output ONLY the JSON object."
+)
+
+_PRODUCT_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "name": {"type": "STRING"},
+        "description": {"type": "STRING"},
+        "category": {"type": "STRING", "enum": ["fashion", "cosmetics", "food", "other"]},
+        "price": {"type": "STRING"},
+        "selling_points": {"type": "STRING"},
+    },
+    "required": ["name", "description", "category", "price", "selling_points"],
+}
+
+_PDP_RE = re.compile(r"^(https?://[^/]*tiktok\.com/[a-z]{2}/pdp/\d+)", re.I)
+
+
+def clean_link(url: str) -> str:
+    """The link worth keeping on a product: a TikTok share link carries a
+    page of tracking parameters (and ids that identify the sharer), so it
+    is cut down to the product page itself."""
+    m = _PDP_RE.match(url.strip())
+    return m.group(1) if m else url.strip().split("#", 1)[0][:500]
+
+
+def _bigger_image(url: str) -> str:
+    """TikTok's og:image is a 260 px thumbnail; the same asset at 800 px is
+    served from the same path with the size in the template suffix (no
+    signature on it), which is what an image model should be shown."""
+    if "ibyteimg.com" in url:
+        return re.sub(r"(resize-(?:webp|jpeg)):\d+:\d+", r"\1:800:800", url)
+    return url
+
+
+async def extract_product(url: str, *, model: str = gemini_api.DEFAULT_MODEL) -> dict[str, Any]:
+    """A product-library draft read from the page at ``url``:
+    ``{draft: {name, description, category, price, selling_points, link},
+    image_url}``."""
+    page = await fetch_page(url)
+    try:
+        text = await gemini_api.generate_text(
+            f"PRODUCT PAGE ({clean_link(page['url'])}):\n{page['text']}",
+            system=_PRODUCT_SYSTEM, model=model, response_schema=_PRODUCT_SCHEMA, timeout=120.0,
+        )
+        data = gemini_api.parse_json(text)
+    except gemini_api.GeminiAPIError as exc:
+        raise ProductLinkError(str(exc)) from exc
+    except ValueError as exc:
+        raise ProductLinkError(f"Gemini returned invalid JSON: {exc}") from exc
+    if not isinstance(data, dict) or not str(data.get("name") or "").strip():
+        raise ProductLinkError("Không đọc được tên sản phẩm từ trang này")
+    category = data.get("category") if data.get("category") in ("fashion", "cosmetics", "food", "other") else "other"
+    return {
+        "draft": {
+            "name": str(data["name"]).strip()[:120],
+            "description": str(data.get("description") or "").strip()[:600],
+            "category": category,
+            "price": str(data.get("price") or "").strip()[:60],
+            "selling_points": str(data.get("selling_points") or "").strip()[:2000],
+            "link": clean_link(page["url"]),
+        },
+        "image_url": _bigger_image(page["image_url"]),
+    }

@@ -1316,6 +1316,54 @@ export async function listProducts(): Promise<Product[]> {
   return res.json();
 }
 
+/** Delete several products in one call; returns how many existed. */
+export async function bulkDeleteProducts(ids: number[]): Promise<number> {
+  const res = await fetch("/api/products/bulk-delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return (await res.json()).deleted;
+}
+
+export interface ProductFromLink {
+  draft: Pick<Product, "name" | "description" | "category" | "price" | "selling_points" | "link">;
+  image_url: string | null;
+}
+
+/** A product-library draft read from a product page (TikTok Shop, Shopee …). */
+export async function productFromLink(url: string): Promise<ProductFromLink> {
+  const res = await fetch("/api/products/from-link", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
+}
+
+export interface TikTokImportResult {
+  found: number;
+  created: number;
+  skipped: number;
+  photos_pending: number;
+  tab_url: string | null;
+  tab_title: string | null;
+  diag: { anchorHits: number; imgs: number; scrollables: number; samples: string[]; bodyText: string } | null;
+}
+
+/** Read the products off the TikTok tab open in Chrome (via the extension). */
+export async function importProductsFromTikTok(): Promise<TikTokImportResult> {
+  const res = await fetch("/api/products/import-tiktok", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
+}
+
 export async function createProduct(draft: ProductDraft): Promise<Product> {
   const res = await fetch("/api/products", {
     method: "POST",
@@ -1360,7 +1408,7 @@ export async function createBoardFromTemplate(
   });
   if (!res.ok) throw new Error(await extractErrorMessage(res));
   const body = (await res.json()) as Board & { nodes: Record<string, string> };
-  return { id: body.id, name: body.name, created_at: body.created_at };
+  return { id: body.id, name: body.name, created_at: body.created_at, data: body.data };
 }
 
 /** The user's rough prompt → a polished English one (same rules as auto-prompt). */

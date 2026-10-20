@@ -67,6 +67,12 @@ export function QuicktoolSidebar({
           <span className="qt-nav__meta">Gemini</span>
         </button>
 
+        <button type="button" className="qt-nav__item" onClick={() => navigate("/clips/new?template=product_link")}
+                title="Dán link trang sản phẩm, AI đọc thông tin và viết kịch bản quảng cáo">
+          <span className="qt-nav__icon">🔗</span> Clip từ link sản phẩm
+          <span className="qt-nav__meta">Gemini</span>
+        </button>
+
         <div className="qt-nav__group">Thư viện</div>
         <button type="button" className={`qt-nav__item${is("/products") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/products")}>
           <span className="qt-nav__icon">🛍️</span> Sản phẩm đang bán
@@ -75,7 +81,7 @@ export function QuicktoolSidebar({
         <div className="qt-nav__group">Nâng cao</div>
         <button type="button" className="qt-nav__item" onClick={() => { setUiMode("canvas"); navigate(boardId !== null ? `/canvas/${boardId}` : "/canvas"); }}
                 title="Bảng node kéo thả — chỉnh từng node, nối dây, chat AI">
-          <span className="qt-nav__icon">🧩</span> Canvas (node)
+          <span className="qt-nav__icon">🧩</span> Canvas (kéo thả node)
         </button>
         <button type="button" className={`qt-nav__item${is("/settings") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/settings")}
                 title="Model ảnh/video, AI provider, Flow project">

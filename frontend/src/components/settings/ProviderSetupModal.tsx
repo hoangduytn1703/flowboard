@@ -41,9 +41,9 @@ function CommandLine({ cmd }: CommandLineProps) {
         type="button"
         className="setup-modal__copy"
         onClick={handleCopy}
-        aria-label="Copy command"
+        aria-label="Sao chép lệnh"
       >
-        {copied ? "✓ Copied" : "Copy"}
+        {copied ? "✓ Đã chép" : "Sao chép"}
       </button>
     </div>
   );
@@ -80,7 +80,7 @@ export function ProviderSetupModal({ provider, open, onClose }: ProviderSetupMod
             type="button"
             className="setup-modal__close"
             onClick={onClose}
-            aria-label="Close setup guide"
+            aria-label="Đóng hướng dẫn"
           >
             ×
           </button>
@@ -100,14 +100,14 @@ export function ProviderSetupModal({ provider, open, onClose }: ProviderSetupMod
             target="_blank"
             rel="noopener noreferrer"
           >
-            Open {labelFor(provider)} docs ↗
+            Mở tài liệu {labelFor(provider)} ↗
           </a>
           <button
             type="button"
             className="setup-modal__close-btn"
             onClick={onClose}
           >
-            Close
+            Đóng
           </button>
         </div>
       </div>
@@ -119,29 +119,29 @@ function ClaudeContent() {
   return (
     <div className="setup-modal__body">
       <p>
-        Flowboard uses your existing Claude subscription via the official
-        CLI — no API key needed.
+        Flowboard dùng gói Claude bạn đang có thông qua CLI chính thức —
+        không cần API key.
       </p>
       <ol className="setup-modal__steps">
         <li>
-          <span className="setup-modal__step-label">Install</span>
+          <span className="setup-modal__step-label">Cài đặt</span>
           <CommandLine cmd="npm install -g @anthropic-ai/claude-code" />
         </li>
         <li>
-          <span className="setup-modal__step-label">Authenticate</span>
+          <span className="setup-modal__step-label">Đăng nhập</span>
           <CommandLine cmd="claude" />
           <span className="setup-modal__step-hint">
-            Opens a browser for OAuth — sign in with your Claude account.
+            Mở trình duyệt để đăng nhập OAuth — đăng nhập bằng tài khoản Claude của bạn.
           </span>
         </li>
         <li>
-          <span className="setup-modal__step-label">Verify</span>
+          <span className="setup-modal__step-label">Kiểm tra phiên bản</span>
           <CommandLine cmd="claude --version" />
         </li>
       </ol>
       <p className="setup-modal__note">
-        Once installed + authenticated, the Claude row above flips to
-        ✓ Connected automatically (the panel polls every 30s).
+        Cài đặt và đăng nhập xong, dòng Claude ở trên sẽ tự chuyển sang
+        ✓ Đã kết nối (bảng này tự kiểm tra mỗi 30 giây).
       </p>
     </div>
   );
@@ -151,26 +151,26 @@ function GeminiContent() {
   return (
     <div className="setup-modal__body">
       <p>
-        Flowboard uses your existing Gemini subscription via the official
-        CLI — no API key needed.
+        Flowboard dùng gói Gemini bạn đang có thông qua CLI chính thức —
+        không cần API key.
       </p>
       <ol className="setup-modal__steps">
         <li>
-          <span className="setup-modal__step-label">Install</span>
+          <span className="setup-modal__step-label">Cài đặt</span>
           <CommandLine cmd="npm install -g @google/gemini-cli" />
         </li>
         <li>
-          <span className="setup-modal__step-label">Authenticate</span>
+          <span className="setup-modal__step-label">Đăng nhập</span>
           <CommandLine cmd="gemini auth login" />
         </li>
         <li>
-          <span className="setup-modal__step-label">Verify</span>
+          <span className="setup-modal__step-label">Kiểm tra phiên bản</span>
           <CommandLine cmd="gemini --version" />
         </li>
       </ol>
       <p className="setup-modal__note">
-        Once authenticated, the Gemini row will flip to ✓ Connected on
-        the next 30s poll.
+        Đăng nhập xong, dòng Gemini sẽ chuyển sang ✓ Đã kết nối ở lần
+        kiểm tra 30 giây kế tiếp.
       </p>
     </div>
   );
@@ -192,7 +192,7 @@ function OpenAiContent({ tab, onTabChange }: OpenAiContentProps) {
           className={`setup-modal__tab${tab === "cli" ? " setup-modal__tab--active" : ""}`}
           onClick={() => onTabChange("cli")}
         >
-          Codex CLI (recommended)
+          Codex CLI (khuyên dùng)
         </button>
         <button
           type="button"
@@ -207,32 +207,32 @@ function OpenAiContent({ tab, onTabChange }: OpenAiContentProps) {
 
       {tab === "cli" ? (
         <>
-          <p>ChatGPT Plus or Pro subscription required.</p>
+          <p>Cần gói ChatGPT Plus hoặc Pro.</p>
           <ol className="setup-modal__steps">
             <li>
-              <span className="setup-modal__step-label">Install</span>
+              <span className="setup-modal__step-label">Cài đặt</span>
               <CommandLine cmd="npm install -g @openai/codex" />
             </li>
             <li>
-              <span className="setup-modal__step-label">Authenticate</span>
+              <span className="setup-modal__step-label">Đăng nhập</span>
               <CommandLine cmd="codex login" />
             </li>
             <li>
-              <span className="setup-modal__step-label">Verify</span>
+              <span className="setup-modal__step-label">Kiểm tra phiên bản</span>
               <CommandLine cmd="codex --version" />
             </li>
           </ol>
           <p className="setup-modal__note">
-            If your Codex version is text-only, you can add an OpenAI API
-            key below as a Vision fallback in the OpenAI row above.
+            Nếu bản Codex của bạn chỉ xử lý văn bản, bạn có thể thêm API key
+            OpenAI ở dòng OpenAI phía trên để dự phòng cho Vision.
           </p>
         </>
       ) : (
         <>
-          <p>For users without ChatGPT Plus or Pro.</p>
+          <p>Dành cho người không có ChatGPT Plus hoặc Pro.</p>
           <ol className="setup-modal__steps">
             <li>
-              <span className="setup-modal__step-label">Get a key</span>
+              <span className="setup-modal__step-label">Lấy key</span>
               <a
                 className="setup-modal__step-link"
                 href="https://platform.openai.com/api-keys"
@@ -243,15 +243,15 @@ function OpenAiContent({ tab, onTabChange }: OpenAiContentProps) {
               </a>
             </li>
             <li>
-              <span className="setup-modal__step-label">Save it</span>
+              <span className="setup-modal__step-label">Lưu key</span>
               <span className="setup-modal__step-hint">
-                Paste in the OpenAI row above and click Save.
+                Dán vào dòng OpenAI phía trên rồi bấm Lưu.
               </span>
             </li>
           </ol>
           <p className="setup-modal__note">
-            The key stays in <code>~/.flowboard/secrets.json</code>{" "}
-            (mode 600, local only) and is never sent anywhere except
+            Key được lưu trong <code>~/.flowboard/secrets.json</code>{" "}
+            (quyền 600, chỉ trên máy bạn) và không bao giờ gửi đi đâu ngoài
             api.openai.com.
           </p>
         </>
@@ -264,46 +264,45 @@ function MuseContent() {
   return (
     <div className="setup-modal__body">
       <p>
-        Muse needs no CLI and no key in this dialog. Pick one transport:
-        the <strong>muse2api</strong> gateway (muse.ai as an
-        OpenAI-compatible API), or a <strong>Pax worker</strong> polling
-        Flowboard's job queue.
+        Muse không cần CLI và không cần nhập key trong hộp thoại này. Chọn
+        một cách kết nối: cổng <strong>muse2api</strong> (muse.ai dưới dạng
+        API tương thích OpenAI), hoặc <strong>Pax worker</strong> lấy việc
+        từ hàng đợi của Flowboard.
       </p>
       <ol className="setup-modal__steps">
         <li>
           <span className="setup-modal__step-label">
-            Option A — muse2api gateway
+            Cách A — cổng muse2api
           </span>
           <CommandLine cmd="FLOWBOARD_MUSE2API_BASE=http://127.0.0.1:18610" />
           <CommandLine cmd="FLOWBOARD_MUSE2API_KEY=<MUSE2API_API_KEY>" />
           <span className="setup-modal__step-hint">
-            Add both to <code>.env</code> at the repo root and restart the
-            agent. LLM features, image and video generation then call
-            muse2api directly; the row flips to ✓ Connected when its
-            /readyz reports ready.
+            Thêm cả hai vào <code>.env</code> ở thư mục gốc rồi khởi động lại
+            agent. Các tính năng LLM, tạo ảnh và video sẽ gọi thẳng muse2api;
+            dòng này chuyển sang ✓ Đã kết nối khi /readyz báo sẵn sàng.
           </span>
         </li>
         <li>
           <span className="setup-modal__step-label">
-            Option B — Pax worker
+            Cách B — Pax worker
           </span>
           <CommandLine cmd="python agent/scripts/muse_worker.py --worker-id pax-1" />
           <span className="setup-modal__step-hint">
-            Used only when FLOWBOARD_MUSE2API_BASE is unset. Run on the
-            same host as the agent; the row flips to ✓ Connected on its
-            first poll (~30s).
+            Chỉ dùng khi chưa đặt FLOWBOARD_MUSE2API_BASE. Chạy trên cùng máy
+            với agent; dòng này chuyển sang ✓ Đã kết nối sau lần kiểm tra
+            đầu tiên (~30 giây).
           </span>
         </li>
         <li>
-          <span className="setup-modal__step-label">Test</span>
+          <span className="setup-modal__step-label">Kiểm tra</span>
           <span className="setup-modal__step-hint">
-            Click “Test” on a feature row — it sends a real round-trip
-            and reports latency.
+            Bấm “Kiểm tra” trên một dòng tính năng — hệ thống gửi một lượt
+            thật và báo độ trễ.
           </span>
         </li>
       </ol>
       <p className="setup-modal__note">
-        See docs/muse-provider.md for what each transport supports.
+        Xem docs/muse-provider.md để biết mỗi cách kết nối hỗ trợ gì.
       </p>
     </div>
   );
@@ -312,13 +311,13 @@ function MuseContent() {
 function titleFor(p: LLMProviderName): string {
   switch (p) {
     case "claude":
-      return "🤖 Claude CLI Setup";
+      return "🤖 Thiết lập Claude CLI";
     case "gemini":
-      return "🤖 Gemini CLI Setup";
+      return "🤖 Thiết lập Gemini CLI";
     case "openai":
-      return "🤖 OpenAI Setup";
+      return "🤖 Thiết lập OpenAI";
     case "muse":
-      return "🤖 Muse Setup";
+      return "🤖 Thiết lập Muse";
   }
 }
 

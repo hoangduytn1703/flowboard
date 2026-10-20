@@ -172,7 +172,7 @@ export function AccountPanel({
 
   const tier = profile?.paygate_tier ?? null;
 
-  const displayName = profile?.name?.trim() || "Flow account";
+  const displayName = profile?.name?.trim() || "Tài khoản Flow";
   const email = profile?.email ?? null;
   const picture = profile?.picture ?? null;
   const initial = displayName.slice(0, 1).toUpperCase();
@@ -200,7 +200,7 @@ export function AccountPanel({
           !email ? " account-panel--disconnected" : ""
         }`}
         role="region"
-        aria-label="Account"
+        aria-label="Tài khoản"
       >
         {/* Avatar + cog only render when an extension session is live —
             without an email there's no profile to show and the settings
@@ -240,7 +240,7 @@ export function AccountPanel({
             {(tier || creditsLabel) && (
               <div
                 className="account-panel__status-row"
-                title={tier ? `${tierLabel}${creditsLabel ? ` · ${creditsLabel} credits remaining` : ""}` : undefined}
+                title={tier ? `${tierLabel}${creditsLabel ? ` · còn ${creditsLabel} credit` : ""}` : undefined}
               >
                 {tier && (
                   <span
@@ -256,7 +256,7 @@ export function AccountPanel({
                 {creditsLabel && (
                   <span
                     className="account-panel__credits-inline"
-                    title={`${creditsLabel} credits remaining`}
+                    title={`Còn ${creditsLabel} credit`}
                   >
                     <span className="account-panel__credits-value">{creditsLabel}</span>
                   </span>
@@ -276,18 +276,18 @@ export function AccountPanel({
             {scanState === "no-extension" ? (
               <div className="account-panel__scan-hint" role="alert">
                 <span className="account-panel__scan-hint-title">
-                  ⚠ Extension not detected
+                  ⚠ Không phát hiện extension
                 </span>
                 <span className="account-panel__scan-hint-text">
-                  Refresh the Flow tab, then reload the Flowboard extension.
+                  Tải lại tab Flow, rồi tải lại extension Flowboard.
                 </span>
                 <button
                   type="button"
                   className="account-panel__scan-btn"
                   onClick={handleScan}
-                  title="Scan again for an extension connection"
+                  title="Quét lại kết nối extension"
                 >
-                  Try again
+                  Thử lại
                 </button>
               </div>
             ) : (
@@ -296,9 +296,9 @@ export function AccountPanel({
                 className="account-panel__scan-btn"
                 onClick={handleScan}
                 disabled={scanState === "scanning"}
-                title="Scan for an extension connection and re-fetch user info"
+                title="Quét kết nối extension và lấy lại thông tin tài khoản"
               >
-                {scanState === "scanning" ? "Scanning…" : "🔍 Scan extension"}
+                {scanState === "scanning" ? "Đang quét…" : "🔍 Quét extension"}
               </button>
             )}
           </div>
@@ -308,8 +308,8 @@ export function AccountPanel({
             type="button"
             className="account-panel__cog"
             onClick={() => setOpen((v) => !v)}
-            aria-label="Open settings"
-            title="Settings"
+            aria-label="Mở cài đặt"
+            title="Cài đặt"
           >
             ⚙
           </button>
@@ -326,7 +326,7 @@ export function AccountPanel({
               href={latestRelease.htmlUrl}
               target="_blank"
               rel="noopener noreferrer"
-              title={`Latest release ${latestRelease.tagName} — click to view`}
+              title={`Bản mới nhất ${latestRelease.tagName} — bấm để xem`}
             >
               ↑ {latestRelease.tagName}
             </a>
@@ -345,11 +345,11 @@ export function AccountPanel({
           <span className="account-panel__tier-warning-icon" aria-hidden="true">⚠</span>
           <div className="account-panel__tier-warning-body">
             <span className="account-panel__tier-warning-title">
-              Plan not configured
+              Chưa cấu hình gói tài khoản
             </span>
             <span className="account-panel__tier-warning-text">
               {profile?.paygate_tier_error
-                ?? "Set FLOWBOARD_PAYGATE_TIER to PAYGATE_TIER_ONE (Pro) or PAYGATE_TIER_TWO (Ultra)."}
+                ?? "Đặt FLOWBOARD_PAYGATE_TIER thành PAYGATE_TIER_ONE (Pro) hoặc PAYGATE_TIER_TWO (Ultra)."}
             </span>
           </div>
           <a
@@ -358,7 +358,7 @@ export function AccountPanel({
             target="_blank"
             rel="noopener noreferrer"
           >
-            Open Flow ↗
+            Mở Flow ↗
           </a>
         </div>
       )}

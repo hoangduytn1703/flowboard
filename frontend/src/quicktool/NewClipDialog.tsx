@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   analyzeProductLink,
   analyzeReferenceVideo,
   buildFromReferenceVideo,
+  createBoardFromTemplate,
   fetchReferenceVideo,
   listProducts,
   mediaUrl,
@@ -18,6 +20,40 @@ import { useBoardStore } from "../store/board";
 export const REFERENCE_KIND = "reference_video";
 /** The other non-template card: a product page link instead of a video. */
 export const PRODUCT_LINK_KIND = "product_link";
+
+/** Backdrops offered for the extra clips of one product, per template. The
+ * first entry of each is that template's own default, so clip 1 is unchanged. */
+const SETTING_IDEAS: Record<string, string[]> = {
+  fashion_ad: [
+    "a bright minimalist studio with wooden wardrobes behind the model",
+    "a sunlit Vietnamese café terrace with rattan chairs and green plants",
+    "a quiet Hanoi old-quarter street with yellow walls in soft morning light",
+    "a modern co-working space with large windows and white desks",
+    "a cozy bedroom corner with a full-length mirror and warm lamp light",
+  ],
+  cosmetics_ad: [
+    "a clean pastel beauty studio with soft diffused light",
+    "a bright bathroom vanity with white marble and morning window light",
+    "a cozy bedroom dressing table with warm lamp light and a round mirror",
+    "a minimalist cream-colored studio with a single dried-flower vase",
+    "a sunny balcony with sheer curtains and potted plants",
+  ],
+  fast_food_ad: [
+    "a bright modern fast-food diner with a wooden table",
+    "a lively Vietnamese street-food stall with plastic stools at dusk",
+    "a sunny rooftop terrace table with city skyline behind",
+    "a cozy home kitchen counter with warm pendant light",
+    "a clean white picnic table in a green park",
+  ],
+  unboxing_review: [
+    "a tidy wooden desk by a window with soft daylight",
+    "a modern living-room coffee table with a grey sofa behind",
+    "a bright white studio desk with a ring light visible",
+    "a cozy bedroom desk with fairy lights and a plant",
+    "a minimalist workspace with a monitor and dark wooden shelves",
+  ],
+};
+const MAX_CLIPS = 5;
 
 type RefPhase = "pick" | "fetching" | "uploading" | "analyzing" | "review" | "building";
 
@@ -35,12 +71,15 @@ export function NewClipDialog({
   initialProductId,
   onClose,
   onCreated,
+  onCreatedMany,
 }: {
   templates: BoardTemplate[];
   initialTemplateId: string | null;
   initialProductId: number | null;
   onClose: () => void;
   onCreated: (boardId: number) => void;
+  /** Several clips were made at once: land on the library, not on one clip. */
+  onCreatedMany?: (boardIds: number[]) => void;
 }) {
   const createNewBoardFromTemplate = useBoardStore((s) => s.createNewBoardFromTemplate);
   const [products, setProducts] = useState<Product[]>([]);
@@ -48,6 +87,10 @@ export function NewClipDialog({
   const [kind, setKind] = useState<string>(initialTemplateId ?? templates[0]?.id ?? "");
   const [inputs, setInputs] = useState<Record<string, string>>({});
   const [name, setName] = useState("");
+  // One product, several clips: clip 1 uses the "Bối cảnh" field, the others
+  // these backdrops.
+  const [clipCount, setClipCount] = useState(1);
+  const [extraSettings, setExtraSettings] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Reference-video mode.
@@ -95,6 +138,7 @@ export function NewClipDialog({
   useEffect(() => {
     if (!template) return;
     setInputs(Object.fromEntries(template.inputs.map((i) => [i.key, i.default ?? ""])));
+    setExtraSettings([]);
   }, [kind]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -154,11 +198,21 @@ export function NewClipDialog({
     }
   }
 
+  /** Backdrop for extra clip ``n`` (1-based after the first): what the user
+   * typed, else the next idea that differs from clip 1's. */
+  function settingFor(n: number): string {
+    const typed = extraSettings[n - 1];
+    if (typed !== undefined) return typed;
+    const first = inputs.setting ?? "";
+    const ideas = (SETTING_IDEAS[kind] ?? SETTING_IDEAS.fashion_ad).filter((x) => x !== first);
+    return ideas[(n - 1) % ideas.length];
+  }
+
   async function createFromTemplate() {
     if (!template || busy) return;
     setBusy(true);
     setError(null);
-    const finalName = name.trim() || (product ? `${product.name} — ${template.title}` : template.title);
+    const baseName = name.trim() || (product ? `${product.name} — ${template.title}` : template.title);
     // With a product the backend fills {{product}} from its description;
     // the product-name field follows the product too.
     const sent = { ...inputs };
@@ -166,13 +220,32 @@ export function NewClipDialog({
       delete sent.product;
       delete sent.product_name;
     }
-    const id = await createNewBoardFromTemplate(kind, finalName, sent, productId);
-    setBusy(false);
-    if (id === null) {
-      setError(useBoardStore.getState().error ?? "Không tạo được clip");
+    if (clipCount <= 1) {
+      const id = await createNewBoardFromTemplate(kind, baseName, sent, productId);
+      setBusy(false);
+      if (id === null) {
+        setError(useBoardStore.getState().error ?? "Không tạo được clip");
+        return;
+      }
+      onCreated(id);
       return;
     }
-    onCreated(id);
+    const ids: number[] = [];
+    try {
+      for (let n = 0; n < clipCount; n++) {
+        const setting = n === 0 ? sent.setting : settingFor(n);
+        const board = await createBoardFromTemplate(
+          kind, `${baseName} #${n + 1}`, { ...sent, ...(setting ? { setting } : {}) }, productId,
+        );
+        ids.push(board.id);
+      }
+    } catch (err) {
+      const made = ids.length ? ` (đã tạo ${ids.length}/${clipCount} clip)` : "";
+      setError((err instanceof Error ? err.message : "Không tạo được clip") + made);
+    }
+    await useBoardStore.getState().refreshBoardList();
+    setBusy(false);
+    if (ids.length === clipCount) (onCreatedMany ?? (() => onCreated(ids[0])))(ids);
   }
 
   /** A TikTok / YouTube link: the agent downloads it, then it is the
@@ -297,6 +370,11 @@ export function NewClipDialog({
               <span className="qt-new__product-thumb qt-new__product-thumb--empty">—</span>
               <span>Không chọn, tự upload ảnh sau</span>
             </button>
+            {products.length === 0 && (
+              <p className="qt-new__hint">
+                Chưa có sản phẩm nào. Thêm ở <Link to="/products">Sản phẩm đang bán</Link> để dùng lại ảnh và mô tả cho nhiều clip.
+              </p>
+            )}
             {products.map((p) => (
               <button
                 key={p.id}
@@ -393,7 +471,32 @@ export function NewClipDialog({
                        onChange={(e) => setName(e.target.value)} disabled={locked}
                        onKeyDown={(e) => { if (e.key === "Enter") createFromTemplate(); }} />
               </label>
+              <label className="tpl-inputs__field">
+                <span>Số clip (mỗi clip một bối cảnh)</span>
+                <select className="project-modal__input" value={clipCount} disabled={locked}
+                        onChange={(e) => setClipCount(Number(e.target.value))}>
+                  {Array.from({ length: MAX_CLIPS }, (_, i) => i + 1).map((n) => (
+                    <option key={n} value={n}>{n === 1 ? "1 clip" : `${n} clip từ cùng sản phẩm`}</option>
+                  ))}
+                </select>
+              </label>
             </div>
+            {clipCount > 1 && (
+              <div className="tpl-inputs" style={{ marginTop: 8 }}>
+                <div className="qt-card__hint" style={{ gridColumn: "1 / -1" }}>
+                  Clip 1 dùng ô "Bối cảnh" ở trên. Các clip sau dùng bối cảnh dưới đây (sửa được). Mỗi clip là một dự án
+                  riêng trong "Clip của tôi", bạn chạy "Tạo video tự động" cho từng clip.
+                </div>
+                {Array.from({ length: clipCount - 1 }, (_, i) => i + 1).map((n) => (
+                  <label key={n} className="tpl-inputs__field">
+                    <span>Bối cảnh clip {n + 1}</span>
+                    <input className="project-modal__input" type="text" maxLength={200} value={settingFor(n)}
+                           onChange={(e) => setExtraSettings((p) => { const next = [...p]; next[n - 1] = e.target.value; return next; })}
+                           disabled={locked} />
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -506,7 +609,7 @@ export function NewClipDialog({
             <>
               <button type="button" className="project-modal__btn" onClick={onClose} disabled={locked}>Huỷ</button>
               <button type="button" className="project-modal__btn project-modal__btn--primary qt-btn--accent" onClick={createFromTemplate} disabled={locked || !template}>
-                {busy ? "Đang tạo…" : "Tạo clip →"}
+                {busy ? "Đang tạo…" : clipCount > 1 ? `Tạo ${clipCount} clip →` : "Tạo clip →"}
               </button>
             </>
           )}

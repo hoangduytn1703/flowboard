@@ -53,7 +53,7 @@ dev:
 	@echo "Load ./extension as unpacked extension in chrome://extensions."
 
 agent:
-	cd agent && .venv/bin/uvicorn flowboard.main:app --reload --port $(FLOWBOARD_HTTP_PORT)
+	cd agent && .venv/bin/uvicorn flowboard.main:app --reload --timeout-graceful-shutdown 3 --port $(FLOWBOARD_HTTP_PORT)
 
 frontend:
 	cd frontend && npm run dev

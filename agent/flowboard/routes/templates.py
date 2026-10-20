@@ -48,7 +48,7 @@ def create_board_from_template(body: FromTemplateBody) -> dict:
         s.add(board)
         s.commit()
         s.refresh(board)
-        board_id, name, created_at = board.id, board.name, board.created_at
+        board_id, name, created_at, data = board.id, board.name, board.created_at, board.data
     try:
         created = build_board(board_id, spec)
     except BoardSpecError as exc:
@@ -59,4 +59,4 @@ def create_board_from_template(body: FromTemplateBody) -> dict:
                 s.delete(b)
                 s.commit()
         raise HTTPException(500, f"template {body.template_id!r} is invalid: {exc}")
-    return {"id": board_id, "name": name, "created_at": created_at, "nodes": created}
+    return {"id": board_id, "name": name, "created_at": created_at, "data": data, "nodes": created}

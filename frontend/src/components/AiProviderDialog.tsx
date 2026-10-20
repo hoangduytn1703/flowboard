@@ -52,18 +52,18 @@ export function AiProviderDialog({ open, onClose, force = false }: AiProviderDia
         className="ai-provider-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="AI Providers"
+        aria-label="AI Provider"
       >
         <div className="ai-provider-dialog__header">
           <span className="ai-provider-dialog__title">
-            {force ? "Set up your AI providers" : "AI Providers"}
+            {force ? "Thiết lập AI provider" : "AI Provider"}
           </span>
           {!force && (
             <button
               type="button"
               className="ai-provider-dialog__close"
               onClick={onClose}
-              aria-label="Close AI Providers"
+              aria-label="Đóng AI Provider"
             >
               ×
             </button>
@@ -71,9 +71,9 @@ export function AiProviderDialog({ open, onClose, force = false }: AiProviderDia
         </div>
         {force && (
           <div className="ai-provider-dialog__force-banner" role="alert">
-            Flowboard needs a provider for each of Auto-prompt, Vision and
-            Planner before it can run them. Pick one per row — model and
-            effort are optional — then Apply to continue.
+            Flowboard cần một provider cho mỗi mục Auto-prompt, Vision và
+            Planner thì mới chạy được. Chọn một provider cho mỗi dòng — model
+            và effort không bắt buộc — rồi bấm Áp dụng để tiếp tục.
           </div>
         )}
         <AiProvidersSection />
