@@ -477,3 +477,49 @@ async def _safe_list_models(provider, force: bool = False) -> list[dict]:
     except Exception:  # noqa: BLE001
         logger.exception("llm: model catalog failed for %s", provider.name)
         return []
+
+
+# ── Gemini API key pool ───────────────────────────────────────────────
+# Several keys, pasted as one blob; the pool rotates to the next one when
+# a key runs out of quota (services/llm/gemini_api.py).
+
+class _GeminiKeysBody(BaseModel):
+    """Either ``keys`` (a list) or ``text`` (one blob, any separators)."""
+    keys: Optional[list[str]] = None
+    text: Optional[str] = None
+
+
+def _gemini_keys_payload() -> dict:
+    from flowboard.services.llm import gemini_api
+
+    return {"keys": gemini_api.pool.snapshot(), "count": len(secrets.get_gemini_keys()),
+            "default_model": gemini_api.DEFAULT_MODEL}
+
+
+@router.get("/gemini-keys")
+def get_gemini_keys() -> dict:
+    """Masked keys with their pool state (parked = out of quota / refused)."""
+    return _gemini_keys_payload()
+
+
+@router.put("/gemini-keys")
+def put_gemini_keys(body: _GeminiKeysBody) -> dict:
+    """Replace the key list. Full keys are never echoed back."""
+    keys = list(body.keys or [])
+    if body.text:
+        keys.extend(secrets.parse_keys(body.text))
+    secrets.set_gemini_keys(keys)
+    provider = registry.get_provider("gemini")
+    if provider is not None and hasattr(provider, "reset_cache"):
+        provider.reset_cache()
+    logger.info("llm: gemini key pool set to %d key(s)", len(secrets.get_gemini_keys()))
+    return _gemini_keys_payload()
+
+
+@router.post("/gemini-keys/test")
+async def test_gemini_keys() -> dict:
+    """One cheap models-list call per key; reports which work."""
+    from flowboard.services.llm import gemini_api
+
+    results = [await gemini_api.check_key(k) for k in secrets.get_gemini_keys()]
+    return {"results": results, **_gemini_keys_payload()}

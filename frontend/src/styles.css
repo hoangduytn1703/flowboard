@@ -6610,3 +6610,17 @@ button.chat-dock__presence[aria-expanded="true"] {
   color: var(--muted);
   line-height: 1.4;
 }
+
+/* ── Canvas toolbar: back to Quicktool ──────────────────────────────────── */
+.toolbar-mode {
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid rgba(255, 106, 43, 0.45);
+  border-radius: 6px;
+  background: rgba(255, 106, 43, 0.14);
+  color: #ff6a2b;
+  cursor: pointer;
+}
+.toolbar-mode:hover { filter: brightness(1.1); }

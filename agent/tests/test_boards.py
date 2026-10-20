@@ -191,3 +191,22 @@ def test_clear_media_keeps_nodes_and_prompts(client):
     with get_session() as s:
         m = s.get(Node, model)
         assert m.status == "idle" and m.data == {"title": "Mẫu", "charGender": "female"}
+
+
+def test_board_data_merges_and_summary_counts_progress(client):
+    r = client.post("/api/boards", json={"name": "clip", "data": {"quicktool": {"step": 1}}})
+    assert r.status_code == 200 and r.json()["data"] == {"quicktool": {"step": 1}}
+    bid = r.json()["id"]
+    r = client.patch(f"/api/boards/{bid}", json={"data": {"quicktool": {"step": 3}, "note": "x"}})
+    assert r.json()["data"] == {"quicktool": {"step": 3}, "note": "x"} and r.json()["name"] == "clip"
+    r = client.patch(f"/api/boards/{bid}", json={"data": {"note": None}})
+    assert r.json()["data"] == {"quicktool": {"step": 3}}
+    assert client.patch(f"/api/boards/{bid}", json={"name": "  "}).status_code == 400
+
+    for t, data in (("image", {"mediaId": "m1"}), ("image", {}), ("video", {}), ("export", {})):
+        client.post("/api/nodes", json={"board_id": bid, "type": t, "data": data})
+    rows = client.get("/api/boards", params={"summary": "true"}).json()
+    row = next(b for b in rows if b["id"] == bid)
+    assert row["summary"] == {"scenes": 2, "scenes_done": 1, "clips": 1, "clips_done": 0,
+                              "exported": False, "thumbnail": "m1"}
+    assert "summary" not in client.get("/api/boards").json()[0]

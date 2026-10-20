@@ -1,5 +1,7 @@
 import { useState, useRef, type KeyboardEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import { useBoardStore } from "../store/board";
+import { useSettingsStore } from "../store/settings";
 import { clearBoardMedia } from "../api/client";
 import { ActivityBell } from "./activity/ActivityBell";
 import { AiProviderBadge } from "./AiProviderBadge";
@@ -7,6 +9,9 @@ import { AiProviderBadge } from "./AiProviderBadge";
 export function Toolbar() {
   const boardName = useBoardStore((s) => s.boardName);
   const renameBoard = useBoardStore((s) => s.renameBoard);
+  const setUiMode = useSettingsStore((s) => s.setUiMode);
+  const boardId = useBoardStore((s) => s.boardId);
+  const navigate = useNavigate();
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -35,6 +40,14 @@ export function Toolbar() {
 
   return (
     <div className="toolbar">
+      <button
+        type="button"
+        className="toolbar-mode"
+        onClick={() => { setUiMode("quicktool"); navigate(boardId !== null ? `/clips/${boardId}` : "/clips"); }}
+        title="Về màn hình Quicktool (làm clip từng bước)"
+      >
+        ⚡ Quicktool
+      </button>
       <span className="toolbar-wordmark">Flowboard</span>
       <span className="toolbar-sep" aria-hidden="true">/</span>
       {editing ? (

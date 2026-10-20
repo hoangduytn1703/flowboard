@@ -50,6 +50,14 @@ def init_db() -> None:
                 )
                 conn.commit()
 
+        # Board.data — the Quicktool wizard's per-board state; same
+        # non-destructive ADD COLUMN as above.
+        if insp.has_table("board"):
+            board_cols = {c["name"] for c in insp.get_columns("board")}
+            if "data" not in board_cols:
+                conn.exec_driver_sql("ALTER TABLE board ADD COLUMN data JSON DEFAULT '{}'")
+                conn.commit()
+
     SQLModel.metadata.create_all(engine)
 
 

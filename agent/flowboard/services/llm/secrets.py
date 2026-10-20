@@ -261,3 +261,43 @@ def set_feature_provider(feature: str, provider: str) -> None:
     selection).
     """
     set_feature_config(feature, provider)
+
+
+# ── Gemini API key pool ────────────────────────────────────────────────
+# Several keys, rotated when one runs out of quota (see gemini_api.py).
+# Stored as a list under ``geminiApiKeys``; ``apiKeys.gemini`` is not used
+# so the single-key helpers above keep their one-string contract.
+
+def parse_keys(text: str) -> list[str]:
+    """Keys pasted as one blob: split on whitespace / commas / semicolons,
+    drop blanks and duplicates, keep order."""
+    import re
+
+    out: list[str] = []
+    for tok in re.split(r"[\s,;]+", text or ""):
+        tok = tok.strip().strip('"\'')
+        if tok and tok not in out:
+            out.append(tok)
+    return out
+
+
+def get_gemini_keys() -> list[str]:
+    doc = read()
+    keys = doc.get("geminiApiKeys")
+    if not isinstance(keys, list):
+        return []
+    return [k for k in keys if isinstance(k, str) and k.strip()]
+
+
+def set_gemini_keys(keys: list[str]) -> None:
+    doc = read()
+    cleaned: list[str] = []
+    for k in keys:
+        k = (k or "").strip()
+        if k and k not in cleaned:
+            cleaned.append(k)
+    if cleaned:
+        doc["geminiApiKeys"] = cleaned
+    else:
+        doc.pop("geminiApiKeys", None)
+    write(doc)

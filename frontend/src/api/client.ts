@@ -151,6 +151,40 @@ export interface Board {
   id: number;
   name: string;
   created_at: string;
+  /** Board settings; the Quicktool wizard keeps its state under `quicktool`. */
+  data?: Record<string, unknown>;
+}
+
+/** What the Quicktool wizard stores on a board (`Board.data.quicktool`). */
+export interface QuicktoolState {
+  template_id?: string | null;
+  product_id?: number | null;
+  inputs?: Record<string, string>;
+  /** 1 setup · 2 script · 3 images · 4 videos · 5 export */
+  step?: number;
+}
+
+export interface BoardSummary extends Board {
+  summary: {
+    scenes: number;
+    scenes_done: number;
+    clips: number;
+    clips_done: number;
+    exported: boolean;
+    thumbnail: string | null;
+  };
+}
+
+export function listBoardSummaries(): Promise<BoardSummary[]> {
+  return api<BoardSummary[]>("/api/boards?summary=true");
+}
+
+/** Shallow-merge `data` into the board's settings (a null value removes a key). */
+export function patchBoardData(id: number, data: Record<string, unknown>): Promise<Board> {
+  return api<Board>(`/api/boards/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ data }),
+  });
 }
 
 export interface NodeDTO {
@@ -1394,6 +1428,136 @@ export async function clearBoardMedia(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ include_refs: includeRefs }),
+  });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
+}
+
+// ── Gemini API key pool ──────────────────────────────────────────────────────
+
+export interface GeminiKeyState {
+  masked: string;
+  parked: boolean;
+  parked_for_s: number;
+  last_error: string | null;
+  calls: number;
+}
+
+export interface GeminiKeysResponse {
+  keys: GeminiKeyState[];
+  count: number;
+  default_model: string;
+}
+
+export async function getGeminiKeys(): Promise<GeminiKeysResponse> {
+  const res = await fetch("/api/llm/gemini-keys");
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
+}
+
+/** Replace the pool with the keys pasted in `text` (any separators). */
+export async function setGeminiKeys(text: string): Promise<GeminiKeysResponse> {
+  const res = await fetch("/api/llm/gemini-keys", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
+}
+
+export async function testGeminiKeys(): Promise<GeminiKeysResponse & {
+  results: { masked: string; ok: boolean; models?: number; latency_ms?: number; error?: string; detail?: string }[];
+}> {
+  const res = await fetch("/api/llm/gemini-keys/test", { method: "POST" });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
+}
+
+// ── Clip from a reference ad video ───────────────────────────────────────────
+
+export interface ReferenceUpload {
+  media_id: string;
+  mime: string;
+  size: number;
+  duration_s: number | null;
+  width: number | null;
+  height: number | null;
+}
+
+export interface ReferencePlanScene {
+  title_vi: string;
+  image_prompt_en: string;
+  motion_prompt_en: string;
+  narration_vi: string;
+}
+
+export interface ReferenceAnalysis {
+  category: ProductCategory;
+  category_vi: string;
+  product_seen: string;
+  hook: string;
+  style?: string;
+  tone?: string;
+  has_person: boolean;
+  voice_transcript_vi?: string;
+  scenes: { start_s: number; end_s: number; shot: string; action: string; camera?: string; on_screen_text?: string }[];
+  plan: ReferencePlanScene[];
+  script_vi: string;
+  character: { gender: string; country: string; vibe: string; extras_en?: string } | null;
+  match: { relevant: boolean; score: number; reason_vi: string };
+  blocked: boolean;
+  block_reason?: string;
+}
+
+export async function uploadReferenceVideo(file: File): Promise<ReferenceUpload> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch("/api/reference-video/upload", { method: "POST", body: form });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
+}
+
+export async function analyzeReferenceVideo(
+  mediaId: string,
+  productId: number | null,
+  scenes?: number,
+): Promise<{ media_id: string; product: Product | null; analysis: ReferenceAnalysis; blocked: boolean; block_reason: string | null }> {
+  const res = await fetch("/api/reference-video/analyze", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ media_id: mediaId, product_id: productId, scenes: scenes ?? null }),
+  });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
+}
+
+export async function buildFromReferenceVideo(input: {
+  mediaId: string;
+  productId: number | null;
+  analysis: ReferenceAnalysis;
+  name?: string;
+  force?: boolean;
+}): Promise<Board & { nodes: Record<string, string> }> {
+  const res = await fetch("/api/reference-video/build", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      media_id: input.mediaId, product_id: input.productId, analysis: input.analysis,
+      name: input.name ?? null, force: input.force ?? false,
+    }),
+  });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
+}
+
+/** Download a TikTok / YouTube / … link on the agent (yt-dlp) and register
+ * it like an uploaded reference video. */
+export async function fetchReferenceVideo(url: string): Promise<ReferenceUpload & { title: string; url: string }> {
+  const res = await fetch("/api/reference-video/fetch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
   });
   if (!res.ok) throw new Error(await extractErrorMessage(res));
   return res.json();

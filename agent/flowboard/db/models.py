@@ -35,6 +35,10 @@ class AppSetting(SQLModel, table=True):
 class Board(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
+    # Free-form board settings. The Quicktool wizard keeps its state here
+    # (``quicktool``: template, product, current step, auto-run flag) so a
+    # clip reopens where the user left it.
+    data: dict = Field(default_factory=dict, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=_utcnow)
 
 

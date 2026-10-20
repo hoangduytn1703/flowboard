@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from sqlmodel import delete as sql_delete, select
@@ -61,22 +63,53 @@ DEFAULT_REQUEST_KINDS = "worker"
 
 class BoardCreate(BaseModel):
     name: str
+    data: Optional[dict] = None
 
 
 class BoardUpdate(BaseModel):
-    name: str
+    name: Optional[str] = None
+    # Shallow-merged into Board.data; a null value removes the key.
+    data: Optional[dict] = None
+
+
+def _board_summary(s, board: Board) -> dict:
+    """The board row plus what the Quicktool home needs to draw its card:
+    scene / clip progress and a thumbnail, without loading every node."""
+    nodes = s.exec(select(Node.type, Node.data).where(Node.board_id == board.id)).all()
+    scenes = [d for t, d in nodes if t == "image"]
+    clips = [d for t, d in nodes if t == "video"]
+    exports = [d for t, d in nodes if t in ("export", "merge") and (d or {}).get("mediaId")]
+    thumb = next((d.get("mediaId") for t, d in nodes
+                  if t in ("image", "visual_asset", "Storyboard") and (d or {}).get("mediaId")), None)
+    return {
+        "id": board.id,
+        "name": board.name,
+        "data": board.data or {},
+        "created_at": board.created_at,
+        "summary": {
+            "scenes": len(scenes),
+            "scenes_done": sum(1 for d in scenes if (d or {}).get("mediaId")),
+            "clips": len(clips),
+            "clips_done": sum(1 for d in clips if (d or {}).get("mediaId")),
+            "exported": bool(exports),
+            "thumbnail": thumb,
+        },
+    }
 
 
 @router.get("")
-def list_boards():
+def list_boards(summary: bool = Query(False)):
     with get_session() as s:
-        return s.exec(select(Board)).all()
+        boards = s.exec(select(Board)).all()
+        if summary:
+            return [_board_summary(s, b) for b in boards]
+        return boards
 
 
 @router.post("")
 def create_board(body: BoardCreate):
     with get_session() as s:
-        board = Board(name=body.name)
+        board = Board(name=body.name, data=body.data or {})
         s.add(board)
         s.commit()
         s.refresh(board)
@@ -201,7 +234,19 @@ def update_board(board_id: int, body: BoardUpdate):
         board = s.get(Board, board_id)
         if not board:
             raise HTTPException(404, "board not found")
-        board.name = body.name
+        if body.name is not None:
+            name = body.name.strip()
+            if not name:
+                raise HTTPException(400, "name must not be empty")
+            board.name = name
+        if body.data is not None:
+            merged = dict(board.data or {})
+            for key, value in body.data.items():
+                if value is None:
+                    merged.pop(key, None)
+                else:
+                    merged[key] = value
+            board.data = merged
         s.add(board)
         s.commit()
         s.refresh(board)

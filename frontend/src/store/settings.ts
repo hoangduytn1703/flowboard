@@ -54,6 +54,9 @@ export const OMNI_FLASH_DURATIONS: OmniFlashDuration[] = [4, 6, 8, 10];
 // queue (no Flow plan, no extension needed). Picked per dispatch in the
 // GenerationDialog and sticky — persisted here like the model picks.
 export type MediaProviderKey = "flow" | "muse";
+// "quicktool" is the step-by-step clip maker (the default screen);
+// "canvas" is the node board underneath it, for fine control.
+export type UiMode = "quicktool" | "canvas";
 
 interface SettingsState {
   imageModel: ImageModelKey;
@@ -61,7 +64,9 @@ interface SettingsState {
   videoModel: VideoModelFamily;
   omniFlashDuration: OmniFlashDuration;
   mediaProvider: MediaProviderKey;
+  uiMode: UiMode;
   setImageModel(model: ImageModelKey): void;
+  setUiMode(mode: UiMode): void;
   setVideoQuality(q: VideoQuality): void;
   setVideoModel(m: VideoModelFamily): void;
   setOmniFlashDuration(d: OmniFlashDuration): void;
@@ -80,6 +85,7 @@ interface PersistShape {
   videoModel?: VideoModelFamily;
   omniFlashDuration?: OmniFlashDuration;
   mediaProvider?: MediaProviderKey;
+  uiMode?: UiMode;
 }
 
 const PERSIST_VERSION = 2;
@@ -121,6 +127,7 @@ function snapshotPersist(get: () => SettingsState): PersistShape {
     videoModel: get().videoModel,
     omniFlashDuration: get().omniFlashDuration,
     mediaProvider: get().mediaProvider,
+    uiMode: get().uiMode,
   };
 }
 
@@ -141,8 +148,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     persisted.mediaProvider && VALID_MEDIA_PROVIDERS.includes(persisted.mediaProvider)
       ? persisted.mediaProvider
       : "flow",
+  uiMode: persisted.uiMode === "canvas" ? "canvas" : "quicktool",
   setImageModel(model) {
     set({ imageModel: model });
+    persist(snapshotPersist(get));
+  },
+  setUiMode(mode) {
+    set({ uiMode: mode });
     persist(snapshotPersist(get));
   },
   setVideoQuality(q) {

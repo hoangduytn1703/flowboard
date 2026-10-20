@@ -38,7 +38,13 @@ def create_board_from_template(body: FromTemplateBody) -> dict:
         raise HTTPException(404, str(exc))
     default_name = template["title"] if product is None else f"{product['name']} — {template['title']}"
     with get_session() as s:
-        board = Board(name=(body.name or "").strip() or default_name)
+        # The Quicktool wizard reopens the clip from this: which template it
+        # follows, which product it sells, and where the user left off.
+        board = Board(
+            name=(body.name or "").strip() or default_name,
+            data={"quicktool": {"template_id": template["id"], "product_id": body.product_id,
+                                "inputs": body.inputs, "step": 1}},
+        )
         s.add(board)
         s.commit()
         s.refresh(board)

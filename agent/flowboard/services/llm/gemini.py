@@ -67,6 +67,7 @@ import subprocess
 import time
 from typing import Optional
 
+from . import gemini_api
 from .base import LLMError
 from .cli_utils import (
     resolve_cli_binary,
@@ -170,16 +171,26 @@ class GeminiProvider:
     # ── availability ──────────────────────────────────────────────────
 
     async def is_available(self) -> bool:
-        """Cached check: does ``agy --version`` exit 0?
+        """True with API keys in the pool, else the cached ``agy --version``
+        probe.
 
-        Doesn't verify auth — the user could have the CLI installed but
-        not signed in. The Test endpoint catches that by actually
-        invoking the model. Mirrors the claude_cli pattern.
+        The CLI probe doesn't verify auth — the user could have the CLI
+        installed but not signed in. The Test endpoint catches that by
+        actually invoking the model. Mirrors the claude_cli pattern.
         """
+        if gemini_api.configured():
+            return True
         if self._available is None:
             self._available = await self._probe_version()
             logger.info("gemini(agy): available=%s", self._available)
         return self._available
+
+    @property
+    def mode(self) -> str:
+        """``api`` once Gemini API keys are configured (direct REST with
+        key rotation), else ``cli`` for the agy path. Reported by
+        /api/llm/providers like OpenAI's dual mode."""
+        return "api" if gemini_api.configured() else "cli"
 
     def reset_cache(self) -> None:
         """Testing hook + Settings panel rescan support."""
@@ -235,6 +246,19 @@ class GeminiProvider:
             and now - self._models_at < _MODELS_TTL_S
         ):
             return [dict(m) for m in self._models]
+
+        if gemini_api.configured():
+            # The API's own catalog; parked / bad keys are skipped by the pool.
+            try:
+                names = await gemini_api.with_key(gemini_api.list_models)
+            except gemini_api.GeminiAPIError as exc:
+                logger.warning("gemini(api): model listing failed: %s", exc)
+                return []
+            models = [{"id": n, "label": n} for n in names]
+            if models:
+                self._models = models
+                self._models_at = now
+            return [dict(m) for m in models]
 
         try:
             agy_bin = await asyncio.to_thread(
@@ -302,6 +326,23 @@ class GeminiProvider:
             validate_attachment_paths(attachments)
         except ValueError as exc:
             raise LLMError(f"Invalid input: {exc}") from exc
+
+        # API keys take precedence over the CLI: no tool-denial retries,
+        # no subprocess, and quota moves to the next key by itself. The
+        # model id is the API's own; agy-style "<model>-<effort>" suffixes
+        # from older pins are stripped.
+        if gemini_api.configured():
+            api_model = model or gemini_api.DEFAULT_MODEL
+            for suffix in ("-low", "-medium", "-high"):
+                if api_model.endswith(suffix):
+                    api_model = api_model[: -len(suffix)]
+            try:
+                return await gemini_api.generate_text(
+                    user_prompt, system=system_prompt, attachments=attachments,
+                    model=api_model, timeout=timeout,
+                )
+            except gemini_api.GeminiAPIError as exc:
+                raise LLMError(f"Gemini API: {exc}") from exc
 
         # Build the composite prompt: system block, user prompt, attachments.
         parts: list[str] = []

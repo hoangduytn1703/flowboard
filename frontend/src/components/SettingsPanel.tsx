@@ -6,6 +6,7 @@ import {
   type VideoQuality,
 } from "../store/settings";
 import { getLatestRelease, isNewerVersion, type LatestRelease } from "../api/github";
+import { GeminiKeysSection } from "./GeminiKeysSection";
 import {
   getPinnedFlowProject,
   setPinnedFlowProject,
@@ -466,6 +467,8 @@ export function SettingsPanel({
           </label>
         </div>
       </div>
+
+      <GeminiKeysSection />
 
       <div className="settings-panel__section">
         <div className="settings-panel__label">Image model</div>
