@@ -1,6 +1,7 @@
 {
   "id": "unboxing_review",
   "category": "other",
+  "order": 60,
   "title": "Review / mở hộp",
   "blurb": "3 cảnh: mở hộp, cầm sản phẩm xem kỹ, dùng thử. Hợp đồ gia dụng, đồ công nghệ, phụ kiện.",
   "scenes": 3,
@@ -94,7 +95,7 @@
       "type": "note",
       "data": {
         "title": "Kịch bản",
-        "prompt": "Review {{product}} — 3 cảnh × 8 s\n\n1. Mở hộp: tay mở nắp hộp, sản phẩm lộ ra.\n2. Xem kỹ: người review cầm sản phẩm xoay nhìn, gật gù.\n3. Dùng thử: dùng sản phẩm, biểu cảm hài lòng, nhìn camera.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh sản phẩm thật → Generate Người review → Generate từng Cảnh → Generate từng Video → ghép bằng Chat AI.\nLồng tiếng: mỗi Video có sẵn một câu thoại (sửa tuỳ ý); node Xuất video đọc giọng Việt + phụ đề khi ghép."
+        "prompt": "Review {{product}} — 3 cảnh × 8 s\n\n1. Mở hộp: tay mở nắp hộp, sản phẩm lộ ra.\n2. Xem kỹ: người review cầm sản phẩm xoay nhìn, gật gù.\n3. Dùng thử: dùng sản phẩm, biểu cảm hài lòng, nhìn camera.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh sản phẩm thật (bước 1) → tạo Người review (bước 1) → tạo ảnh từng cảnh (bước 3) → tạo video từng cảnh (bước 4, Omni Flash 8 s) → ghép + lồng tiếng (bước 5).\nLồng tiếng: mỗi cảnh có sẵn một câu thoại tiếng Việt (sửa ở bước 2); bước 5 đọc giọng + phụ đề rồi ghép thành clip hoàn chỉnh."
       }
     },
     {

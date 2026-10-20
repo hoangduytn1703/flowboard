@@ -172,6 +172,8 @@ def set_pinned_project(body: PinnedProjectUpdate):
         rebound = set_override(body.flow_project_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    from flowboard.routes.auth import remember_project_for_active
+    remember_project_for_active(effective_project_id())
     return {**project_setting(), "rebound_boards": rebound}
 
 

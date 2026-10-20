@@ -1,0 +1,240 @@
+{
+  "id": "home_appliance_review",
+  "category": "home",
+  "order": 50,
+  "title": "Review đồ gia dụng",
+  "blurb": "4 cảnh review tại nhà: khổ sở khi chưa có, mở hộp, dùng thử tính năng chính, kết quả + nhận xét. Quay người hoặc chỉ bàn tay đều được.",
+  "scenes": 4,
+  "inputs": [
+    {
+      "key": "product",
+      "label": "Sản phẩm",
+      "placeholder": "để trống = dùng đúng sản phẩm trong ảnh đã upload; hoặc mô tả: cordless handheld vacuum",
+      "default": "the product shown in the uploaded product photo"
+    },
+    {
+      "key": "product_name",
+      "label": "Tên gọi trong lời thoại",
+      "placeholder": "ví dụ: máy hút bụi cầm tay",
+      "default": "sản phẩm này"
+    },
+    {
+      "key": "pain",
+      "label": "Vấn đề khi chưa có (tiếng Anh)",
+      "placeholder": "ví dụ: sweeping crumbs by hand every evening",
+      "default": "the chore is slow, messy and tiring done by hand"
+    },
+    {
+      "key": "setting",
+      "label": "Bối cảnh",
+      "placeholder": "ví dụ: bếp nhà sáng, mặt bàn trắng",
+      "default": "a bright modern Vietnamese home kitchen with white counters and morning light"
+    },
+    {
+      "key": "charGender",
+      "label": "Giới tính mẫu",
+      "type": "select",
+      "options": [
+        [
+          "female",
+          "Nữ"
+        ],
+        [
+          "male",
+          "Nam"
+        ],
+        [
+          "hands_female",
+          "Tay nữ (không lộ mặt)"
+        ],
+        [
+          "hands_male",
+          "Tay nam (không lộ mặt)"
+        ]
+      ],
+      "default": "female"
+    },
+    {
+      "key": "charCountry",
+      "label": "Quốc gia mẫu",
+      "type": "select",
+      "options": [
+        [
+          "vn",
+          "Việt Nam"
+        ],
+        [
+          "kr",
+          "Hàn Quốc"
+        ],
+        [
+          "jp",
+          "Nhật Bản"
+        ],
+        [
+          "cn",
+          "Trung Quốc"
+        ],
+        [
+          "th",
+          "Thái Lan"
+        ],
+        [
+          "us",
+          "Mỹ"
+        ],
+        [
+          "fr",
+          "Pháp"
+        ]
+      ],
+      "default": "vn"
+    }
+  ],
+  "character": {
+    "charVibe": "casual",
+    "charExtras": "early 30s, homely, warm expression, hair tied back"
+  },
+  "nodes": [
+    {
+      "key": "script",
+      "type": "note",
+      "data": {
+        "title": "Kịch bản",
+        "prompt": "Review {{product}} — 4 cảnh × 8 s\n\n1. Vấn đề: làm việc nhà theo cách cũ, mệt và bừa; hộp sản phẩm còn nguyên ở phía sau.\n2. Mở hộp: tay mở hộp, nhấc sản phẩm ra, nhìn qua một lượt.\n3. Dùng thử: bật lên, tính năng chính đang chạy.\n4. Kết quả: nhà gọn sạch, nhận xét và chấm điểm, chừa chỗ cho chữ.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh sản phẩm thật (bước 1) → tạo Người review (bước 1) → tạo ảnh từng cảnh (bước 3) → tạo video từng cảnh (bước 4, Omni Flash 8 s) → ghép + lồng tiếng (bước 5).\nLồng tiếng: mỗi cảnh có sẵn một câu thoại tiếng Việt (sửa ở bước 2); bước 5 đọc giọng + phụ đề rồi ghép thành clip hoàn chỉnh."
+      }
+    },
+    {
+      "key": "model",
+      "type": "character",
+      "data": {
+        "title": "Người review"
+      }
+    },
+    {
+      "key": "product",
+      "type": "visual_asset",
+      "data": {
+        "title": "Sản phẩm — upload ảnh thật"
+      }
+    },
+    {
+      "key": "s1",
+      "type": "image",
+      "data": {
+        "title": "Cảnh 1 - Vấn đề",
+        "prompt": "Candid medium shot of the model in {{setting}} doing a chore the old, hard way ({{pain}}), slightly tired and frustrated, cluttered counter, flat ordinary light. {{product}} still in its unopened box sits on the counter in the background. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+      }
+    },
+    {
+      "key": "s2",
+      "type": "image",
+      "data": {
+        "title": "Cảnh 2 - Mở hộp",
+        "prompt": "Top-down close-up of the model's hands opening the box and lifting out {{product}}, in {{setting}}. Soft daylight, product sharp and centred, packaging foam and manual beside it. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+      }
+    },
+    {
+      "key": "s3",
+      "type": "image",
+      "data": {
+        "title": "Cảnh 3 - Dùng thử",
+        "prompt": "Medium close-up of the model using {{product}} for its main job in {{setting}}, the key feature clearly in action, a hand on the controls. Bright clean light, product prominent and in focus. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+      }
+    },
+    {
+      "key": "s4",
+      "type": "image",
+      "data": {
+        "title": "Cảnh 4 - Kết quả",
+        "prompt": "Medium shot of the model standing beside {{product}} in a now tidy {{setting}}, the finished result visible (clean, done, ready), looking at the camera with a satisfied nod, clean space on one side for text. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+      }
+    },
+    {
+      "key": "v1",
+      "type": "video",
+      "data": {
+        "title": "Video 1 - Vấn đề",
+        "prompt": "0-3s: the model keeps at the chore by hand and sighs. 3-6s: wipes the brow and glances at the boxed product behind. 6-8s: reaches toward the box. Locked-off camera.",
+        "narration": "Trước giờ làm tay vừa lâu vừa mệt, nên mình mua thử {{product_name}} về xem sao."
+      }
+    },
+    {
+      "key": "v2",
+      "type": "video",
+      "data": {
+        "title": "Video 2 - Mở hộp",
+        "prompt": "0-3s: hands lift the lid off the box. 3-6s: the product is lifted out and turned over. 6-8s: it is held toward the camera. Locked-off top-down camera.",
+        "narration": "Mở hộp ra là thấy chắc chắn, phụ kiện đầy đủ, nhìn xịn hơn mình nghĩ."
+      }
+    },
+    {
+      "key": "v3",
+      "type": "video",
+      "data": {
+        "title": "Video 3 - Dùng thử",
+        "prompt": "0-3s: a hand presses the control and the product starts working. 3-6s: the key feature runs, the result visible. 6-8s: the model leans in, impressed. Locked-off camera, product stays in frame.",
+        "narration": "Bật lên là chạy êm ru, xong việc trong vài phút, không phải đụng tay nhiều."
+      }
+    },
+    {
+      "key": "v4",
+      "type": "video",
+      "data": {
+        "title": "Video 4 - Kết quả",
+        "prompt": "0-3s: the model gestures at the tidy result. 3-6s: a thumbs-up at the camera. 6-8s: a warm smile held. Locked-off camera, clean space on one side.",
+        "narration": "Mình chấm {{product_name}} chín điểm, nhà nào cũng nên có một cái, link ở giỏ hàng nha."
+      }
+    }
+  ],
+  "edges": [
+    [
+      "model",
+      "s1"
+    ],
+    [
+      "product",
+      "s1"
+    ],
+    [
+      "model",
+      "s2"
+    ],
+    [
+      "product",
+      "s2"
+    ],
+    [
+      "model",
+      "s3"
+    ],
+    [
+      "product",
+      "s3"
+    ],
+    [
+      "model",
+      "s4"
+    ],
+    [
+      "product",
+      "s4"
+    ],
+    [
+      "s1",
+      "v1"
+    ],
+    [
+      "s2",
+      "v2"
+    ],
+    [
+      "s3",
+      "v3"
+    ],
+    [
+      "s4",
+      "v4"
+    ]
+  ]
+}

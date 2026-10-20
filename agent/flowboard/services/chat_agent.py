@@ -136,7 +136,7 @@ NODE DATA (what the Generate button reads)
 
 TOOLS
 - build_from_template: {"product_id": 3 (optional: a saved product from
-  "Saved products"), "template_id": "fashion_ad|cosmetics_ad|fast_food_ad|
+  "Saved products"), "template_id": "fashion_ad|cosmetics_ad|fast_food_ad|food_review|grocery_ad|home_appliance_review|affiliate_reel|
   unboxing_review" (optional when product_id is given — the product's
   category picks it), "inputs": {"setting": "English scene setting",
   "charGender": "female|male", "charCountry": "vn|kr|jp|cn|th|us|fr"}

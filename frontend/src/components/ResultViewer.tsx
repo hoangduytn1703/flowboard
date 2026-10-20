@@ -37,6 +37,13 @@ const VIDEO_QUALITY_LABELS: Record<string, string> = {
   abra_r2v_10s: "Omni Flash · 10s",
 };
 
+/** The modifier key the shortcut hints show: ⌘ on Apple platforms, Ctrl
+ *  everywhere else (the wizard mostly runs on Windows). */
+const MOD_KEY =
+  typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent)
+    ? "⌘"
+    : "Ctrl";
+
 /** Format Flow's aspect-ratio enum to the human label shown on the node
  *  card. Returns "—" when the value is missing or unrecognised so the
  *  metadata grid never displays a stale hardcoded fallback. */
@@ -241,6 +248,12 @@ export function ResultViewer() {
         e.preventDefault();
         setActiveIdx((i) => (i - 1 + Math.max(mediaIds.length, 1)) % Math.max(mediaIds.length, 1));
       }
+      // The Regenerate button advertises this shortcut; while the viewer
+      // is open it means "re-run this node", not "reload the page".
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "r") {
+        e.preventDefault();
+        handleRegenerate();
+      }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
@@ -319,11 +332,11 @@ export function ResultViewer() {
 
   let hintText: string;
   if (status === null) {
-    hintText = "Loading…";
+    hintText = "Đang tải…";
   } else if (!status.has_url) {
-    hintText = "Open your project on flow.google.com so Flowboard can capture the image URL.";
+    hintText = "Mở project trên flow.google.com để Flowboard lấy được đường dẫn ảnh.";
   } else {
-    hintText = "Fetching bytes from Google…";
+    hintText = "Đang tải dữ liệu từ Google…";
   }
 
   // Blocks the three generation-flow buttons (Edit prompt, Regenerate,
@@ -365,7 +378,7 @@ export function ResultViewer() {
       ).filter((m): m is string => typeof m === "string" && m.length > 0);
       if (sourceMediaIds.length === 0) {
         useGenerationStore.setState({
-          error: "Video re-gen needs an upstream image with rendered media.",
+          error: "Tạo lại video cần ảnh nguồn phía trước đã render xong.",
         });
         return;
       }
@@ -466,7 +479,7 @@ export function ResultViewer() {
           <div
             className="media-placeholder"
             role={mediaReady ? undefined : "img"}
-            aria-label={mediaReady ? undefined : `${data.title} — media pending`}
+            aria-label={mediaReady ? undefined : `${data.title} — đang chờ ảnh`}
           >
             {currentMediaId ? (
               <>
@@ -509,13 +522,12 @@ export function ResultViewer() {
               // whether to retry, change inputs, or accept the loss.
               <div className="media-placeholder__content media-placeholder__content--blocked">
                 <span className="media-placeholder__icon media-placeholder__icon--warn" aria-hidden="true">⚠</span>
-                <span className="media-placeholder__title">Variant blocked</span>
+                <span className="media-placeholder__title">Biến thể bị chặn</span>
                 <span className="media-placeholder__error-code">{slotError}</span>
                 <span className="media-placeholder__error-hint">
-                  This variant was rejected by Google&apos;s safety filter. The
-                  other variants in this batch rendered normally — try
-                  re-running just this slot, or tweak the upstream image /
-                  prompt to avoid the trigger.
+                  Bộ lọc an toàn của Google từ chối biến thể này; các biến thể
+                  khác trong đợt vẫn tạo bình thường. Hãy tạo lại riêng ô này,
+                  hoặc sửa ảnh nguồn / prompt để tránh bị chặn.
                 </span>
               </div>
             ) : (
@@ -536,7 +548,7 @@ export function ResultViewer() {
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {currentMediaId && (
               <button className="media-placeholder__refresh" onClick={handleRefresh}>
-                Refresh
+                Tải lại
               </button>
             )}
             {/* Variant switcher — chips for each slot. Blocked slots
@@ -544,7 +556,7 @@ export function ResultViewer() {
                 the user can scan the strip and see at a glance which
                 variants succeeded vs failed. */}
             {mediaIds.length > 0 && (
-              <div className="variant-switcher" role="group" aria-label="Variant selection">
+              <div className="variant-switcher" role="group" aria-label="Chọn biến thể">
                 {mediaIds.map((_id, idx) => {
                   const chipError = data?.slotErrors?.[idx] ?? null;
                   const blocked = chipError !== null && chipError !== undefined;
@@ -553,8 +565,8 @@ export function ResultViewer() {
                       key={idx}
                       className={`variant-switcher__chip${idx === activeIdx ? " variant-switcher__chip--active" : ""}${blocked ? " variant-switcher__chip--blocked" : ""}`}
                       onClick={() => setActiveIdx(idx)}
-                      aria-label={blocked ? `Variant ${idx + 1} — blocked: ${chipError}` : `Variant ${idx + 1}`}
-                      title={blocked ? `Blocked: ${chipError}` : undefined}
+                      aria-label={blocked ? `Biến thể ${idx + 1} — bị chặn: ${chipError}` : `Biến thể ${idx + 1}`}
+                      title={blocked ? `Bị chặn: ${chipError}` : undefined}
                       aria-pressed={idx === activeIdx}
                     >
                       {blocked ? "⚠" : idx + 1}
@@ -568,7 +580,7 @@ export function ResultViewer() {
 
         {/* Right panel — metadata */}
         <div className="result-viewer__right">
-          <div className="result-viewer__status-pill">Rendered</div>
+          <div className="result-viewer__status-pill">Đã tạo</div>
 
           <h2 id="result-viewer-title" className="result-viewer__node-title">
             {data.title}
@@ -578,21 +590,21 @@ export function ResultViewer() {
           <hr className="result-viewer__divider" />
 
           <span className="result-viewer__section-label">PROMPT</span>
-          <p className="result-viewer__prompt">{data.prompt ?? "(no prompt)"}</p>
+          <p className="result-viewer__prompt">{data.prompt ?? "(chưa có prompt)"}</p>
           <button
             className="result-viewer__edit-prompt"
             onClick={handleEditPrompt}
             disabled={llmBusy}
-            title={llmBusy ? "Backend is composing — try again in a moment" : undefined}
+            title={llmBusy ? "AI đang soạn prompt — thử lại sau một lát" : undefined}
           >
-            Edit prompt →
+            Sửa prompt →
           </button>
 
           {refSourceNodes.length > 0 && (
             <>
               <hr className="result-viewer__divider" />
               <span className="result-viewer__section-label">
-                SOURCE REFERENCES ({refSourceNodes.length})
+                ẢNH THAM CHIẾU ({refSourceNodes.length})
               </span>
               <div className="ref-source-row">
                 {refSourceNodes.map((r) => (
@@ -601,7 +613,7 @@ export function ResultViewer() {
                     className="ref-source-chip"
                     title={
                       r.variantIdx !== null
-                        ? `${r.node.data.title} — variant ${r.variantIdx + 1}`
+                        ? `${r.node.data.title} — biến thể ${r.variantIdx + 1}`
                         : r.node.data.title
                     }
                   >
@@ -626,7 +638,7 @@ export function ResultViewer() {
 
           <hr className="result-viewer__divider" />
 
-          <span className="result-viewer__section-label">METADATA</span>
+          <span className="result-viewer__section-label">THÔNG TIN</span>
           <dl className="result-viewer__metadata-grid">
             <dt>model</dt>
             <dd>
@@ -638,7 +650,7 @@ export function ResultViewer() {
             </dd>
             {data?.type === "character" && countryLabel(data.charCountry) && (
               <>
-                <dt>country</dt>
+                <dt>quốc gia</dt>
                 <dd>
                   <span className="model-badge">{countryLabel(data.charCountry)}</span>
                 </dd>
@@ -646,15 +658,15 @@ export function ResultViewer() {
             )}
             {data?.type === "character" && vibeLabel(data.charVibe) && (
               <>
-                <dt>vibe</dt>
+                <dt>phong cách</dt>
                 <dd>
                   <span className="model-badge">{vibeLabel(data.charVibe)}</span>
                 </dd>
               </>
             )}
-            <dt>aspect</dt>
+            <dt>tỉ lệ</dt>
             <dd>{formatAspectRatio(data?.aspectRatio)}</dd>
-            <dt>time</dt>
+            <dt>thời gian</dt>
             <dd>{formatRelativeTime(data?.renderedAt)}</dd>
           </dl>
 
@@ -665,17 +677,17 @@ export function ResultViewer() {
               <div className="result-viewer__busy-banner" role="status">
                 <span className="node-header__llm-spinner" aria-hidden="true" />
                 {data?.autoPromptStatus === "pending"
-                  ? "Composing prompt — actions disabled until done"
-                  : "Analyzing image — actions disabled until done"}
+                  ? "AI đang soạn prompt — tạm khoá các nút đến khi xong"
+                  : "AI đang phân tích ảnh — tạm khoá các nút đến khi xong"}
               </div>
             )}
             <button
               className="result-viewer__btn result-viewer__btn--primary"
               onClick={handleRegenerate}
               disabled={llmBusy}
-              title={llmBusy ? "Backend is busy on this node — try again in a moment" : undefined}
+              title={llmBusy ? "AI đang xử lý node này — thử lại sau một lát" : `Tạo lại kết quả với cùng prompt (${MOD_KEY}+R)`}
             >
-              Regenerate ⌘R
+              Tạo lại {MOD_KEY}+R
             </button>
             <button
               className="result-viewer__btn"
@@ -683,11 +695,11 @@ export function ResultViewer() {
               disabled={llmBusy}
               title={
                 llmBusy
-                  ? "Backend is busy on this node — try again in a moment"
-                  : "Clone this node onto the canvas with the same upstream refs"
+                  ? "AI đang xử lý node này — thử lại sau một lát"
+                  : "Nhân bản node này lên canvas, giữ nguyên các ảnh tham chiếu"
               }
             >
-              New variant +
+              Biến thể mới +
             </button>
             <button
               className={
@@ -698,11 +710,11 @@ export function ResultViewer() {
               disabled={!currentMediaId || saving}
               title={
                 !currentMediaId
-                  ? "Wait for the generation to finish"
-                  : "Save this variant to the cross-board Reference library"
+                  ? "Chờ tạo xong đã"
+                  : "Lưu biến thể này vào thư viện tham chiếu dùng chung cho mọi board"
               }
             >
-              {savedFlash ? "★ Saved" : saving ? "…" : "★ Save to library"}
+              {savedFlash ? "★ Đã lưu" : saving ? "…" : "★ Lưu vào thư viện"}
             </button>
             {projectId ? (
               <a
@@ -711,11 +723,11 @@ export function ResultViewer() {
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                Open in Flow ↗
+                Mở trong Flow ↗
               </a>
             ) : (
               <button className="result-viewer__btn" disabled>
-                Open in Flow ↗
+                Mở trong Flow ↗
               </button>
             )}
           </div>
@@ -723,14 +735,14 @@ export function ResultViewer() {
 
         {/* Footer hint */}
         <div className="result-viewer__footer-hint">
-          esc close · ←/→ variants
+          Esc đóng · ←/→ biến thể · {MOD_KEY}+R tạo lại
         </div>
 
         {/* Close button */}
         <button
           className="result-viewer__close"
           onClick={closeResultViewer}
-          aria-label="Close result viewer"
+          aria-label="Đóng"
         >
           ×
         </button>

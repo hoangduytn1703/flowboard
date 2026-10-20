@@ -152,6 +152,27 @@ class Reference(SQLModel, table=True):
     position: int = 0
     source_board_id: Optional[int] = Field(default=None, foreign_key="board.id", index=True)
     source_node_short_id: Optional[str] = None
+    # Kind-specific extras. For ``character`` (the Quicktool model library):
+    # gender / country / vibe / extras keys of the character builder, the
+    # rendered prompt and the product name the model was made for — enough
+    # to put a saved model back on a wizard board with its form filled in.
+    # Added after the table shipped: ``db.ensure_reference_meta_column``
+    # ALTERs it in on existing DBs.
+    meta: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class SavedPrompt(SQLModel, table=True):
+    """The Quicktool prompt library: a scene image prompt, a clip motion
+    prompt or a voice line the user wants to reuse on another clip.
+    Plain text, no media; ``create_all`` adds the table on first start."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    kind: str = Field(index=True)  # "image" | "video" | "narration"
+    title: str = ""
+    text: str
+    tags: list = Field(default_factory=list, sa_column=Column(JSON))
+    source_board_id: Optional[int] = Field(default=None, index=True)
+    uses: int = 0
     created_at: datetime = Field(default_factory=_utcnow)
 
 

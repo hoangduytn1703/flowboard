@@ -7,6 +7,9 @@ import {
 } from "../store/settings";
 import { getLatestRelease, isNewerVersion, type LatestRelease } from "../api/github";
 import { GeminiKeysSection } from "./GeminiKeysSection";
+import { FlowAccountsSection } from "./settings/FlowAccountsSection";
+import { AccountPoolSection } from "./settings/AccountPoolSection";
+import { ImageProvidersSection } from "./settings/ImageProvidersSection";
 import {
   getPinnedFlowProject,
   setPinnedFlowProject,
@@ -468,7 +471,13 @@ export function SettingsPanel({
         </div>
       </div>
 
+      <AccountPoolSection onProjectChange={onFlowProjectChange} />
+
+      <FlowAccountsSection onProjectChange={onFlowProjectChange} />
+
       <GeminiKeysSection />
+
+      <ImageProvidersSection />
 
       <div className="settings-panel__section">
         <div className="settings-panel__label">Model ảnh</div>

@@ -18,6 +18,7 @@ back. The list endpoint reports `configured: true/false` instead.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Optional
 
@@ -523,3 +524,53 @@ async def test_gemini_keys() -> dict:
 
     results = [await gemini_api.check_key(k) for k in secrets.get_gemini_keys()]
     return {"results": results, **_gemini_keys_payload()}
+
+
+@router.get("/voices")
+def list_voices() -> dict:
+    """Voice-over voices for the export pickers, grouped by provider."""
+    from flowboard.services import tts
+
+    return {"groups": tts.voice_groups(), "default": tts.DEFAULT_VOICE}
+
+
+# ── voice preview ─────────────────────────────────────────────────────────
+# `POST /voices/preview {voice, style?}` speaks one fixed Vietnamese sample
+# sentence (cached per voice + style under tts.TTS_DIR, nothing registered)
+# and answers with the URL the file is served from.
+
+_PREVIEW_FILE_RE = re.compile(r"^[0-9a-f]{8,40}\.(mp3|wav)$")
+
+
+class _VoicePreviewBody(BaseModel):
+    voice: str
+    style: Optional[str] = None
+
+
+@router.post("/voices/preview")
+async def preview_voice(body: _VoicePreviewBody) -> dict:
+    from flowboard.services import tts
+
+    if body.voice not in tts.VOICES:
+        raise HTTPException(400, f"unknown voice {body.voice!r}")
+    style = (body.style or "").strip()[:160] or None
+    try:
+        path = await tts.preview(body.voice, style if tts.is_gemini_voice(body.voice) else None)
+    except tts.TTSError as exc:
+        raise HTTPException(502, str(exc))
+    if not _PREVIEW_FILE_RE.fullmatch(path.name):
+        raise HTTPException(500, f"unexpected preview file {path.name!r}")
+    return {"url": f"/api/llm/voices/preview/{path.name}", "voice": body.voice, "cached": True}
+
+
+@router.get("/voices/preview/{file}")
+def preview_voice_file(file: str):
+    from fastapi.responses import FileResponse
+    from flowboard.services import tts
+
+    if not _PREVIEW_FILE_RE.fullmatch(file):
+        raise HTTPException(400, "invalid preview file name")
+    path = tts.TTS_DIR / file
+    if not path.is_file():
+        raise HTTPException(404, "preview not found")
+    return FileResponse(str(path), media_type="audio/mpeg" if file.endswith(".mp3") else "audio/wav")

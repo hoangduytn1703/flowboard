@@ -1,6 +1,7 @@
 {
   "id": "cosmetics_ad",
   "category": "cosmetics",
+  "order": 20,
   "title": "Quảng cáo mỹ phẩm",
   "blurb": "3 cảnh: sản phẩm trên nền sạch, người mẫu dùng thử, kết da đẹp + sản phẩm. Phong cách beauty editorial.",
   "scenes": 3,
@@ -81,7 +82,7 @@
           "Pháp"
         ]
       ],
-      "default": "kr"
+      "default": "vn"
     }
   ],
   "character": {
@@ -94,7 +95,7 @@
       "type": "note",
       "data": {
         "title": "Kịch bản",
-        "prompt": "Quảng cáo {{product}} — 3 cảnh × 8 s\n\n1. Sản phẩm: cận chai trên nền sạch, giọt nước, ánh sáng mềm — không có người.\n2. Dùng thử: người mẫu nhỏ/thoa sản phẩm lên má, nhẹ nhàng.\n3. Kết: cận mặt da căng bóng, tay cầm sản phẩm cạnh mặt, chừa chỗ cho logo.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh sản phẩm thật → Generate Người mẫu → Generate từng Cảnh → Generate từng Video → ghép bằng Chat AI.\nLồng tiếng: mỗi Video có sẵn một câu thoại (sửa tuỳ ý); node Xuất video đọc giọng Việt + phụ đề khi ghép."
+        "prompt": "Quảng cáo {{product}} — 3 cảnh × 8 s\n\n1. Sản phẩm: cận chai trên nền sạch, giọt nước, ánh sáng mềm — không có người.\n2. Dùng thử: người mẫu nhỏ/thoa sản phẩm lên má, nhẹ nhàng.\n3. Kết: cận mặt da căng bóng, tay cầm sản phẩm cạnh mặt, chừa chỗ cho logo.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh sản phẩm thật (bước 1) → tạo Người mẫu (bước 1) → tạo ảnh từng cảnh (bước 3) → tạo video từng cảnh (bước 4, Omni Flash 8 s) → ghép + lồng tiếng (bước 5).\nLồng tiếng: mỗi cảnh có sẵn một câu thoại tiếng Việt (sửa ở bước 2); bước 5 đọc giọng + phụ đề rồi ghép thành clip hoàn chỉnh."
       }
     },
     {

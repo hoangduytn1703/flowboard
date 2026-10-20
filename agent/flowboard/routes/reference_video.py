@@ -135,7 +135,7 @@ async def analyze_product_link(body: AnalyzeLinkBody) -> dict[str, Any]:
         raise HTTPException(400, "Chưa có Gemini API key — thêm trong Settings → Gemini API keys.")
     try:
         analysis = await product_link.analyze(
-            body.url, product, scenes=body.scenes, model=body.model or gemini_api.DEFAULT_MODEL,
+            body.url, product, scenes=body.scenes, model=body.model,
         )
     except product_link.ProductLinkError as exc:
         raise HTTPException(502, str(exc))

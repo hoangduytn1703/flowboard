@@ -48,6 +48,12 @@ _EXT_BY_MIME = {
     "image/gif": ".gif",
     "video/mp4": ".mp4",
     "video/webm": ".webm",
+    "video/quicktime": ".mov",
+    # Background-music uploads (routes/export_extras.py) are served back for
+    # the step-5 player.
+    "audio/mpeg": ".mp3",
+    "audio/mp4": ".m4a",
+    "audio/wav": ".wav",
 }
 
 

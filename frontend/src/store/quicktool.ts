@@ -1,5 +1,15 @@
 import { create } from "zustand";
-import { autoPrompt, createEdge, createNode, patchBoardData, patchNode, uploadImage, writeNarrationApi, type QuicktoolState } from "../api/client";
+import {
+  autoPrompt, createEdge, createNode, patchBoardData, patchNode, uploadImage, uploadReferenceVideo,
+  writeNarrationApi, type ExportItem, type QuicktoolState,
+} from "../api/client";
+
+/** One entry of a drama clip's play order. */
+export interface SequenceItem {
+  node: FlowNode;
+  kind: "image" | "video";
+  keepAudio: boolean;
+}
 import { requestAutoBrief } from "../api/autoBrief";
 import { buildCharacterPrompt } from "../lib/characterPrompt";
 import { deriveRoles, hasMedia, isBusy, type ClipRoles } from "../quicktool/roles";
@@ -34,6 +44,7 @@ interface QuicktoolStore {
   writeNarrations(): Promise<boolean>;
   /** The board's export node, created when missing. Returns its rfId. */
   ensureExportNode(): Promise<string | null>;
+  _createExportNode(): Promise<string | null>;
   /** A real photo onto a product / model node (Flow upload + vision brief). */
   uploadToNode(rfId: string, file: File): Promise<boolean>;
   /** Another product photo (back, texture, in hand…): a new photo node wired
@@ -41,11 +52,39 @@ interface QuicktoolStore {
   addProductPhoto(file: File): Promise<boolean>;
   /** Remove an extra product photo (never the main one). */
   removeProductPhoto(rfId: string): Promise<void>;
+  /** The user's own footage for a scene (step 4): a local video Asset
+   * put on the scene's video node, in place of a Flow render. */
+  uploadVideoToScene(sceneIndex: number, file: File): Promise<boolean>;
   exportClip(): Promise<boolean>;
+  // Drama clips: the play order (beat stills + spliced-in footage).
+  isDrama(): boolean;
+  sequenceItems(): SequenceItem[];
+  saveSequence(items: SequenceItem[]): void;
+  moveSequenceItem(index: number, delta: number): void;
+  removeSequenceItem(index: number): void;
+  setSequenceKeepAudio(index: number, keep: boolean): void;
+  restoreSequence(): void;
+  insertClip(file: File, afterIndex: number): Promise<boolean>;
+  exportItems(): ExportItem[];
   runAuto(): Promise<void>;
   stopAuto(): void;
+  /** Library-level queue: auto-run several clips one after another. */
+  queue: QueueState;
+  runQueue(boardIds: number[]): Promise<void>;
+  stopQueue(): void;
   clearError(): void;
 }
+
+export interface QueueState {
+  /** Board ids still to run, in order (the current one excluded). */
+  pending: number[];
+  current: number | null;
+  done: number[];
+  failed: Record<number, string>;
+  running: boolean;
+}
+
+const EMPTY_QUEUE: QueueState = { pending: [], current: null, done: [], failed: {}, running: false };
 
 const IMAGE_AR = "IMAGE_ASPECT_RATIO_PORTRAIT";
 /** Product photos per clip, main one included. Every one is fed to every
@@ -53,6 +92,9 @@ const IMAGE_AR = "IMAGE_ASPECT_RATIO_PORTRAIT";
  * request only gets heavier. */
 export const MAX_PRODUCT_PHOTOS = 4;
 const VIDEO_AR = "VIDEO_ASPECT_RATIO_PORTRAIT";
+
+/** The export-node creation currently running, shared by concurrent callers. */
+let exportNodeInFlight: Promise<string | null> | null = null;
 
 function nodeById(id: string): FlowNode | undefined {
   return useBoardStore.getState().nodes.find((n) => n.id === id);
@@ -102,6 +144,7 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
   auto: "idle",
   autoMessage: null,
   error: null,
+  queue: EMPTY_QUEUE,
 
   setStep(step) {
     set({ step });
@@ -223,6 +266,21 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
   },
 
   async ensureExportNode() {
+    // Step 5 mounts twice under StrictMode and both mounts asked for the
+    // node before the first answer landed, leaving duplicate "Clip hoàn
+    // chỉnh" nodes; one in-flight creation serves every caller.
+    if (exportNodeInFlight) return exportNodeInFlight;
+    exportNodeInFlight = (async () => {
+      try {
+        return await get()._createExportNode();
+      } finally {
+        exportNodeInFlight = null;
+      }
+    })();
+    return exportNodeInFlight;
+  },
+
+  async _createExportNode() {
     const board = useBoardStore.getState();
     const existing = get().roles().export;
     if (existing) return existing.id;
@@ -272,6 +330,28 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
     await useBoardStore.getState().deleteNodeByRfId(rfId);
   },
 
+  async uploadVideoToScene(sceneIndex, file) {
+    const scene = get().roles().scenes.find((s) => s.index === sceneIndex);
+    if (!scene?.video || isBusy(scene.video)) return false;
+    const video = scene.video;
+    const dbId = parseInt(video.id, 10);
+    try {
+      // Stored like a reference video: a local Asset, never sent to Flow.
+      const up = await uploadReferenceVideo(file);
+      const patch = { mediaId: up.media_id, mediaIds: [up.media_id], variantCount: 1, status: "done" as const,
+                      error: undefined, uploaded: true };
+      useBoardStore.getState().updateNodeData(video.id, patch);
+      if (!isNaN(dbId)) {
+        patchNode(dbId, { status: "done", data: { ...patch, error: null, renderedAt: new Date().toISOString() } })
+          .catch(() => {});
+      }
+      return true;
+    } catch (err) {
+      set({ error: `Không tải được video: ${err instanceof Error ? err.message : "lỗi"}` });
+      return false;
+    }
+  },
+
   async uploadToNode(rfId, file) {
     const projectId = await useGenerationStore.getState().ensureProjectId();
     if (!projectId) {
@@ -296,12 +376,137 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
     }
   },
 
+  // ── Drama clips: the play order of beat stills and spliced-in footage ──
+
+  isDrama() {
+    const { boardId, boards } = useBoardStore.getState();
+    return (boards.find((b) => b.id === boardId)?.data?.quicktool as QuicktoolState | undefined)?.template_id === "drama";
+  },
+
+  sequenceItems() {
+    const { boardId, boards, nodes } = useBoardStore.getState();
+    const qt = (boards.find((b) => b.id === boardId)?.data?.quicktool ?? {}) as QuicktoolState;
+    const byShort = new Map(nodes.map((n) => [n.data.shortId, n]));
+    const saved = qt.sequence ?? [];
+    const items: SequenceItem[] = [];
+    for (const entry of saved) {
+      const node = byShort.get(entry.node);
+      if (!node) continue;
+      const kind = node.data.type === "video" ? "video" : "image";
+      items.push({ node, kind, keepAudio: entry.keepAudio ?? kind === "video" });
+    }
+    if (saved.length === 0) {
+      // No order saved yet (an older board): the stills in canvas order.
+      for (const s of get().roles().scenes) items.push({ node: s.image, kind: "image", keepAudio: false });
+    }
+    return items;
+  },
+
+  saveSequence(items) {
+    const boardId = useBoardStore.getState().boardId;
+    if (boardId === null) return;
+    const sequence = items.map((it) => ({ node: it.node.data.shortId, keepAudio: it.keepAudio }));
+    const current = (useBoardStore.getState().boards.find((b) => b.id === boardId)?.data?.quicktool ?? {}) as QuicktoolState;
+    const next = { ...current, sequence };
+    useBoardStore.setState((s) => ({
+      boards: s.boards.map((b) => b.id === boardId ? { ...b, data: { ...(b.data ?? {}), quicktool: next } } : b),
+    }));
+    patchBoardData(boardId, { quicktool: next }).catch(() => {});
+  },
+
+  moveSequenceItem(index, delta) {
+    const items = get().sequenceItems();
+    const to = index + delta;
+    if (to < 0 || to >= items.length) return;
+    [items[index], items[to]] = [items[to], items[index]];
+    get().saveSequence(items);
+  },
+
+  removeSequenceItem(index) {
+    const items = get().sequenceItems();
+    const [gone] = items.splice(index, 1);
+    if (!gone) return;
+    get().saveSequence(items);
+    // Spliced-in footage has no other home on the board; a beat still stays
+    // (step 3 keeps it, "restore" brings it back).
+    if (gone.kind === "video") void useBoardStore.getState().deleteNodeByRfId(gone.node.id);
+  },
+
+  setSequenceKeepAudio(index, keep) {
+    const items = get().sequenceItems();
+    if (!items[index]) return;
+    items[index] = { ...items[index], keepAudio: keep };
+    get().saveSequence(items);
+  },
+
+  restoreSequence() {
+    const items = get().sequenceItems();
+    const listed = new Set(items.map((it) => it.node.id));
+    for (const s of get().roles().scenes) {
+      if (!listed.has(s.image.id)) items.push({ node: s.image, kind: "image", keepAudio: false });
+    }
+    get().saveSequence(items);
+  },
+
+  async insertClip(file, afterIndex) {
+    const board = useBoardStore.getState();
+    if (board.boardId === null) return false;
+    try {
+      // Registered like a reference video: a local video Asset, never sent to Flow.
+      const up = await uploadReferenceVideo(file);
+      const items = get().sequenceItems();
+      const anchor = items[Math.min(Math.max(afterIndex, 0), items.length - 1)];
+      const dto = await createNode({
+        board_id: board.boardId,
+        type: "video",
+        x: Math.round((anchor?.node.position.x ?? 0) + 380),
+        y: Math.round(anchor?.node.position.y ?? items.length * 320),
+        data: {
+          title: `Clip chèn — ${file.name}`.slice(0, 80),
+          mediaId: up.media_id, mediaIds: [up.media_id], variantCount: 1, narration: "",
+          renderedAt: new Date().toISOString(),
+        },
+      });
+      // createNode has no status field; the clip is ready as soon as it exists.
+      patchNode(dto.id, { status: "done" }).catch(() => {});
+      await board.refreshBoardState();
+      const node = useBoardStore.getState().nodes.find((n) => n.id === String(dto.id));
+      if (!node) throw new Error("node không xuất hiện trên board");
+      const refreshed = get().sequenceItems();
+      const at = Math.min(Math.max(afterIndex + 1, 0), refreshed.length);
+      refreshed.splice(at, 0, { node, kind: "video", keepAudio: true });
+      get().saveSequence(refreshed);
+      return true;
+    } catch (err) {
+      set({ error: `Chèn clip thất bại: ${err instanceof Error ? err.message : "lỗi"}` });
+      return false;
+    }
+  },
+
+  exportItems() {
+    return get().sequenceItems()
+      .filter((it) => hasMedia(it.node))
+      .map((it) => ({
+        media_id: it.node.data.mediaId as string,
+        kind: it.kind,
+        narration: typeof it.node.data.narration === "string" ? it.node.data.narration.trim() : "",
+        caption: typeof it.node.data.caption === "string" ? it.node.data.caption.trim() : "",
+        original_audio: it.kind === "video" ? (it.keepAudio ? "keep" : "duck") : undefined,
+        // The still/clip's own voice (step 2), read by `dispatchExport`.
+        voice: typeof it.node.data.voice === "string" && it.node.data.voice ? it.node.data.voice : null,
+      }));
+  },
+
   async exportClip() {
     const board = useBoardStore.getState();
     const roles = get().roles();
-    const clips = roles.scenes.map((s) => s.video).filter(hasMedia) as FlowNode[];
+    const drama = get().isDrama();
+    const items = drama ? get().exportItems() : null;
+    const clips = drama
+      ? get().sequenceItems().filter((it) => hasMedia(it.node)).map((it) => it.node)
+      : roles.scenes.map((s) => s.video).filter(hasMedia) as FlowNode[];
     if (clips.length === 0) {
-      set({ error: "Chưa có video nào để ghép." });
+      set({ error: drama ? "Chưa có ảnh nào để ghép — tạo ảnh ở bước 3." : "Chưa có video nào để ghép." });
       return false;
     }
     const exportId = await get().ensureExportNode();
@@ -311,7 +516,7 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
       if (!wired.has(v.id)) await board.addEdgeFromConnection(v.id, exportId);
     }
     useGenerationStore.getState().clearError();
-    await useGenerationStore.getState().dispatchExport(exportId);
+    await useGenerationStore.getState().dispatchExport(exportId, items ?? undefined);
     const err = useGenerationStore.getState().error;
     if (err) {
       set({ error: err });
@@ -336,14 +541,18 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
       for (const s of get().roles().scenes) await waitForNode(s.image.id, hasMedia);
       if (!stillRunning(get)) return;
 
-      set({ auto: "videos", autoMessage: "Tạo video từng cảnh (1–3 phút mỗi clip)…" });
-      await get().generateAllVideos();
-      for (const s of get().roles().scenes) {
-        if (s.video) await waitForNode(s.video.id, hasMedia);
+      // Drama clips have no videos to render: the export animates the stills.
+      if (!get().isDrama()) {
+        set({ auto: "videos", autoMessage: "Tạo video từng cảnh (1–3 phút mỗi clip)…" });
+        await get().generateAllVideos();
+        for (const s of get().roles().scenes) {
+          if (s.video) await waitForNode(s.video.id, hasMedia);
+        }
+        if (!stillRunning(get)) return;
       }
-      if (!stillRunning(get)) return;
 
-      const missing = get().roles().scenes.some((s) => s.video && !(typeof s.video.data.narration === "string" && s.video.data.narration.trim()));
+      const missing = !get().isDrama()
+        && get().roles().scenes.some((s) => s.video && !(typeof s.video.data.narration === "string" && s.video.data.narration.trim()));
       if (missing) {
         set({ auto: "narration", autoMessage: "Viết lời thoại…" });
         await get().writeNarrations();
@@ -364,6 +573,40 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
 
   stopAuto() {
     set({ auto: "stopped", autoMessage: "Đã dừng. Việc đang chạy trên Flow vẫn hoàn tất; bấm từng bước để tiếp tục." });
+  },
+
+  async runQueue(boardIds) {
+    if (get().queue.running || stillRunning(get) || boardIds.length === 0) return;
+    const ids = Array.from(new Set(boardIds));
+    set({ queue: { pending: ids.slice(1), current: ids[0], done: [], failed: {}, running: true }, error: null });
+    for (let i = 0; i < ids.length; i++) {
+      const q = get().queue;
+      if (!q.running) break;
+      const id = ids[i];
+      set({ queue: { ...q, current: id, pending: ids.slice(i + 1) } });
+      try {
+        // The auto run works on the board store's active board.
+        if (useBoardStore.getState().boardId !== id) await useBoardStore.getState().switchBoard(id);
+        if (useBoardStore.getState().boardId !== id) throw new Error("không mở được clip");
+        await get().runAuto();
+        const auto = get().auto;
+        if (auto === "done") {
+          set({ queue: { ...get().queue, done: [...get().queue.done, id] } });
+        } else {
+          const why = auto === "stopped" ? "đã dừng" : get().error ?? "lỗi";
+          set({ queue: { ...get().queue, failed: { ...get().queue.failed, [id]: why } } });
+          if (auto === "stopped") break;
+        }
+      } catch (err) {
+        set({ queue: { ...get().queue, failed: { ...get().queue.failed, [id]: err instanceof Error ? err.message : String(err) } } });
+      }
+    }
+    set({ queue: { ...get().queue, current: null, pending: [], running: false }, auto: "idle", autoMessage: null });
+  },
+
+  stopQueue() {
+    set({ queue: { ...get().queue, pending: [], running: false } });
+    if (stillRunning(get)) get().stopAuto();
   },
 
   clearError() {

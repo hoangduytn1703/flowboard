@@ -19,6 +19,7 @@ import httpx
 
 from flowboard.services import reference_video
 from flowboard.services.llm import gemini_api
+from flowboard.services.templates import CATEGORIES
 
 logger = logging.getLogger(__name__)
 
@@ -138,10 +139,20 @@ _SCHEMA = {**reference_video._SCHEMA,
            "required": [r for r in reference_video._SCHEMA["required"] if r != "scenes"]}
 
 
+#: The ad plan needs more judgement than the card extraction below, but the
+#: default gemini-3.8-flash took ~115 s on a long page (apple.com/vn/iphone)
+#: while the button promised 10–40 s; 3.5-flash answers the same ask in
+#: ~20 s. The route passes the generic default when the user picked no
+#: model, so that value means "no pick" here and resolves to this one.
+PLAN_MODEL = "gemini-3.5-flash"
+
+
 async def analyze(url: str, product: Optional[dict], *, scenes: Optional[int] = None,
-                  model: str = gemini_api.DEFAULT_MODEL) -> dict[str, Any]:
+                  model: Optional[str] = None) -> dict[str, Any]:
     """The adapted plan for the product at ``url``; the fetched page's
     ``title`` / ``image_url`` ride along as ``page``."""
+    if not model or model == gemini_api.DEFAULT_MODEL:
+        model = PLAN_MODEL
     page = await fetch_page(url)
     ask = [
         "Write the video plan for the product on this page.",
@@ -179,8 +190,10 @@ _PRODUCT_SYSTEM = (
     "hashtags and repeated words), <= 80 chars. description: ENGLISH, <= 300 chars, what the "
     "item physically looks like (type, colour, material, shape, distinctive details, size cues) "
     "so an image model can draw it; no marketing words. category: fashion for clothing, shoes, "
-    "bags and accessories; cosmetics for beauty and skincare; food for food and drink; else "
-    "other. price: the current selling price exactly as the page shows it (e.g. '79.434đ'), "
+    "bags and wearable accessories; cosmetics for beauty and skincare; food for food and drink; "
+    "grocery for small everyday goods and phone accessories (phone cases, acrylic stands, cables, "
+    "chargers, earphones, hooks, boxes, organisers); home for household appliances and kitchen "
+    "gear (pots, pans, blenders, vacuums, fans, cookers, water filters, lamps); else other. price: the current selling price exactly as the page shows it (e.g. '79.434đ'), "
     "empty if absent. selling_points: 3-5 short Vietnamese lines, one per line, the real "
     "benefits and facts from the page, each <= 90 chars. Output ONLY the JSON object."
 )
@@ -190,7 +203,7 @@ _PRODUCT_SCHEMA = {
     "properties": {
         "name": {"type": "STRING"},
         "description": {"type": "STRING"},
-        "category": {"type": "STRING", "enum": ["fashion", "cosmetics", "food", "other"]},
+        "category": {"type": "STRING", "enum": list(CATEGORIES)},
         "price": {"type": "STRING"},
         "selling_points": {"type": "STRING"},
     },
@@ -220,7 +233,7 @@ def _bigger_image(url: str) -> str:
 #: Filling a product card is plain extraction, so it runs on the light model:
 #: measured on the same page, gemini-3.1-flash-lite answered in ~4 s while
 #: gemini-3.7/3.8-flash timed out past 40 s (and 3.5-flash took ~21 s, mostly
-#: thinking tokens). The ad plan below stays on the default model.
+#: thinking tokens). The ad plan above runs on :data:`PLAN_MODEL`.
 EXTRACT_MODEL = "gemini-3.1-flash-lite"
 
 
@@ -241,7 +254,7 @@ async def extract_product(url: str, *, model: str = EXTRACT_MODEL) -> dict[str, 
         raise ProductLinkError(f"Gemini returned invalid JSON: {exc}") from exc
     if not isinstance(data, dict) or not str(data.get("name") or "").strip():
         raise ProductLinkError("Không đọc được tên sản phẩm từ trang này")
-    category = data.get("category") if data.get("category") in ("fashion", "cosmetics", "food", "other") else "other"
+    category = data.get("category") if data.get("category") in CATEGORIES else "other"
     return {
         "draft": {
             "name": str(data["name"]).strip()[:120],

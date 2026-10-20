@@ -166,6 +166,10 @@ export interface QuicktoolState {
   hands?: { gender: "hands_female" | "hands_male"; country: string; look: string } | null;
   /** What a link / video clip was analysed as. */
   reference?: { category?: string | null } | null;
+  /** Drama clips: the play order — beat stills and spliced-in footage, by node short id. */
+  sequence?: { node: string; keepAudio?: boolean }[];
+  drama?: { title?: string; hook?: string | null; tone?: string | null } | null;
+  source_url?: string | null;
 }
 
 /** The model picked on the review screen of a link / video clip, or on
@@ -1300,7 +1304,7 @@ export interface BoardTemplate {
   blurb: string;
   scenes: number;
   /** Product category this template is made for (product library). */
-  category?: ProductCategory;
+  category?: ProductCategory | "any";
   /** The clip must show a person (clothes are judged on a body): no hands-only option. */
   person_required?: boolean;
   inputs: TemplateInput[];
@@ -1308,12 +1312,14 @@ export interface BoardTemplate {
 
 // ── Product library ──────────────────────────────────────────────────────────
 
-export type ProductCategory = "fashion" | "cosmetics" | "food" | "other";
+export type ProductCategory = "fashion" | "cosmetics" | "food" | "grocery" | "home" | "other";
 
 export const PRODUCT_CATEGORIES: [ProductCategory, string][] = [
   ["fashion", "Thời trang"],
   ["cosmetics", "Mỹ phẩm"],
   ["food", "Đồ ăn / uống"],
+  ["grocery", "Tạp hoá & phụ kiện"],
+  ["home", "Gia dụng"],
   ["other", "Khác"],
 ];
 
@@ -1473,12 +1479,43 @@ export async function splitStoryboard(nodeId: number): Promise<SplitStoryboardRe
 
 // ── Voice-over ───────────────────────────────────────────────────────────────
 
-/** Edge neural voices the agent offers (`services/tts.py::VOICES`). */
-export const VOICES: Record<string, string> = {
-  "vi-VN-HoaiMyNeural": "Hoài My (nữ)",
-  "vi-VN-NamMinhNeural": "Nam Minh (nam)",
-};
+/** Voice-over voices (`services/tts.py::VOICES`): Edge (free, instant) and
+ * Gemini prebuilt voices (many, style-steerable, served by the key pool). */
+export const VOICE_GROUPS: { id: "edge" | "gemini"; label: string; voices: [string, string][] }[] = [
+  {
+    id: "edge",
+    label: "Microsoft Edge — miễn phí, nhanh",
+    voices: [
+      ["vi-VN-HoaiMyNeural", "Hoài My (nữ)"],
+      ["vi-VN-NamMinhNeural", "Nam Minh (nam)"],
+    ],
+  },
+  {
+    id: "gemini",
+    label: "Gemini — nhiều giọng, chỉnh được phong cách (cần Gemini API key)",
+    voices: [
+      ["gemini:Kore", "Kore (nữ, chắc giọng)"],
+      ["gemini:Aoede", "Aoede (nữ, nhẹ nhàng)"],
+      ["gemini:Leda", "Leda (nữ, trẻ trung)"],
+      ["gemini:Sulafat", "Sulafat (nữ, ấm áp)"],
+      ["gemini:Gacrux", "Gacrux (nữ, chững chạc)"],
+      ["gemini:Despina", "Despina (nữ, mượt)"],
+      ["gemini:Laomedeia", "Laomedeia (nữ, sôi nổi)"],
+      ["gemini:Puck", "Puck (nam, vui tươi)"],
+      ["gemini:Charon", "Charon (nam, kể chuyện)"],
+      ["gemini:Fenrir", "Fenrir (nam, hào hứng)"],
+      ["gemini:Orus", "Orus (nam, chắc giọng)"],
+      ["gemini:Achird", "Achird (nam, thân thiện)"],
+      ["gemini:Algenib", "Algenib (nam, khàn)"],
+      ["gemini:Sadaltager", "Sadaltager (nam, hiểu biết)"],
+    ],
+  },
+];
+export const VOICES: Record<string, string> = Object.fromEntries(
+  VOICE_GROUPS.flatMap((g) => g.voices.map(([id, label]) => [id, `${label} · ${g.id === "edge" ? "Edge" : "Gemini"}`])),
+);
 export const DEFAULT_VOICE = "vi-VN-HoaiMyNeural";
+export const isGeminiVoice = (id: string) => id.startsWith("gemini:");
 
 /** AI writes one Vietnamese voice line per video node (in clip order) and
  * stores it on each node's `data.narration`. */
@@ -1657,4 +1694,154 @@ export async function fetchReferenceVideo(url: string): Promise<ReferenceUpload 
   });
   if (!res.ok) throw new Error(await extractErrorMessage(res));
   return res.json();
+}
+
+// ── Drama clips (story → narrated slideshow) ─────────────────────────────────
+
+export interface DramaBeat {
+  title_vi: string;
+  caption_vi: string;
+  narration_vi: string;
+  image_prompt_en: string;
+}
+
+export interface DramaPlan {
+  title_vi: string;
+  summary_vi: string;
+  hook_vi: string;
+  tone: string;
+  beats: DramaBeat[];
+  source_url: string | null;
+}
+
+export async function analyzeDrama(input: { url?: string; text?: string; beats?: number }): Promise<{
+  source: { title: string; url: string | null; chars: number };
+  plan: DramaPlan;
+}> {
+  const res = await fetch("/api/drama/analyze", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url: input.url ?? null, text: input.text ?? null, beats: input.beats ?? null }),
+  });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
+}
+
+export async function buildDrama(plan: DramaPlan, name?: string): Promise<Board & { nodes: Record<string, string>; sequence: { node: string }[] }> {
+  const res = await fetch("/api/drama/build", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ plan, name: name ?? null }),
+  });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
+}
+
+/** One entry of an explicit export order (drama clips): a still or a clip. */
+export interface ExportItem {
+  media_id: string;
+  kind: "image" | "video";
+  narration: string;
+  caption?: string;
+  /** Inserted footage keeps its own sound by default. */
+  original_audio?: "duck" | "keep" | "mute";
+}
+
+// ── Export extras: voice preview, background music, cover image ─────────────
+
+/** `POST /api/llm/voices/preview`: one fixed sample sentence spoken by
+ * `voice` (`style` applies to Gemini voices); play the URL with
+ * `new Audio(url)`. The agent caches it per voice + style. */
+export async function previewVoice(voice: string, style?: string): Promise<{ url: string; voice: string }> {
+  const res = await fetch("/api/llm/voices/preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ voice, style: style || null }),
+  });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
+}
+
+/** Background-music levels offered in the export step (volume factor). */
+export const BGM_VOLUMES: [number, string][] = [[0.08, "Nhỏ"], [0.15, "Vừa"], [0.25, "To"]];
+export const BGM_DEFAULT_VOLUME = 0.15;
+export const MAX_MUSIC_BYTES = 20 * 1024 * 1024;
+
+export interface MusicUpload {
+  media_id: string;
+  name: string;
+  mime: string;
+  size: number;
+  duration_s: number | null;
+}
+
+/** `POST /api/llm/music`: store an mp3 / m4a / wav track as an audio asset. */
+export async function uploadMusic(file: File): Promise<MusicUpload> {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  const res = await fetch("/api/llm/music", { method: "POST", body: form });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
+}
+
+export type CoverStyle = "yellow" | "white" | "red";
+export const COVER_STYLES: [CoverStyle, string][] = [["yellow", "Chữ vàng"], ["white", "Chữ trắng"], ["red", "Chữ đỏ"]];
+
+export interface CoverResult {
+  media_id: string;
+  url: string;
+  width: number;
+  height: number;
+}
+
+/** `POST /api/boards/{id}/cover`: a 1080×1920 PNG cover from a scene image
+ * with the title burned in; registered as an image asset. */
+export async function createCover(
+  boardId: number,
+  body: { media_id: string; title: string; subtitle?: string; style?: CoverStyle },
+): Promise<CoverResult> {
+  const res = await fetch(`/api/boards/${boardId}/cover`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ media_id: body.media_id, title: body.title, subtitle: body.subtitle || null, style: body.style ?? "yellow" }),
+  });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
+}
+
+// ── Dialogue: several voices in one narration line ──────────────────────────
+
+/** `[A]` / `[b2]` in a voice line marks who speaks what follows
+ * (`services/tts.py::SPEAKER_TAG`). Tags are compared upper-cased. */
+export const SPEAKER_TAG = /\[([A-Za-z0-9]{1,8})\]/g;
+/** An export node may name this many speakers (`tts.MAX_SPEAKERS`). */
+export const MAX_SPEAKERS = 4;
+
+/** `[{ tag, text }]` of a line: `"[A] Ủa? [b] Mát lắm."` →
+ * `[{tag: "A", text: "Ủa?"}, {tag: "B", text: "Mát lắm."}]`; text before the
+ * first tag has `tag: null`; empty segments are dropped. */
+export function parseSpeakers(text: string): { tag: string | null; text: string }[] {
+  const out: { tag: string | null; text: string }[] = [];
+  let pos = 0;
+  let tag: string | null = null;
+  for (const m of (text || "").matchAll(SPEAKER_TAG)) {
+    const seg = text.slice(pos, m.index).trim();
+    if (seg) out.push({ tag, text: seg });
+    tag = m[1].toUpperCase();
+    pos = (m.index ?? 0) + m[0].length;
+  }
+  const seg = (text || "").slice(pos).trim();
+  if (seg) out.push({ tag, text: seg });
+  return out;
+}
+
+/** The distinct speaker tags used across `lines`, in order of first use. */
+export function speakerTags(lines: string[]): string[] {
+  const tags: string[] = [];
+  for (const line of lines) {
+    for (const seg of parseSpeakers(line)) {
+      if (seg.tag && !tags.includes(seg.tag)) tags.push(seg.tag);
+    }
+  }
+  return tags;
 }

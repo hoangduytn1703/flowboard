@@ -24,8 +24,8 @@ logger = logging.getLogger(__name__)
 
 
 async def _handler(websocket) -> None:
-    flow_client.set_extension(websocket)
-    logger.info("extension connected from %s", getattr(websocket, "remote_address", "?"))
+    conn_id = flow_client.set_extension(websocket)
+    logger.info("extension connected from %s (conn %s)", getattr(websocket, "remote_address", "?"), conn_id)
 
     # Hand the extension the secret it needs to authenticate HTTP callbacks.
     try:
@@ -43,14 +43,14 @@ async def _handler(websocket) -> None:
                 logger.warning("invalid JSON from extension")
                 continue
             try:
-                await flow_client.handle_message(data)
+                await flow_client.handle_message(data, websocket)
             except Exception:  # noqa: BLE001
                 logger.exception("error handling extension message")
     except websockets.ConnectionClosed:
         pass
     finally:
-        flow_client.clear_extension()
-        logger.info("extension disconnected")
+        flow_client.clear_extension(websocket)
+        logger.info("extension disconnected (conn %s)", conn_id)
 
 
 async def run_ws_server() -> None:

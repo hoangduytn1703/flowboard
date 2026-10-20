@@ -41,10 +41,14 @@ _VISION_SYSTEM = (
     "describes the image. Focus on attributes useful for image generation: "
     "for a product → colour, material, design, fit, style; for a person → "
     "gender, apparent ethnicity, age range, expression, hair, outfit. No "
-    "marketing language, no opinions, no preamble — just the description."
+    "marketing language, no opinions, no preamble — just the description. "
+    # The brief is spliced into English generation prompts and the form
+    # labels it "tiếng Anh"; without this the model answers in the language
+    # of any text printed on the product (Vietnamese packaging, labels).
+    "Write in ENGLISH only, whatever language any text in the image is in."
 )
 
-_VISION_USER_PROMPT = "Describe this image."
+_VISION_USER_PROMPT = "Describe this image in English."
 
 
 class VisionError(RuntimeError):

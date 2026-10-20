@@ -24,6 +24,7 @@ from flowboard import config
 from flowboard.services.video_prompt import ensure_realtime
 from flowboard.services import media as media_service
 from flowboard.services.flow_client import flow_client
+from flowboard.services.account_pool import account_pool
 from flowboard.services.flow_sdk import get_flow_sdk, resolve_paygate_tier
 
 logger = logging.getLogger(__name__)
@@ -163,6 +164,12 @@ async def _handle_create_project(params: dict) -> tuple[dict, Optional[str]]:
 
 async def _handle_gen_image(params: dict) -> tuple[dict, Optional[str]]:
     from flowboard.services.flow_sdk import is_valid_project_id
+    # Images from an API account (OpenAI / xAI) instead of Flow: the result
+    # is still pushed into Flow so videos can use it as an ingredient.
+    from flowboard.services import image_providers
+    hook = await image_providers.maybe_generate_via_api(params)
+    if hook is not None:
+        return hook
 
     prompt = params.get("prompt")
     project_id = params.get("project_id")
@@ -380,6 +387,13 @@ async def _handle_gen_video(params: dict) -> tuple[dict, Optional[str]]:
     video_quality = params.get("video_quality")
     if not isinstance(video_quality, str) or not video_quality.strip():
         video_quality = None
+    # Out of credits on this account? Move to the next one (and its project)
+    # before spending anything; the job waits for the Flow tab to follow.
+    gate_err, switched_pid = await account_pool.ensure_credits(account_pool.job_cost(params))
+    if gate_err:
+        return {}, gate_err
+    if switched_pid:
+        project_id = switched_pid
 
     # Start frames from another Flow project are unknown here — re-home
     # them first. The sync keeps list positions, so start frame i still
@@ -738,6 +752,11 @@ async def _handle_gen_video_omni(params: dict) -> tuple[dict, Optional[str]]:
         )
     except ValueError as exc:
         return {}, str(exc)[:200]
+    gate_err, switched_pid = await account_pool.ensure_credits(account_pool.job_cost(params))
+    if gate_err:
+        return {}, gate_err
+    if switched_pid:
+        project_id = switched_pid
 
     # ── Cross-project ref sync ────────────────────────────────────────
     # Flow scopes mediaIds to the project they were uploaded in. When
@@ -910,33 +929,58 @@ async def _handle_export_video(params: dict) -> tuple[dict, Optional[str]]:
     clip that is still just a signed Flow URL is fetched into the cache
     first; the join needs files on disk.
     """
-    from flowboard.services import tts
-    from flowboard.services.video_export import NarrationOptions, export_video
+    from pathlib import Path
 
+    from flowboard.services import tts
+    from flowboard.services.video_export import BGM_DEFAULT_VOLUME, ExportItem, NarrationOptions, export_video
+
+    # Explicit order with stills and clips mixed (drama clips) …
+    raw_items = params.get("items")
+    items_in: list[dict] = [it for it in raw_items if isinstance(it, dict) and isinstance(it.get("media_id"), str)] \
+        if isinstance(raw_items, list) else []
+    # … or the plain list of clips the export node is wired from.
     raw = params.get("source_media_ids")
-    media_ids = [m for m in (raw if isinstance(raw, list) else []) if isinstance(m, str) and m]
+    media_ids = [it["media_id"] for it in items_in] if items_in else \
+        [m for m in (raw if isinstance(raw, list) else []) if isinstance(m, str) and m]
     if not media_ids:
         return {}, "missing_source_media_ids"
     smooth60 = bool(params.get("smooth60"))
     # Voice-over: one line per clip, aligned with source_media_ids.
-    raw_lines = params.get("narrations")
+    raw_lines = [str(it.get("narration") or "") for it in items_in] if items_in else params.get("narrations")
     narration = None
-    if isinstance(raw_lines, list) and any(isinstance(t, str) and t.strip() for t in raw_lines):
+    if items_in or (isinstance(raw_lines, list) and any(isinstance(t, str) and t.strip() for t in raw_lines)):
         voice = params.get("voice") if params.get("voice") in tts.VOICES else tts.DEFAULT_VOICE
         try:
             rate = int(params.get("voice_rate") or 0)
         except (TypeError, ValueError):
             rate = 0
         original = params.get("original_audio")
+        # Dialogue: `[A] … [B] …` tags → voices (tag → voice id, at most
+        # MAX_SPEAKERS); unknown voices are dropped and fall back to `voice`.
+        raw_speakers = params.get("speakers")
+        speakers: dict[str, str] = {}
+        if isinstance(raw_speakers, dict):
+            for tag, v in raw_speakers.items():
+                if isinstance(tag, str) and tts.SPEAKER_TAG.fullmatch(f"[{tag}]") and v in tts.VOICES \
+                        and len(speakers) < tts.MAX_SPEAKERS:
+                    speakers[tag.upper()] = v
+        # Per-clip voice, aligned with the clips (null = the export's voice).
+        raw_voices = params.get("voices")
+        line_voices = [v if isinstance(v, str) and v in tts.VOICES else None
+                       for v in (raw_voices if isinstance(raw_voices, list) else [])]
         narration = NarrationOptions(
             lines=[t if isinstance(t, str) else "" for t in raw_lines],
             voice=voice,
             rate=rate,
             subtitles=params.get("subtitles", True) is not False,
             original_audio=original if original in ("duck", "keep", "mute") else "duck",
+            style=str(params.get("voice_style") or "").strip() or None,
+            speakers=speakers,
+            line_voices=line_voices,
         )
 
     asset_ids: list[int] = []
+    kinds: list[str] = []
     for mid in media_ids:
         if media_service.cached_path(mid) is None:
             await media_service.fetch_and_cache(mid)
@@ -945,10 +989,52 @@ async def _handle_export_video(params: dict) -> tuple[dict, Optional[str]]:
             if row is None or not row.local_path:
                 return {}, f"clip_unavailable:{mid[:8]}"
             asset_ids.append(row.id)
+            kinds.append("image" if (row.kind == "image" or str(row.local_path).lower().endswith(
+                (".png", ".jpg", ".jpeg", ".webp"))) else "video")
+
+    items = None
+    if items_in:
+        items = [
+            ExportItem(
+                asset_id=aid,
+                kind=it.get("kind") if it.get("kind") in ("image", "video") else kind,
+                narration=str(it.get("narration") or ""),
+                caption=str(it.get("caption") or ""),
+                original_audio=it.get("original_audio") if it.get("original_audio") in ("duck", "keep", "mute") else None,
+            )
+            for it, aid, kind in zip(items_in, asset_ids, kinds)
+        ]
+    elif "image" in kinds:
+        # Stills reached the export through the plain path (an image node
+        # wired straight into the export node): still has to be rendered.
+        lines = narration.lines if narration else [""] * len(asset_ids)
+        items = [ExportItem(asset_id=aid, kind=kind, narration=(lines[i] if i < len(lines) else ""))
+                 for i, (aid, kind) in enumerate(zip(asset_ids, kinds))]
+        narration = narration or NarrationOptions(lines=[])
+
+    # Background music: an uploaded audio Asset looped under the whole clip.
+    bgm_asset_id: Optional[int] = None
+    bgm_error: Optional[str] = None
+    bgm_media = params.get("bgm_media_id")
+    if isinstance(bgm_media, str) and bgm_media.strip():
+        with get_session() as s:
+            bgm_row = s.exec(select(Asset).where(Asset.uuid_media_id == bgm_media.strip())).first()
+            if bgm_row is None or not bgm_row.local_path or not Path(bgm_row.local_path).is_file():
+                bgm_error = f"bgm_unavailable:{bgm_media[:8]}"
+            else:
+                bgm_asset_id = bgm_row.id
+    try:
+        bgm_volume = float(params.get("bgm_volume") or BGM_DEFAULT_VOLUME)
+    except (TypeError, ValueError):
+        bgm_volume = BGM_DEFAULT_VOLUME
 
     out_media, err, report = await asyncio.to_thread(
-        export_video, asset_ids, smooth60=smooth60, narration=narration
+        export_video, asset_ids, smooth60=smooth60, narration=narration, items=items,
+        bgm_asset_id=bgm_asset_id, bgm_volume=bgm_volume,
     )
+    if bgm_error and isinstance(report, dict):
+        # The clip is still exported; the missing track is only reported.
+        report["bgm_error"] = bgm_error
     if err or not out_media:
         return {"report": report}, err or "export_failed"
     return {
@@ -1348,6 +1434,10 @@ class WorkerController:
 
             # Release the session during the possibly-long RPC.
             result, err = await handler(params)
+            try:
+                account_pool.note_result(params, err)
+            except Exception:  # noqa: BLE001
+                logger.exception("account_pool.note_result failed")
 
             with get_session() as s:
                 req = s.get(Request, rid)

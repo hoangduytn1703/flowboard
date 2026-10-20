@@ -182,6 +182,9 @@ function connectToAgent() {
       type: 'extension_ready',
       flowKeyPresent: !!flowKey,
       tokenAge,
+      // Lets the agent refuse commands this build does not know (TikTok
+      // import needs >= 0.2.0) instead of waiting on a reply that never comes.
+      version: chrome.runtime.getManifest().version,
     }));
 
     // Resend token immediately so agent can start without waiting for a capture
@@ -235,6 +238,10 @@ function connectToAgent() {
         await handleBatchRpc(msg);
       } else if (msg.method === 'scrape_page') {
         await handleScrapePage(msg);
+      } else if (msg.method === 'read_account') {
+        await handleReadAccount(msg);
+      } else if (msg.method === 'open_flow_tab') {
+        await handleOpenFlowTab(msg);
       } else if (msg.method === 'api_request') {
         await handleApiRequest(msg);
       } else if (msg.method === 'trpc_request') {
@@ -477,6 +484,94 @@ async function handleBatchRpc(msg) {
 // is heuristic — TikTok's markup is not a contract — so the result carries
 // `diag` (counts and a couple of card samples) to tune it against the real
 // page instead of guessing.
+
+// Email / credits / plan of the Google account this Chrome profile uses on
+// Flow. flow.google.com mints no Bearer token any more, so the only place
+// these numbers exist is the account panel in the page: open it, read it,
+// close it (a short flicker on the Flow tab, only when asked).
+async function handleReadAccount(msg) {
+  const { id } = msg;
+  try {
+    const tabs = await chrome.tabs.query({ url: ['https://flow.google.com/*', 'https://labs.google/fx/*'] });
+    if (!tabs.length) {
+      sendToAgent({ id, status: 404, error: 'NO_FLOW_TAB' });
+      return;
+    }
+    const tab = tabs.find((t) => t.active) || tabs.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0];
+    const [res] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: readAccountInPage,
+    });
+    const out = res && res.result;
+    if (!out || out.error) {
+      sendToAgent({ id, status: 404, error: (out && out.error) || 'ACCOUNT_PANEL_NOT_FOUND' });
+      return;
+    }
+    sendToAgent({ id, status: 200, data: JSON.stringify({ tabUrl: tab.url, ...out }) });
+  } catch (e) {
+    sendToAgent({ id, status: 500, error: e?.message || 'READ_ACCOUNT_FAILED' });
+  }
+}
+
+// Open (or focus) flow.google.com for a given Google account. `authuser=<email>`
+// makes Google pick that signed-in account when it can; otherwise the user
+// switches on the page — the agent keeps reading the panel until it matches.
+async function handleOpenFlowTab(msg) {
+  const { id, params } = msg;
+  const email = params && params.email ? String(params.email) : '';
+  try {
+    const url = 'https://flow.google.com/' + (email ? '?authuser=' + encodeURIComponent(email) : '');
+    const tabs = await chrome.tabs.query({ url: ['https://flow.google.com/*', 'https://labs.google/fx/*'] });
+    const existing = tabs.find((t) => t.active) || tabs[0];
+    if (existing) {
+      await chrome.tabs.update(existing.id, { url, active: true });
+      try { await chrome.windows.update(existing.windowId, { focused: true }); } catch (e) { /* ignore */ }
+    } else {
+      await chrome.tabs.create({ url, active: true });
+    }
+    sendToAgent({ id, status: 200, data: JSON.stringify({ opened: true, url }) });
+  } catch (e) {
+    sendToAgent({ id, status: 500, error: e?.message || 'OPEN_TAB_FAILED' });
+  }
+}
+
+// Runs inside the Flow page: must be self-contained.
+async function readAccountInPage() {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const panelSel = 'flow-account-panel';
+  const read = () => {
+    const panel = document.querySelector(panelSel);
+    if (!panel) return null;
+    const c = panel.querySelector('.credits-count');
+    const e = panel.querySelector('.user-email');
+    return { credits: c ? c.textContent.trim() : null, email: e ? e.textContent.trim() : null };
+  };
+  let out = read();
+  let opened = false;
+  if (!out) {
+    const btn = document.querySelector('.header-user-button') || document.querySelector('[aria-label*="tài khoản" i], [aria-label*="account" i]');
+    if (!btn) return { error: 'NO_ACCOUNT_BUTTON' };
+    btn.click();
+    opened = true;
+    for (let i = 0; i < 25 && !out; i++) {
+      await sleep(120);
+      out = read();
+      if (out && !out.credits && !out.email) out = null;
+    }
+  }
+  const chip = document.querySelector('flow-user-tier-chip');
+  const tier = chip ? chip.textContent.trim() : null;
+  if (opened) {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await sleep(150);
+    if (document.querySelector(panelSel)) {
+      const bd = document.querySelector('.cdk-overlay-backdrop');
+      if (bd) bd.click();
+    }
+  }
+  if (!out) return { error: 'ACCOUNT_PANEL_NOT_FOUND', tier };
+  return { ...out, tier };
+}
 
 async function handleScrapePage(msg) {
   const { id, params } = msg;

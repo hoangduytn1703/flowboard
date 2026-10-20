@@ -25,7 +25,9 @@ emits one, and because ``/api/requests`` still accepts a raw ``proxy`` type.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 import json
+import re
 import logging
 import secrets
 import time
@@ -49,13 +51,67 @@ _FLOW_CREDITS_URL = "https://aisandbox-pa.googleapis.com/v1/credits"
 _TIER_REFRESH_MIN_INTERVAL_S = 60.0
 
 
+@dataclass
+class ExtConn:
+    """One connected extension = one Chrome profile = one Google account."""
+    id: int
+    ws: Any
+    connected_at: float
+    remote: str = ""
+    version: Optional[str] = None
+    flow_key_present: bool = False
+    email: Optional[str] = None
+    credits: Optional[int] = None
+    tier: Optional[str] = None
+    account_checked_at: Optional[float] = None
+    account_error: Optional[str] = None
+
+
+def _version_tuple(v: Optional[str]) -> tuple[int, ...]:
+    try:
+        return tuple(int(x) for x in (v or "0").split("."))
+    except ValueError:
+        return (0,)
+
+
+def _parse_credits(value: Any) -> Optional[int]:
+    """'62 tín dụng Google Flow' / '1.250 credits' / 1250 → 1250."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    if not isinstance(value, str):
+        return None
+    m = re.search(r"\d[\d.,\s]*", value)
+    if not m:
+        return None
+    digits = re.sub(r"[^\d]", "", m.group(0))
+    return int(digits) if digits else None
+
+
+def _clean_email(value: Any) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value if "@" in value and len(value) < 200 else None
+
+
 class FlowClient:
     """Singleton bridge client."""
 
     DEFAULT_TIMEOUT = 180.0  # seconds
+    #: First extension build that answers ``read_account``.
+    ACCOUNT_MIN_VERSION = (0, 3, 0)
 
     def __init__(self) -> None:
-        self._ws: Optional[Any] = None
+        # Every connected extension (one per Chrome profile = one Google
+        # account) is an ExtConn; ``_active`` is the one generation uses.
+        self._conns: dict[int, ExtConn] = {}
+        self._active: Optional[int] = None
+        self._next_conn_id = 1
+        # Called with {"email", "credits", "tier"} after each account read
+        # (services.account_pool registers itself here).
+        self.account_listeners: list = []
         self._pending: dict[str, asyncio.Future] = {}
         self._callback_secret: str = secrets.token_urlsafe(32)
 
@@ -89,18 +145,76 @@ class FlowClient:
 
     # ── connection ─────────────────────────────────────────────────────────
     @property
+    def active_conn(self) -> Optional["ExtConn"]:
+        if self._active is None:
+            return None
+        return self._conns.get(self._active)
+
+    @property
+    def _ws(self) -> Optional[Any]:
+        conn = self.active_conn
+        return conn.ws if conn else None
+
+    @property
     def connected(self) -> bool:
         return self._ws is not None
+
+    @property
+    def extension_version(self) -> Optional[str]:
+        """Manifest version the active extension reported on connect; None
+        for a build older than 0.2.0, which does not send one."""
+        conn = self.active_conn
+        return conn.version if conn else None
 
     @property
     def callback_secret(self) -> str:
         return self._callback_secret
 
-    def set_extension(self, ws: Any) -> None:
-        self._ws = ws
+    def conn_for(self, ws: Any) -> Optional["ExtConn"]:
+        for c in self._conns.values():
+            if c.ws is ws:
+                return c
+        return None
 
-    def clear_extension(self) -> None:
-        self._ws = None
+    def set_extension(self, ws: Any) -> int:
+        """Register a connected extension; the first one becomes active.
+        Returns its connection id."""
+        existing = self.conn_for(ws)
+        if existing:
+            return existing.id
+        conn = ExtConn(id=self._next_conn_id, ws=ws, connected_at=time.time(),
+                       remote=str(getattr(ws, "remote_address", "") or ""))
+        self._next_conn_id += 1
+        self._conns[conn.id] = conn
+        if self._active is None or self._active not in self._conns:
+            self._active = conn.id
+        return conn.id
+
+    def clear_extension(self, ws: Any = None) -> None:
+        """Forget one connection (``ws``) or, with no argument, all of them
+        (logout). Losing the active one promotes another connected
+        extension so generation keeps going."""
+        if ws is None:
+            self._conns.clear()
+            self._active = None
+        else:
+            conn = self.conn_for(ws)
+            if conn is None:
+                return
+            self._conns.pop(conn.id, None)
+            if self._active == conn.id:
+                self._active = next(iter(self._conns), None)
+            if self._active is not None:
+                # Another account carries on; its own identity applies.
+                self._reset_identity()
+                return
+        self._reset_identity()
+        for fut in self._pending.values():
+            if not fut.done():
+                fut.set_exception(ConnectionError("extension_disconnected"))
+        self._pending.clear()
+
+    def _reset_identity(self) -> None:
         self._flow_key_present = False
         self._flow_key = None
         # Drop the cached identity + tier — next reconnect will replay.
@@ -108,10 +222,65 @@ class FlowClient:
         self._paygate_tier = None
         self._sku = None
         self._credits = None
-        for fut in self._pending.values():
-            if not fut.done():
-                fut.set_exception(ConnectionError("extension_disconnected"))
-        self._pending.clear()
+
+    # ── accounts (one per connected Chrome profile) ────────────────────────
+    def accounts(self) -> list[dict]:
+        out = []
+        for c in self._conns.values():
+            out.append({
+                "id": c.id, "active": c.id == self._active, "email": c.email,
+                "credits": c.credits, "tier": c.tier, "version": c.version,
+                "connected_at": c.connected_at, "account_checked_at": c.account_checked_at,
+                "account_error": c.account_error,
+            })
+        return out
+
+    def activate(self, conn_id: int) -> bool:
+        if conn_id not in self._conns or conn_id == self._active:
+            return conn_id in self._conns
+        self._active = conn_id
+        self._reset_identity()
+        return True
+
+    async def read_account(self, conn_id: Optional[int] = None) -> dict:
+        """Ask one extension to read email / credits / plan off the account
+        panel of its Flow tab (there is no API for it on this transport)."""
+        conn = self._conns.get(conn_id) if conn_id is not None else self.active_conn
+        if conn is None:
+            return {"error": "extension_disconnected"}
+        if _version_tuple(conn.version) < self.ACCOUNT_MIN_VERSION:
+            conn.account_error = "extension_outdated"
+            return {"error": "extension_outdated", "version": conn.version}
+        resp = await self._send("read_account", {}, timeout=25.0, conn=conn)
+        err = resp.get("error")
+        if err:
+            conn.account_error = str(err)
+            return {"error": str(err)}
+        try:
+            data = resp.get("data")
+            info = json.loads(data) if isinstance(data, str) else dict(data or {})
+        except (TypeError, ValueError):
+            conn.account_error = "bad_payload"
+            return {"error": "bad_payload"}
+        conn.email = _clean_email(info.get("email"))
+        conn.credits = _parse_credits(info.get("credits"))
+        tier = info.get("tier")
+        conn.tier = tier.strip().upper() if isinstance(tier, str) and tier.strip() else None
+        conn.account_checked_at = time.time()
+        conn.account_error = None
+        if conn.id == self._active:
+            self._credits = conn.credits
+            if conn.email and not self._user_info:
+                self._user_info = {"email": conn.email}
+        logger.info("read_account conn=%s email=%s credits=%s tier=%s", conn.id, conn.email, conn.credits, conn.tier)
+        out = {"email": conn.email, "credits": conn.credits, "tier": conn.tier}
+        if conn.id == self._active:
+            for fn in list(self.account_listeners):
+                try:
+                    fn(out)
+                except Exception:  # noqa: BLE001
+                    logger.exception("account listener failed")
+        return out
 
     @property
     def user_info(self) -> Optional[dict]:
@@ -203,11 +372,21 @@ class FlowClient:
         return True
 
     # ── inbound handling ───────────────────────────────────────────────────
-    async def handle_message(self, data: dict) -> None:
+    async def handle_message(self, data: dict, ws: Any = None) -> None:
         t = data.get("type")
         if t == "extension_ready":
-            self._flow_key_present = bool(data.get("flowKeyPresent"))
-            logger.info("extension_ready flowKeyPresent=%s", self._flow_key_present)
+            v = data.get("version")
+            conn = self.conn_for(ws) if ws is not None else self.active_conn
+            if conn is not None:
+                conn.version = v if isinstance(v, str) and v else None
+                conn.flow_key_present = bool(data.get("flowKeyPresent"))
+                if _version_tuple(conn.version) >= self.ACCOUNT_MIN_VERSION:
+                    # Learn which Google account this profile is, in the background.
+                    asyncio.create_task(self.read_account(conn.id))
+            if conn is None or conn.id == self._active:
+                self._flow_key_present = bool(data.get("flowKeyPresent"))
+            logger.info("extension_ready conn=%s flowKeyPresent=%s version=%s",
+                        conn.id if conn else None, bool(data.get("flowKeyPresent")), conn.version if conn else None)
             return
         if t == "token_captured":
             self._flow_key_present = True
@@ -307,8 +486,10 @@ class FlowClient:
             logger.warning("notify failed: %s", exc)
             return False
 
-    async def _send(self, method: str, params: dict, timeout: Optional[float] = None) -> dict:
-        if not self.connected:
+    async def _send(self, method: str, params: dict, timeout: Optional[float] = None,
+                    conn: Optional["ExtConn"] = None) -> dict:
+        ws = conn.ws if conn is not None else self._ws
+        if ws is None:
             return {"error": "extension_disconnected"}
 
         req_id = str(uuid.uuid4())
@@ -318,7 +499,7 @@ class FlowClient:
 
         payload = {"id": req_id, "method": method, "params": params}
         try:
-            await self._ws.send(json.dumps(payload))
+            await ws.send(json.dumps(payload))
             return await asyncio.wait_for(fut, timeout=timeout or self.DEFAULT_TIMEOUT)
         except asyncio.TimeoutError:
             self._pending.pop(req_id, None)

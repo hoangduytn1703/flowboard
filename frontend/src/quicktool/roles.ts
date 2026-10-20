@@ -25,6 +25,12 @@ export interface ClipRoles {
   export: FlowNode | null;
 }
 
+/** Rough Flow credits for one 8 s clip, for the "are you sure" prompts. */
+export function creditsPerClip(model: string, quality?: string): number {
+  if (model === "omni_flash") return 25;
+  return quality && /quality|high/i.test(quality) ? 100 : 20;
+}
+
 export function hasMedia(n: FlowNode | null | undefined): boolean {
   return !!n && typeof n.data.mediaId === "string" && n.data.mediaId.length > 0;
 }
@@ -67,4 +73,17 @@ export function furthestStep(roles: ClipRoles): number {
   if (roles.scenes.length > 0 && images === roles.scenes.length) return 4;
   if (images > 0 || hasMedia(roles.model)) return 3;
   return roles.scenes.length > 0 ? 2 : 1;
+}
+
+/** Whether step `n` is complete on its own terms (for the ✓ in the stepper),
+ * independent of how far the clip has been taken. */
+export function stepDone(roles: ClipRoles, n: number, isDrama = false): boolean {
+  switch (n) {
+    case 1: return roles.products.length > 0 && roles.products.every(hasMedia);
+    case 2: return roles.scenes.length > 0;
+    case 3: return roles.scenes.length > 0 && roles.scenes.every((s) => hasMedia(s.image));
+    case 4: return isDrama ? stepDone(roles, 3) : roles.scenes.length > 0 && roles.scenes.every((s) => hasMedia(s.video));
+    case 5: return hasMedia(roles.export);
+    default: return false;
+  }
 }

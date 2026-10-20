@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { getLlmConfig } from "../api/client";
 import { AiProviderDialog } from "./AiProviderDialog";
+import { getLlmConfigCached, LLM_CONFIG_POLL_MS } from "./llmConfigCache";
 
 /**
  * App-level gate that force-opens the AI Provider dialog whenever the
@@ -20,13 +20,12 @@ import { AiProviderDialog } from "./AiProviderDialog";
  * "no provider configured" toast. Forcing setup at boot makes the
  * happy-path dispatches a guaranteed-success contract.
  *
- * Polling cadence: 30s while visible, plus an immediate refresh on
- * tab-visibility change. Same pattern as AiProviderBadge so they stay
- * in lockstep — when the user Applies inside the dialog, both surfaces
- * see the new state on the next refresh tick.
+ * Polling cadence: the shared config cache (`llmConfigCache`) — one
+ * request a minute for the gate, the badge and the chat dock together,
+ * plus a re-read on tab-visibility change (served from the cache while
+ * it is fresh). When the user Applies inside the dialog, the broadcast
+ * below forces one fresh read so every surface flips at once.
  */
-
-const POLL_INTERVAL_MS = 30_000;
 
 export function ForcedSetupGate() {
   // null = haven't checked yet (don't render anything to avoid a flash
@@ -35,9 +34,9 @@ export function ForcedSetupGate() {
 
   useEffect(() => {
     let alive = true;
-    const refresh = async () => {
+    const refresh = async (fresh = false) => {
       try {
-        const cfg = await getLlmConfig();
+        const cfg = await getLlmConfigCached({ fresh });
         if (!alive) return;
         setConfigured(cfg.configured);
       } catch {
@@ -49,14 +48,14 @@ export function ForcedSetupGate() {
     void refresh();
     const timer = setInterval(() => {
       if (document.visibilityState === "visible") void refresh();
-    }, POLL_INTERVAL_MS);
+    }, LLM_CONFIG_POLL_MS);
     const onVis = () => {
       if (document.visibilityState === "visible") void refresh();
     };
     document.addEventListener("visibilitychange", onVis);
     // Apply inside the dialog dispatches this event so the gate can
-    // close immediately instead of waiting up to 30s for the next poll.
-    const onConfigChange = () => void refresh();
+    // close immediately instead of waiting for the next poll.
+    const onConfigChange = () => void refresh(true);
     window.addEventListener("flowboard:llm-config-changed", onConfigChange);
     return () => {
       alive = false;

@@ -1,6 +1,7 @@
 {
   "id": "fashion_ad",
   "category": "fashion",
+  "order": 10,
   "title": "Quảng cáo quần áo",
   "blurb": "Người mẫu mặc sản phẩm qua 4 cảnh: giới thiệu, cận chất liệu, dáng đứng, kết. Mỗi cảnh một clip 8 s.",
   "scenes": 4,
@@ -86,7 +87,7 @@
       "type": "note",
       "data": {
         "title": "Kịch bản",
-        "prompt": "Quảng cáo {{product}} — 4 cảnh × 8 s\n\n1. Giới thiệu: toàn thân, người mẫu bước vào khung hình và nhìn thẳng camera.\n2. Chất liệu: cận cảnh tay vuốt vải, thấy rõ chi tiết sản phẩm.\n3. Dáng: trung cảnh, xoay nhẹ người, tay đút túi.\n4. Kết: nụ cười, cử chỉ chào, khung hình sạch cho chữ/logo.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh sản phẩm thật → Generate Người mẫu → Generate từng Cảnh → Generate từng Video (Veo 3.1 Lite) → ghép bằng Chat AI.\nLồng tiếng: mỗi Video có sẵn một câu thoại (sửa tuỳ ý); node Xuất video đọc giọng Việt + phụ đề khi ghép."
+        "prompt": "Quảng cáo {{product}} — 4 cảnh × 8 s\n\n1. Giới thiệu: toàn thân, người mẫu bước vào khung hình và nhìn thẳng camera.\n2. Chất liệu: cận cảnh tay vuốt vải, thấy rõ chi tiết sản phẩm.\n3. Dáng: trung cảnh, xoay nhẹ người, tay đút túi.\n4. Kết: nụ cười, cử chỉ chào, khung hình sạch cho chữ/logo.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh sản phẩm thật (bước 1) → tạo Người mẫu (bước 1) → tạo ảnh từng cảnh (bước 3) → tạo video từng cảnh (bước 4, Omni Flash 8 s) → ghép + lồng tiếng (bước 5).\nLồng tiếng: mỗi cảnh có sẵn một câu thoại tiếng Việt (sửa ở bước 2); bước 5 đọc giọng + phụ đề rồi ghép thành clip hoàn chỉnh."
       }
     },
     {

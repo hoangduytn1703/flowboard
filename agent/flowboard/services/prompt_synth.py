@@ -601,6 +601,33 @@ _REFINE_SUFFIX = (
     "Do not add ideas the user did not ask for. Output only the prompt."
 )
 
+#: The sentences the templates and the reference-video builder put after
+#: every scene prompt so Flow keeps the product true to its photo. The
+#: rewrite tends to drop them as "not part of the description".
+PRODUCT_GUARD = (
+    "The product must match the reference photo exactly (shape, colour, print, material).",
+    "Keep the product at its real size relative to the person, as in the reference photos.",
+)
+
+
+def _has_sentence(text: str, sentence: str) -> bool:
+    return sentence.rstrip(".").lower() in text.lower()
+
+
+def restore_product_guard(text: str, draft: str, *, image_with_product: bool) -> str:
+    """``text`` with the :data:`PRODUCT_GUARD` sentences the rewrite lost.
+
+    A guard sentence is owed when the draft carried it, or — for an image
+    fed by a product photo — always; it is appended only when the answer
+    does not already say it."""
+    owed = [g for g in PRODUCT_GUARD if _has_sentence(draft, g)]
+    if image_with_product:
+        owed = list(PRODUCT_GUARD)
+    missing = [g for g in owed if not _has_sentence(text, g)]
+    if not missing:
+        return text
+    return text.rstrip().rstrip(".…") + ". " + " ".join(missing)
+
 
 async def refine_prompt(node_id: int, draft: str, *, camera: Optional[str] = None) -> str:
     """Turn the user's own rough prompt into a polished English one.
@@ -634,6 +661,10 @@ async def refine_prompt(node_id: int, draft: str, *, camera: Optional[str] = Non
             raise PromptSynthError("empty response from auto-prompt provider")
         if len(text) > 500:
             text = text[:500].rstrip() + "…"
+        text = restore_product_guard(
+            text, draft,
+            image_with_product=not is_video and any(r["type"] == "visual_asset" for r in records),
+        )
         activity.set_result({"prompt": text, "draft": draft[:200]})
         return text
 

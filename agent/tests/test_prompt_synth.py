@@ -1276,3 +1276,43 @@ async def test_refine_prompt_rejects_an_empty_draft(client):
     ids = _seed_board_with_chain()
     with pytest.raises(prompt_synth.PromptSynthError):
         await prompt_synth.refine_prompt(ids["target_id"], "   ")
+
+
+@pytest.mark.asyncio
+async def test_refine_prompt_restores_the_product_guard_the_rewrite_dropped(client, monkeypatch):
+    """The template scene prompts end in two guard sentences (match the
+    reference photo, real size). The rewrite keeps the description and
+    drops those as "not the user's intent" — they must come back."""
+    ids = _seed_board_with_chain()
+
+    async def stub_run(feature, prompt, *, system_prompt=None, timeout=0):
+        return "Editorial photo of the model wearing the product from the reference photo in a sunlit café."
+
+    monkeypatch.setattr(prompt_synth, "run_llm", stub_run)
+    draft = ("Model wearing the shirt in a café. " + prompt_synth.PRODUCT_GUARD[0]
+             + " " + prompt_synth.PRODUCT_GUARD[1])
+    out = await prompt_synth.refine_prompt(ids["target_id"], draft)
+    assert out.startswith("Editorial photo of the model")
+    for guard in prompt_synth.PRODUCT_GUARD:
+        assert out.count(guard) == 1
+
+
+@pytest.mark.asyncio
+async def test_refine_prompt_adds_the_guard_for_an_image_fed_by_a_product_photo(client, monkeypatch):
+    """Even a draft without the sentences gets them when a visual_asset
+    (the product photo) feeds the image; and they are not doubled when the
+    model already said them."""
+    ids = _seed_board_with_chain()
+
+    async def stub_run(feature, prompt, *, system_prompt=None, timeout=0):
+        return "Studio shot of the model holding the product. " + prompt_synth.PRODUCT_GUARD[0]
+
+    monkeypatch.setattr(prompt_synth, "run_llm", stub_run)
+    out = await prompt_synth.refine_prompt(ids["target_id"], "model holding the product")
+    assert out.count(prompt_synth.PRODUCT_GUARD[0]) == 1
+    assert out.count(prompt_synth.PRODUCT_GUARD[1]) == 1
+
+
+def test_restore_product_guard_leaves_a_plain_prompt_alone():
+    out = prompt_synth.restore_product_guard("A quiet street at dusk.", "street at dusk", image_with_product=False)
+    assert out == "A quiet street at dusk."

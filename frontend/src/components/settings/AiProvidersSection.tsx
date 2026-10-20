@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  getLlmConfig,
   getLlmProviderModels,
-  getLlmProviders,
   setLlmConfig,
   testLlmProvider,
   type LLMConfig,
@@ -15,6 +13,7 @@ import {
 } from "../../api/client";
 import { FeatureConfigRow, type FeatureTest } from "./FeatureConfigRow";
 import { ProviderSetupModal } from "./ProviderSetupModal";
+import { getLlmConfigCached, getLlmProvidersCached, LLM_CONFIG_POLL_MS } from "../llmConfigCache";
 
 /**
  * Per-feature provider configuration. Each of Auto-prompt / Vision /
@@ -42,7 +41,6 @@ import { ProviderSetupModal } from "./ProviderSetupModal";
  * (Claude Code / Gemini via the agy CLI / OpenAI Codex).
  */
 
-const REFRESH_INTERVAL_MS = 30_000;
 // Order matters — this is the option order in every provider select.
 // Gemini first (lowest install friction), Claude middle, Codex last.
 const SHOWN_PROVIDERS: LLMProviderName[] = ["gemini", "claude", "openai", "muse"];
@@ -144,9 +142,11 @@ export function AiProvidersSection() {
     };
   }, []);
 
-  const refresh = useCallback(async (): Promise<LLMConfig | null> => {
+  // `fresh` skips the shared cache: after Apply and on the manual retry
+  // the page must show the server's current state, not a minute-old copy.
+  const refresh = useCallback(async (fresh = false): Promise<LLMConfig | null> => {
     try {
-      const [p, c] = await Promise.all([getLlmProviders(), getLlmConfig()]);
+      const [p, c] = await Promise.all([getLlmProvidersCached({ fresh }), getLlmConfigCached({ fresh })]);
       if (!aliveRef.current) return null;
       setProviders(p);
       setConfig(c);
@@ -164,7 +164,7 @@ export function AiProvidersSection() {
     void refresh();
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") void refresh();
-    }, REFRESH_INTERVAL_MS);
+    }, LLM_CONFIG_POLL_MS);
     const onVis = () => {
       if (document.visibilityState === "visible") void refresh();
     };
@@ -269,7 +269,7 @@ export function AiProvidersSection() {
       }
       await setLlmConfig(body);
       showToast("Đã lưu cài đặt AI provider.");
-      const fresh = await refresh();
+      const fresh = await refresh(true);
       if (fresh && aliveRef.current) setDraft(draftFrom(fresh));
       // Broadcast so the badge + ForcedSetupGate refresh immediately
       // instead of waiting up to 30s for their own poll. Plain window
@@ -307,7 +307,7 @@ export function AiProvidersSection() {
           <button
             type="button"
             className="ai-providers-section__retry"
-            onClick={() => void refresh()}
+            onClick={() => void refresh(true)}
           >
             Thử lại
           </button>

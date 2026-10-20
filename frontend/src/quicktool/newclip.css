@@ -1,0 +1,42 @@
+/* "Clip mới" dialog, section 2: the clip kinds come in two groups —
+   one card per product line, then the cards that start from something
+   the user already has (a sample video, a product link). */
+.qt-new__group + .qt-new__group {
+  margin-top: 12px;
+}
+.qt-new__group-title {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.qt-new__group-title small {
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* A template made for the chosen product's category. */
+.qt-new .tpl-card__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.tpl-card__fit {
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.14);
+}
+.tpl-card--fit {
+  border-color: rgba(74, 222, 128, 0.45);
+}
+.tpl-card--fit.tpl-card--active {
+  border-color: var(--accent);
+}

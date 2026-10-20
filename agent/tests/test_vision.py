@@ -350,3 +350,13 @@ def test_describe_route_502s_on_an_unknown_node_id(client):
     )
     assert r.status_code == 502
     assert "424242" in r.json()["detail"]
+
+
+def test_vision_prompt_forces_english_output():
+    """The brief is labelled "tiếng Anh" in the form and spliced into
+    English prompts, so the model must not answer in the language printed
+    on the packaging."""
+    from flowboard.services import vision
+
+    assert "ENGLISH" in vision._VISION_SYSTEM
+    assert "English" in vision._VISION_USER_PROMPT

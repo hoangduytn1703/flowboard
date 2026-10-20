@@ -48,6 +48,13 @@ ORIGINAL_AUDIO_LEVELS = {"duck": 0.2, "keep": 1.0, "mute": 0.0}
 MAX_AUTO_RATE = 35
 #: Room left after the last word so the clip does not cut on it.
 _TAIL_S = 0.3
+#: Background music under the whole clip: sensible loudness range and the
+#: fade before the end so the track does not stop dead.
+BGM_DEFAULT_VOLUME = 0.15
+BGM_MIN_VOLUME, BGM_MAX_VOLUME = 0.02, 0.6
+_BGM_FADE_S = 1.5
+#: The cover image (TikTok's 9:16 thumbnail).
+COVER_SIZE = (1080, 1920)
 
 
 @dataclass
@@ -59,9 +66,41 @@ class NarrationOptions:
     rate: int = 0
     subtitles: bool = True
     original_audio: str = "duck"  # duck | keep | mute
+    # Spoken-language style for Gemini voices ("giọng kể chuyện kịch tính").
+    style: Optional[str] = None
+    # Dialogue: ``[A] … [B] …`` tags in a line map to these voices (tag →
+    # voice id, up to ``tts.MAX_SPEAKERS``); an unmapped tag speaks with
+    # ``voice``.
+    speakers: dict[str, str] = field(default_factory=dict)
+    # Per-clip voice override aligned with ``lines`` (None = ``voice``).
+    line_voices: list[Optional[str]] = field(default_factory=list)
 
     def any_line(self) -> bool:
         return any(line.strip() for line in self.lines)
+
+    def voice_for(self, index: int) -> str:
+        """The voice clip ``index`` is read with."""
+        if index < len(self.line_voices) and self.line_voices[index] in tts.VOICES:
+            return self.line_voices[index]  # type: ignore[return-value]
+        return self.voice
+
+
+@dataclass
+class ExportItem:
+    """One entry of the export order: a rendered clip or a still (drama
+    beats), with its own voice line and headline."""
+    asset_id: int
+    kind: str = "video"  # video | image
+    narration: str = ""
+    caption: str = ""
+    # None = the export's setting; inserted footage usually says "keep".
+    original_audio: Optional[str] = None
+
+
+#: A still with nothing to say stays on screen this long.
+STILL_SILENT_S = 4.0
+#: Output frame every still is rendered to (9:16 portrait).
+STILL_SIZE = (720, 1280)
 
 
 @dataclass
@@ -79,12 +118,16 @@ class ExportReport:
     voiced: bool = False
     smooth60: bool = False
     smooth60_error: Optional[str] = None
+    bgm: bool = False
+    bgm_error: Optional[str] = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "voiced": self.voiced,
             "smooth60": self.smooth60,
             "smooth60_error": self.smooth60_error,
+            "bgm": self.bgm,
+            "bgm_error": self.bgm_error,
             "clips": [c.__dict__ for c in self.clips],
         }
 
@@ -189,35 +232,100 @@ def _filter_path(path: Path) -> str:
     return f"'{text}'"
 
 
-def _synth_to_fit(text: str, opts: NarrationOptions, clip_s: float) -> tuple[tts.Narration, int]:
+def _synth_line(text: str, opts: NarrationOptions, rate: int, voice: Optional[str] = None) -> tts.Narration:
+    """``text`` spoken by ``voice`` (default: the export's voice). A line
+    with ``[A] … [B] …`` tags goes through the multi-voice path; a plain
+    line takes exactly the single-voice path it always did (same cache)."""
+    voice = voice if voice in tts.VOICES else opts.voice
+    if tts.has_speaker_tags(text):
+        return asyncio.run(tts.synthesize_dialogue(text, voice, rate, opts.style, opts.speakers))
+    return asyncio.run(tts.synthesize(text, voice, rate, opts.style))
+
+
+def _synth_to_fit(text: str, opts: NarrationOptions, clip_s: float,
+                  voice: Optional[str] = None) -> tuple[tts.Narration, int]:
     """Synthesise ``text``; when it runs well past the clip, speak faster
     (up to ``MAX_AUTO_RATE`` on top of the user's rate) before the footage
     is extended to cover the rest."""
-    narration = asyncio.run(tts.synthesize(text, opts.voice, opts.rate))
+    narration = _synth_line(text, opts, opts.rate, voice)
     rate = opts.rate
     room = clip_s - _TAIL_S
     if room > 1.0 and narration.duration > room + 0.75:
         needed = math.ceil((narration.duration / room - 1.0) * 100)
         rate = opts.rate + min(MAX_AUTO_RATE, needed)
-        narration = asyncio.run(tts.synthesize(text, opts.voice, rate))
+        narration = _synth_line(text, opts, rate, voice)
     return narration, rate
 
 
+def _image_clip(ffmpeg: str, src: Path, text: str, opts: NarrationOptions,
+                dst: Path, work: Path, caption: str = "", voice: Optional[str] = None) -> ClipReport:
+    """A still rendered into a portrait clip that lasts as long as its
+    voice line: slow push-in (Ken Burns), fade in/out, the headline at the
+    top and the subtitles at the bottom."""
+    text = text.strip()
+    narration: Optional[tts.Narration] = None
+    report = ClipReport(0.0)
+    if text:
+        try:
+            narration = _synth_line(text, opts, opts.rate, voice)
+            report.narration_s = narration.duration
+        except tts.TTSError as exc:
+            report.error = str(exc)
+            logger.warning("video_export: narration skipped for still %s: %s", src.name, exc)
+    length = (narration.duration + _TAIL_S + 0.4) if narration else STILL_SILENT_S
+    report.duration = round(length, 2)
+    w, h = STILL_SIZE
+    frames = int(length * 24) + 1
+    vf = [
+        f"scale={w}:{h}:force_original_aspect_ratio=increase",
+        f"crop={w}:{h}",
+        # One output frame per input frame; zoom creeps up to ~12 %.
+        f"zoompan=z='min(zoom+0.0009,1.12)':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={w}x{h}:fps=24",
+        "fade=t=in:st=0:d=0.4",
+        f"fade=t=out:st={max(0.0, length - 0.45):.2f}:d=0.45",
+    ]
+    if opts.subtitles and (narration is not None or caption):
+        ass = work / f"{dst.stem}.ass"
+        cues = tts.subtitle_cues(narration, tts.strip_speaker_tags(text)) if narration is not None else []
+        tts.write_ass(cues, ass, width=w, height=h, headline=caption, total_s=length)
+        vf.append(f"subtitles={_filter_path(ass)}")
+    inputs = ["-loop", "1", "-framerate", "24", "-t", f"{length:.3f}", "-i", str(src)]
+    chains = ["[0:v]" + ",".join(vf) + "[v]"]
+    if narration is not None:
+        inputs += ["-i", str(narration.path)]
+        chains.append("[1:a]aresample=48000,apad[a]")
+    else:
+        inputs += ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]
+        chains.append("[1:a]apad[a]")
+    cmd = [ffmpeg, "-y", *inputs, "-filter_complex", ";".join(chains),
+           "-map", "[v]", "-map", "[a]", "-t", f"{length:.3f}", "-frames:v", str(frames),
+           *_encode_args(ffmpeg), "-pix_fmt", "yuv420p", "-r", "24",
+           "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2",
+           "-movflags", "+faststart", str(dst)]
+    err = _run(cmd, _CLIP_TIMEOUT_S)
+    if err is not None or not dst.is_file() or dst.stat().st_size == 0:
+        report.error = (report.error + "; " if report.error else "") + f"ffmpeg: {err or 'no output'}"
+    return report
+
+
 def _voice_clip(ffmpeg: str, src: Path, text: str, opts: NarrationOptions,
-                dst: Path, work: Path) -> ClipReport:
+                dst: Path, work: Path, caption: str = "", original_audio: Optional[str] = None,
+                voice: Optional[str] = None) -> ClipReport:
     """``src`` re-encoded into ``dst`` with the voice line, ducked original
     sound and burned subtitles. The clip is held on its last frame when the
-    speech outlasts it."""
+    speech outlasts it. ``voice`` overrides the export's voice for this
+    clip; ``[A] … [B] …`` tags in ``text`` switch voices mid-line."""
     info = probe_clip(src)
     if info is None:
         return ClipReport(0.0, error="unreadable clip")
     report = ClipReport(info.duration)
     text = text.strip()
+    audio_mode = original_audio or opts.original_audio
 
     narration: Optional[tts.Narration] = None
     if text:
         try:
-            narration, report.rate = _synth_to_fit(text, opts, info.duration)
+            narration, report.rate = _synth_to_fit(text, opts, info.duration, voice)
         except tts.TTSError as exc:
             report.error = str(exc)
             logger.warning("video_export: narration skipped for %s: %s", src.name, exc)
@@ -231,13 +339,14 @@ def _voice_clip(ffmpeg: str, src: Path, text: str, opts: NarrationOptions,
     vf = ["[0:v]"]
     if report.extended_s > 0:
         vf.append(f"tpad=stop_mode=clone:stop_duration={report.extended_s:.3f}")
-    if narration is not None and opts.subtitles:
+    if opts.subtitles and (narration is not None or caption):
         ass = work / f"{dst.stem}.ass"
-        tts.write_ass(tts.subtitle_cues(narration, text), ass, width=info.width, height=info.height)
+        cues = tts.subtitle_cues(narration, tts.strip_speaker_tags(text)) if narration is not None else []
+        tts.write_ass(cues, ass, width=info.width, height=info.height, headline=caption, total_s=length)
         vf.append(f"subtitles={_filter_path(ass)}")
     video_chain = (vf[0] + ",".join(vf[1:]) if len(vf) > 1 else vf[0] + "null") + "[v]"
 
-    level = ORIGINAL_AUDIO_LEVELS.get(opts.original_audio, 0.2) if narration is not None else 1.0
+    level = ORIGINAL_AUDIO_LEVELS.get(audio_mode, 0.2) if narration is not None else 1.0
     chains = [video_chain]
     audio_sources: list[str] = []
     if info.has_audio and level > 0:
@@ -266,6 +375,75 @@ def _voice_clip(ffmpeg: str, src: Path, text: str, opts: NarrationOptions,
     if err is not None or not dst.is_file():
         report.error = (report.error + "; " if report.error else "") + f"ffmpeg: {err or 'no output'}"
     return report
+
+
+def mix_background_music(src: Path, music: Path, dst: Path, volume: float = BGM_DEFAULT_VOLUME) -> Optional[str]:
+    """``src`` with ``music`` looped underneath at ``volume``, fading out
+    over the last 1.5 s; the video stream is copied. None on success,
+    else why."""
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        return "ffmpeg_not_found"
+    info = probe_clip(src)
+    if info is None or info.duration <= 0:
+        return "unreadable clip"
+    volume = max(BGM_MIN_VOLUME, min(BGM_MAX_VOLUME, float(volume)))
+    length = info.duration
+    fade_start = max(0.0, length - _BGM_FADE_S)
+    bg = (f"[1:a]aresample=48000,atrim=0:{length:.3f},volume={volume:.3f},"
+          f"afade=t=out:st={fade_start:.3f}:d={_BGM_FADE_S}[bg]")
+    if info.has_audio:
+        chains = [bg, "[0:a]aresample=48000[org]",
+                  "[org][bg]amix=inputs=2:duration=first:normalize=0[a]"]
+    else:
+        chains = [bg, "[bg]anull[a]"]
+    cmd = [ffmpeg, "-y", "-i", str(src), "-stream_loop", "-1", "-i", str(music),
+           "-filter_complex", ";".join(chains),
+           "-map", "0:v", "-map", "[a]", "-t", f"{length:.3f}",
+           "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2",
+           "-movflags", "+faststart", str(dst)]
+    err = _run(cmd, _CLIP_TIMEOUT_S)
+    if err is None and (not dst.is_file() or dst.stat().st_size == 0):
+        return "no output file"
+    return err
+
+
+def render_cover(src: Path, dst: Path, title: str, *, subtitle: Optional[str] = None,
+                 style: str = "yellow") -> Optional[str]:
+    """A 1080×1920 PNG cover from a scene image: the picture scaled and
+    cropped to fill, a dark gradient band over the bottom third, the title
+    (and subtitle) burned in through libass. None on success, else why."""
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        return "ffmpeg_not_found"
+    if not title or not title.strip():
+        return "empty title"
+    w, h = COVER_SIZE
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    ass = dst.with_suffix(".ass")
+    tts.write_cover_ass(title, ass, width=w, height=h, subtitle=subtitle, style=style)
+    band_top = round(h * 0.57)
+    chains = [
+        f"[0:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},format=rgba[b]",
+        # A black layer whose alpha ramps 0 → 0.9 from `band_top` to the bottom
+        # (the `gradients` filter mishandles alpha and came out upside down).
+        f"color=c=black:s={w}x{h}:d=0.1,format=gbrap,"
+        f"geq=r=0:g=0:b=0:a='if(lt(Y,{band_top}),0,229*(Y-{band_top})/({h}-{band_top}))',format=rgba[g]",
+        f"[b][g]overlay=format=auto,format=rgb24,subtitles={_filter_path(ass)}[v]",
+    ]
+    cmd = [ffmpeg, "-y", "-loop", "1", "-framerate", "24", "-t", "0.1", "-i", str(src),
+           "-filter_complex", ";".join(chains), "-map", "[v]",
+           "-frames:v", "1", "-update", "1", str(dst)]
+    try:
+        err = _run(cmd, 120)
+    finally:
+        try:
+            ass.unlink()
+        except OSError:
+            pass
+    if err is None and (not dst.is_file() or dst.stat().st_size == 0):
+        return "no output file"
+    return err
 
 
 def _asset_paths(asset_ids: list[int]) -> tuple[list[Path], Optional[str]]:
@@ -315,14 +493,29 @@ def export_video(
     *,
     smooth60: bool,
     narration: Optional[NarrationOptions] = None,
+    items: Optional[list[ExportItem]] = None,
+    bgm_asset_id: Optional[int] = None,
+    bgm_volume: float = BGM_DEFAULT_VOLUME,
 ) -> tuple[Optional[str], Optional[str], dict[str, Any]]:
     """Join ``asset_ids`` in order, with voice-over when ``narration`` has
-    any line, then optional 60 fps. Returns (media_id, error, report)."""
+    any line, then background music (``bgm_asset_id``: an audio Asset
+    looped under the whole clip at ``bgm_volume``), then optional 60 fps.
+    Returns (media_id, error, report). A failed music mix or smoothing
+    hands back the plain join with the reason in the report.
+
+    ``items`` (drama clips) is the explicit order with stills and clips
+    mixed; it replaces ``asset_ids`` + ``narration.lines`` and always goes
+    through the per-item renderer, since stills have to become clips."""
     report = ExportReport(smooth60=smooth60)
     out_dir = config.STORAGE_DIR / "media"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    if narration is not None and narration.any_line():
+    if items:
+        asset_ids = [it.asset_id for it in items]
+        narration = narration or NarrationOptions(lines=[])
+        narration.lines = [it.narration for it in items]
+
+    if items or (narration is not None and narration.any_line()):
         ffmpeg = shutil.which("ffmpeg")
         if ffmpeg is None:
             return None, "ffmpeg_not_found", report.as_dict()
@@ -335,7 +528,16 @@ def export_video(
         voiced: list[Path] = []
         for i, (src, line) in enumerate(zip(paths, lines)):
             dst = work / f"clip{i:02d}.mp4"
-            clip = _voice_clip(ffmpeg, src, line, narration, dst, work)
+            item = items[i] if items else None
+            line_voice = narration.voice_for(i)
+            if item is not None and item.kind == "image":
+                clip = _image_clip(ffmpeg, src, line, narration, dst, work, caption=item.caption,
+                                   voice=line_voice)
+            else:
+                clip = _voice_clip(ffmpeg, src, line, narration, dst, work,
+                                   caption=item.caption if item else "",
+                                   original_audio=item.original_audio if item else None,
+                                   voice=line_voice)
             report.clips.append(clip)
             # ffmpeg leaves a 0-byte file behind when an encode fails, so
             # "exists" is not "worked".
@@ -355,6 +557,21 @@ def export_video(
         with get_session() as s:
             joined = s.get(Asset, joined_id)
             joined_media, joined_path = joined.uuid_media_id, Path(joined.local_path)
+
+    if bgm_asset_id is not None:
+        music, err = _asset_paths([bgm_asset_id])
+        if err:
+            report.bgm_error = err
+        else:
+            bgm_path = out_dir / f"bgm_{uuid.uuid4().hex}.mp4"
+            err = mix_background_music(joined_path, music[0], bgm_path, bgm_volume)
+            if err:
+                logger.warning("video_export: background music failed (%s); keeping the join", err[:160])
+                report.bgm_error = err[:200]
+            else:
+                report.bgm = True
+                joined_path = bgm_path
+                joined_media = _register(bgm_path)
 
     if not smooth60:
         return joined_media, None, report.as_dict()

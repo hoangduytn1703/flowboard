@@ -396,6 +396,57 @@ async def generate_text(
     ))
 
 
+TTS_MODEL = "gemini-3.8-flash-tts"
+MODEL_FALLBACKS[TTS_MODEL] = ["gemini-3.8-flash-lite-tts", "gemini-3.1-flash-tts-preview"]
+
+
+async def _speak(key: str, prompt: str, voice: str, model: str, timeout: float) -> bytes:
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "responseModalities": ["AUDIO"],
+            "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice}}},
+        },
+    }
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(f"{BASE_URL}/v1beta/models/{model}:generateContent",
+                                     headers={"x-goog-api-key": key}, json=payload)
+    except httpx.TimeoutException as exc:
+        raise GeminiAPIError(f"gemini tts timed out after {timeout}s") from exc
+    except httpx.HTTPError as exc:
+        raise GeminiAPIError(f"gemini tts transport error: {exc}") from exc
+    _raise_for(resp)
+    try:
+        part = resp.json()["candidates"][0]["content"]["parts"][0]["inlineData"]
+        data = base64.b64decode(part["data"])
+        mime = str(part.get("mimeType") or "")
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        raise GeminiAPIError("gemini tts answered without audio") from exc
+    if not data:
+        raise GeminiAPIError("gemini tts returned empty audio")
+    if mime.startswith("audio/L16") or "pcm" in mime:
+        # Raw 24 kHz 16-bit mono PCM: wrap it so ffmpeg can read it.
+        import io
+        import wave
+
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(24000)
+            wf.writeframes(data)
+        data = buf.getvalue()
+    return data
+
+
+async def speak(prompt: str, voice: str, *, model: str = TTS_MODEL, timeout: float = 120.0) -> bytes:
+    """Gemini TTS through the key pool: WAV bytes for ``prompt`` (which
+    carries the style instruction before the text)."""
+    return await with_key(lambda key: with_model_fallback(
+        lambda m: _speak(key, prompt, voice, m, timeout), model))
+
+
 async def list_models(key: str, timeout: float = 20.0) -> list[str]:
     async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.get(f"{BASE_URL}/v1beta/models?pageSize=200", headers={"x-goog-api-key": key})

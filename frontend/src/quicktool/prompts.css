@@ -1,0 +1,89 @@
+/* Prompt library: the ★ Lưu / 📚 Dùng lại buttons in step 2 and the /prompts page. */
+.qt-plib { position: relative; display: inline-flex; gap: 8px; align-items: center; margin-left: 8px; }
+.qt-plib__note { color: var(--muted); font-size: 12px; }
+.qt-plib__pop {
+  position: absolute;
+  top: 22px;
+  right: 0;
+  z-index: 20;
+  width: min(520px, 80vw);
+  max-height: 340px;
+  overflow: auto;
+  padding: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.qt-plib__head { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+.qt-plib__head input {
+  flex: 1;
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--panel-high);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.qt-plib__empty { padding: 10px; font-size: 13px; color: var(--muted); }
+.qt-plib__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.qt-plib__list button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  background: var(--panel-high);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.qt-plib__list button:hover { border-color: var(--qt-accent); }
+.qt-plib__list strong { font-size: 13px; }
+.qt-plib__list span { font-size: 12px; color: var(--muted); line-height: 1.4; }
+.qt-plib__list small { font-size: 11px; color: var(--muted); }
+
+.qt-plib-page__select, .qt-plib-page__search {
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.qt-plib-page__search { min-width: 260px; }
+.qt-plib-page__add { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.qt-plib-page__list { display: flex; flex-direction: column; gap: 10px; }
+.qt-plib-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+}
+.qt-plib-card__head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 13px; color: var(--muted); }
+.qt-plib-card__title {
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  padding: 0;
+}
+.qt-plib-card__kind { padding: 1px 8px; border-radius: 999px; font-size: 12px; background: var(--panel-high); }
+.qt-plib-card__kind--image { color: #60a5fa; }
+.qt-plib-card__kind--video { color: #fbbf24; }
+.qt-plib-card__kind--narration { color: #4ade80; }
+.qt-plib-card .qt-link--danger { margin-left: auto; }

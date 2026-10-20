@@ -18,13 +18,14 @@ from flowboard.services.templates import PersonRequiredError, apply_product, wit
 
 logger = logging.getLogger(__name__)
 
-CATEGORIES = ("fashion", "cosmetics", "food", "other")
+from flowboard.services.templates import CATEGORIES  # fashion, cosmetics, food, grocery, home, other
 #: Below this the product and the video are judged to sell different things.
 MATCH_THRESHOLD = 0.45
 MAX_SCENES = 6
 MIN_SCENES = 2
 
-_CATEGORY_VI = {"fashion": "thời trang", "cosmetics": "mỹ phẩm", "food": "đồ ăn / uống", "other": "khác"}
+_CATEGORY_VI = {"fashion": "thời trang", "cosmetics": "mỹ phẩm", "food": "đồ ăn / uống", "grocery": "tạp hoá / phụ kiện",
+                "home": "gia dụng", "other": "khác"}
 
 _SYSTEM = (
     "You are a director for short TikTok Shop / affiliate product videos in Vietnam. "

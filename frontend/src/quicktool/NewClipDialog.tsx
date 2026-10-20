@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   analyzeProductLink,
+  analyzeDrama,
   analyzeReferenceVideo,
+  buildDrama,
   buildFromReferenceVideo,
   createBoardFromTemplate,
   fetchReferenceVideo,
@@ -10,17 +12,25 @@ import {
   mediaUrl,
   uploadReferenceVideo,
   type BoardTemplate,
+  type DramaPlan,
   type CharacterPick,
   type Product,
   type ReferenceAnalysis,
   type ReferenceUpload,
 } from "../api/client";
 import { useBoardStore } from "../store/board";
+import "./newclip.css";
 
 /** The "kind of clip" card that is not a template: an uploaded ad video. */
 export const REFERENCE_KIND = "reference_video";
 /** The other non-template card: a product page link instead of a video. */
 export const PRODUCT_LINK_KIND = "product_link";
+/** A story (article link or pasted text) told as narrated stills. */
+export const DRAMA_KIND = "drama";
+/** Drama clips are parked for now: the card stays hidden until this is
+ * flipped (the agent gates its API with FLOWBOARD_DRAMA=1 the same way). */
+export const DRAMA_ENABLED = false;
+const DRAMA_BEAT_CHOICES = [4, 6, 8, 10, 12];
 
 /** Backdrops offered for the extra clips of one product, per template. The
  * first entry of each is that template's own default, so clip 1 is unchanged. */
@@ -53,8 +63,53 @@ const SETTING_IDEAS: Record<string, string[]> = {
     "a cozy bedroom desk with fairy lights and a plant",
     "a minimalist workspace with a monitor and dark wooden shelves",
   ],
+  grocery_ad: [
+    "a clean white desk with a phone, a notebook and soft daylight",
+    "a pastel bedroom desk with a small plant and a phone stand",
+    "a café table with a latte and a laptop in warm light",
+    "a car dashboard and console in soft daylight",
+    "a tidy shop counter with a phone and a small mirror",
+  ],
+  home_appliance_review: [
+    "a bright modern Vietnamese home kitchen with white counters and morning light",
+    "a small apartment kitchen with wooden cabinets and warm evening light",
+    "a tiled living room with a sofa and a balcony door open to daylight",
+    "a compact laundry corner with a washing machine and shelves",
+    "a family dining table with a kettle and bowls in soft daylight",
+  ],
+  food_review: [
+    "a cozy Vietnamese eatery table with a wooden top and warm light",
+    "a lively street-food stall with plastic stools at dusk",
+    "a bright café window table in the morning",
+    "a home dining table with a steaming pot in warm lamp light",
+    "a night-market food court with string lights behind",
+  ],
+  affiliate_reel: [
+    "a bright everyday Vietnamese living room with natural light",
+    "a tidy bedroom with a desk and a window in soft daylight",
+    "a small home office with a plant and a ring light",
+    "a kitchen counter with morning light through the window",
+    "a sunny balcony with potted plants and a small table",
+  ],
 };
 const MAX_CLIPS = 5;
+
+/** Second line of a product card; empty for "other" so no stray separator. */
+const CATEGORY_LABEL: Record<string, string> = {
+  fashion: "Thời trang",
+  cosmetics: "Mỹ phẩm",
+  food: "Đồ ăn",
+  grocery: "Tạp hoá & phụ kiện",
+  home: "Gia dụng",
+};
+
+/** Why a template refuses the hands-only mode (shown under its form). */
+const PERSON_REASON: Record<string, string> = {
+  fashion_ad: "Quảng cáo quần áo cần người mẫu mặc để thấy form và độ vừa, nên không có lựa chọn chỉ quay bàn tay.",
+  food_review: "Review ăn thử cần có người ăn để thấy phản ứng khi nếm, nên không có lựa chọn chỉ quay bàn tay.",
+};
+/** A template for every product line: shown last, never tagged as the fit. */
+const ANY_CATEGORY = "any";
 
 type RefPhase = "pick" | "fetching" | "uploading" | "analyzing" | "review" | "building";
 
@@ -72,14 +127,14 @@ export function NewClipDialog({
   initialProductId,
   onClose,
   onCreated,
-  onCreatedMany,
 }: {
   templates: BoardTemplate[];
   initialTemplateId: string | null;
   initialProductId: number | null;
   onClose: () => void;
   onCreated: (boardId: number) => void;
-  /** Several clips were made at once: land on the library, not on one clip. */
+  /** Accepted for compatibility; several clips at once now say so inline
+   * and open clip #1 through `onCreated` like a single one. */
   onCreatedMany?: (boardIds: number[]) => void;
 }) {
   const createNewBoardFromTemplate = useBoardStore((s) => s.createNewBoardFromTemplate);
@@ -98,6 +153,10 @@ export function NewClipDialog({
   const [extraSettings, setExtraSettings] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // "Số clip" > 1: how many were just made, shown while clip #1 opens.
+  const [createdCount, setCreatedCount] = useState<number | null>(null);
+  // Seconds since the current analysis (link / video / story) started.
+  const [elapsed, setElapsed] = useState(0);
   // Reference-video mode.
   const [file, setFile] = useState<File | null>(null);
   const [upload, setUpload] = useState<ReferenceUpload | null>(null);
@@ -110,17 +169,23 @@ export function NewClipDialog({
   const [linkAnalysis, setLinkAnalysis] = useState<ReferenceAnalysis | null>(null);
   const [linkPhase, setLinkPhase] = useState<RefPhase>("pick");
   const [analyzedUrl, setAnalyzedUrl] = useState("");
+  // Drama mode.
+  const [dramaInput, setDramaInput] = useState("");
+  const [dramaBeats, setDramaBeats] = useState(8);
+  const [dramaPlan, setDramaPlan] = useState<DramaPlan | null>(null);
+  const [dramaPhase, setDramaPhase] = useState<RefPhase>("pick");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const isReference = kind === REFERENCE_KIND;
   const isLink = kind === PRODUCT_LINK_KIND;
+  const isDrama = kind === DRAMA_KIND;
   // What the current card shows: its own analysis and phase.
   const phase = isLink ? linkPhase : refPhase;
   const shown = isLink ? linkAnalysis : analysis;
   const template = templates.find((t) => t.id === kind) ?? null;
   const product = products.find((p) => p.id === productId) ?? null;
   const busyPhase = (ph: RefPhase) => ph === "fetching" || ph === "uploading" || ph === "analyzing" || ph === "building";
-  const refBusy = busyPhase(refPhase) || busyPhase(linkPhase);
+  const refBusy = busyPhase(refPhase) || busyPhase(linkPhase) || busyPhase(dramaPhase);
   const locked = busy || refBusy;
   // Once the video is analysed the result (prompts, fit verdict) belongs to
   // this product: picking another would throw it away, so step 1 freezes
@@ -129,6 +194,19 @@ export function NewClipDialog({
   // upload and the analysis, they live in this component's state.
   const analysisLocked = [refPhase, linkPhase].some((ph) => ph === "review" || ph === "building");
   const pickLocked = locked || analysisLocked;
+  const analyzing = [refPhase, linkPhase, dramaPhase].includes("analyzing");
+
+  // Gemini takes 20 s to a few minutes here and gives no progress: a running
+  // clock on the button shows the request is alive.
+  useEffect(() => {
+    if (!analyzing) {
+      setElapsed(0);
+      return;
+    }
+    const started = Date.now();
+    const timer = setInterval(() => setElapsed(Math.round((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [analyzing]);
 
   useEffect(() => {
     listProducts().then((list) => {
@@ -145,6 +223,14 @@ export function NewClipDialog({
     setInputs(Object.fromEntries(template.inputs.map((i) => [i.key, i.default ?? ""])));
     setExtraSettings([]);
   }, [kind]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // "Tên gọi trong lời thoại" follows the chosen product (its name), and goes
+  // back to the template's wording when the product is cleared. Runs after
+  // the seeding above on a template change, so the name survives it.
+  useEffect(() => {
+    const fallback = template?.inputs.find((i) => i.key === "product_name")?.default ?? "";
+    setInputs((p) => ({ ...p, product_name: product ? product.name : fallback }));
+  }, [product?.id ?? null, kind]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -213,17 +299,53 @@ export function NewClipDialog({
     return ideas[(n - 1) % ideas.length];
   }
 
+  /** Drama: the story is a link or pasted text; Gemini writes the beats. */
+  async function analyzeDramaStory() {
+    const raw = dramaInput.trim();
+    if (!raw) return;
+    setError(null);
+    setDramaPhase("analyzing");
+    try {
+      const isUrl = /^https?:\/\/\S+$/i.test(raw);
+      const res = await analyzeDrama(isUrl ? { url: raw, beats: dramaBeats } : { text: raw, beats: dramaBeats });
+      setDramaPlan(res.plan);
+      setDramaPhase("review");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "phân tích thất bại");
+      setDramaPhase("pick");
+    }
+  }
+
+  async function createFromDrama() {
+    if (!dramaPlan) return;
+    setError(null);
+    setDramaPhase("building");
+    try {
+      const board = await buildDrama(dramaPlan, name.trim() || undefined);
+      useBoardStore.setState((s) => ({
+        boards: [{ id: board.id, name: board.name, created_at: board.created_at, data: board.data }, ...s.boards],
+      }));
+      await useBoardStore.getState().switchBoard(board.id);
+      onCreated(board.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "tạo clip thất bại");
+      setDramaPhase("review");
+    }
+  }
+
   async function createFromTemplate() {
     if (!template || busy) return;
     setBusy(true);
     setError(null);
     const baseName = name.trim() || (product ? `${product.name} — ${template.title}` : template.title);
-    // With a product the backend fills {{product}} from its description;
-    // the product-name field follows the product too.
+    // With a product the backend fills {{product}} from its description; the
+    // spoken name is whatever the user left in "Tên gọi trong lời thoại"
+    // (prefilled with the product's name), the backend's own fallback when
+    // that is blank.
     const sent = { ...inputs };
     if (product) {
       delete sent.product;
-      delete sent.product_name;
+      if (!sent.product_name?.trim()) delete sent.product_name;
     }
     if (clipCount <= 1) {
       const id = await createNewBoardFromTemplate(kind, baseName, sent, productId);
@@ -249,8 +371,15 @@ export function NewClipDialog({
       setError((err instanceof Error ? err.message : "Không tạo được clip") + made);
     }
     await useBoardStore.getState().refreshBoardList();
-    setBusy(false);
-    if (ids.length === clipCount) (onCreatedMany ?? (() => onCreated(ids[0])))(ids);
+    if (ids.length !== clipCount) {
+      setBusy(false);
+      return;
+    }
+    // Say what happened before leaving: N boards appeared in the library
+    // and clip #1 opens; the others wait there (the dialog stays locked
+    // meanwhile, so nothing can be clicked twice).
+    setCreatedCount(ids.length);
+    window.setTimeout(() => onCreated(ids[0]), 1500);
   }
 
   /** A TikTok / YouTube link: the agent downloads it, then it is the
@@ -324,6 +453,13 @@ export function NewClipDialog({
     hand_look: pickHandLook.trim() || undefined,
   };
   const refNamePlaceholder = isLink ? refBase : `${refBase} — theo video mẫu`;
+  // Section 2, first group: the templates in their own order, except that
+  // the ones made for the chosen product's category move to the front and
+  // get a "phù hợp" tag. The any-category reel keeps its place at the end.
+  const fits = (t: BoardTemplate) =>
+    product !== null && (t.category as string | undefined) !== ANY_CATEGORY && t.category === product.category;
+  const orderedTemplates = [...templates.filter(fits), ...templates.filter((t) => !fits(t))];
+  const fitCount = templates.filter(fits).length;
 
   const review = shown && (
     <>
@@ -390,6 +526,9 @@ export function NewClipDialog({
                     </li>
                   ))}
                 </ol>
+                {isLink && (
+                  <p className="qt-new__hint">Kiểm tra lại thông số kỹ thuật — AI có thể đoán sai.</p>
+                )}
                 <label className="tpl-inputs__field">
                   <span>Tên clip</span>
                   <input className="project-modal__input" type="text" maxLength={80} value={name}
@@ -440,7 +579,13 @@ export function NewClipDialog({
                 ) : (
                   <span className="qt-new__product-thumb qt-new__product-thumb--empty">?</span>
                 )}
-                <span>{p.name}{p.price ? <small> · {p.price}</small> : null}</span>
+                <span>
+                  {p.name}
+                  {/* The second line is "category · price"; the dot only sits between two parts. */}
+                  {(p.price || CATEGORY_LABEL[p.category]) && (
+                    <small>{[CATEGORY_LABEL[p.category], p.price].filter(Boolean).join(" · ")}</small>
+                  )}
+                </span>
               </button>
             ))}
           </div>
@@ -448,59 +593,147 @@ export function NewClipDialog({
 
         <div className="qt-new__section">
           <div className="qt-new__label">2 · Kiểu clip</div>
-          <div className="tpl-grid" role="radiogroup">
-            {templates.map((t) => (
+          <div className="qt-new__group">
+            <p className="qt-new__group-title">
+              Theo ngành hàng
+              {product && fitCount > 0 && (
+                <small> · {fitCount} kiểu phù hợp với {CATEGORY_LABEL[product.category] ?? "sản phẩm này"} xếp trước</small>
+              )}
+            </p>
+            <div className="tpl-grid" role="radiogroup" aria-label="Theo ngành hàng">
+              {orderedTemplates.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={`tpl-card${kind === t.id ? " tpl-card--active" : ""}${fits(t) ? " tpl-card--fit" : ""}`}
+                  onClick={() => setKind(t.id)}
+                  disabled={locked}
+                  role="radio"
+                  aria-checked={kind === t.id}
+                >
+                  <span className="tpl-card__title">
+                    {t.title}
+                    {fits(t) && <span className="tpl-card__fit" title="Kiểu clip dành cho ngành hàng của sản phẩm đã chọn">phù hợp</span>}
+                  </span>
+                  <span className="tpl-card__blurb">{t.blurb}</span>
+                  <span className="tpl-card__meta">{t.scenes} cảnh · {t.scenes} video</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="qt-new__group">
+            <p className="qt-new__group-title">Từ nguồn có sẵn</p>
+            <div className="tpl-grid" role="radiogroup" aria-label="Từ nguồn có sẵn">
               <button
-                key={t.id}
                 type="button"
-                className={`tpl-card${kind === t.id ? " tpl-card--active" : ""}`}
-                onClick={() => setKind(t.id)}
+                className={`tpl-card tpl-card--reference${isReference ? " tpl-card--active" : ""}`}
+                onClick={() => setKind(REFERENCE_KIND)}
                 disabled={locked}
                 role="radio"
-                aria-checked={kind === t.id}
+                aria-checked={isReference}
               >
-                <span className="tpl-card__title">{t.title}</span>
-                <span className="tpl-card__blurb">{t.blurb}</span>
-                <span className="tpl-card__meta">{t.scenes} cảnh · {t.scenes} video</span>
+                <span className="tpl-card__title">🎞️ Theo video mẫu</span>
+                <span className="tpl-card__blurb">
+                  Bỏ một video quảng cáo có sẵn vào, AI xem và viết lại kịch bản theo đúng nhịp đó cho sản phẩm của bạn.
+                </span>
+                <span className="tpl-card__meta">Gemini · 2–6 cảnh</span>
               </button>
-            ))}
-            <button
-              type="button"
-              className={`tpl-card tpl-card--reference${isReference ? " tpl-card--active" : ""}`}
-              onClick={() => setKind(REFERENCE_KIND)}
-              disabled={locked}
-              role="radio"
-              aria-checked={isReference}
-            >
-              <span className="tpl-card__title">🎞️ Theo video mẫu</span>
-              <span className="tpl-card__blurb">
-                Bỏ một video quảng cáo có sẵn vào, AI xem và viết lại kịch bản theo đúng nhịp đó cho sản phẩm của bạn.
-              </span>
-              <span className="tpl-card__meta">Gemini · 2–6 cảnh</span>
-            </button>
-            <button
-              type="button"
-              className={`tpl-card tpl-card--reference${isLink ? " tpl-card--active" : ""}`}
-              onClick={() => setKind(PRODUCT_LINK_KIND)}
-              disabled={locked}
-              role="radio"
-              aria-checked={isLink}
-            >
-              <span className="tpl-card__title">🔗 Theo link sản phẩm</span>
-              <span className="tpl-card__blurb">
-                Dán link trang sản phẩm (Shopee, Lazada, TikTok Shop, web shop…), AI đọc thông tin và viết kịch bản quảng cáo, không cần video mẫu.
-              </span>
-              <span className="tpl-card__meta">Gemini · 3–5 cảnh</span>
-            </button>
+              <button
+                type="button"
+                className={`tpl-card tpl-card--reference${isLink ? " tpl-card--active" : ""}`}
+                onClick={() => setKind(PRODUCT_LINK_KIND)}
+                disabled={locked}
+                role="radio"
+                aria-checked={isLink}
+              >
+                <span className="tpl-card__title">🔗 Theo link sản phẩm</span>
+                <span className="tpl-card__blurb">
+                  Dán link trang sản phẩm (Shopee, Lazada, TikTok Shop, web shop…), AI đọc thông tin và viết kịch bản quảng cáo, không cần video mẫu.
+                </span>
+                <span className="tpl-card__meta">Gemini · 3–5 cảnh</span>
+              </button>
+              {DRAMA_ENABLED && (
+                <button
+                  type="button"
+                  className={`tpl-card tpl-card--reference${isDrama ? " tpl-card--active" : ""}`}
+                  onClick={() => setKind(DRAMA_KIND)}
+                  disabled={locked}
+                  role="radio"
+                  aria-checked={isDrama}
+                >
+                  <span className="tpl-card__title">📰 Tạo drama</span>
+                  <span className="tpl-card__blurb">
+                    Dán link bài viết hoặc gõ câu chuyện, AI tóm tắt thành các đoạn: mỗi đoạn một ảnh minh hoạ + lời kể + tiêu đề, ảnh chuyển cảnh nối nhau. Chèn thêm video phỏng vấn nếu có.
+                  </span>
+                  <span className="tpl-card__meta">Gemini · 4–12 đoạn · không cần sản phẩm</span>
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
-        {template && !isReference && !isLink && (
+        {isDrama && (
+          <div className="qt-new__section">
+            <div className="qt-new__label">3 · Câu chuyện</div>
+            {dramaPhase !== "review" && dramaPhase !== "building" ? (
+              <>
+                <textarea
+                  className="qt-textarea"
+                  rows={5}
+                  value={dramaInput}
+                  placeholder={"Dán link bài viết (báo, Facebook, blog…) HOẶC gõ / dán nội dung câu chuyện vào đây."}
+                  onChange={(e) => setDramaInput(e.target.value)}
+                  disabled={locked}
+                />
+                <div className="qt-row">
+                  <label className="qt-field">
+                    <span>Số đoạn (mỗi đoạn một ảnh)</span>
+                    <select value={dramaBeats} onChange={(e) => setDramaBeats(Number(e.target.value))} disabled={locked}>
+                      {DRAMA_BEAT_CHOICES.map((n) => <option key={n} value={n}>{n} đoạn · ~{n * 8} s</option>)}
+                    </select>
+                  </label>
+                </div>
+                <div className="qt-card__hint">
+                  AI giữ đúng nội dung nguồn, gắn "theo bài viết" cho các cáo buộc, ảnh minh hoạ không lấy mặt người thật.
+                  Trang bắt đăng nhập (Facebook riêng tư) thì dán nội dung thay vì link.
+                </div>
+              </>
+            ) : dramaPlan && (
+              <>
+                <div className="qt-ref__summary">
+                  <div><span>Tiêu đề</span><strong>{dramaPlan.title_vi}</strong></div>
+                  <div><span>Hook</span><strong>{dramaPlan.hook_vi}</strong></div>
+                  {dramaPlan.tone && <div><span>Giọng kể</span><strong>{dramaPlan.tone}</strong></div>}
+                  <div><span>Đoạn</span><strong>{dramaPlan.beats.length} ảnh · ~{dramaPlan.beats.length * 8} s</strong></div>
+                </div>
+                {dramaPlan.summary_vi && <div className="qt-card__hint">{dramaPlan.summary_vi}</div>}
+                <ol className="qt-ref__plan">
+                  {dramaPlan.beats.map((b, i) => (
+                    <li key={i}>
+                      <div className="qt-ref__plan-title">{i + 1}. {b.title_vi} <small>· {b.caption_vi}</small></div>
+                      <div className="qt-ref__plan-line">🎙 {b.narration_vi}</div>
+                      <div className="qt-ref__plan-prompt">{b.image_prompt_en}</div>
+                    </li>
+                  ))}
+                </ol>
+                <label className="tpl-inputs__field">
+                  <span>Tên clip</span>
+                  <input className="project-modal__input" type="text" maxLength={80} value={name}
+                         placeholder={`Drama — ${dramaPlan.title_vi}`} onChange={(e) => setName(e.target.value)} disabled={locked} />
+                </label>
+              </>
+            )}
+          </div>
+        )}
+
+        {template && !isReference && !isLink && !isDrama && (
           <div className="qt-new__section">
             <div className="qt-new__label">3 · Thiết lập</div>
             <div className="tpl-inputs">
               {template.inputs
-                .filter((i) => !(product && (i.key === "product" || i.key === "product_name")))
+                // The product's description fills {{product}}; its spoken
+                // name stays editable (prefilled with the product's name).
+                .filter((i) => !(product && i.key === "product"))
                 .map((i) => (
                   <label key={i.key} className="tpl-inputs__field">
                     <span>{i.label}</span>
@@ -518,7 +751,7 @@ export function NewClipDialog({
                 ))}
               {template.person_required && (
                 <p className="qt-new__hint qt-field--wide">
-                  Quảng cáo quần áo cần người mẫu mặc để thấy form và độ vừa, nên không có lựa chọn chỉ quay bàn tay.
+                  {PERSON_REASON[template.id] ?? `${template.title} cần có người mẫu, nên không có lựa chọn chỉ quay bàn tay.`}
                 </p>
               )}
               {(inputs.charGender ?? "").startsWith("hands_") && !template.person_required && (
@@ -642,8 +875,28 @@ export function NewClipDialog({
         )}
 
         {error && <p className="product-form__error" role="alert">{error}</p>}
+        {createdCount !== null && (
+          <p className="qt-new__created" role="status">
+            ✓ Đã tạo {createdCount} clip trong "Clip của tôi" — đang mở clip 1…
+          </p>
+        )}
         <div className="project-modal__actions">
-          {(isReference || isLink) && (phase === "review" || phase === "building") ? (
+          {isDrama && (dramaPhase === "review" || dramaPhase === "building") ? (
+            <>
+              <button type="button" className="project-modal__btn" onClick={() => setDramaPhase("pick")} disabled={locked}>← Sửa câu chuyện</button>
+              <button type="button" className="project-modal__btn" onClick={onClose} disabled={locked}>Huỷ</button>
+              <button type="button" className="project-modal__btn project-modal__btn--primary qt-btn--accent" onClick={createFromDrama} disabled={locked}>
+                {dramaPhase === "building" ? "Đang tạo…" : "Tạo clip →"}
+              </button>
+            </>
+          ) : isDrama ? (
+            <>
+              <button type="button" className="project-modal__btn" onClick={onClose} disabled={locked}>Huỷ</button>
+              <button type="button" className="project-modal__btn project-modal__btn--primary qt-btn--accent" onClick={analyzeDramaStory} disabled={locked || !dramaInput.trim()}>
+                {dramaPhase === "analyzing" ? `AI đang viết kịch bản… ${elapsed} s` : "Phân tích →"}
+              </button>
+            </>
+          ) : (isReference || isLink) && (phase === "review" || phase === "building") ? (
             <>
               <button type="button" className="project-modal__btn" onClick={() => (isLink ? setLinkPhase("pick") : setRefPhase("pick"))} disabled={locked}>{isLink ? "← Đổi link" : "← Đổi video"}</button>
               <button type="button" className="project-modal__btn" onClick={onClose} disabled={locked}>Huỷ</button>
@@ -661,14 +914,14 @@ export function NewClipDialog({
             <>
               <button type="button" className="project-modal__btn" onClick={onClose} disabled={locked}>Huỷ</button>
               <button type="button" className="project-modal__btn project-modal__btn--primary qt-btn--accent" onClick={analyzeLink} disabled={locked || !productUrl.trim()}>
-                {linkPhase === "analyzing" ? "AI đang đọc trang (10–40 s)…" : "Phân tích →"}
+                {linkPhase === "analyzing" ? `AI đang đọc trang… ${elapsed} s` : "Phân tích →"}
               </button>
             </>
           ) : isReference ? (
             <>
               <button type="button" className="project-modal__btn" onClick={onClose} disabled={locked}>Huỷ</button>
               <button type="button" className="project-modal__btn project-modal__btn--primary qt-btn--accent" onClick={analyze} disabled={locked || (!file && !upload)}>
-                {refPhase === "uploading" ? "Đang tải video…" : refPhase === "analyzing" ? "AI đang xem video (30–90 s)…" : "Phân tích →"}
+                {refPhase === "uploading" ? "Đang tải video…" : refPhase === "analyzing" ? `AI đang xem video… ${elapsed} s` : "Phân tích →"}
               </button>
             </>
           ) : (

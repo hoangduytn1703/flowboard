@@ -14,8 +14,9 @@ default). ``character`` is applied on top of every character node, and the
 form may override it (``inputs`` whose key starts with ``char``).
 
 ``category`` ties a template to the product categories of the product
-library; ``apply_product`` puts a saved product's photos and selling points
-on a rendered spec.
+library (:data:`ANY_CATEGORY` = fits every product, never picked by
+default); ``order`` sorts the list the dialog shows; ``apply_product`` puts
+a saved product's photos and selling points on a rendered spec.
 """
 from __future__ import annotations
 
@@ -30,7 +31,10 @@ _PLACEHOLDER = re.compile(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}")
 _CHAR_KEYS = ("charGender", "charCountry", "charVibe", "charExtras")
 
 #: Product categories, in the order the product form lists them.
-CATEGORIES = ("fashion", "cosmetics", "food", "other")
+CATEGORIES = ("fashion", "cosmetics", "food", "grocery", "home", "other")
+#: Template ``category`` meaning "any product": the template is offered for
+#: every category but is never the default one a product starts from.
+ANY_CATEGORY = "any"
 #: Key of the template node that holds the product photo.
 PRODUCT_NODE = "product"
 #: Extra product photos beyond the main one that become their own nodes.
@@ -39,12 +43,15 @@ MAX_EXTRA_PHOTOS = 2
 
 @lru_cache(maxsize=1)
 def _load_all() -> dict[str, dict]:
-    out: dict[str, dict] = {}
+    docs = []
     for path in sorted(TEMPLATES_DIR.glob("*.json")):
         doc = json.loads(path.read_text(encoding="utf-8"))
         doc.setdefault("id", path.stem)
-        out[doc["id"]] = doc
-    return out
+        docs.append(doc)
+    # ``order`` is the position in the dialog (and which template a category
+    # falls back to first); files without one go after those with it.
+    docs.sort(key=lambda d: (int(d.get("order", 10**6)), d["id"]))
+    return {d["id"]: d for d in docs}
 
 
 def list_templates() -> list[dict]:
@@ -82,7 +89,19 @@ class PersonRequiredError(ValueError):
     hands-only mode is refused. The message is meant for the user."""
 
 
-_MODEL_STEP = re.compile(r"Generate Người [^→\n]*→ ")
+def person_required_message(template: dict) -> str:
+    """Why hands-only is refused for ``template``, for the user. The
+    template's ``person_reason`` says what the person is there for (clothes
+    are judged on a body, food on a face); without one, clothes are assumed."""
+    reason = str(template.get("person_reason") or "").strip() or "cần người mẫu mặc để thấy form và độ vừa"
+    if not reason.startswith("cần"):
+        reason = f"cần người mẫu: {reason}"
+    return (f"{template.get('title') or 'Kiểu clip này'} {reason}, "
+            "nên không dùng được chế độ chỉ quay bàn tay. Hãy chọn Nữ hoặc Nam.")
+
+
+#: The "tạo Người mẫu (bước 1) → " step of the note's how-to line.
+_MODEL_STEP = re.compile(r"tạo Người [^→\n]*→ ")
 
 
 #: Starts the sentence hands mode appends, so it can be found and removed again.
@@ -131,10 +150,7 @@ def render(template: dict, inputs: dict[str, str] | None) -> dict:
 
     hands = values.get("charGender") in HANDS_GENDERS
     if hands and template.get("person_required"):
-        raise PersonRequiredError(
-            f"{template.get('title') or 'Kiểu clip này'} cần người mẫu mặc để thấy form và độ vừa, "
-            "nên không dùng được chế độ chỉ quay bàn tay. Hãy chọn Nữ hoặc Nam."
-        )
+        raise PersonRequiredError(person_required_message(template))
     hands_text = _hands_instruction(values) if hands else ""
     nodes = []
     dropped: set[str] = set()
@@ -157,11 +173,23 @@ def render(template: dict, inputs: dict[str, str] | None) -> dict:
 
 
 def template_for_category(category: str) -> str | None:
-    """The template a product of ``category`` starts from by default."""
+    """The template a product of ``category`` starts from by default: the
+    first (by ``order``) made for that category. Templates for
+    :data:`ANY_CATEGORY` are never the default."""
+    if not category or category == ANY_CATEGORY:
+        return None
     for t in _load_all().values():
         if t.get("category") == category:
             return t["id"]
     return None
+
+
+def templates_for_category(category: str | None) -> list[dict]:
+    """The templates the dialog should put first for a product of
+    ``category``: its own ones, then the ones for any category."""
+    listed = list_templates()
+    own = [t for t in listed if category and t.get("category") == category]
+    return own + [t for t in listed if t.get("category") == ANY_CATEGORY]
 
 
 def product_inputs(template: dict, product: dict, inputs: dict[str, str] | None) -> dict[str, str]:
@@ -169,15 +197,19 @@ def product_inputs(template: dict, product: dict, inputs: dict[str, str] | None)
 
     The product description replaces the ``product`` field only while that
     field is empty or still the template default — a phrase the user typed
-    in the dialog wins.
+    in the dialog wins. The same goes for ``price`` (templates that read
+    the price aloud default it to a filler like "hạt dẻ").
     """
     out = {k: v for k, v in (inputs or {}).items() if v is not None}
-    default = next((str(i.get("default") or "") for i in template.get("inputs", [])
-                    if i["key"] == "product"), "")
+    defaults = {i["key"]: str(i.get("default") or "") for i in template.get("inputs", [])}
+    default = defaults.get("product", "")
     typed = str(out.get("product") or "").strip()
     if not typed or typed == default:
         out["product"] = product.get("description") or product.get("name") or default
     out.setdefault("product_name", product.get("name") or "")
+    typed_price = str(out.get("price") or "").strip()
+    if product.get("price") and (not typed_price or typed_price == defaults.get("price", "")):
+        out["price"] = product["price"]
     out.setdefault("price", product.get("price") or "")
     out.setdefault("selling_points", product.get("selling_points") or "")
     return out
@@ -238,6 +270,11 @@ def apply_product(spec: dict, product: dict) -> dict:
     script = by_key.get("script")
     if script is not None and script.get("type") == "note":
         prompt = str(script["data"].get("prompt") or "").rstrip()
+        # The note is Vietnamese; its title took the English description that
+        # filled {{product}} ("Quảng cáo a navy blue oversized t-shirt…"). The
+        # product's name is what belongs there.
+        if name and brief != name:
+            prompt = prompt.replace(brief, name)
         script["data"] = {**script["data"], "prompt": f"{prompt}\n\n{_script_footer(product)}".strip()}
     return {"nodes": nodes, "edges": edges}
 

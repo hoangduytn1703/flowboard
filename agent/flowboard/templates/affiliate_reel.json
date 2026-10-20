@@ -1,0 +1,240 @@
+{
+  "id": "affiliate_reel",
+  "category": "any",
+  "order": 70,
+  "title": "Clip affiliate chung",
+  "blurb": "Dùng cho mọi ngành hàng. 4 cảnh: hook gây chú ý, nỗi đau của khách, sản phẩm giải quyết, kêu gọi \"link ở giỏ hàng\". Lấy mô tả sản phẩm làm nội dung.",
+  "scenes": 4,
+  "inputs": [
+    {
+      "key": "product",
+      "label": "Sản phẩm",
+      "placeholder": "để trống = dùng đúng sản phẩm trong ảnh đã upload; hoặc mô tả: a foldable laundry basket",
+      "default": "the product shown in the uploaded product photo"
+    },
+    {
+      "key": "product_name",
+      "label": "Tên gọi trong lời thoại",
+      "placeholder": "ví dụ: giỏ đựng đồ gấp gọn",
+      "default": "sản phẩm này"
+    },
+    {
+      "key": "pain",
+      "label": "Nỗi đau của khách (tiếng Anh)",
+      "placeholder": "ví dụ: clothes piling up with nowhere to put them",
+      "default": "the usual way is slow, awkward and wastes money"
+    },
+    {
+      "key": "setting",
+      "label": "Bối cảnh",
+      "placeholder": "ví dụ: phòng khách sáng, sofa xám",
+      "default": "a bright everyday Vietnamese living room with natural light"
+    },
+    {
+      "key": "charGender",
+      "label": "Giới tính mẫu",
+      "type": "select",
+      "options": [
+        [
+          "female",
+          "Nữ"
+        ],
+        [
+          "male",
+          "Nam"
+        ],
+        [
+          "hands_female",
+          "Tay nữ (không lộ mặt)"
+        ],
+        [
+          "hands_male",
+          "Tay nam (không lộ mặt)"
+        ]
+      ],
+      "default": "female"
+    },
+    {
+      "key": "charCountry",
+      "label": "Quốc gia mẫu",
+      "type": "select",
+      "options": [
+        [
+          "vn",
+          "Việt Nam"
+        ],
+        [
+          "kr",
+          "Hàn Quốc"
+        ],
+        [
+          "jp",
+          "Nhật Bản"
+        ],
+        [
+          "cn",
+          "Trung Quốc"
+        ],
+        [
+          "th",
+          "Thái Lan"
+        ],
+        [
+          "us",
+          "Mỹ"
+        ],
+        [
+          "fr",
+          "Pháp"
+        ]
+      ],
+      "default": "vn"
+    }
+  ],
+  "character": {
+    "charVibe": "casual",
+    "charExtras": "mid 20s, energetic content creator, expressive face"
+  },
+  "nodes": [
+    {
+      "key": "script",
+      "type": "note",
+      "data": {
+        "title": "Kịch bản",
+        "prompt": "Clip affiliate {{product}} — 4 cảnh × 8 s\n\n1. Hook: giơ sản phẩm sát camera, biểu cảm \"khoan, xem cái này\".\n2. Nỗi đau: cảnh khổ sở với cách cũ, sản phẩm để cạnh bên.\n3. Giải pháp: dùng sản phẩm, vấn đề biến mất, cười nhẹ nhõm.\n4. Kêu gọi: cầm sản phẩm, chỉ xuống giỏ hàng, chừa chỗ cho chữ ở dưới.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh sản phẩm thật (bước 1) → tạo Người mẫu (bước 1) → tạo ảnh từng cảnh (bước 3) → tạo video từng cảnh (bước 4, Omni Flash 8 s) → ghép + lồng tiếng (bước 5).\nLồng tiếng: mỗi cảnh có sẵn một câu thoại tiếng Việt (sửa ở bước 2); bước 5 đọc giọng + phụ đề rồi ghép thành clip hoàn chỉnh."
+      }
+    },
+    {
+      "key": "model",
+      "type": "character",
+      "data": {
+        "title": "Người mẫu"
+      }
+    },
+    {
+      "key": "product",
+      "type": "visual_asset",
+      "data": {
+        "title": "Sản phẩm — upload ảnh thật"
+      }
+    },
+    {
+      "key": "s1",
+      "type": "image",
+      "data": {
+        "title": "Cảnh 1 - Hook",
+        "prompt": "Eye-catching medium close-up of the model holding {{product}} right up to the camera with a surprised \"wait, look at this\" expression, in {{setting}}. Punchy bright light, bold TikTok-style framing, product sharp and large in frame. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+      }
+    },
+    {
+      "key": "s2",
+      "type": "image",
+      "data": {
+        "title": "Cảnh 2 - Nỗi đau",
+        "prompt": "Candid medium shot of the model frustrated by a problem that {{product}} solves ({{pain}}), in {{setting}}, with {{product}} set aside on a table nearby. Flat ordinary light, relatable everyday mess. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+      }
+    },
+    {
+      "key": "s3",
+      "type": "image",
+      "data": {
+        "title": "Cảnh 3 - Giải pháp",
+        "prompt": "Medium close-up of the model using {{product}} with the problem visibly solved, a relieved happy smile, in {{setting}}. Bright clean light, product in use and prominent. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+      }
+    },
+    {
+      "key": "s4",
+      "type": "image",
+      "data": {
+        "title": "Cảnh 4 - Kêu gọi",
+        "prompt": "Medium shot of the model holding {{product}} in one hand and pointing down toward the bottom of the frame where the shopping-cart link sits, in {{setting}}. Bright flattering light, clean space at the bottom for text. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+      }
+    },
+    {
+      "key": "v1",
+      "type": "video",
+      "data": {
+        "title": "Video 1 - Hook",
+        "prompt": "0-3s: the model whips the product toward the lens. 3-6s: holds it still, eyebrows raised. 6-8s: a knowing nod. Locked-off camera, no zoom.",
+        "narration": "Khoan, đừng lướt, {{product_name}} này mình phải khoe cho mọi người xem."
+      }
+    },
+    {
+      "key": "v2",
+      "type": "video",
+      "data": {
+        "title": "Video 2 - Nỗi đau",
+        "prompt": "0-3s: the model struggles with the old way and sighs. 3-6s: shakes the head at the mess. 6-8s: glances at the product nearby. Locked-off camera.",
+        "narration": "Mọi người có hay bực mình vì chuyện này không, mình thì gặp hoài luôn."
+      }
+    },
+    {
+      "key": "v3",
+      "type": "video",
+      "data": {
+        "title": "Video 3 - Giải pháp",
+        "prompt": "0-3s: the model picks up the product and uses it. 3-6s: the problem is gone, a relieved smile. 6-8s: a satisfied nod at the camera. Locked-off camera, product stays in frame.",
+        "narration": "Từ ngày có {{product_name}} là xong hết, nhanh gọn, đúng kiểu mình cần."
+      }
+    },
+    {
+      "key": "v4",
+      "type": "video",
+      "data": {
+        "title": "Video 4 - Kêu gọi",
+        "prompt": "0-3s: the model lifts the product beside the face. 3-6s: points down toward the cart link. 6-8s: a bright smile held. Locked-off camera, clean space at the bottom.",
+        "narration": "Ưng thì bấm vô giỏ hàng bên dưới nha, mình để link sẵn rồi đó."
+      }
+    }
+  ],
+  "edges": [
+    [
+      "model",
+      "s1"
+    ],
+    [
+      "product",
+      "s1"
+    ],
+    [
+      "model",
+      "s2"
+    ],
+    [
+      "product",
+      "s2"
+    ],
+    [
+      "model",
+      "s3"
+    ],
+    [
+      "product",
+      "s3"
+    ],
+    [
+      "model",
+      "s4"
+    ],
+    [
+      "product",
+      "s4"
+    ],
+    [
+      "s1",
+      "v1"
+    ],
+    [
+      "s2",
+      "v2"
+    ],
+    [
+      "s3",
+      "v3"
+    ],
+    [
+      "s4",
+      "v4"
+    ]
+  ]
+}

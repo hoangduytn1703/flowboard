@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { ExportItem } from "../api/client";
 import { exportSources } from "../lib/exportOrder";
 import {
   ensureBoardProject,
@@ -55,7 +56,8 @@ interface GenerationState {
   ensureProjectId(): Promise<string | null>;
 
   /** "Xuất video" node: join the upstream clips (+ optional 60 fps). */
-  dispatchExport(rfId: string): Promise<void>;
+  /** `items`: an explicit order with stills and clips mixed (drama clips). */
+  dispatchExport(rfId: string, items?: (ExportItem & { voice?: string | null })[]): Promise<void>;
 
   dispatchGeneration(
     rfId: string,
@@ -626,11 +628,18 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     const cached = get().projectId;
     if (cached !== null) return cached;
     const boardId = useBoardStore.getState().boardId;
-    if (boardId === null) {
-      set({ error: "no board loaded" });
-      return null;
-    }
     try {
+      if (boardId === null) {
+        // No board open (the Products page on a fresh install): uploads
+        // go to the pinned Flow project, the same one every board binds to.
+        const res = await fetch("/api/flow/projects/pinned");
+        const pinned = res.ok ? ((await res.json()) as { flow_project_id?: string | null }).flow_project_id : null;
+        if (!pinned) {
+          set({ error: "Chưa ghim Flow project — mở Cài đặt → Google Flow project và dán uuid." });
+          return null;
+        }
+        return pinned;
+      }
       const proj = await ensureBoardProject(boardId);
       set({ projectId: proj.flow_project_id });
       return proj.flow_project_id;
@@ -640,10 +649,10 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     }
   },
 
-  async dispatchExport(rfId) {
+  async dispatchExport(rfId, items?: (ExportItem & { voice?: string | null })[]) {
     const { nodes, edges } = useBoardStore.getState();
     const sources = exportSources(rfId, nodes, edges);
-    const mediaIds = sources.map((s) => s.mediaId).filter((m) => m);
+    const mediaIds = items ? items.map((it) => it.media_id) : sources.map((s) => s.mediaId).filter((m) => m);
     if (mediaIds.length === 0) {
       set({ error: "Nối ít nhất một node Video đã render vào node Xuất video." });
       return;
@@ -652,12 +661,22 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     const smooth60 = node?.data.smooth60 === true;
     // One voice line per clip, aligned with source_media_ids (clips without
     // media are skipped above, so align on the same filter).
-    const narrations = sources
+    const narrations = items ? items.map((it) => it.narration) : sources
       .filter((s) => s.mediaId)
       .map((s) => {
         const v = nodes.find((n) => n.id === s.rfId);
         return typeof v?.data.narration === "string" ? v.data.narration.trim() : "";
       });
+    // Per-clip voice (the scene's own pick in step 2), aligned like `narrations`;
+    // null = the export's voice.
+    const voices: (string | null)[] = items ? items.map((it) => it.voice || null) : sources
+      .filter((s) => s.mediaId)
+      .map((s) => {
+        const v = nodes.find((n) => n.id === s.rfId);
+        return typeof v?.data.voice === "string" && v.data.voice ? v.data.voice : null;
+      });
+    // Dialogue voices: `[A] … [B] …` tag → voice id.
+    const speakers = node?.data.speakers && typeof node.data.speakers === "object" ? node.data.speakers : {};
     const nodeDbId = parseInt(rfId, 10);
     useBoardStore.getState().updateNodeData(rfId, { status: "queued", error: undefined });
     let reqDto;
@@ -667,12 +686,20 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
         node_id: isNaN(nodeDbId) ? undefined : nodeDbId,
         params: {
           source_media_ids: mediaIds,
+          // Explicit order with stills and clips mixed (drama clips).
+          items,
           smooth60,
           narrations,
           voice: node?.data.voice,
           voice_rate: node?.data.voiceRate ?? 0,
+          voice_style: node?.data.voiceStyle ?? "",
+          voices,
+          speakers,
           subtitles: node?.data.subtitles !== false,
           original_audio: node?.data.originalAudio ?? "duck",
+          // Background music looped under the whole clip (an uploaded audio asset).
+          bgm_media_id: node?.data.bgmMediaId || undefined,
+          bgm_volume: node?.data.bgmVolume ?? 0.15,
         },
       });
     } catch (err) {
@@ -840,6 +867,10 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
           // User's image model preference from the Settings panel.
           // Backend resolves the nickname → real Flow model identifier.
           image_model: useSettingsStore.getState().imageModel,
+          // "flow" (default) renders on Flow; "openai" / "xai" render via
+          // that API and upload the PNG into the Flow project (worker
+          // hook: services/image_providers.maybe_generate_via_api).
+          image_provider: useSettingsStore.getState().imageProvider,
         };
         if (refMediaIds.length > 0) {
           params.ref_media_ids = refMediaIds;

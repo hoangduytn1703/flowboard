@@ -1,0 +1,234 @@
+{
+  "id": "food_review",
+  "category": "food",
+  "order": 31,
+  "title": "Review ăn thử",
+  "blurb": "4 cảnh ăn thử: món lên bàn, cắn miếng đầu tiên, cận kết cấu + khói nóng, kết luận và giá. Cần có người ăn thử.",
+  "scenes": 4,
+  "inputs": [
+    {
+      "key": "product",
+      "label": "Món ăn",
+      "placeholder": "để trống = dùng đúng món trong ảnh đã upload; hoặc mô tả: bánh tráng trộn",
+      "default": "the dish shown in the uploaded product photo"
+    },
+    {
+      "key": "product_name",
+      "label": "Tên gọi trong lời thoại",
+      "placeholder": "ví dụ: bánh tráng trộn Sài Gòn",
+      "default": "món này"
+    },
+    {
+      "key": "price",
+      "label": "Giá (đọc ở câu kết)",
+      "placeholder": "ví dụ: 35k; để trống = giá sản phẩm đã lưu, không có thì đọc 'hạt dẻ'",
+      "default": "hạt dẻ"
+    },
+    {
+      "key": "setting",
+      "label": "Bối cảnh",
+      "placeholder": "ví dụ: quán ăn vỉa hè buổi tối, bàn inox",
+      "default": "a cozy Vietnamese eatery table with a wooden top and warm light"
+    },
+    {
+      "key": "charGender",
+      "label": "Giới tính mẫu",
+      "type": "select",
+      "options": [
+        [
+          "female",
+          "Nữ"
+        ],
+        [
+          "male",
+          "Nam"
+        ]
+      ],
+      "default": "female"
+    },
+    {
+      "key": "charCountry",
+      "label": "Quốc gia mẫu",
+      "type": "select",
+      "options": [
+        [
+          "vn",
+          "Việt Nam"
+        ],
+        [
+          "kr",
+          "Hàn Quốc"
+        ],
+        [
+          "jp",
+          "Nhật Bản"
+        ],
+        [
+          "cn",
+          "Trung Quốc"
+        ],
+        [
+          "th",
+          "Thái Lan"
+        ],
+        [
+          "us",
+          "Mỹ"
+        ],
+        [
+          "fr",
+          "Pháp"
+        ]
+      ],
+      "default": "vn"
+    }
+  ],
+  "character": {
+    "charVibe": "casual",
+    "charExtras": "early 20s, expressive foodie, big appetite, cheerful"
+  },
+  "nodes": [
+    {
+      "key": "script",
+      "type": "note",
+      "data": {
+        "title": "Kịch bản",
+        "prompt": "Review ăn thử {{product}} — 4 cảnh × 8 s\n\n1. Món lên bàn: hero shot món vừa được bưng ra, khói bốc, tay xoay đĩa về phía camera.\n2. Miếng đầu tiên: người ăn cắn miếng đầu, biểu cảm mắt mở to.\n3. Cận kết cấu: gắp lên sát ống kính, thấy sốt, khói, độ mềm giòn.\n4. Kết luận: chỉ vào món, nhận xét và đọc giá, chừa chỗ cho chữ giá ở trên.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh món thật (bước 1) → tạo Người ăn thử (bước 1) → tạo ảnh từng cảnh (bước 3) → tạo video từng cảnh (bước 4, Omni Flash 8 s) → ghép + lồng tiếng (bước 5).\nLồng tiếng: mỗi cảnh có sẵn một câu thoại tiếng Việt (sửa ở bước 2); bước 5 đọc giọng + phụ đề rồi ghép thành clip hoàn chỉnh."
+      }
+    },
+    {
+      "key": "model",
+      "type": "character",
+      "data": {
+        "title": "Người ăn thử"
+      }
+    },
+    {
+      "key": "product",
+      "type": "visual_asset",
+      "data": {
+        "title": "Món ăn — upload ảnh thật"
+      }
+    },
+    {
+      "key": "s1",
+      "type": "image",
+      "data": {
+        "title": "Cảnh 1 - Món lên bàn",
+        "prompt": "Hero shot of {{product}} just served on the table with steam rising, in {{setting}}. The model's hands reach into frame to turn the dish toward the camera, warm appetizing light, shallow depth of field, commercial food photography. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+      }
+    },
+    {
+      "key": "s2",
+      "type": "image",
+      "data": {
+        "title": "Cảnh 2 - Miếng đầu tiên",
+        "prompt": "Medium close-up of the model taking the first bite of {{product}}, eyes widening with delight, in {{setting}}. Warm natural light, the dish sharp and visible in frame. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+      }
+    },
+    {
+      "key": "s3",
+      "type": "image",
+      "data": {
+        "title": "Cảnh 3 - Cận kết cấu",
+        "prompt": "Extreme close-up of a bite of {{product}} lifted on chopsticks or a spoon toward the lens, texture, sauce and steam clearly visible, in {{setting}}. Macro food photography, glossy detail, warm light, the dish in the background. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+      }
+    },
+    {
+      "key": "s4",
+      "type": "image",
+      "data": {
+        "title": "Cảnh 4 - Kết luận",
+        "prompt": "Medium shot of the model pointing at {{product}} on the table and giving a verdict to the camera with a satisfied grin, in {{setting}}. Bright cheerful light, clean space at the top for a price caption. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+      }
+    },
+    {
+      "key": "v1",
+      "type": "video",
+      "data": {
+        "title": "Video 1 - Món lên bàn",
+        "prompt": "0-3s: the dish is set down, steam curls up. 3-6s: hands turn the plate toward the camera. 6-8s: the dish sits still, glossy and steaming. Locked-off camera, no zoom.",
+        "narration": "Hôm nay mình đi ăn thử {{product_name}} đang hot, nhìn thôi là thấy muốn ăn rồi."
+      }
+    },
+    {
+      "key": "v2",
+      "type": "video",
+      "data": {
+        "title": "Video 2 - Miếng đầu tiên",
+        "prompt": "0-3s: the model lifts a bite to the mouth. 3-6s: bites, eyes widen, a slow nod. 6-8s: a happy, full-mouth reaction. Locked-off camera, dish stays in frame.",
+        "narration": "Miếng đầu tiên cắn vào là đậm đà, nóng hổi, đúng vị mình thích."
+      }
+    },
+    {
+      "key": "v3",
+      "type": "video",
+      "data": {
+        "title": "Video 3 - Cận kết cấu",
+        "prompt": "0-3s: chopsticks lift the food, sauce drips. 3-6s: a slow turn showing the texture. 6-8s: steam rises past the lens. Locked-off macro camera, warm light.",
+        "narration": "Nhìn kết cấu này nè, trong mềm, ngoài vừa tới, sốt bám đều."
+      }
+    },
+    {
+      "key": "v4",
+      "type": "video",
+      "data": {
+        "title": "Video 4 - Kết luận",
+        "prompt": "0-3s: the model points at the dish. 3-6s: counts on the fingers while giving the verdict. 6-8s: a thumbs-up and a grin. Locked-off camera, clean space at the top.",
+        "narration": "Giá {{price}} mà ngon vậy là quá ổn, mọi người ghé giỏ hàng đặt thử nha."
+      }
+    }
+  ],
+  "edges": [
+    [
+      "model",
+      "s1"
+    ],
+    [
+      "product",
+      "s1"
+    ],
+    [
+      "model",
+      "s2"
+    ],
+    [
+      "product",
+      "s2"
+    ],
+    [
+      "model",
+      "s3"
+    ],
+    [
+      "product",
+      "s3"
+    ],
+    [
+      "model",
+      "s4"
+    ],
+    [
+      "product",
+      "s4"
+    ],
+    [
+      "s1",
+      "v1"
+    ],
+    [
+      "s2",
+      "v2"
+    ],
+    [
+      "s3",
+      "v3"
+    ],
+    [
+      "s4",
+      "v4"
+    ]
+  ],
+  "person_required": true,
+  "person_reason": "cần có người ăn thử để thấy phản ứng khi nếm"
+}

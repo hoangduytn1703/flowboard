@@ -41,3 +41,38 @@ def test_write_ass_scales_to_the_frame(tmp_path):
 def test_filter_path_escapes_windows_drive():
     from flowboard.services.video_export import _filter_path
     assert _filter_path(Path(r"D:\a b\s.ass")) == "'D\:/a b/s.ass'"
+
+
+def test_gemini_voice_uses_the_key_pool_and_caches(tmp_path, monkeypatch):
+    import asyncio
+    import wave
+    from flowboard.services.llm import gemini_api
+
+    monkeypatch.setattr(tts, "TTS_DIR", tmp_path)
+    calls = []
+
+    async def fake_speak(prompt, voice, *, model=None, timeout=None):
+        calls.append((prompt, voice))
+        import io
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(24000); wf.writeframes(b"\x00\x00" * 24000)
+        return buf.getvalue()
+
+    monkeypatch.setattr(gemini_api, "speak", fake_speak)
+    n = asyncio.run(tts.synthesize("Xin chào mọi người", "gemini:Kore", 20, "giọng kể chuyện kịch tính"))
+    assert n.path.suffix == ".wav" and n.words == [] and 0.9 <= n.duration <= 1.1
+    assert calls == [("giọng kể chuyện kịch tính, nói nhanh hơn bình thường: Xin chào mọi người", "Kore")]
+    # cached: the same line does not hit the service again
+    asyncio.run(tts.synthesize("Xin chào mọi người", "gemini:Kore", 20, "giọng kể chuyện kịch tính"))
+    assert len(calls) == 1
+    # the subtitle cues still spread over the audio without word timings
+    cues = tts.subtitle_cues(n, "Xin chào mọi người")
+    assert cues and cues[-1][1] == n.duration
+
+
+def test_voice_groups_lists_edge_and_gemini():
+    groups = tts.voice_groups()
+    assert [g["id"] for g in groups] == ["edge", "gemini"]
+    assert len(groups[0]["voices"]) == 2 and len(groups[1]["voices"]) >= 10
+    assert all(tts.is_gemini_voice(v["id"]) for v in groups[1]["voices"])

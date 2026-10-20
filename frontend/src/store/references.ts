@@ -1,5 +1,14 @@
 import { create } from "zustand";
 import {
+  deleteCharacter,
+  listCharacters,
+  renameCharacter,
+  saveCharacter,
+  updateCharacterMeta,
+  type SaveCharacterInput,
+  type SavedCharacter,
+} from "../api/characters";
+import {
   createReference,
   deleteReference,
   listReferences,
@@ -144,6 +153,81 @@ export const useReferencesStore = create<ReferencesState>((set, get) => ({
     if (get().panelOpen === open) return;
     set({ panelOpen: open });
     persistPanelOpen(open);
+  },
+}));
+
+/**
+ * The Quicktool model library (kind "character" references with `meta`).
+ * Shared by step 1 of the wizard (★ save / pick) and the /models page, so
+ * a model saved in the wizard shows up on the page without a reload.
+ * Newest first — the backend orders pinned DESC, position ASC, created DESC.
+ */
+export interface CharactersState {
+  items: SavedCharacter[];
+  /** True once `load()` has completed at least once (success or not). */
+  loaded: boolean;
+  loading: boolean;
+  error: string | null;
+
+  load(force?: boolean): Promise<void>;
+  save(input: SaveCharacterInput): Promise<SavedCharacter>;
+  rename(id: number, label: string): Promise<void>;
+  remove(id: number): Promise<void>;
+  isSaved(mediaId: string | null | undefined): boolean;
+}
+
+export const useCharactersStore = create<CharactersState>((set, get) => ({
+  items: [],
+  loaded: false,
+  loading: false,
+  error: null,
+
+  async load(force = false) {
+    if (get().loading) return;
+    if (get().loaded && !force) return;
+    set({ loading: true, error: null });
+    try {
+      const items = await listCharacters();
+      set({ items, loading: false, loaded: true });
+    } catch (err) {
+      set({
+        loading: false,
+        loaded: true,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+
+  async save(input) {
+    // POST is idempotent on media_id: re-saving returns the existing row.
+    let row = await saveCharacter(input);
+    // A photo saved from the Canvas (★ Lưu vào thư viện) has no form
+    // data; the wizard knows it, so fill it in rather than leave the
+    // card without badges.
+    if (!row.meta.gender && input.meta.gender) {
+      row = await updateCharacterMeta(row.id, input.meta);
+    }
+    const exists = get().items.some((c) => c.id === row.id);
+    set({
+      items: exists
+        ? get().items.map((c) => (c.id === row.id ? row : c))
+        : [row, ...get().items],
+    });
+    return row;
+  },
+
+  async rename(id, label) {
+    const row = await renameCharacter(id, label);
+    set({ items: get().items.map((c) => (c.id === row.id ? row : c)) });
+  },
+
+  async remove(id) {
+    await deleteCharacter(id);
+    set({ items: get().items.filter((c) => c.id !== id) });
+  },
+
+  isSaved(mediaId) {
+    return !!mediaId && get().items.some((c) => c.mediaId === mediaId);
   },
 }));
 

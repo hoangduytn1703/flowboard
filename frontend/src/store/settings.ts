@@ -54,6 +54,11 @@ export const OMNI_FLASH_DURATIONS: OmniFlashDuration[] = [4, 6, 8, 10];
 // queue (no Flow plan, no extension needed). Picked per dispatch in the
 // GenerationDialog and sticky — persisted here like the model picks.
 export type MediaProviderKey = "flow" | "muse";
+// Image renderer for `gen_image`. "flow" = Flow credits via the extension
+// (default). "openai" / "xai" = a paid API keyed in Settings → "Nguồn tạo
+// ảnh"; the result is still uploaded into the Flow project so the video
+// step can use it. Sent per image dispatch as `params.image_provider`.
+export type ImageProviderKey = "flow" | "openai" | "xai";
 // "quicktool" is the step-by-step clip maker (the default screen);
 // "canvas" is the node board underneath it, for fine control.
 export type UiMode = "quicktool" | "canvas";
@@ -64,8 +69,10 @@ interface SettingsState {
   videoModel: VideoModelFamily;
   omniFlashDuration: OmniFlashDuration;
   mediaProvider: MediaProviderKey;
+  imageProvider: ImageProviderKey;
   uiMode: UiMode;
   setImageModel(model: ImageModelKey): void;
+  setImageProvider(p: ImageProviderKey): void;
   setUiMode(mode: UiMode): void;
   setVideoQuality(q: VideoQuality): void;
   setVideoModel(m: VideoModelFamily): void;
@@ -85,6 +92,7 @@ interface PersistShape {
   videoModel?: VideoModelFamily;
   omniFlashDuration?: OmniFlashDuration;
   mediaProvider?: MediaProviderKey;
+  imageProvider?: ImageProviderKey;
   uiMode?: UiMode;
 }
 
@@ -118,6 +126,7 @@ const persisted = loadPersisted();
 
 const VALID_VIDEO_QUALITIES: VideoQuality[] = ["fast", "lite", "quality", "lite_relaxed"];
 const VALID_MEDIA_PROVIDERS: MediaProviderKey[] = ["flow", "muse"];
+const VALID_IMAGE_PROVIDERS: ImageProviderKey[] = ["flow", "openai", "xai"];
 
 function snapshotPersist(get: () => SettingsState): PersistShape {
   return {
@@ -127,6 +136,7 @@ function snapshotPersist(get: () => SettingsState): PersistShape {
     videoModel: get().videoModel,
     omniFlashDuration: get().omniFlashDuration,
     mediaProvider: get().mediaProvider,
+    imageProvider: get().imageProvider,
     uiMode: get().uiMode,
   };
 }
@@ -148,9 +158,17 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     persisted.mediaProvider && VALID_MEDIA_PROVIDERS.includes(persisted.mediaProvider)
       ? persisted.mediaProvider
       : "flow",
+  imageProvider:
+    persisted.imageProvider && VALID_IMAGE_PROVIDERS.includes(persisted.imageProvider)
+      ? persisted.imageProvider
+      : "flow",
   uiMode: persisted.uiMode === "canvas" ? "canvas" : "quicktool",
   setImageModel(model) {
     set({ imageModel: model });
+    persist(snapshotPersist(get));
+  },
+  setImageProvider(p) {
+    set({ imageProvider: p });
     persist(snapshotPersist(get));
   },
   setUiMode(mode) {

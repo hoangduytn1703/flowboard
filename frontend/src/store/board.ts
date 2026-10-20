@@ -100,8 +100,18 @@ export interface FlowboardNodeData extends Record<string, unknown> {
   narration?: string;
   voice?: string;
   voiceRate?: number;
+  /** Spoken-language style for Gemini voices ("giọng kể chuyện kịch tính"). */
+  voiceStyle?: string;
   subtitles?: boolean;
   originalAudio?: "duck" | "keep" | "mute";
+  /** Export node: background music (an uploaded audio asset) and its level. */
+  bgmMediaId?: string;
+  bgmName?: string;
+  bgmVolume?: number;
+  /** Export node: the rendered 1080×1920 cover image. */
+  coverMediaId?: string;
+  /** Export node: dialogue voices — `[A] … [B] …` tag → voice id (max 4). */
+  speakers?: Record<string, string>;
 }
 
 export type FlowNode = Node<FlowboardNodeData>;
@@ -340,8 +350,14 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           narration: n.data["narration"] as string | undefined,
           voice: n.data["voice"] as string | undefined,
           voiceRate: n.data["voiceRate"] as number | undefined,
+          voiceStyle: n.data["voiceStyle"] as string | undefined,
           subtitles: n.data["subtitles"] as boolean | undefined,
           originalAudio: n.data["originalAudio"] as "duck" | "keep" | "mute" | undefined,
+          bgmMediaId: n.data["bgmMediaId"] as string | undefined,
+          bgmName: n.data["bgmName"] as string | undefined,
+          bgmVolume: n.data["bgmVolume"] as number | undefined,
+          coverMediaId: n.data["coverMediaId"] as string | undefined,
+          speakers: n.data["speakers"] as Record<string, string> | undefined,
           // The worker persists the partial-failure summary onto the
           // node now, so a cold load has to read it back — otherwise a
           // batch where some variants were blocked reloads looking
@@ -416,8 +432,14 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           narration: n.data["narration"] as string | undefined,
           voice: n.data["voice"] as string | undefined,
           voiceRate: n.data["voiceRate"] as number | undefined,
+          voiceStyle: n.data["voiceStyle"] as string | undefined,
           subtitles: n.data["subtitles"] as boolean | undefined,
           originalAudio: n.data["originalAudio"] as "duck" | "keep" | "mute" | undefined,
+          bgmMediaId: n.data["bgmMediaId"] as string | undefined,
+          bgmName: n.data["bgmName"] as string | undefined,
+          bgmVolume: n.data["bgmVolume"] as number | undefined,
+          coverMediaId: n.data["coverMediaId"] as string | undefined,
+          speakers: n.data["speakers"] as Record<string, string> | undefined,
           // The worker persists the partial-failure summary onto the
           // node now, so a cold load has to read it back — otherwise a
           // batch where some variants were blocked reloads looking
@@ -534,8 +556,14 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           narration: n.data["narration"] as string | undefined,
           voice: n.data["voice"] as string | undefined,
           voiceRate: n.data["voiceRate"] as number | undefined,
+          voiceStyle: n.data["voiceStyle"] as string | undefined,
           subtitles: n.data["subtitles"] as boolean | undefined,
           originalAudio: n.data["originalAudio"] as "duck" | "keep" | "mute" | undefined,
+          bgmMediaId: n.data["bgmMediaId"] as string | undefined,
+          bgmName: n.data["bgmName"] as string | undefined,
+          bgmVolume: n.data["bgmVolume"] as number | undefined,
+          coverMediaId: n.data["coverMediaId"] as string | undefined,
+          speakers: n.data["speakers"] as Record<string, string> | undefined,
           error: n.data["error"] as string | undefined,
         },
       }));

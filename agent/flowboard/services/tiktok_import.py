@@ -26,7 +26,7 @@ from flowboard.services.flow_project import effective_project_id
 
 logger = logging.getLogger(__name__)
 
-SCRAPE_TIMEOUT_S = 180.0
+SCRAPE_TIMEOUT_S = 45.0
 PHOTO_TIMEOUT_S = 20.0
 MAX_PHOTO_BYTES = 10 * 1024 * 1024
 
@@ -37,6 +37,15 @@ _CATEGORY_WORDS = {
                 "thời trang", "len", "hoodie", "jeans", "sandal", "sneaker"),
     "food": ("bánh", "kẹo", "trà", "cà phê", "snack", "mì ", "gia vị", "nước mắm", "hạt", "khô ",
              "thực phẩm", "đồ ăn", "ăn vặt", "sữa", "nước ép"),
+    # Small goods and phone accessories: the grocery_ad template (hands-only).
+    "grocery": ("ốp lưng", "ốp điện thoại", "mica", "sạc", "cáp", "dây cáp", "tai nghe", "kệ ", "móc",
+                "hộp đựng", "giá đỡ", "khay", "bình nước", "ly ", "cốc", "bút", "sổ tay", "miếng dán",
+                "cường lực", "pin dự phòng", "đế sạc", "khăn", "túi đựng", "giỏ", "hũ ", "lót chuột"),
+    # Appliances and household gear: the home_appliance_review template.
+    "home": ("nồi", "chảo", "máy xay", "máy hút bụi", "máy lọc", "máy ép", "máy sấy", "máy giặt",
+             "máy hút", "quạt", "bếp", "lọc nước", "đèn", "ấm siêu tốc", "nồi chiên", "lò nướng",
+             "lò vi sóng", "tủ lạnh", "bình giữ nhiệt", "máy rửa", "robot hút", "gia dụng", "điều hoà",
+             "máy lạnh", "máy nước nóng", "bàn ủi", "bàn là", "máy pha"),
 }
 
 #: Strong references so a fire-and-forget photo task is not collected midway.
@@ -55,14 +64,41 @@ def guess_category(title: str) -> str:
     return "other"
 
 
+#: First extension build that answers ``scrape_page``.
+MIN_EXTENSION_VERSION = (0, 2, 0)
+
+
+def _version_tuple(v: Optional[str]) -> tuple[int, ...]:
+    try:
+        return tuple(int(x) for x in (v or "0").split("."))
+    except ValueError:
+        return (0,)
+
+
 async def scrape(max_items: int = 100) -> dict[str, Any]:
     """Ask the extension to read the open TikTok tab."""
-    resp = await get_flow_client()._send(
+    client = get_flow_client()
+    if not client.connected:
+        raise TikTokImportError("Extension Chrome chưa kết nối. Mở lại Chrome và kiểm tra badge extension.")
+    # An older build ignores the command and never answers; say so at once
+    # instead of after the timeout.
+    if _version_tuple(client.extension_version) < MIN_EXTENSION_VERSION:
+        have = client.extension_version or "cũ"
+        raise TikTokImportError(
+            f"Extension Chrome đang chạy bản {have}, chưa biết lệnh đọc TikTok. Mở chrome://extensions, bấm "
+            "↻ Reload ở Flowboard extension (bản 0.2.0 trở lên), rồi bấm nhập lại."
+        )
+    resp = await client._send(
         "scrape_page", {"maxItems": max_items, "scrolls": 14}, timeout=SCRAPE_TIMEOUT_S,
     )
     err = resp.get("error")
     if err == "extension_disconnected":
         raise TikTokImportError("Extension Chrome chưa kết nối. Mở lại Chrome và kiểm tra badge extension.")
+    if err == "timeout":
+        raise TikTokImportError(
+            f"Extension Chrome không trả lời sau {int(SCRAPE_TIMEOUT_S)} giây. Reload extension ở chrome://extensions "
+            "(bản cũ không biết lệnh đọc TikTok), mở lại tab TikTok rồi bấm nhập lại."
+        )
     if err == "NO_TIKTOK_TAB":
         raise TikTokImportError(
             "Chưa thấy tab TikTok nào. Mở trang showcase / shop của bạn trên TikTok (đã đăng nhập), "

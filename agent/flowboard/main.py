@@ -1,4 +1,5 @@
 import asyncio
+import os
 import hmac
 import logging
 from contextlib import asynccontextmanager
@@ -11,6 +12,12 @@ from flowboard.db import get_session, init_db
 from flowboard.db.models import Node, Request
 from flowboard.routes import activity, auth, boards, chat, edges, flow_debug, flow_projects, llm, media, nodes, plans, projects, prompt, templates, upload, vision
 from flowboard.routes import provider_jobs as provider_jobs_route
+from flowboard.routes import drama as drama_route
+from flowboard.routes import export_extras as export_extras_route
+from flowboard.routes import history as history_route
+from flowboard.routes import prompt_library as prompt_library_route
+from flowboard.routes import video_clean as video_clean_route
+from flowboard.routes import image_providers as image_providers_route
 from flowboard.routes import products as products_route
 from flowboard.routes import reference_video as reference_video_route
 from flowboard.routes import references as references_route
@@ -140,7 +147,11 @@ app.include_router(flow_projects.router)
 app.include_router(flow_debug.router)
 app.include_router(references_route.router)
 app.include_router(products_route.router)
+# Drama clips are parked (FLOWBOARD_DRAMA=1 re-enables the API and the UI card).
+if os.getenv("FLOWBOARD_DRAMA") == "1":
+    app.include_router(drama_route.router)
 app.include_router(reference_video_route.router)
+app.include_router(export_extras_route.router)
 app.include_router(requests_route.router)
 app.include_router(media.bytes_router)
 app.include_router(media.api_router)
@@ -150,6 +161,10 @@ app.include_router(vision.router)
 app.include_router(prompt.router)
 app.include_router(auth.router)
 app.include_router(llm.router)
+app.include_router(image_providers_route.router)
+app.include_router(history_route.router)
+app.include_router(prompt_library_route.router)
+app.include_router(video_clean_route.router)
 app.include_router(activity.router)
 app.include_router(provider_jobs_route.router)
 

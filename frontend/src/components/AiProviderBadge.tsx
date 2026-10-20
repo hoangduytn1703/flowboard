@@ -1,13 +1,12 @@
 import { useEffect, useState } from "react";
 import {
-  getLlmConfig,
-  getLlmProviders,
   type LLMConfig,
   type LLMFeature,
   type LLMProviderInfo,
   type LLMProviderName,
 } from "../api/client";
 import { AiProviderDialog } from "./AiProviderDialog";
+import { getLlmConfigCached, getLlmProvidersCached, LLM_CONFIG_POLL_MS } from "./llmConfigCache";
 
 /**
  * Compact toolbar entry point for the AI Provider stack. Sits to the
@@ -45,21 +44,21 @@ const FEATURE_LABEL: Record<LLMFeature, string> = {
 
 const FEATURES: LLMFeature[] = ["auto_prompt", "vision", "planner"];
 
-const POLL_INTERVAL_MS = 30_000;
-
 export function AiProviderBadge() {
   const [open, setOpen] = useState(false);
   const [config, setConfig] = useState<LLMConfig | null>(null);
   const [providers, setProviders] = useState<LLMProviderInfo[] | null>(null);
 
   // Light polling so the badge stays fresh when the user installs a
-  // CLI in another terminal or saves a key in the dialog. Visibility-aware.
+  // CLI in another terminal or saves a key in the dialog. Reads go
+  // through the shared cache (one request a minute app-wide); only the
+  // Apply broadcast forces a fresh one.
   useEffect(() => {
     let alive = true;
     let timer: ReturnType<typeof setInterval> | null = null;
-    const refresh = async () => {
+    const refresh = async (fresh = false) => {
       try {
-        const [c, p] = await Promise.all([getLlmConfig(), getLlmProviders()]);
+        const [c, p] = await Promise.all([getLlmConfigCached({ fresh }), getLlmProvidersCached({ fresh })]);
         if (!alive) return;
         setConfig(c);
         setProviders(p);
@@ -70,13 +69,13 @@ export function AiProviderBadge() {
     void refresh();
     timer = setInterval(() => {
       if (document.visibilityState === "visible") void refresh();
-    }, POLL_INTERVAL_MS);
+    }, LLM_CONFIG_POLL_MS);
     const onVis = () => {
       if (document.visibilityState === "visible") void refresh();
     };
     document.addEventListener("visibilitychange", onVis);
     // Match the gate: refresh immediately when Apply fires the broadcast.
-    const onConfigChange = () => void refresh();
+    const onConfigChange = () => void refresh(true);
     window.addEventListener("flowboard:llm-config-changed", onConfigChange);
     return () => {
       alive = false;

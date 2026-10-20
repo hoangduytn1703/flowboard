@@ -32,7 +32,7 @@ def test_handler_joins_in_the_given_order(tmp_path):
     a, b, c = (_clip(tmp_path, n) for n in ("aaaaaaaa", "bbbbbbbb", "cccccccc"))
     seen = {}
 
-    def fake_export(asset_ids, *, smooth60, narration=None):
+    def fake_export(asset_ids, *, smooth60, narration=None, items=None, **_bgm):
         seen["asset_ids"], seen["smooth60"], seen["narration"] = list(asset_ids), smooth60, narration
         return "joined-media-id", None, {"voiced": False}
 
@@ -79,7 +79,7 @@ def test_handler_builds_narration_options(tmp_path):
     a, b = (_clip(tmp_path, n) for n in ("dddddddd", "eeeeeeee"))
     seen = {}
 
-    def fake_export(asset_ids, *, smooth60, narration=None):
+    def fake_export(asset_ids, *, smooth60, narration=None, items=None, **_bgm):
         seen["narration"] = narration
         return "voiced-id", None, {"voiced": True}
 

@@ -313,7 +313,8 @@ async def test_gen_video_envelope_and_captcha():
     assert call["captcha_action"] == fb.CAPTCHA_VIDEO == "VIDEO_GENERATION"
 
     item = video_item(rec.payload(fb.RPC_GEN_VIDEO))
-    assert item[0][2][0][0][0] == "wave in the wind"
+    # silent_prompt() appends the "no speech" sentence to every video prompt.
+    assert item[0][2][0][0][0].startswith("wave in the wind")
     assert item[VID_SOURCE][SRC_MEDIA_ID] == "img-abc"
 
 

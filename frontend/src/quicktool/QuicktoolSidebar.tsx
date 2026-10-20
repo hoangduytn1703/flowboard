@@ -1,12 +1,13 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { AccountPanel } from "../components/AccountPanel";
+import { CreditBadge } from "../components/CreditBadge";
 import { useBoardStore } from "../store/board";
 import { useSettingsStore } from "../store/settings";
 
 /**
  * Left rail of the Quicktool screen, modelled on the reference app: a
- * brand block, the one "Công cụ nhanh" entry (its dialog picks the clip
- * kind), the libraries, and the switch to the node canvas underneath.
+ * brand block, the one "+ Clip mới" entry (it opens the dialog that picks
+ * the clip kind), the libraries, and the switch to the node canvas underneath.
  */
 export function QuicktoolSidebar() {
   const setUiMode = useSettingsStore((s) => s.setUiMode);
@@ -38,12 +39,30 @@ export function QuicktoolSidebar() {
           onClick={() => navigate("/clips/new")}
           title="Tạo clip quảng cáo mới: chọn sản phẩm và kiểu clip (mỹ phẩm, quần áo, đồ ăn, review, theo video mẫu, theo link)"
         >
-          <span className="qt-nav__icon">⚡</span> Công cụ nhanh
+          <span className="qt-nav__icon">⚡</span> + Clip mới
         </button>
 
         <div className="qt-nav__group">Thư viện</div>
         <button type="button" className={`qt-nav__item${is("/products") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/products")}>
           <span className="qt-nav__icon">🛍️</span> Sản phẩm đang bán
+        </button>
+        <button type="button" className={`qt-nav__item${is("/models") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/models")}
+                title="Người mẫu đã lưu ở bước 1 — dùng lại cho sản phẩm khác">
+          <span className="qt-nav__icon">👤</span> Người mẫu đã lưu
+        </button>
+        <button type="button" className={`qt-nav__item${is("/prompts") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/prompts")}
+                title="Prompt ảnh / chuyển động / lời thoại đã lưu ở bước 2 — dùng lại cho clip khác">
+          <span className="qt-nav__icon">📚</span> Prompt đã lưu
+        </button>
+        <button type="button" className={`qt-nav__item${is("/history") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/history")}
+                title="Mọi lần tạo ảnh/video/ghép: trạng thái, credit, tải lại media, thử lại">
+          <span className="qt-nav__icon">🕘</span> Lịch sử & credit
+        </button>
+
+        <div className="qt-nav__group">Công cụ</div>
+        <button type="button" className={`qt-nav__item${is("/tools/clean") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/tools/clean")}
+                title="Xoá logo, watermark, phụ đề cứng khỏi video có sẵn">
+          <span className="qt-nav__icon">🧽</span> Xoá chữ / logo
         </button>
 
         <div className="qt-nav__group">Nâng cao</div>
@@ -57,6 +76,7 @@ export function QuicktoolSidebar() {
         </button>
       </nav>
 
+      <div className="qt-sidebar__credit"><CreditBadge /></div>
       <AccountPanel />
     </aside>
   );

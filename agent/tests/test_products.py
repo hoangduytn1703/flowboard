@@ -44,7 +44,22 @@ def test_product_crud(client):
 def test_product_validation(client):
     assert client.post("/api/products", json={"name": "  "}).status_code == 400
     assert client.post("/api/products", json={"name": "x", "category": "cars"}).status_code == 400
+    assert client.post("/api/products", json={"name": "x", "category": "any"}).status_code == 400
     assert client.post("/api/products", json={"name": "x", "media_ids": ["../etc"]}).status_code == 400
+
+
+def test_new_categories_pick_their_template(client):
+    expect = {"grocery": "grocery_ad", "home": "home_appliance_review", "food": "fast_food_ad",
+              "other": "unboxing_review"}
+    for category, template_id in expect.items():
+        p = _create(client, name=f"sp {category}", category=category)
+        assert p["category"] == category and p["template_id"] == template_id
+        r = client.post("/api/boards/from-template", json={"product_id": p["id"], "template_id": p["template_id"]})
+        assert r.status_code == 200, r.text
+        assert r.json()["data"]["quicktool"]["template_id"] == template_id
+        assert r.json()["name"] == f"sp {category} — " + {
+            "grocery": "Tạp hoá & phụ kiện", "home": "Review đồ gia dụng",
+            "food": "Quảng cáo thức ăn nhanh", "other": "Review / mở hộp"}[category]
 
 
 def test_board_from_template_with_product(client):

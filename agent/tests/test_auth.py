@@ -46,6 +46,7 @@ def test_me_returns_null_identity_but_the_configured_tier(client):
         "identity_available": False,
         "sku": None,
         "credits": None,
+        "accounts": 0,
     }
 
 
@@ -349,6 +350,7 @@ def test_scan_reports_disconnected_state_when_no_extension(client):
         "has_paygate_tier": False,
         "userinfo_nudged": False,
         "tier_fetched": False,
+        "account": {"error": "extension_disconnected"},
     }
 
 

@@ -415,7 +415,7 @@ export function ProductsPanel({
             <div className="project-modal__actions">
               <button type="button" className="project-modal__btn" onClick={importTikTok} disabled={importing}
                       title="Mở trang showcase / shop của bạn trên TikTok (đã đăng nhập) trong Chrome trước khi bấm">
-                {importing ? "Đang đọc TikTok…" : "⬇ Nhập từ TikTok"}
+                {importing ? "Đang đọc TikTok…" : "📥 Nhập từ TikTok"}
               </button>
               {!asPage && <button type="button" className="project-modal__btn" onClick={onClose}>Đóng</button>}
             </div>
@@ -423,6 +423,9 @@ export function ProductsPanel({
         ) : (
           <>
             <div className="product-form">
+              {error && /ảnh|upload|project/i.test(error) && (
+                <p className="product-form__error product-form__error--photo" role="alert">{error}</p>
+              )}
               <div className="product-photos">
                 {draft.media_ids.map((id, i) => (
                   <div key={id} className={`product-photo${i === 0 ? " product-photo--main" : ""}`}>
@@ -560,7 +563,7 @@ export function ProductsPanel({
                 />
               </label>
             </div>
-            {error && <p className="product-form__error" role="alert">{error}</p>}
+            {error && !/ảnh|upload|project/i.test(error) && <p className="product-form__error" role="alert">{error}</p>}
             <div className="project-modal__actions">
               {typeof editing === "number" && (
                 <button

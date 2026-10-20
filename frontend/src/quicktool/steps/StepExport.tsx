@@ -1,14 +1,113 @@
-import { useEffect } from "react";
-import { DEFAULT_VOICE, VOICES, mediaUrl, patchNode } from "../../api/client";
+import { useEffect, useRef, useState } from "react";
+import {
+  BGM_DEFAULT_VOLUME, BGM_VOLUMES, COVER_STYLES, DEFAULT_VOICE, MAX_MUSIC_BYTES, MAX_SPEAKERS, VOICES, VOICE_GROUPS,
+  createCover, isGeminiVoice, mediaUrl, parseSpeakers, patchNode, previewVoice, speakerTags, uploadMusic,
+  type CoverStyle,
+} from "../../api/client";
 import { useBoardStore, type FlowboardNodeData } from "../../store/board";
 import { useQuicktoolStore } from "../../store/quicktool";
 import { hasMedia, isBusy, type ClipRoles } from "../roles";
+import "../voices.css";
+
+// ── voice preview ───────────────────────────────────────────────────────────
+// Only one sample plays at a time, whichever button started it.
+let playingSample: HTMLAudioElement | null = null;
+
+function stopSample() {
+  if (playingSample) {
+    playingSample.pause();
+    playingSample.src = "";
+    playingSample = null;
+  }
+}
+
+/** "▶ Nghe thử" for one voice (+ Gemini style); used by the main voice
+ * picker and by each dialogue speaker row. */
+function VoicePreviewButton({ voice, style }: { voice: string; style?: string }) {
+  const [state, setState] = useState<"idle" | "loading" | "playing">("idle");
+  const [error, setError] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  function stop() {
+    if (audioRef.current) {
+      if (playingSample === audioRef.current) playingSample = null;
+      audioRef.current.pause();
+      audioRef.current.src = "";
+      audioRef.current = null;
+    }
+    setState("idle");
+  }
+
+  // Stop the sample when the voice changes or the button unmounts.
+  useEffect(() => stop, [voice, style]);
+
+  async function play() {
+    if (state !== "idle") {
+      stop();
+      return;
+    }
+    stopSample();
+    setError(null);
+    setState("loading");
+    try {
+      const { url } = await previewVoice(voice, isGeminiVoice(voice) ? style : undefined);
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      playingSample = audio;
+      audio.onended = () => { if (audioRef.current === audio) stop(); };
+      audio.onerror = () => { if (audioRef.current === audio) { stop(); setError("Không phát được file mẫu."); } };
+      await audio.play();
+      setState("playing");
+    } catch (err) {
+      stop();
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        className={"qt-field__action" + (state === "playing" ? " qt-field__action--live" : "")}
+        disabled={state === "loading"}
+        title="Nghe một câu mẫu bằng giọng này"
+        onClick={(e) => { e.preventDefault(); void play(); }}
+      >
+        {state === "loading" ? "Đang tạo…" : state === "playing" ? "■ Dừng" : "▶ Nghe thử"}
+      </button>
+      {error && <div className="product-form__error">{error}</div>}
+    </>
+  );
+}
+
+function SpeakerChip({ tag, tags }: { tag: string; tags: string[] }) {
+  const idx = tags.indexOf(tag);
+  return <span className={"qt-speaker-chip" + (idx >= 0 ? ` qt-speaker-chip--${idx % 4}` : "")}>{tag}</span>;
+}
+
+/** A voice line with its `[A]` tags rendered as coloured chips. */
+function DialogueLine({ text, tags }: { text: string; tags: string[] }) {
+  const segs = parseSpeakers(text);
+  if (!segs.some((s) => s.tag)) return <>{text}</>;
+  return (
+    <>
+      {segs.map((seg, i) => (
+        <span key={i} className="qt-cliplist__seg">
+          {seg.tag && <SpeakerChip tag={seg.tag} tags={tags} />}
+          {seg.text}
+        </span>
+      ))}
+    </>
+  );
+}
 
 /** Step 5 — voice options, the clip list, the final file. */
 export function StepExport({ roles }: { roles: ClipRoles }) {
   const ensureExportNode = useQuicktoolStore((s) => s.ensureExportNode);
   const exportClip = useQuicktoolStore((s) => s.exportClip);
   const writeNarrations = useQuicktoolStore((s) => s.writeNarrations);
+  const boardId = useBoardStore((s) => s.boardId);
+  const boardName = useBoardStore((s) => s.boardName);
   const exp = roles.export;
 
   // The options live on the export node, so make sure there is one.
@@ -23,13 +122,115 @@ export function StepExport({ roles }: { roles: ClipRoles }) {
     if (!isNaN(dbId)) patchNode(dbId, { data: patch }).catch(() => {});
   }
 
-  const clips = roles.scenes.filter((s) => s.video && hasMedia(s.video));
+  const isDrama = useQuicktoolStore((s) => s.isDrama)();
+  const sequence = useQuicktoolStore((s) => s.sequenceItems)();
+  // Drama: the play order (stills + spliced clips); otherwise one clip per scene.
+  const clips = isDrama
+    ? sequence.filter((it) => hasMedia(it.node)).map((it, i) => ({ index: i + 1, image: it.node, video: it.node }))
+    : roles.scenes.filter((s) => s.video && hasMedia(s.video));
   const voiced = clips.filter((s) => typeof s.video!.data.narration === "string" && s.video!.data.narration.trim()).length;
+  const estimate = isDrama
+    ? Math.round(clips.reduce((t, s) => {
+        const words = String(s.video!.data.narration ?? "").split(/\s+/).filter(Boolean).length;
+        return t + (s.video!.data.type === "video" ? 8 : Math.max(4, words / 2.8 + 1));
+      }, 0))
+    : clips.length * 8;
   const voice = exp && typeof exp.data.voice === "string" && exp.data.voice in VOICES ? exp.data.voice : DEFAULT_VOICE;
+  const voiceStyle = typeof exp?.data.voiceStyle === "string" ? exp.data.voiceStyle : "";
   const subtitles = exp ? exp.data.subtitles !== false : true;
   const originalAudio = exp?.data.originalAudio ?? "duck";
   const smooth60 = exp?.data.smooth60 === true;
   const busy = isBusy(exp);
+
+  // Stop any sample when the step unmounts.
+  useEffect(() => stopSample, []);
+
+  // ── dialogue speakers ───────────────────────────────────────────────────
+  // `[A] … [B] …` tags found in the voice lines, plus the ones the user
+  // named by hand; each maps to a voice on the export node (`speakers`).
+  const lines = clips.map((s) => (typeof s.video!.data.narration === "string" ? s.video!.data.narration : ""));
+  const usedTags = speakerTags(lines);
+  const speakers: Record<string, string> =
+    exp?.data.speakers && typeof exp.data.speakers === "object" ? (exp.data.speakers as Record<string, string>) : {};
+  const [extraTags, setExtraTags] = useState<string[]>([]);
+  const allTags = [...usedTags];
+  for (const t of [...Object.keys(speakers), ...extraTags]) if (!allTags.includes(t)) allTags.push(t);
+  const showSpeakers = allTags.length > 0;
+
+  function setSpeaker(tag: string, v: string) {
+    const next = { ...speakers };
+    if (v) next[tag] = v; else delete next[tag];
+    setOption({ speakers: next });
+  }
+
+  function addSpeaker() {
+    const tag = ["A", "B", "C", "D"].find((t) => !allTags.includes(t));
+    if (!tag) return;
+    setExtraTags((p) => [...p, tag]);
+  }
+
+  function removeSpeaker(tag: string) {
+    setExtraTags((p) => p.filter((t) => t !== tag));
+    if (tag in speakers) setSpeaker(tag, "");
+  }
+
+  // ── background music ────────────────────────────────────────────────────
+  const bgmMediaId = typeof exp?.data.bgmMediaId === "string" && exp.data.bgmMediaId ? exp.data.bgmMediaId : null;
+  const bgmName = typeof exp?.data.bgmName === "string" ? exp.data.bgmName : "";
+  const bgmVolume = BGM_VOLUMES.some(([v]) => v === exp?.data.bgmVolume) ? (exp!.data.bgmVolume as number) : BGM_DEFAULT_VOLUME;
+  const [bgmUploading, setBgmUploading] = useState(false);
+  const [bgmError, setBgmError] = useState<string | null>(null);
+
+  async function pickMusic(file: File | undefined) {
+    if (!file) return;
+    setBgmError(null);
+    if (file.size > MAX_MUSIC_BYTES) {
+      setBgmError(`File ${Math.round(file.size / 1024 / 1024)} MB — tối đa 20 MB.`);
+      return;
+    }
+    setBgmUploading(true);
+    try {
+      const res = await uploadMusic(file);
+      setOption({ bgmMediaId: res.media_id, bgmName: res.name, bgmVolume });
+    } catch (err) {
+      setBgmError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBgmUploading(false);
+    }
+  }
+
+  // ── cover image ─────────────────────────────────────────────────────────
+  // Scenes that have an image: the candidates for the cover.
+  const sceneImages = (isDrama
+    ? sequence.filter((it) => it.kind === "image" && hasMedia(it.node)).map((it, i) => ({ mediaId: it.node.data.mediaId as string, title: String(it.node.data.title ?? `Ảnh ${i + 1}`) }))
+    : roles.scenes.filter((s) => hasMedia(s.image)).map((s) => ({ mediaId: s.image.data.mediaId as string, title: String(s.image.data.title ?? `Cảnh ${s.index}`) })))
+    // The product photos work as a cover too (handy before step 3 has run).
+    .concat(roles.products.filter(hasMedia).map((p, i) => ({ mediaId: p.data.mediaId as string, title: i === 0 ? "Ảnh sản phẩm" : `Ảnh sản phẩm ${i + 1}` })));
+  const [coverTitle, setCoverTitle] = useState<string | null>(null);
+  const [coverSubtitle, setCoverSubtitle] = useState("");
+  const [coverStyle, setCoverStyle] = useState<CoverStyle>("yellow");
+  const [coverScene, setCoverScene] = useState<string | null>(null);
+  const [coverBusy, setCoverBusy] = useState(false);
+  const [coverError, setCoverError] = useState<string | null>(null);
+  const title = coverTitle ?? boardName;
+  const selectedScene = sceneImages.find((s) => s.mediaId === coverScene)?.mediaId ?? sceneImages[0]?.mediaId ?? null;
+  const coverMediaId = typeof exp?.data.coverMediaId === "string" && exp.data.coverMediaId ? exp.data.coverMediaId : null;
+
+  async function makeCover() {
+    if (boardId === null || !selectedScene || !title.trim()) return;
+    setCoverError(null);
+    setCoverBusy(true);
+    try {
+      const res = await createCover(boardId, {
+        media_id: selectedScene, title: title.trim(), subtitle: coverSubtitle.trim() || undefined, style: coverStyle,
+      });
+      setOption({ coverMediaId: res.media_id });
+    } catch (err) {
+      setCoverError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCoverBusy(false);
+    }
+  }
 
   return (
     <div className="qt-step qt-step--two">
@@ -39,7 +240,7 @@ export function StepExport({ roles }: { roles: ClipRoles }) {
         <div className="qt-stats">
           <div className="qt-stat"><strong>{clips.length}</strong><span>clip sẵn sàng</span></div>
           <div className="qt-stat"><strong>{voiced}</strong><span>có lời thoại</span></div>
-          <div className="qt-stat"><strong>~{clips.length * 8}s</strong><span>thời lượng</span></div>
+          <div className="qt-stat"><strong>~{estimate}s</strong><span>thời lượng</span></div>
         </div>
         <ol className="qt-cliplist">
           {clips.map((s) => (
@@ -48,14 +249,17 @@ export function StepExport({ roles }: { roles: ClipRoles }) {
               <span className="qt-cliplist__title">{s.image.data.title}</span>
               <span className="qt-cliplist__line">
                 {typeof s.video!.data.narration === "string" && s.video!.data.narration
-                  ? s.video!.data.narration
+                  ? <DialogueLine text={s.video!.data.narration} tags={allTags} />
                   : <em>chưa có lời thoại</em>}
+                {typeof s.video!.data.voice === "string" && s.video!.data.voice in VOICES && (
+                  <small className="qt-speakers__unused"> · giọng riêng: {VOICES[s.video!.data.voice]}</small>
+                )}
               </span>
             </li>
           ))}
-          {clips.length === 0 && <li className="qt-empty">Chưa có video nào — quay lại bước 4.</li>}
+          {clips.length === 0 && <li className="qt-empty">{isDrama ? "Chưa có ảnh nào — quay lại bước 3." : "Chưa có video nào — quay lại bước 4."}</li>}
         </ol>
-        {clips.length > 0 && voiced < clips.length && (
+        {clips.length > 0 && voiced < clips.length && !isDrama && (
           <button type="button" className="qt-btn qt-btn--ghost" onClick={() => void writeNarrations()}>
             ✨ AI viết lời thoại còn thiếu
           </button>
@@ -63,11 +267,72 @@ export function StepExport({ roles }: { roles: ClipRoles }) {
 
         <div className="qt-form">
           <label className="qt-field">
-            <span>Giọng đọc</span>
-            <select value={voice} disabled={busy} onChange={(e) => setOption({ voice: e.target.value })}>
-              {Object.entries(VOICES).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+            <span>
+              Giọng đọc
+              <VoicePreviewButton voice={voice} style={voiceStyle} />
+            </span>
+            <select value={voice} disabled={busy} onChange={(e) => { stopSample(); setOption({ voice: e.target.value }); }}>
+              {VOICE_GROUPS.map((g) => (
+                <optgroup key={g.id} label={g.label}>
+                  {g.voices.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+                </optgroup>
+              ))}
             </select>
           </label>
+          {isGeminiVoice(voice) && (
+            <>
+              <label className="qt-field">
+                <span>Phong cách đọc (Gemini)</span>
+                <input
+                  type="text"
+                  maxLength={160}
+                  key={`vs-${exp?.id}`}
+                  defaultValue={voiceStyle}
+                  placeholder="ví dụ: giọng kể chuyện kịch tính, chậm rãi · vui tươi như bán hàng livestream"
+                  disabled={busy}
+                  onBlur={(e) => setOption({ voiceStyle: e.target.value.trim() })}
+                />
+              </label>
+              <p className="qt-hint">Giọng Gemini dùng quota API key; phụ đề chia đều theo độ dài câu.</p>
+            </>
+          )}
+          {showSpeakers ? (
+            <div className="qt-speakers">
+              <div className="qt-speakers__head">
+                <span>🗣 Nhân vật lồng tiếng</span>
+                <small>gõ [A] … [B] … trong lời thoại ở bước 2</small>
+              </div>
+              {allTags.map((tag) => {
+                const picked = speakers[tag] && speakers[tag] in VOICES ? speakers[tag] : "";
+                return (
+                  <div key={tag} className="qt-speakers__row">
+                    <SpeakerChip tag={tag} tags={allTags} />
+                    <select value={picked} disabled={busy} onChange={(e) => setSpeaker(tag, e.target.value)}>
+                      <option value="">giọng chung ({VOICES[voice] ?? voice})</option>
+                      {VOICE_GROUPS.map((g) => (
+                        <optgroup key={g.id} label={g.id === "edge" ? "Edge" : "Gemini"}>
+                          {g.voices.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+                        </optgroup>
+                      ))}
+                    </select>
+                    <VoicePreviewButton voice={picked || voice} style={voiceStyle} />
+                    {usedTags.includes(tag)
+                      ? <span className="qt-speakers__unused" title="Đang dùng trong lời thoại">đang dùng</span>
+                      : <button type="button" className="qt-link qt-link--danger" disabled={busy} onClick={() => removeSpeaker(tag)}>Bỏ</button>}
+                  </div>
+                );
+              })}
+              {allTags.length < MAX_SPEAKERS && (
+                <button type="button" className="qt-link" disabled={busy} onClick={addSpeaker}>+ Thêm nhân vật</button>
+              )}
+              <p className="qt-hint">Giữa hai lượt thoại có 0,3 s nghỉ; nhân vật chưa chọn giọng sẽ đọc bằng giọng chung.</p>
+            </div>
+          ) : (
+            <button type="button" className="qt-link" disabled={busy} onClick={addSpeaker}
+                    title="Hội thoại nhiều giọng: gõ [A] … [B] … trong lời thoại ở bước 2 rồi chọn giọng cho từng nhân vật">
+              + Thêm nhân vật lồng tiếng (hội thoại)
+            </button>
+          )}
           <label className="qt-field">
             <span>Tiếng gốc của clip</span>
             <select value={originalAudio} disabled={busy}
@@ -77,6 +342,40 @@ export function StepExport({ roles }: { roles: ClipRoles }) {
               <option value="keep">Giữ nguyên</option>
             </select>
           </label>
+          <div className="qt-field">
+            <span>Nhạc nền <small>mp3 / m4a / wav · tối đa 20 MB</small></span>
+            {bgmMediaId ? (
+              <div className="qt-bgm__row">
+                <span className="qt-bgm__name" title={bgmName}>🎵 {bgmName || "nhạc nền"}</span>
+                <select
+                  value={String(bgmVolume)}
+                  disabled={busy}
+                  title="Âm lượng nhạc nền"
+                  onChange={(e) => setOption({ bgmVolume: parseFloat(e.target.value) })}
+                >
+                  {BGM_VOLUMES.map(([v, label]) => <option key={v} value={String(v)}>{label}</option>)}
+                </select>
+                <button type="button" className="qt-btn qt-btn--ghost qt-btn--small" disabled={busy}
+                        onClick={() => setOption({ bgmMediaId: undefined, bgmName: undefined })}>
+                  Bỏ nhạc
+                </button>
+              </div>
+            ) : (
+              <div className="qt-bgm__row">
+                <label className="qt-btn qt-btn--ghost qt-btn--small qt-bgm__pick">
+                  <input
+                    type="file"
+                    accept="audio/mpeg,audio/mp4,audio/x-m4a,audio/wav,.mp3,.m4a,.wav"
+                    disabled={busy || bgmUploading || !exp}
+                    onChange={(e) => { void pickMusic(e.target.files?.[0]); e.target.value = ""; }}
+                  />
+                  {bgmUploading ? "Đang tải lên…" : "🎵 Chọn nhạc nền"}
+                </label>
+                <small className="qt-hint">Không bắt buộc — nhạc lặp suốt clip, nhỏ dần ở cuối.</small>
+              </div>
+            )}
+            {bgmError && <div className="product-form__error">{bgmError}</div>}
+          </div>
           <label className="qt-check">
             <input type="checkbox" checked={subtitles} disabled={busy} onChange={(e) => setOption({ subtitles: e.target.checked })} />
             Phụ đề tiếng Việt theo lời thoại
@@ -105,7 +404,7 @@ export function StepExport({ roles }: { roles: ClipRoles }) {
           <>
             <video className="qt-result" src={mediaUrl(exp.data.mediaId as string)} controls playsInline />
             <a className="qt-btn qt-btn--accent" href={mediaUrl(exp.data.mediaId as string)}
-               download={`${useBoardStore.getState().boardName || "clip"}.mp4`}>
+               download={`${boardName || "clip"}.mp4`}>
               ⬇ Tải về đăng TikTok
             </a>
           </>
@@ -114,6 +413,74 @@ export function StepExport({ roles }: { roles: ClipRoles }) {
             {busy ? "Đang xử lý… (giọng đọc 2–4 s/câu, ghép vài chục giây)" : "Chưa có — bấm \"Ghép video hoàn chỉnh\"."}
           </div>
         )}
+
+        <div className="qt-cover">
+          <div className="qt-cover__head">
+            <h4>Ảnh bìa</h4>
+            <small>1080×1920, chữ in lên ảnh cảnh</small>
+          </div>
+          {sceneImages.length === 0 ? (
+            <p className="qt-hint">Chưa có ảnh nào để làm bìa — upload ảnh sản phẩm ở bước 1 hoặc tạo ảnh cảnh ở bước 3.</p>
+          ) : (
+            <>
+              <label className="qt-field">
+                <span>Tiêu đề trên ảnh</span>
+                <input
+                  type="text"
+                  maxLength={200}
+                  value={title}
+                  placeholder="ví dụ: Áo thun cotton mát lạnh – giảm 50%"
+                  onChange={(e) => setCoverTitle(e.target.value)}
+                />
+              </label>
+              <label className="qt-field">
+                <span>Dòng phụ <small>không bắt buộc</small></span>
+                <input
+                  type="text"
+                  maxLength={120}
+                  value={coverSubtitle}
+                  placeholder="ví dụ: Mua ngay kẻo hết"
+                  onChange={(e) => setCoverSubtitle(e.target.value)}
+                />
+              </label>
+              <div className="qt-cover__scenes">
+                {sceneImages.map((s) => (
+                  <button
+                    key={s.mediaId}
+                    type="button"
+                    className={"qt-cover__scene" + (s.mediaId === selectedScene ? " is-selected" : "")}
+                    title={s.title}
+                    onClick={() => setCoverScene(s.mediaId)}
+                  >
+                    <img src={mediaUrl(s.mediaId)} alt={s.title} loading="lazy" />
+                  </button>
+                ))}
+              </div>
+              <div className="qt-cover__actions">
+                <select value={coverStyle} onChange={(e) => setCoverStyle(e.target.value as CoverStyle)}>
+                  {COVER_STYLES.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+                </select>
+                <button
+                  type="button"
+                  className="qt-btn qt-btn--small"
+                  disabled={coverBusy || boardId === null || !selectedScene || !title.trim()}
+                  onClick={() => void makeCover()}
+                >
+                  {coverBusy ? "Đang tạo…" : coverMediaId ? "Tạo lại ảnh bìa" : "Tạo ảnh bìa"}
+                </button>
+              </div>
+              {coverError && <div className="product-form__error">{coverError}</div>}
+              {coverMediaId && (
+                <>
+                  <img className="qt-cover__preview" src={mediaUrl(coverMediaId)} alt="Ảnh bìa" />
+                  <a className="qt-btn qt-btn--small" href={mediaUrl(coverMediaId)} download={`${boardName || "clip"}-bia.png`}>
+                    ⬇ Tải ảnh bìa
+                  </a>
+                </>
+              )}
+            </>
+          )}
+        </div>
       </section>
     </div>
   );

@@ -33,6 +33,10 @@ class ReferenceCreate(BaseModel):
     source_board_id: Optional[int] = None
     source_node_short_id: Optional[str] = None
     tags: Optional[list[str]] = None
+    # Kind-specific extras (character: gender / country / vibe / extras /
+    # prompt / product). Free-form so the wizard can grow it without a
+    # schema change; the row is the only consumer.
+    meta: Optional[dict[str, Any]] = None
 
 
 class ReferencePatch(BaseModel):
@@ -40,6 +44,9 @@ class ReferencePatch(BaseModel):
     pinned: Optional[bool] = None
     position: Optional[int] = None
     tags: Optional[list[str]] = None
+    # Replaces the whole dict (no deep merge): the frontend always sends
+    # the full set of keys it knows about.
+    meta: Optional[dict[str, Any]] = None
 
 
 def _default_label(body: ReferenceCreate) -> str:
@@ -71,6 +78,7 @@ def _row_dict(row: Reference) -> dict[str, Any]:
         "position": row.position,
         "source_board_id": row.source_board_id,
         "source_node_short_id": row.source_node_short_id,
+        "meta": dict(row.meta or {}),
         "created_at": row.created_at.isoformat() if row.created_at else None,
     }
 
@@ -108,6 +116,7 @@ def create_reference(body: ReferenceCreate):
             source_board_id=body.source_board_id,
             source_node_short_id=body.source_node_short_id,
             tags=list(body.tags or []),
+            meta=dict(body.meta or {}),
         )
         s.add(row)
         s.commit()
@@ -118,17 +127,27 @@ def create_reference(body: ReferenceCreate):
 @router.get("")
 def list_references(
     q: Optional[str] = None,
+    kind: Optional[str] = None,
     pinned_first: bool = True,
     limit: int = 200,
 ):
     """List references, sorted (pinned DESC, position ASC, created_at DESC).
 
     ``q``: case-insensitive substring match against label OR ai_brief.
+    ``kind``: only rows of that kind (e.g. ``character`` for the model
+    library); must be one of the allowed kinds.
     ``pinned_first``: when False, drop pinned from the ORDER BY so
     raw insertion order surfaces (debug / testing convenience).
     """
+    if kind is not None and kind not in _ALLOWED_KINDS:
+        raise HTTPException(
+            400,
+            f"invalid kind {kind!r}; must be one of {sorted(_ALLOWED_KINDS)}",
+        )
     with get_session() as s:
         stmt = select(Reference)
+        if kind is not None:
+            stmt = stmt.where(Reference.kind == kind)
         if q:
             needle = f"%{q.lower()}%"
             # SQLite's LIKE is case-insensitive for ASCII by default but
@@ -172,6 +191,8 @@ def patch_reference(ref_id: int, body: ReferencePatch):
             row.position = body.position
         if "tags" in fields and body.tags is not None:
             row.tags = list(body.tags)
+        if "meta" in fields and body.meta is not None:
+            row.meta = dict(body.meta)
         s.add(row)
         s.commit()
         s.refresh(row)

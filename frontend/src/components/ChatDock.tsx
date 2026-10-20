@@ -11,11 +11,11 @@ import { useBoardStore } from "../store/board";
 import { useChatStore } from "../store/chat";
 import {
   getActivityList,
-  getLlmConfig,
   uploadChatAttachments,
   type ChatMessageDTO,
   type LLMFeatureConfig,
 } from "../api/client";
+import { getLlmConfigCached, LLM_CONFIG_POLL_MS } from "./llmConfigCache";
 import { ChatModelPicker } from "./ChatModelPicker";
 
 // ── Limits (mirror backend caps in routes/chat.py) ────────────────────────────
@@ -116,12 +116,13 @@ export function ChatDock() {
     if (boardId !== null) void loadChat(boardId);
   }, [boardId, loadChat]);
 
-  // Planner provider presence — same polling family as AiProviderBadge.
+  // Planner provider presence — reads the shared config cache, so the
+  // badge, the gate and this dock cost one request between them.
   useEffect(() => {
     let alive = true;
-    const refresh = async () => {
+    const refresh = async (fresh = false) => {
       try {
-        const cfg = await getLlmConfig();
+        const cfg = await getLlmConfigCached({ fresh });
         if (!alive) return;
         const own = cfg.chat_agent?.provider ? cfg.chat_agent : null;
         const pin = own ?? cfg.planner;
@@ -134,9 +135,9 @@ export function ChatDock() {
     void refresh();
     const timer = setInterval(() => {
       if (document.visibilityState === "visible") void refresh();
-    }, 30_000);
-    // Saved from Settings or from the picker: refresh now, not in 30 s.
-    const onChange = () => void refresh();
+    }, LLM_CONFIG_POLL_MS);
+    // Saved from Settings or from the picker: refresh now, not in a minute.
+    const onChange = () => void refresh(true);
     window.addEventListener("flowboard:llm-config-changed", onChange);
     return () => {
       alive = false;

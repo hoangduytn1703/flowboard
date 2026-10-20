@@ -1,0 +1,80 @@
+/* Dialogue voices: per-scene voice pick (step 2), speaker chips and the
+   "Nhân vật lồng tiếng" box (step 5). */
+
+.qt-voice-pick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.qt-voice-pick select {
+  max-width: 220px;
+  padding: 2px 6px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.qt-voice-pick select:disabled { opacity: 0.6; }
+
+/* `[A]` chips inside the clip list and the speaker rows. */
+.qt-speaker-chip {
+  display: inline-block;
+  min-width: 18px;
+  margin-right: 4px;
+  padding: 0 5px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  color: #fff;
+  background: #64748b;
+  border-radius: 9px;
+  vertical-align: baseline;
+}
+.qt-speaker-chip--0 { background: #ff6a2b; }
+.qt-speaker-chip--1 { background: #2563eb; }
+.qt-speaker-chip--2 { background: #16a34a; }
+.qt-speaker-chip--3 { background: #9333ea; }
+.qt-cliplist__seg { display: inline; }
+.qt-cliplist__seg + .qt-cliplist__seg { margin-left: 6px; }
+
+/* Step 5 · "Nhân vật lồng tiếng" */
+.qt-speakers {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+.qt-speakers__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.qt-speakers__head small { font-weight: 400; color: var(--muted); font-size: 11px; }
+.qt-speakers__row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+}
+.qt-speakers__row select {
+  min-width: 0;
+  padding: 4px 6px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.qt-speakers__row .qt-field__action { margin-left: 0; }
+.qt-speakers__unused { font-size: 11px; color: var(--muted); }
