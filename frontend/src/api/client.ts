@@ -1532,8 +1532,25 @@ export async function analyzeReferenceVideo(
   return res.json();
 }
 
+/** Plan from a product page (Shopee, Lazada, TikTok Shop …) instead of a video. */
+export async function analyzeProductLink(
+  url: string,
+  productId: number | null,
+  scenes?: number,
+): Promise<{ product: Product | null; analysis: ReferenceAnalysis; blocked: boolean; block_reason: string | null }> {
+  const res = await fetch("/api/reference-video/analyze-link", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url, product_id: productId, scenes: scenes ?? null }),
+  });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
+}
+
 export async function buildFromReferenceVideo(input: {
-  mediaId: string;
+  /** null: the plan came from a product link, there is no video. */
+  mediaId: string | null;
+  sourceUrl?: string;
   productId: number | null;
   analysis: ReferenceAnalysis;
   name?: string;
@@ -1543,7 +1560,7 @@ export async function buildFromReferenceVideo(input: {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      media_id: input.mediaId, product_id: input.productId, analysis: input.analysis,
+      media_id: input.mediaId, source_url: input.sourceUrl ?? null, product_id: input.productId, analysis: input.analysis,
       name: input.name ?? null, force: input.force ?? false,
     }),
   });

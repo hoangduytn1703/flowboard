@@ -96,7 +96,20 @@ def _nvenc_available(ffmpeg: str) -> bool:
                              timeout=20, check=False).stdout.decode("utf-8", "replace")
     except (OSError, subprocess.TimeoutExpired):
         return False
-    return "h264_nvenc" in out
+    if "h264_nvenc" not in out:
+        return False
+    # Listed is not usable: a build can ship NVENC on a machine with no
+    # NVIDIA driver, and then every encode dies opening the encoder. Prove it
+    # with one tiny frame.
+    try:
+        probe = subprocess.run(
+            [ffmpeg, "-hide_banner", "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=256x256:d=0.1",
+             "-c:v", "h264_nvenc", "-f", "null", "-"],
+            capture_output=True, timeout=30, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return probe.returncode == 0
 
 
 def _encode_args(ffmpeg: str) -> list[str]:
@@ -324,7 +337,9 @@ def export_video(
             dst = work / f"clip{i:02d}.mp4"
             clip = _voice_clip(ffmpeg, src, line, narration, dst, work)
             report.clips.append(clip)
-            if clip.error and not dst.is_file():
+            # ffmpeg leaves a 0-byte file behind when an encode fails, so
+            # "exists" is not "worked".
+            if clip.error and (not dst.is_file() or dst.stat().st_size == 0):
                 return None, f"clip {i + 1}: {clip.error}", report.as_dict()
             voiced.append(dst)
         joined_path = out_dir / f"export_{uuid.uuid4().hex}.mp4"

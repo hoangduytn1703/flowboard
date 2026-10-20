@@ -22,7 +22,7 @@ from sqlmodel import select
 from flowboard.db import get_session
 from flowboard.db.models import Asset
 from flowboard.services import media as media_service
-from flowboard.services import reference_video
+from flowboard.services import product_link, reference_video
 from flowboard.services.llm import gemini_api
 from flowboard.services.products import get_product
 from flowboard.services.video_export import probe_clip
@@ -118,8 +118,33 @@ async def analyze_reference_video(body: AnalyzeBody) -> dict[str, Any]:
             "blocked": analysis["blocked"], "block_reason": analysis.get("block_reason")}
 
 
+class AnalyzeLinkBody(BaseModel):
+    url: str = Field(min_length=8, max_length=2000)
+    product_id: Optional[int] = None
+    scenes: Optional[int] = Field(default=None, ge=2, le=6)
+    model: Optional[str] = None
+
+
+@router.post("/analyze-link")
+async def analyze_product_link(body: AnalyzeLinkBody) -> dict[str, Any]:
+    """Same plan as ``/analyze`` but from a product page instead of a video;
+    the result is built with ``/build`` (no ``media_id``)."""
+    product = _product_or_404(body.product_id)
+    if not gemini_api.configured():
+        raise HTTPException(400, "Chưa có Gemini API key — thêm trong Settings → Gemini API keys.")
+    try:
+        analysis = await product_link.analyze(
+            body.url, product, scenes=body.scenes, model=body.model or gemini_api.DEFAULT_MODEL,
+        )
+    except product_link.ProductLinkError as exc:
+        raise HTTPException(502, str(exc))
+    return {"product": product, "analysis": analysis,
+            "blocked": analysis["blocked"], "block_reason": analysis.get("block_reason")}
+
+
 class BuildBody(BaseModel):
-    media_id: str
+    media_id: Optional[str] = None  # None: the plan came from a product link
+    source_url: Optional[str] = Field(default=None, max_length=2000)
     product_id: Optional[int] = None
     analysis: dict
     name: Optional[str] = Field(default=None, max_length=80)
@@ -130,7 +155,8 @@ class BuildBody(BaseModel):
 def build_from_reference(body: BuildBody) -> dict[str, Any]:
     """The board for a plan the user has reviewed. A mismatching product is
     refused (409) unless ``force`` says they know."""
-    _video_path(body.media_id)
+    if body.media_id is not None:
+        _video_path(body.media_id)
     product = _product_or_404(body.product_id)
     try:
         analysis = reference_video.normalize(body.analysis, product)
@@ -138,8 +164,11 @@ def build_from_reference(body: BuildBody) -> dict[str, Any]:
         raise HTTPException(400, str(exc))
     if analysis["blocked"] and not body.force:
         raise HTTPException(409, analysis.get("block_reason") or "sản phẩm không khớp video mẫu")
-    return reference_video.build_board(analysis, product, name=body.name,
-                                       source_media_id=media_service.normalize_media_id(body.media_id))
+    return reference_video.build_board(
+        analysis, product, name=body.name,
+        source_media_id=media_service.normalize_media_id(body.media_id) if body.media_id else None,
+        source_url=body.source_url,
+    )
 
 
 # ── from a link (TikTok / YouTube / …) ────────────────────────────────────

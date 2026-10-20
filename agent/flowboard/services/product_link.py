@@ -1,0 +1,170 @@
+"""Clip from a product link: the agent downloads the product page
+(Shopee, Lazada, TikTok Shop, a shop's own site …), pulls out the text
+that describes the item, and Gemini writes the same scene plan the
+reference-video flow produces — no ad video needed. The result goes
+through ``reference_video.normalize`` / ``build_board`` unchanged.
+"""
+from __future__ import annotations
+
+import html
+import ipaddress
+import json
+import logging
+import re
+import socket
+from typing import Any, Optional
+from urllib.parse import urlparse
+
+import httpx
+
+from flowboard.services import reference_video
+from flowboard.services.llm import gemini_api
+
+logger = logging.getLogger(__name__)
+
+FETCH_TIMEOUT_S = 25.0
+MAX_PAGE_BYTES = 3 * 1024 * 1024
+MAX_PAGE_TEXT = 9000
+_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+       "Chrome/126.0 Safari/537.36")
+
+
+class ProductLinkError(RuntimeError):
+    pass
+
+
+def _check_public(url: str) -> None:
+    """Refuse anything that is not a public http(s) host — the agent sits
+    on the user's machine, so a pasted link must not reach localhost or
+    the LAN."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise ProductLinkError("Link phải bắt đầu bằng http:// hoặc https://")
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, None)
+    except socket.gaierror as exc:
+        raise ProductLinkError(f"Không phân giải được tên miền {parsed.hostname}") from exc
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+            raise ProductLinkError("Link trỏ vào địa chỉ nội bộ, không hỗ trợ")
+
+
+def _meta(page: str, *names: str) -> str:
+    for name in names:
+        for pat in (
+            rf'<meta[^>]+(?:property|name)=["\']{re.escape(name)}["\'][^>]*content=["\']([^"\']*)["\']',
+            rf'<meta[^>]+content=["\']([^"\']*)["\'][^>]*(?:property|name)=["\']{re.escape(name)}["\']',
+        ):
+            m = re.search(pat, page, re.I)
+            if m and m.group(1).strip():
+                return html.unescape(m.group(1)).strip()
+    return ""
+
+
+def _json_ld(page: str) -> list[str]:
+    """schema.org Product blocks, flattened to ``key: value`` lines."""
+    out: list[str] = []
+    for m in re.finditer(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', page, re.I | re.S):
+        try:
+            data = json.loads(m.group(1))
+        except ValueError:
+            continue
+        for node in data if isinstance(data, list) else [data]:
+            if isinstance(node, dict) and "Product" in str(node.get("@type", "")):
+                offers = node.get("offers") if isinstance(node.get("offers"), dict) else {}
+                for key, val in (("name", node.get("name")), ("description", node.get("description")),
+                                 ("brand", (node.get("brand") or {}).get("name") if isinstance(node.get("brand"), dict) else node.get("brand")),
+                                 ("price", offers.get("price")), ("currency", offers.get("priceCurrency"))):
+                    if val:
+                        out.append(f"{key}: {val}")
+    return out
+
+
+def _visible_text(page: str) -> str:
+    page = re.sub(r"<(script|style|noscript|svg|head)[^>]*>.*?</\1>", " ", page, flags=re.I | re.S)
+    text = html.unescape(re.sub(r"<[^>]+>", " ", page))
+    return re.sub(r"\s+", " ", text).strip()
+
+
+async def fetch_page(url: str) -> dict[str, Any]:
+    """``{url, title, description, image_url, text}`` for a product page."""
+    url = url.strip()
+    _check_public(url)
+    try:
+        async with httpx.AsyncClient(timeout=FETCH_TIMEOUT_S, follow_redirects=True, max_redirects=5,
+                                     headers={"User-Agent": _UA, "Accept-Language": "vi,en;q=0.8"}) as client:
+            resp = await client.get(url)
+    except httpx.HTTPError as exc:
+        raise ProductLinkError(f"Không mở được link: {exc}") from exc
+    _check_public(str(resp.url))  # a redirect must not slip past the check
+    if resp.status_code >= 400:
+        raise ProductLinkError(f"Trang trả về HTTP {resp.status_code} (có thể trang chặn bot — hãy tạo sản phẩm và dán mô tả vào)")
+    page = resp.text[:MAX_PAGE_BYTES]
+    title = _meta(page, "og:title", "twitter:title") or (
+        html.unescape(m.group(1)).strip() if (m := re.search(r"<title[^>]*>(.*?)</title>", page, re.I | re.S)) else "")
+    description = _meta(page, "og:description", "description", "twitter:description")
+    image = _meta(page, "og:image", "twitter:image")
+    lines = [f"title: {title}", f"description: {description}", *_json_ld(page), "", _visible_text(page)]
+    text = "\n".join(l for l in lines if l is not None)[:MAX_PAGE_TEXT]
+    if len(title) + len(description) < 8 and len(text) < 200:
+        raise ProductLinkError("Trang không có nội dung đọc được (cần đăng nhập hoặc chặn bot) — hãy tạo sản phẩm và dán mô tả vào")
+    return {"url": str(resp.url), "title": title, "description": description, "image_url": image, "text": text}
+
+
+_SYSTEM = (
+    "You are a director for short TikTok Shop / affiliate product videos in Vietnam. "
+    "You get the text of a product page and, optionally, the product the user has chosen in "
+    "their library. Work out what is being sold, its strongest selling points and its real "
+    "details, then write a plan for a short ad video of that product. hook: one line, the "
+    "opening claim. style/tone: how the ad should feel. Every scene becomes one AI-generated "
+    "still image (image_prompt_en, English, photoreal, <= 480 chars, describe shot size, "
+    "subject, action, setting, light; refer to 'the product from the reference photo' and "
+    "'the model' instead of describing their looks) animated into an 8-second clip "
+    "(motion_prompt_en, English, 2-3 beats like '0-3s … 3-6s … 6-8s', locked-off camera) with "
+    "one spoken Vietnamese line (narration_vi, natural spoken Vietnamese, ngôi 'mình', <= 24 "
+    "words, first line hooks and names the product, last line is a call to action). Use only "
+    "facts from the page — never invent specs, prices, discounts or certifications. Use "
+    "between 3 and 5 scenes. If a person suits the product, describe a character to generate "
+    "(gender, country, vibe, extras_en); otherwise character is null. product_seen: the "
+    "product's name as the page states it. scenes: leave empty. match: whether the user's "
+    "chosen product is the same kind of thing the page sells; score 1.0 = same kind, 0.0 = "
+    "unrelated; explain reason_vi in Vietnamese. Output ONLY the JSON object."
+)
+
+# Same shape as the video analysis, minus the beat-by-beat breakdown there is
+# no video to read it from.
+_SCHEMA = {**reference_video._SCHEMA,
+           "required": [r for r in reference_video._SCHEMA["required"] if r != "scenes"]}
+
+
+async def analyze(url: str, product: Optional[dict], *, scenes: Optional[int] = None,
+                  model: str = gemini_api.DEFAULT_MODEL) -> dict[str, Any]:
+    """The adapted plan for the product at ``url``; the fetched page's
+    ``title`` / ``image_url`` ride along as ``page``."""
+    page = await fetch_page(url)
+    ask = [
+        "Write the video plan for the product on this page.",
+        reference_video._product_brief(product) if product else
+        "No product chosen in the library: plan for the product the page sells; the user will "
+        "upload its photo later. match.score = 1.0, relevant = true.",
+        f"PRODUCT PAGE ({page['url']}):\n{page['text']}",
+    ]
+    if scenes:
+        n = max(reference_video.MIN_SCENES, min(reference_video.MAX_SCENES, scenes))
+        ask.append(f"Use exactly {n} scenes in the plan.")
+    try:
+        text = await gemini_api.generate_text(
+            "\n\n".join(ask), system=_SYSTEM, model=model, response_schema=_SCHEMA, timeout=180.0,
+        )
+        data = gemini_api.parse_json(text)
+    except gemini_api.GeminiAPIError as exc:
+        raise ProductLinkError(str(exc)) from exc
+    except ValueError as exc:
+        raise ProductLinkError(f"Gemini returned invalid JSON: {exc}") from exc
+    try:
+        analysis = reference_video.normalize(data, product)
+    except reference_video.ReferenceVideoError as exc:
+        raise ProductLinkError(str(exc)) from exc
+    analysis["page"] = {"url": page["url"], "title": page["title"], "image_url": page["image_url"]}
+    return analysis

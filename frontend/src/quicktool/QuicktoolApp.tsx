@@ -190,7 +190,7 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
   const running = auto !== "idle" && auto !== "done" && auto !== "stopped" && auto !== "failed";
   const qt = (boards.find((b) => b.id === routeId)?.data?.quicktool ?? {}) as QuicktoolState;
   const template = templates.find((t) => t.id === qt.template_id) ?? null;
-  const kindLabel = template?.title ?? (qt.template_id === "reference_video" ? "Theo video mẫu" : "Clip");
+  const kindLabel = template?.title ?? (qt.template_id === "reference_video" ? "Theo video mẫu" : qt.template_id === "product_link" ? "Theo link sản phẩm" : "Clip");
   const step = stepOf(stepSlug);
 
   // URL → board: a deep link or the back button loads the board it names.
@@ -270,7 +270,7 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
           </select>
         </div>
         <div className="qt-project__actions">
-          <button type="button" className="qt-btn qt-btn--ghost" onClick={() => navigate(`/clips/new${qt.template_id && qt.template_id !== "reference_video" ? `?template=${qt.template_id}` : ""}`)}>+ Clip mới</button>
+          <button type="button" className="qt-btn qt-btn--ghost" onClick={() => navigate(`/clips/new${qt.template_id && qt.template_id !== "reference_video" && qt.template_id !== "product_link" ? `?template=${qt.template_id}` : ""}`)}>+ Clip mới</button>
           <button type="button" className="qt-btn qt-btn--ghost" onClick={rename} disabled={running}>Đổi tên</button>
           <button type="button" className={`qt-btn qt-btn--ghost${confirmDelete ? " qt-btn--danger" : ""}`} onClick={() => void removeClip()} disabled={running}>
             {confirmDelete ? "Bấm lần nữa để xoá" : "Xoá"}

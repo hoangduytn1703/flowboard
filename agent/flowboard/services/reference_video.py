@@ -211,7 +211,7 @@ def board_spec(analysis: dict[str, Any], product: Optional[dict]) -> dict:
     )
     script = (
         f"{analysis.get('script_vi') or ''}\n\n"
-        f"Dựng theo video mẫu — hook: {analysis.get('hook') or ''}\n"
+        f"{'Dựng theo video mẫu' if analysis.get('scenes') else 'Dựng theo link sản phẩm'} — hook: {analysis.get('hook') or ''}\n"
         f"Phong cách: {analysis.get('style') or ''} · {analysis.get('tone') or ''}\n\n"
         f"{len(plan)} cảnh × 8 s:\n{scene_lines}"
     ).strip()
@@ -249,17 +249,19 @@ def board_spec(analysis: dict[str, Any], product: Optional[dict]) -> dict:
 
 
 def build_board(analysis: dict[str, Any], product: Optional[dict], *, name: Optional[str],
-                source_media_id: str) -> dict[str, Any]:
+                source_media_id: Optional[str], source_url: Optional[str] = None) -> dict[str, Any]:
     """Create the board for the plan. Returns ``{id, name, nodes}``."""
     spec = board_spec(analysis, product)
     base = (product.get("name") if product else None) or analysis.get("product_seen") or "Clip"
-    board_name = (name or "").strip() or f"{base} — theo video mẫu"
+    from_link = source_media_id is None
+    board_name = (name or "").strip() or f"{base} — {'theo link sản phẩm' if from_link else 'theo video mẫu'}"
     with get_session() as s:
         board = Board(name=board_name, data={"quicktool": {
-            "template_id": "reference_video",
+            "template_id": "product_link" if from_link else "reference_video",
             "product_id": product.get("id") if product else None,
             "step": 1,
             "source_media_id": source_media_id,
+            "source_url": source_url,
             "reference": {
                 "category": analysis.get("category"),
                 "hook": analysis.get("hook"),

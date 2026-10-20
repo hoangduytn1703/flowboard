@@ -272,6 +272,11 @@ interface BoardState {
   clearError(): void;
 }
 
+/** Quicktool (/clips…) lives happily with zero boards; the canvas does not. */
+function inCanvasMode(): boolean {
+  return window.location.pathname.startsWith("/canvas");
+}
+
 export const useBoardStore = create<BoardState>((set, get) => ({
   boardId: null,
   boardName: "",
@@ -293,6 +298,12 @@ export const useBoardStore = create<BoardState>((set, get) => ({
         (persistedId !== null && boards.find((b) => b.id === persistedId)) ||
         boards[0];
       if (!board) {
+        // The Quicktool library is fine empty; only the node canvas needs
+        // a board to draw on.
+        if (!inCanvasMode()) {
+          set({ boards: [], boardId: null, boardName: "", nodes: [], edges: [], loading: false });
+          return;
+        }
         board = await createBoard("Untitled");
         boards = [board];
       }
@@ -474,6 +485,8 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     if (get().boardId === id) {
       if (remaining.length > 0) {
         await get().switchBoard(remaining[0].id);
+      } else if (!inCanvasMode()) {
+        set({ boardId: null, boardName: "", nodes: [], edges: [] });
       } else {
         try {
           const board = await createBoard("Untitled");

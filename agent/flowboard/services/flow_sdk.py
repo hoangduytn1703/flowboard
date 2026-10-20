@@ -801,7 +801,7 @@ class FlowSDK:
         for mid in sources:
             try:
                 freq = fb.video_request(
-                    prompt, pid, mid, aspect=aspect_ratio, model=model
+                    silent_prompt(prompt), pid, mid, aspect=aspect_ratio, model=model
                 )
                 payload = await self._payload(
                     fb.RPC_GEN_VIDEO, freq, fb.CAPTCHA_VIDEO, timeout=120.0
@@ -868,7 +868,7 @@ class FlowSDK:
 
         try:
             freq = fb.omni_reference_video_request(
-                prompt, pid, refs, duration_s=duration_s,
+                silent_prompt(prompt), pid, refs, duration_s=duration_s,
                 resolution=resolution, aspect=aspect_ratio,
             )
             payload = await self._payload(
@@ -1171,6 +1171,18 @@ class FlowSDK:
             "raw": {"status": 200, "data": {"media": {"name": media_id}}},
             "media_id": media_id,
         }
+
+
+#: Flow's video models invent a voice track when the prompt shows a person, and
+#: the voice is English. The ads are Vietnamese with a Vietnamese voice-over laid
+#: on afterwards, so ask for a silent clip rather than fight it in the mix.
+_NO_SPEECH = " No speech, no dialogue, no voice-over, no singing; the subject's mouth stays closed. Ambient sound only."
+
+
+def silent_prompt(prompt: str) -> str:
+    """``prompt`` with the no-speech directive, once."""
+    text = (prompt or "").rstrip()
+    return text if "No speech" in text else text + _NO_SPEECH
 
 
 def extract_operation_names(resp: Any) -> list[str]:
