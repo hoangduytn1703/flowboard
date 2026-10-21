@@ -160,3 +160,9 @@
 .qt-gender-warn { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; font-size: 14px;
   color: var(--text); background: rgba(251, 191, 36, 0.12); border: 1px solid rgba(251, 191, 36, 0.45); border-radius: 8px; }
 .qt-gender-note { font-size: 13px; color: var(--muted); }
+
+/* Saved-model card: the whole card opens the editor. */
+.qt-model-card--clickable { cursor: pointer; transition: border-color 120ms ease, transform 120ms ease; }
+.qt-model-card--clickable:hover { border-color: var(--accent, #ff6b35); transform: translateY(-1px); }
+.qt-model-card__actions { justify-content: space-between; align-items: center; margin-top: auto; }
+.qt-model-card__delete { margin-left: auto; padding: 4px 14px; font-size: 14px; }

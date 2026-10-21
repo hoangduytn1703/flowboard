@@ -204,13 +204,14 @@ Tạo ảnh/video đi qua Google Flow (cần gói Pro/Ultra) bằng extension Ch
   trong danh sách); xoá sản phẩm cũng toast. Đã thử thêm → sửa → xoá trên UI.
 
 - **Người mẫu đã lưu: tạo / sửa ngay trên trang + giọng đọc + câu nói** (21/10): trang `/models` có một form dùng chung
-  **`ModelEditor`** (`pages/ModelsPage.tsx`) cho "+ Tạo người mẫu" và "✎ Sửa" trên thẻ: ảnh + giới tính / quốc gia / phong cách
+  **`ModelEditor`** (`pages/ModelsPage.tsx`) cho "+ Tạo người mẫu" và **bấm vào thẻ** (không còn nút Sửa): ảnh + giới tính / quốc gia / phong cách
   / mô tả thêm / tên / giọng (+ phong cách đọc nếu giọng Gemini) / câu nói. **Ảnh AI hay upload chỉ là xem trước — chỉ lưu khi
   bấm "★ Lưu vào thư viện" / "Lưu thay đổi"** (nút khoá khi chưa có ảnh). AI = `quicktool/standaloneImage.ts`
   `generateStandaloneImage()` (request `gen_image` **không có node**, poll `/api/requests/{id}`; ~26 s, 1 lượt ảnh Flow); ảnh vừa
   tạo có thể 404 vài giây đầu → `RetryImg`. Sửa: đổi ảnh (AI/upload, có "Giữ ảnh cũ"), không tự vẽ lại ảnh khi đổi thông tin.
   `PATCH /api/references/{id}` nhận thêm `media_id` / `aspect_ratio` / `ai_brief` (đổi ảnh xoá ai_brief cũ; ảnh đã thuộc mục khác → 409).
-  Thẻ người mẫu chỉ hiển thị (🎙 giọng + ▶ nghe thử, 💬 câu nói) + Sửa / Mở clip gốc / Xoá.
+  Thẻ người mẫu: cả thẻ bấm được (Enter/Space cũng mở) → form sửa; ▶ nghe thử, "Mở clip gốc", nút Xoá đỏ
+  (`project-modal__btn--danger`) chặn lan click. Nút đỏ `--danger` giữ màu đỏ khi hover (trước đó hover thành nền tối).
   `Reference.meta` có **`voice`**, `voiceStyle`, **`line`** (tuỳ chọn); `api/characters.ts` `voiceOf()` = giọng riêng hoặc mặc
   định theo giới tính (`defaultVoiceFor`: nam → Nam Minh, còn lại → Hoài My). Bước 1 "Dùng người mẫu này" → `applyModelVoice`:
   giọng thành `voice` của node xuất video (`ensureExportNode`), câu nói **thêm vào đầu lời thoại cảnh 1** (nếu chưa có); picker
@@ -271,3 +272,4 @@ Tạo ảnh/video đi qua Google Flow (cần gói Pro/Ultra) bằng extension Ch
 - **21/10** — Người mẫu: upload/AI chỉ xem trước, bấm Lưu mới lưu; thêm "✎ Sửa" (tên, ảnh, thông tin, giọng, câu nói) bằng cùng một form; API đổi ảnh của mục đã lưu. Đã thử thật tạo → sửa (đổi tên, giọng Gemini, đổi ảnh) → lưu; mẫu thử đã xoá.
 - **21/10** — Sản phẩm có "Dành cho" (Nam/Nữ/Unisex, tự đoán + AI điền), chặn chọn người mẫu khác giới ở hộp Clip mới, review link/video, Bước 1, thư viện và backend; hộp Cài đặt rộng gấp đôi, hai cột. Đã thử trên UI với sản phẩm thật (áo ba lỗ → nam); test 85 pass.
 - **21/10** — Bỏ viền trắng khi bấm vào nút/mục menu (giữ quầng cam khi dùng Tab); đăng xuất Flow cần xác nhận. Commit + push gộp mọi việc 21/10.
+- **21/10** — Người mẫu: bấm vào thẻ là mở form sửa (bỏ nút "✎ Sửa"); nút Xoá thành nút đỏ như form sản phẩm; sửa lỗi nút đỏ hover bị đổi thành nền tối (mọi chỗ dùng `project-modal__btn--danger`). Đã thử trên UI (bấm thẻ → form sửa; ▶ / Xoá không mở form). Commit + push.

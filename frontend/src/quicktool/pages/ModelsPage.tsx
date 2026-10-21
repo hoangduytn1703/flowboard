@@ -88,7 +88,7 @@ export function ModelsPage() {
           <ol>
             <li>Thêm người mẫu: bấm <strong>+ Tạo người mẫu</strong> ở trên (tạo bằng AI hoặc upload ảnh người thật), hoặc ở Bước 1 của clip bấm <strong>★ Lưu người mẫu</strong>.</li>
             <li>Mỗi người mẫu có <strong>giọng đọc</strong> riêng (mặc định theo giới tính) và một <strong>câu nói</strong> tuỳ chọn. Khi dùng người mẫu cho clip, giọng này thành giọng đọc của clip, câu nói được thêm vào đầu lời thoại cảnh 1.</li>
-            <li>Bấm <strong>✎ Sửa</strong> trên thẻ để đổi tên, ảnh, thông tin, giọng, câu nói. Xoá chỉ bỏ khỏi thư viện, clip đã dùng người mẫu đó không bị ảnh hưởng.</li>
+            <li>Bấm vào thẻ người mẫu để đổi tên, ảnh, thông tin, giọng, câu nói. Xoá chỉ bỏ khỏi thư viện, clip đã dùng người mẫu đó không bị ảnh hưởng.</li>
           </ol>
         </div>
 
@@ -142,7 +142,11 @@ function ModelCard({ item, active, onEdit }: { item: SavedCharacter; active: boo
   const date = formatDate(item.createdAt);
   const voice = voiceOf(item);
   return (
-    <div className={`qt-model-card${active ? " qt-model-card--current" : ""}`}>
+    // The whole card opens the editor; the buttons inside keep their own click.
+    <div className={`qt-model-card qt-model-card--clickable${active ? " qt-model-card--current" : ""}`}
+         role="button" tabIndex={0} title="Bấm để sửa người mẫu này"
+         onClick={onEdit}
+         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onEdit(); } }}>
       <img className="qt-model-card__photo" src={characterPhotoUrl(item)} alt={item.label} loading="lazy" />
       <div className="qt-model-card__name"><span title={item.label}>{item.label}</span></div>
       {badges.length > 0 && (
@@ -152,19 +156,23 @@ function ModelCard({ item, active, onEdit }: { item: SavedCharacter; active: boo
       )}
       <div className="qt-model-card__voiceline">
         <span title={VOICES[voice] ?? voice}>🎙 {VOICES[voice]?.split(" · ")[0] ?? voice}{!item.meta.voice && <small> (mặc định)</small>}</span>
-        <VoicePreview voice={voice} style={item.meta.voiceStyle} text={item.meta.line} />
+        <span onClick={(e) => e.stopPropagation()}>
+          <VoicePreview voice={voice} style={item.meta.voiceStyle} text={item.meta.line} />
+        </span>
       </div>
       {item.meta.line && <div className="qt-model-card__line" title={item.meta.line}>💬 "{item.meta.line}"</div>}
       <div className="qt-model-card__meta">
         {date && <>Lưu ngày {date}</>}
         {item.meta.product && <>{date ? " · " : ""}từ "{item.meta.product}"</>}
       </div>
-      <div className="qt-row qt-row--tight qt-model-card__actions">
-        <button type="button" className="qt-btn qt-btn--small" disabled={busy} onClick={onEdit}>✎ Sửa</button>
+      <div className="qt-row qt-row--tight qt-model-card__actions" onClick={(e) => e.stopPropagation()}>
         {item.sourceBoardId !== null && (
           <Link className="qt-link" to={`/clips/${item.sourceBoardId}`} title="Mở clip đã tạo ra người mẫu này">Mở clip gốc ↗</Link>
         )}
-        <button type="button" className="qt-link qt-link--danger" disabled={busy} onClick={() => void onDelete()}>Xoá</button>
+        <button type="button" className="project-modal__btn project-modal__btn--danger qt-model-card__delete" disabled={busy}
+                onClick={() => void onDelete()}>
+          Xoá
+        </button>
       </div>
     </div>
   );

@@ -402,6 +402,8 @@ button:disabled {
   color: #fff;
 }
 .project-modal__btn--danger:hover:not(:disabled) {
+  background: #ef4444;
+  border-color: #ef4444;
   filter: brightness(1.08);
 }
 
