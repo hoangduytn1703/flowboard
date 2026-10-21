@@ -19,6 +19,14 @@ export const PROMPT_KIND_LABEL: Record<PromptKind, string> = {
   narration: "Lời thoại",
 };
 
+/** Tag every shipped sample prompt carries (see agent prompt_seeds.json). */
+export const SAMPLE_TAG = "mẫu có sẵn";
+
+/** Put back every sample prompt that is missing from the library. */
+export function restoreSamplePrompts() {
+  return api<{ added: number }>("/api/prompt-library/samples", { method: "POST" });
+}
+
 export function listSavedPrompts(kind?: PromptKind, q?: string) {
   const params = new URLSearchParams();
   if (kind) params.set("kind", kind);

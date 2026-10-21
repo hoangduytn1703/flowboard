@@ -6,6 +6,7 @@ through ``reference_video.normalize`` / ``build_board`` unchanged.
 """
 from __future__ import annotations
 
+import asyncio
 import html
 import ipaddress
 import json
@@ -88,8 +89,202 @@ def _visible_text(page: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+#: Pages a shop serves instead of the product when it decides the request is
+#: a bot (TikTok's "Security Check", Shopee's captcha…). Seen live: the same
+#: TikTok link answered with the product page, then with this, then the
+#: product again, so one retry after a pause is worth it.
+_BLOCK_PAGE = re.compile(
+    r"security check|captcha|verify (?:you are|that you are) (?:a )?human|access denied|"
+    r"are you a robot|unusual traffic|xác minh (?:bạn|rằng)|kiểm tra bảo mật",
+    re.I,
+)
+BLOCK_RETRY_DELAY_S = 3.0
+
+
+def _looks_blocked(title: str, text: str) -> bool:
+    """A challenge page: its title says so, or the whole page is a short
+    challenge text (a real product page is thousands of characters)."""
+    return bool(_BLOCK_PAGE.search(title or "")) or (len(text) < 1500 and bool(_BLOCK_PAGE.search(text)))
+
+
+# ── shops that only render in a signed-in browser (Shopee) ─────────────────
+
+#: Hosts whose product pages are JavaScript-only and behind a login wall:
+#: a plain fetch gets an empty shell, the API answers 403, a headless browser
+#: is sent to "Cần đăng nhập". They are read by the Chrome extension instead,
+#: in the user's own signed-in browser (``read_page``, extension >= 0.4.0).
+BROWSER_ONLY_HOSTS = ("shopee.vn", "shp.ee")
+MIN_READ_PAGE_VERSION = (0, 4, 0)
+#: First build that answers ``read_open_tab`` ("Nhập từ Shopee").
+MIN_READ_TAB_VERSION = (0, 4, 1)
+READ_PAGE_TIMEOUT_S = 45.0
+_LOGIN_WALL = re.compile(r"cần đăng nhập|đăng nhập để tiếp tục|chưa đăng nhập", re.I)
+
+
+def needs_browser(url: str) -> bool:
+    host = (urlparse(url.strip()).hostname or "").lower()
+    return any(host == h or host.endswith("." + h) for h in BROWSER_ONLY_HOSTS)
+
+
+def _version_tuple(v: Optional[str]) -> tuple[int, ...]:
+    try:
+        return tuple(int(x) for x in (v or "0").split("."))
+    except ValueError:
+        return (0,)
+
+
+def _ld_products(ld: list) -> list[dict]:
+    """schema.org Product objects anywhere in the page's JSON-LD."""
+    out: list[dict] = []
+    stack = list(ld)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, list):
+            stack.extend(node)
+        elif isinstance(node, dict):
+            if "Product" in str(node.get("@type", "")):
+                out.append(node)
+            stack.extend(v for k, v in node.items() if k == "@graph")
+    return out
+
+
+def page_from_browser(data: dict[str, Any]) -> dict[str, Any]:
+    """Turn what the extension read into the dict :func:`fetch_page` returns."""
+    products = _ld_products(data.get("ld") or [])
+    prod = products[0] if products else {}
+    title = str(prod.get("name") or data.get("title") or "").strip()
+    title = re.sub(r"\s*[|–-]\s*Shopee Việt Nam.*$", "", title).strip()
+    description = str(prod.get("description") or data.get("description") or "").strip()
+    image = prod.get("image")
+    if isinstance(image, list):
+        image = image[0] if image else ""
+    image = str(image or data.get("ogImage") or ((data.get("images") or [{}])[0].get("src")) or "")
+    offers = prod.get("offers") if isinstance(prod.get("offers"), dict) else {}
+    lines = [f"title: {title}", f"description: {description[:1500]}"]
+    for key in ("price", "lowPrice", "highPrice", "priceCurrency"):
+        if offers.get(key):
+            lines.append(f"{key}: {offers[key]}")
+    if prod.get("brand"):
+        brand = prod["brand"]
+        lines.append(f"brand: {brand.get('name') if isinstance(brand, dict) else brand}")
+    lines += ["", str(data.get("text") or "")]
+    return {"url": str(data.get("url") or ""), "title": title, "description": description,
+            "image_url": image, "text": "\n".join(lines)[:MAX_PAGE_TEXT]}
+
+
+async def read_via_extension(url: str) -> dict[str, Any]:
+    """Read a browser-only product page through the Chrome extension."""
+    from flowboard.services.flow_client import get_flow_client
+
+    client = get_flow_client()
+    if not client.connected:
+        raise ProductLinkError("Link Shopee cần đọc qua Chrome, nhưng extension chưa kết nối. Mở Chrome và kiểm tra badge extension.")
+    if _version_tuple(client.extension_version) < MIN_READ_PAGE_VERSION:
+        have = client.extension_version or "cũ"
+        raise ProductLinkError(
+            f"Extension đang là bản {have}, chưa biết đọc Shopee. Mở chrome://extensions, bấm ↻ Reload ở "
+            "Flowboard extension (bản 0.4.0 trở lên), rồi thử lại."
+        )
+    resp = await client._send("read_page", {"url": url.strip()}, timeout=READ_PAGE_TIMEOUT_S)
+    err = resp.get("error")
+    if err == "timeout":
+        raise ProductLinkError("Chrome không trả lời kịp khi mở trang Shopee. Thử lại, hoặc reload extension.")
+    if err:
+        raise ProductLinkError(f"Extension không đọc được trang Shopee: {err}")
+    try:
+        raw = resp.get("data")
+        data = json.loads(raw) if isinstance(raw, str) else dict(raw or {})
+    except (TypeError, ValueError) as exc:
+        raise ProductLinkError("Extension trả về dữ liệu không đọc được") from exc
+    if data.get("blocked") or _LOGIN_WALL.search(str(data.get("text") or "")[:600]):
+        raise ProductLinkError(
+            "Shopee yêu cầu đăng nhập (hoặc đang bắt xác minh). Mở shopee.vn trong Chrome, đăng nhập "
+            "(và giải xác minh nếu có), rồi thử lại."
+        )
+    if data.get("timeout") or not data.get("text"):
+        raise ProductLinkError("Trang Shopee chưa hiện xong sau 25 giây. Thử lại, mạng chậm thì đợi thêm.")
+    page = page_from_browser(data)
+    if _looks_blocked(page["title"], page["text"]):
+        raise ProductLinkError("Shopee đang bắt xác minh (captcha). Mở shopee.vn trong Chrome, giải xác minh rồi thử lại.")
+    if not page["title"]:
+        raise ProductLinkError("Không đọc được tên sản phẩm trên trang Shopee này.")
+    return page
+
+
+#: A Shopee product page address: ".../<slug>-i.<shop>.<item>" or "/product/<shop>/<item>".
+_SHOPEE_PRODUCT_URL = re.compile(r"-i\.\d+\.\d+|/product/\d+/\d+", re.I)
+
+
+async def read_open_shopee_tab() -> dict[str, Any]:
+    """The Shopee product page the user has open in Chrome, read in place
+    (extension ``read_open_tab``). Adds ``tab_url`` / ``tab_title``."""
+    from flowboard.services.flow_client import get_flow_client
+
+    client = get_flow_client()
+    if not client.connected:
+        raise ProductLinkError("Extension Chrome chưa kết nối. Mở Chrome và kiểm tra badge extension.")
+    if _version_tuple(client.extension_version) < MIN_READ_PAGE_VERSION:
+        have = client.extension_version or "cũ"
+        raise ProductLinkError(
+            f"Extension đang là bản {have}, chưa biết đọc Shopee. Mở chrome://extensions, bấm ↻ Reload ở "
+            "Flowboard extension (bản 0.4.0 trở lên), rồi thử lại."
+        )
+    if _version_tuple(client.extension_version) < MIN_READ_TAB_VERSION:
+        raise ProductLinkError(
+            f"Extension đang là bản {client.extension_version or 'cũ'}, chưa biết lệnh đọc tab Shopee. Mở "
+            "chrome://extensions, bấm ↻ Reload ở Flowboard extension (bản 0.4.1 trở lên), rồi bấm lại."
+        )
+    resp = await client._send("read_open_tab", {}, timeout=20.0)
+    err = resp.get("error")
+    if err == "NO_SHOPEE_TAB":
+        raise ProductLinkError("Chưa thấy tab Shopee nào. Mở trang sản phẩm Shopee trong Chrome (đã đăng nhập) rồi bấm lại.")
+    if err == "timeout":
+        raise ProductLinkError("Chrome không trả lời. Reload extension ở chrome://extensions rồi thử lại.")
+    if err:
+        raise ProductLinkError(f"Extension không đọc được tab Shopee: {err}")
+    try:
+        raw = resp.get("data")
+        data = json.loads(raw) if isinstance(raw, str) else dict(raw or {})
+    except (TypeError, ValueError) as exc:
+        raise ProductLinkError("Extension trả về dữ liệu không đọc được") from exc
+    tab_url = str(data.get("tabUrl") or data.get("url") or "")
+    if "/verify/" in tab_url or "/buyer/login" in tab_url or _LOGIN_WALL.search(str(data.get("text") or "")[:600]):
+        raise ProductLinkError("Tab Shopee đang ở trang đăng nhập / xác minh. Đăng nhập Shopee trong Chrome, mở lại trang sản phẩm rồi bấm lại.")
+    page = page_from_browser(data)
+    if not _SHOPEE_PRODUCT_URL.search(tab_url) and not _ld_products(data.get("ld") or []):
+        raise ProductLinkError(
+            f"Tab Shopee đang mở (\"{data.get('tabTitle') or tab_url}\") không phải trang chi tiết một sản phẩm. "
+            "Bấm vào sản phẩm muốn nhập rồi bấm lại."
+        )
+    if len(page["text"]) < 300:
+        raise ProductLinkError("Trang sản phẩm Shopee chưa hiện xong. Đợi trang tải hết rồi bấm lại.")
+    page["tab_url"], page["tab_title"] = tab_url, str(data.get("tabTitle") or "")
+    return page
+
+
+async def get_page(url: str) -> dict[str, Any]:
+    """The product page, read by the agent or — for browser-only shops — by Chrome."""
+    return await read_via_extension(url) if needs_browser(url) else await fetch_page(url)
+
+
 async def fetch_page(url: str) -> dict[str, Any]:
-    """``{url, title, description, image_url, text}`` for a product page."""
+    """``{url, title, description, image_url, text}`` for a product page.
+    Raises :class:`ProductLinkError` on an anti-bot page instead of handing
+    it on: Gemini would otherwise read "Security Check" as the product."""
+    page = await _fetch_page_once(url)
+    if _looks_blocked(page["title"], page["text"]):
+        logger.info("product link: anti-bot page for %s, retrying once", url[:80])
+        await asyncio.sleep(BLOCK_RETRY_DELAY_S)
+        page = await _fetch_page_once(url)
+        if _looks_blocked(page["title"], page["text"]):
+            raise ProductLinkError(
+                "Trang đang chặn đọc tự động (trang kiểm tra bảo mật / captcha). Thử lại sau ít phút, "
+                "hoặc thêm sản phẩm bằng tay ở trang Sản phẩm đang bán."
+            )
+    return page
+
+
+async def _fetch_page_once(url: str) -> dict[str, Any]:
     url = url.strip()
     _check_public(url)
     try:
@@ -153,7 +348,7 @@ async def analyze(url: str, product: Optional[dict], *, scenes: Optional[int] = 
     ``title`` / ``image_url`` ride along as ``page``."""
     if not model or model == gemini_api.DEFAULT_MODEL:
         model = PLAN_MODEL
-    page = await fetch_page(url)
+    page = await get_page(url)
     ask = [
         "Write the video plan for the product on this page.",
         reference_video._product_brief(product) if product else
@@ -195,7 +390,9 @@ _PRODUCT_SYSTEM = (
     "chargers, earphones, hooks, boxes, organisers); home for household appliances and kitchen "
     "gear (pots, pans, blenders, vacuums, fans, cookers, water filters, lamps); else other. price: the current selling price exactly as the page shows it (e.g. '79.434đ'), "
     "empty if absent. selling_points: 3-5 short Vietnamese lines, one per line, the real "
-    "benefits and facts from the page, each <= 90 chars. Output ONLY the JSON object."
+    "benefits and facts from the page, each <= 90 chars. gender: who the product is for — male "
+    "(men's / boys'), female (women's / girls'), unisex (both, or the page says nam nữ / unisex), "
+    "unknown when it does not matter or is not said (food, phone stands, kitchen gear…). Output ONLY the JSON object."
 )
 
 _PRODUCT_SCHEMA = {
@@ -206,8 +403,9 @@ _PRODUCT_SCHEMA = {
         "category": {"type": "STRING", "enum": list(CATEGORIES)},
         "price": {"type": "STRING"},
         "selling_points": {"type": "STRING"},
+        "gender": {"type": "STRING", "enum": ["male", "female", "unisex", "unknown"]},
     },
-    "required": ["name", "description", "category", "price", "selling_points"],
+    "required": ["name", "description", "category", "price", "selling_points", "gender"],
 }
 
 _PDP_RE = re.compile(r"^(https?://[^/]*tiktok\.com/[a-z]{2}/pdp/\d+)", re.I)
@@ -218,13 +416,21 @@ def clean_link(url: str) -> str:
     page of tracking parameters (and ids that identify the sharer), so it
     is cut down to the product page itself."""
     m = _PDP_RE.match(url.strip())
-    return m.group(1) if m else url.strip().split("#", 1)[0][:500]
+    if m:
+        return m.group(1)
+    if needs_browser(url):
+        # Shopee links carry share / tracking query parameters only.
+        return url.strip().split("?", 1)[0].split("#", 1)[0][:500]
+    return url.strip().split("#", 1)[0][:500]
 
 
 def _bigger_image(url: str) -> str:
     """TikTok's og:image is a 260 px thumbnail; the same asset at 800 px is
     served from the same path with the size in the template suffix (no
     signature on it), which is what an image model should be shown."""
+    if "susercontent.com" in url:
+        # Shopee: "<id>_tn" is the thumbnail of "<id>".
+        return re.sub(r"_tn(?=$|[?#])", "", url)
     if "ibyteimg.com" in url:
         return re.sub(r"(resize-(?:webp|jpeg)):\d+:\d+", r"\1:800:800", url)
     return url
@@ -241,7 +447,17 @@ async def extract_product(url: str, *, model: str = EXTRACT_MODEL) -> dict[str, 
     """A product-library draft read from the page at ``url``:
     ``{draft: {name, description, category, price, selling_points, link},
     image_url}``."""
-    page = await fetch_page(url)
+    return await extract_from_page(await get_page(url), model=model)
+
+
+def _gender_guess(*texts: str) -> str:
+    from flowboard.services.product_gender import guess
+
+    return guess(*texts)
+
+
+async def extract_from_page(page: dict[str, Any], *, model: str = EXTRACT_MODEL) -> dict[str, Any]:
+    """:func:`extract_product` for a page already read (e.g. an open tab)."""
     try:
         text = await gemini_api.generate_text(
             f"PRODUCT PAGE ({clean_link(page['url'])}):\n{page['text']}",
@@ -262,6 +478,8 @@ async def extract_product(url: str, *, model: str = EXTRACT_MODEL) -> dict[str, 
             "category": category,
             "price": str(data.get("price") or "").strip()[:60],
             "selling_points": str(data.get("selling_points") or "").strip()[:2000],
+            "gender": (data.get("gender") if data.get("gender") in ("male", "female", "unisex")
+                       else _gender_guess(str(data.get("name") or ""), page.get("title") or "")),
             "link": clean_link(page["url"]),
         },
         "image_url": _bigger_image(page["image_url"]),

@@ -6,6 +6,7 @@ import {
   refreshFlowAccounts,
   type FlowAccountsResponse,
 } from "../../api/accounts";
+import { toast } from "../../store/toast";
 
 function credits(n: number | null): string {
   return n === null ? "—" : n.toLocaleString("vi-VN");
@@ -21,7 +22,6 @@ function credits(n: number | null): string {
 export function FlowAccountsSection({ onProjectChange }: { onProjectChange?: () => void }) {
   const [data, setData] = useState<FlowAccountsResponse | null>(null);
   const [busy, setBusy] = useState<"" | "refresh" | number>("");
-  const [note, setNote] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -37,14 +37,14 @@ export function FlowAccountsSection({ onProjectChange }: { onProjectChange?: () 
 
   async function refresh() {
     setBusy("refresh");
-    setNote(null);
     try {
       const r = await refreshFlowAccounts();
       setData(r);
       const failed = Object.values(r.results ?? {}).filter((x) => x.error).length;
-      setNote(failed ? `${failed} tài khoản chưa đọc được (xem lỗi bên dưới).` : "Đã cập nhật credit.");
+      if (failed) toast.warning(`${failed} tài khoản chưa đọc được (xem lỗi bên dưới).`);
+      else toast.success("Đã cập nhật credit.");
     } catch (err) {
-      setNote(err instanceof Error ? err.message : "không đọc được");
+      toast.error(err instanceof Error ? err.message : "không đọc được");
     } finally {
       setBusy("");
     }
@@ -52,21 +52,19 @@ export function FlowAccountsSection({ onProjectChange }: { onProjectChange?: () 
 
   async function activate(id: number) {
     setBusy(id);
-    setNote(null);
     try {
       const r = await activateFlowAccount(id);
       setData(r);
       if (r.repinned_project_id) {
-        setNote(`Đã chuyển tài khoản và ghim lại project ${r.repinned_project_id.slice(0, 8)}…`);
+        toast.success(`Đã chuyển tài khoản và ghim lại project ${r.repinned_project_id.slice(0, 8)}…`);
         onProjectChange?.();
       } else {
         const acc = r.accounts.find((a) => a.id === id);
-        setNote(acc?.project_id
-          ? "Đã chuyển tài khoản."
-          : "Đã chuyển tài khoản. Tài khoản này chưa có project ghim — chọn project ở mục Google Flow project bên dưới.");
+        if (acc?.project_id) toast.success("Đã chuyển tài khoản.");
+        else toast.warning("Đã chuyển tài khoản. Tài khoản này chưa có project ghim — chọn project ở mục Google Flow project bên dưới.");
       }
     } catch (err) {
-      setNote(err instanceof Error ? err.message : "không chuyển được");
+      toast.error(err instanceof Error ? err.message : "không chuyển được");
     } finally {
       setBusy("");
     }
@@ -123,7 +121,6 @@ export function FlowAccountsSection({ onProjectChange }: { onProjectChange?: () 
           {busy === "refresh" ? "Đang đọc…" : "↻ Đọc lại credit"}
         </button>
       </div>
-      {note && <div className="settings-panel__hint">{note}</div>}
       <div className="settings-panel__hint">
         Thêm tài khoản: mở một <strong>Chrome profile khác</strong> đã đăng nhập Google khác, cài cùng extension
         (Load unpacked → thư mục <code>extension/</code>) và mở flow.google.com — nó tự hiện ở đây. Credit được đọc

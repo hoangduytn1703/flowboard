@@ -26,6 +26,7 @@ from flowboard.services import product_link, reference_video
 from flowboard.services.llm import gemini_api
 from flowboard.services.products import get_product
 from flowboard.services.templates import PersonRequiredError
+from flowboard.services.product_gender import GenderMismatchError
 from flowboard.services.video_export import probe_clip
 
 logger = logging.getLogger(__name__)
@@ -173,7 +174,7 @@ def build_from_reference(body: BuildBody) -> dict[str, Any]:
             source_media_id=media_service.normalize_media_id(body.media_id) if body.media_id else None,
             source_url=body.source_url, character_pick=body.character,
         )
-    except PersonRequiredError as exc:
+    except (PersonRequiredError, GenderMismatchError) as exc:
         raise HTTPException(400, str(exc))
 
 

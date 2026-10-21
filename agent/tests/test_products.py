@@ -144,3 +144,39 @@ def test_chat_agent_sees_products_and_builds_from_one(client):
 
     bad = asyncio.run(chat_agent._execute_tool(board_id, "build_from_template", {"product_id": 999}))
     assert bad["ok"] is False and "999" in bad["error"]
+
+
+def test_anti_bot_page_is_refused_not_saved_as_a_product(monkeypatch):
+    """TikTok sometimes answers a product link with a "Security Check" page;
+    that must be an error, not a product named "Security Check"."""
+    import asyncio
+
+    import pytest
+
+    from flowboard.services import product_link as pl
+
+    calls = []
+
+    async def fake_once(url):
+        calls.append(url)
+        return {"url": url, "title": "Security Check", "description": "", "image_url": "", "text": "Security Check\\nPlease verify you are human"}
+
+    monkeypatch.setattr(pl, "_fetch_page_once", fake_once)
+    monkeypatch.setattr(pl, "BLOCK_RETRY_DELAY_S", 0)
+    with pytest.raises(pl.ProductLinkError, match="chặn đọc tự động"):
+        asyncio.run(pl.fetch_page("https://shop.tiktok.com/vn/pdp/1"))
+    assert len(calls) == 2  # retried once
+
+    # blocked once, then the real page: the retry wins
+    pages = iter([
+        {"url": "u", "title": "Security Check", "description": "", "image_url": "", "text": "Security Check"},
+        {"url": "u", "title": "Áo mưa", "description": "d", "image_url": "", "text": "x" * 3000},
+    ])
+
+    async def flaky(url):
+        return next(pages)
+
+    monkeypatch.setattr(pl, "_fetch_page_once", flaky)
+    assert asyncio.run(pl.fetch_page("https://shop.tiktok.com/vn/pdp/1"))["title"] == "Áo mưa"
+    # a long real page that merely mentions "captcha" somewhere is not a block page
+    assert not pl._looks_blocked("Máy hút bụi", "mô tả " * 400 + "captcha")

@@ -215,6 +215,15 @@ def _character_for(analysis: dict[str, Any], product: Optional[dict], pick: Char
     gender = str(pick.get("gender") or "")
     country = str(pick.get("country") or (suggested or {}).get("country") or "vn")
     category = (product or {}).get("category") if product else analysis.get("category")
+    if gender and gender != "none":
+        from flowboard.services.product_gender import check
+
+        check(product, gender)
+    elif not gender and suggested and product:
+        # Keeping the AI's suggestion: it must not contradict the product either.
+        from flowboard.services.product_gender import check
+
+        check(product, suggested.get("gender"))
     if gender.startswith("hands_"):
         if category == "fashion":
             raise PersonRequiredError(

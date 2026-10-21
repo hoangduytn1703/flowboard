@@ -804,7 +804,7 @@ button:disabled {
 }
 
 .settings-panel {
-  width: 420px;
+  width: 880px;
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 64px);
   overflow-y: auto;
@@ -854,6 +854,24 @@ button:disabled {
 
 .settings-panel__section:last-child {
   border-bottom: none;
+}
+
+/* Wide settings dialog: sections pair up in two columns (a column rule
+ * between them), the long ones (video models, sign-out) span the row. */
+.settings-panel__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.settings-panel__grid > .settings-panel__section { padding: 16px 20px; }
+.settings-panel__grid > .settings-panel__section:nth-child(odd):not(.settings-panel__section--wide) { border-right: 1px solid var(--border); }
+.settings-panel__grid > .settings-panel__section--wide { grid-column: 1 / -1; border-right: 0; }
+.settings-panel__section--wide .settings-panel__radio-group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (max-width: 760px) {
+  .settings-panel__grid, .settings-panel__section--wide .settings-panel__radio-group { grid-template-columns: 1fr; }
+  .settings-panel__grid > .settings-panel__section { border-right: 0 !important; }
 }
 
 /* Sign-out section — destructive action, lives at the bottom of
@@ -2803,61 +2821,79 @@ button:disabled {
 
 /* ── Toaster ─────────────────────────────────────────────────────────────────── */
 
-.toaster {
+/* Toasts: one stack, top right, above every dialog (they sit at 200–1100). */
+.toast-stack {
   position: fixed;
-  top: 24px;
-  right: 24px;
-  /* Above every modal backdrop (dialogs sit at 200–1100). At 100 it hid
-     under the Generate dialog, so errors raised while it was open were
-     never seen (FB-001). */
+  top: 20px;
+  right: 20px;
   z-index: 1200;
-  max-width: 320px;
-  min-width: 280px;
-  background: var(--panel-higher);
-  border-radius: 8px;
-  border-left: 2px solid var(--error);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(420px, calc(100vw - 32px));
+  pointer-events: none;
 }
-
-.toaster__body {
+.toast {
+  --toast-color: var(--error);
+  position: relative;
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  padding: 10px 12px;
-}
-
-.toaster__icon {
-  font-size: 17px;
-  color: var(--error);
-  flex-shrink: 0;
-  font-weight: 700;
-  line-height: 1.6;
-}
-
-.toaster__msg {
-  font-size: 16px;
-  line-height: 1.5;
-  flex: 1;
+  gap: 12px;
+  padding: 12px 14px 14px;
   overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
   color: var(--text);
+  background: var(--panel-higher);
+  border: 1px solid color-mix(in srgb, var(--toast-color) 45%, var(--border));
+  border-left: 4px solid var(--toast-color);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  pointer-events: auto;
+  animation: toast-in 180ms ease-out;
 }
-
-.toaster__close {
-  font-size: 17px;
+.toast--success { --toast-color: #4ade80; }
+.toast--info { --toast-color: #60a5fa; }
+.toast--warning { --toast-color: #fbbf24; }
+.toast--error { --toast-color: var(--error); }
+.toast__icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  font-size: 15px;
+  font-weight: 800;
+  color: #0b0c10;
+  background: var(--toast-color);
+  border-radius: 50%;
+}
+.toast__body { flex: 1; min-width: 0; }
+.toast__title { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--toast-color); }
+.toast__msg { margin-top: 2px; font-size: 16px; line-height: 1.45; overflow-wrap: anywhere; max-height: 9em; overflow-y: auto; }
+.toast__close {
+  flex: none;
+  padding: 0 2px;
+  font-size: 22px;
+  line-height: 1;
   color: var(--muted);
   background: none;
-  border: none;
-  padding: 0;
+  border: 0;
   cursor: pointer;
-  flex-shrink: 0;
-  line-height: 1.6;
 }
-
-.toaster__close:hover {
-  color: var(--text);
+.toast__close:hover { color: var(--text); }
+.toast__bar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  width: 100%;
+  background: var(--toast-color);
+  opacity: 0.7;
+  transform-origin: left;
+  animation: toast-bar linear forwards;
 }
+@keyframes toast-in { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
+@keyframes toast-bar { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+@media (prefers-reduced-motion: reduce) { .toast, .toast__bar { animation: none; } }
 
 /* ── Chat Sidebar ─────────────────────────────────────────────────────────────── */
 
@@ -6712,3 +6748,20 @@ button.chat-dock__presence[aria-expanded="true"] {
 .pool__actions { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
 .pool__add { display: flex; gap: 6px; margin-top: 8px; }
 .pool__add .settings-panel__project-input { flex: 1; }
+
+/* ── Focus ring ──────────────────────────────────────────────────────────
+ * No browser outline when something is clicked (the white box around a
+ * clicked sidebar item / button). Keyboard users (Tab) still get a soft
+ * accent glow, so they can see where they are. Text fields keep their own
+ * border-colour focus styles. */
+:where(button, a, select, input, textarea, [tabindex], summary):focus {
+  outline: none;
+}
+:where(button, a, select, summary, [role="radio"], [role="option"], [tabindex]):focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(255, 106, 43, 0.45);
+}
+
+/* Sign-out: second click needed. */
+.settings-panel__logout-btn--armed { background: rgba(248, 113, 113, 0.22); color: #fecaca; border-color: #f87171; }
+.settings-panel__logout-cancel { display: inline-block; margin-top: 6px; }

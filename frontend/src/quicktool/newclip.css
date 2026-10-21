@@ -40,3 +40,59 @@
 .tpl-card--fit.tpl-card--active {
   border-color: var(--accent);
 }
+
+/* Free-text field with a ready-made list (Bối cảnh, Sản phẩm). */
+.qt-suggest { position: relative; display: flex; flex-direction: column; gap: 4px; }
+.qt-suggest__row { display: flex; gap: 6px; }
+.qt-suggest__row .project-modal__input { flex: 1; min-width: 0; }
+.qt-suggest__toggle { white-space: nowrap; }
+.qt-suggest__picked { font-size: 13px; color: var(--muted); }
+.qt-suggest__pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  max-height: 320px;
+  overflow: auto;
+  padding: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+.qt-suggest__filter {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 6px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--panel-high);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.qt-suggest__group + .qt-suggest__group { margin-top: 6px; }
+.qt-suggest__title { padding: 4px 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: #ff8a3d; }
+.qt-suggest__opt {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 15px;
+  text-align: left;
+  color: var(--text);
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.qt-suggest__opt small { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qt-suggest__opt:hover, .qt-suggest__opt--on { background: var(--panel-high); }
+.qt-suggest__opt--on span::after { content: " ✓"; color: #4ade80; }
+.qt-suggest__empty { padding: 8px; font-size: 14px; color: var(--muted); }
+.qt-new__product--add { border-style: dashed; }
+.qt-new__addlink { margin-top: 8px; }

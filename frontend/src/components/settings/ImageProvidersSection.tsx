@@ -7,6 +7,7 @@ import {
   type ImageProviderInfo,
 } from "../../api/imageProviders";
 import { useSettingsStore, type ImageProviderKey } from "../../store/settings";
+import { toast } from "../../store/toast";
 
 /**
  * Settings → "Nguồn tạo ảnh". Radio: Flow (default, spends Flow credits) /
@@ -21,7 +22,6 @@ export function ImageProvidersSection() {
   const [providers, setProviders] = useState<ImageProviderInfo[] | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string>("");
-  const [notes, setNotes] = useState<Record<string, string>>({});
   const [blocked, setBlocked] = useState<string | null>(null);
 
   async function refresh() {
@@ -59,14 +59,13 @@ export function ImageProvidersSection() {
 
   async function save(id: ImageProviderId) {
     setBusy(`save:${id}`);
-    setNotes((n) => ({ ...n, [id]: "" }));
     try {
       const row = await setImageProviderKey(id, (drafts[id] ?? "").trim());
       setProviders((list) => (list ?? []).map((p) => (p.id === id ? row : p)));
       setDrafts((d) => ({ ...d, [id]: "" }));
-      setNotes((n) => ({ ...n, [id]: row.configured ? "Đã lưu key." : "Đã xoá key." }));
+      toast.success(row.configured ? "Đã lưu key." : "Đã xoá key.");
     } catch (err) {
-      setNotes((n) => ({ ...n, [id]: err instanceof Error ? err.message : "lưu thất bại" }));
+      toast.error(err instanceof Error ? err.message : "Lưu key thất bại.");
     } finally {
       setBusy("");
     }
@@ -74,13 +73,12 @@ export function ImageProvidersSection() {
 
   async function test(id: ImageProviderId) {
     setBusy(`test:${id}`);
-    setNotes((n) => ({ ...n, [id]: "" }));
     try {
       const draft = (drafts[id] ?? "").trim();
       const res = await testImageProvider(id, draft || undefined);
-      setNotes((n) => ({ ...n, [id]: `${res.ok ? "✓" : "✗"} ${res.message}` }));
+      if (res.ok) toast.success(res.message); else toast.error(res.message);
     } catch (err) {
-      setNotes((n) => ({ ...n, [id]: err instanceof Error ? err.message : "kiểm tra thất bại" }));
+      toast.error(err instanceof Error ? err.message : "Kiểm tra key thất bại.");
     } finally {
       setBusy("");
     }
@@ -169,7 +167,6 @@ export function ImageProvidersSection() {
                           {busy === `save:${p.id}` ? "Đang lưu…" : hasDraft ? "Lưu" : "Xoá key"}
                         </button>
                       </div>
-                      {notes[p.id] && <div className="settings-panel__hint">{notes[p.id]}</div>}
                     </div>
                   )}
                 </div>

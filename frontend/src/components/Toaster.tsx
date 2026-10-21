@@ -1,10 +1,46 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useBoardStore } from "../store/board";
 import { useChatStore } from "../store/chat";
 import { useGenerationStore } from "../store/generation";
 import { usePipelineStore } from "../store/pipeline";
+import { useToastStore, type ToastKind } from "../store/toast";
 
+const ICON: Record<ToastKind, string> = { success: "✓", info: "i", warning: "!", error: "!" };
+const LABEL: Record<ToastKind, string> = { success: "Thành công", info: "Thông báo", warning: "Lưu ý", error: "Lỗi" };
+
+/** One toast: dismisses itself after ``duration``; hovering holds it. */
+function Toast({ kind, message, duration, onClose }: { kind: ToastKind; message: string; duration: number; onClose: () => void }) {
+  const [hover, setHover] = useState(false);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    if (hover) return;
+    const t = setTimeout(() => closeRef.current(), duration);
+    return () => clearTimeout(t);
+  }, [hover, duration, message]);
+  return (
+    <div className={`toast toast--${kind}`} role={kind === "error" || kind === "warning" ? "alert" : "status"}
+         onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+      <span className="toast__icon" aria-hidden="true">{ICON[kind]}</span>
+      <div className="toast__body">
+        <div className="toast__title">{LABEL[kind]}</div>
+        <div className="toast__msg">{message}</div>
+      </div>
+      <button type="button" className="toast__close" onClick={onClose} aria-label="Đóng thông báo">×</button>
+      {!hover && <span className="toast__bar" style={{ animationDuration: `${duration}ms` }} aria-hidden="true" />}
+    </div>
+  );
+}
+
+/**
+ * The toast stack (top right). Shows the toasts pushed with `toast.*` and,
+ * as error toasts, the `error` that the board / chat / generation / pipeline
+ * stores raise (one at a time, in that priority).
+ */
 export function Toaster() {
+  const toasts = useToastStore((s) => s.toasts);
+  const dismiss = useToastStore((s) => s.dismiss);
+
   const boardError = useBoardStore((s) => s.error);
   const chatError = useChatStore((s) => s.error);
   const genError = useGenerationStore((s) => s.error);
@@ -15,50 +51,20 @@ export function Toaster() {
   const clearPipelineError = usePipelineStore((s) => s.clearError);
 
   // Priority: chat > pipeline > generation > board
-  const error = chatError ?? pipelineError ?? genError ?? boardError;
-  const clearError =
-    chatError !== null
-      ? clearChatError
-      : pipelineError !== null
-      ? clearPipelineError
-      : genError !== null
-      ? clearGenError
-      : clearBoardError;
+  const storeError = chatError ?? pipelineError ?? genError ?? boardError;
+  const clearStoreError =
+    chatError !== null ? clearChatError
+    : pipelineError !== null ? clearPipelineError
+    : genError !== null ? clearGenError
+    : clearBoardError;
 
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (!error) return;
-
-    if (timerRef.current !== null) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      clearError();
-      timerRef.current = null;
-    }, 5000);
-
-    return () => {
-      if (timerRef.current !== null) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
-    };
-  }, [error, clearError]);
-
-  if (!error) return null;
-
+  if (!storeError && toasts.length === 0) return null;
   return (
-    <div className="toaster" role="alert" aria-live="assertive">
-      <div className="toaster__body">
-        <span className="toaster__icon" aria-hidden="true">!</span>
-        <span className="toaster__msg">{error}</span>
-        <button
-          className="toaster__close"
-          onClick={clearError}
-          aria-label="Dismiss error"
-        >
-          ×
-        </button>
-      </div>
+    <div className="toast-stack" aria-live="polite">
+      {storeError && <Toast key={`store:${storeError}`} kind="error" message={storeError} duration={9000} onClose={clearStoreError} />}
+      {toasts.map((t) => (
+        <Toast key={t.id} kind={t.kind} message={t.message} duration={t.duration} onClose={() => dismiss(t.id)} />
+      ))}
     </div>
   );
 }

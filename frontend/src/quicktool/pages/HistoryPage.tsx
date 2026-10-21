@@ -24,6 +24,7 @@ import {
 } from "../../api/history";
 import { tierLabel, useFlowCredits } from "../../components/credits";
 import "../history.css";
+import { toast } from "../../store/toast";
 
 const PAGE_SIZE = 50;
 /** Re-poll the list while something is still queued / running. */
@@ -73,7 +74,6 @@ export function HistoryPage() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<number | null>(null);
   const [retrying, setRetrying] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -152,11 +152,6 @@ export function HistoryPage() {
     return () => clearInterval(t);
   }, [hasLive, loadFirst, loadSummary]);
 
-  useEffect(() => {
-    if (!notice) return;
-    const t = setTimeout(() => setNotice(null), 5000);
-    return () => clearTimeout(t);
-  }, [notice]);
 
   const retry = useCallback(async (row: HistoryRow) => {
     if (retrying !== null) return;
@@ -164,7 +159,7 @@ export function HistoryPage() {
     try {
       const detail = await getHistoryDetail(row.id);
       if (!detail.can_retry) {
-        setNotice("Không thể chạy lại: cảnh của việc này đã bị xoá.");
+        toast.warning("Không thể chạy lại: cảnh của việc này đã bị xoá.");
         return;
       }
       const cost = detail.credits_estimate;
@@ -181,11 +176,11 @@ export function HistoryPage() {
       );
       if (!ok) return;
       const created = await retryHistoryRow(detail);
-      setNotice(`Đã đưa vào hàng đợi (việc #${created.id}).`);
+      toast.success(`Đã đưa vào hàng đợi (việc #${created.id}).`);
       await loadFirst();
       loadSummary();
     } catch (err) {
-      setNotice(`Chạy lại thất bại: ${errorText(err)}`);
+      toast.error(`Chạy lại thất bại: ${errorText(err)}`);
     } finally {
       setRetrying(null);
     }
@@ -205,7 +200,6 @@ export function HistoryPage() {
         <div className="hist">
           <SummaryStrip summary={summary} />
 
-          {notice && <div className="qt-banner qt-banner--busy">{notice}</div>}
           {error && (
             <div className="qt-banner qt-banner--error">
               {error}

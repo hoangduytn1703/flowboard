@@ -6,6 +6,7 @@ from step 2 of the wizard and put back on another clip.
   PATCH  /api/prompt-library/{id}       {title?, text?, tags?}
   DELETE /api/prompt-library/{id}
   POST   /api/prompt-library/{id}/use   → bumps the use counter
+  POST   /api/prompt-library/samples    → puts back every missing sample prompt
 """
 from __future__ import annotations
 
@@ -86,6 +87,14 @@ def create_prompt(body: PromptCreate) -> dict:
         s.commit()
         s.refresh(row)
         return _row(row)
+
+
+@router.post("/samples")
+def restore_samples() -> dict:
+    """Put back the sample prompts the user deleted (or never had)."""
+    from flowboard.services.prompt_seeds import add_missing
+
+    return {"added": add_missing()}
 
 
 @router.patch("/{prompt_id}")

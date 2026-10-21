@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { listSavedPrompts, savePrompt, useSavedPrompt, type PromptKind, type SavedPrompt } from "../api/promptLibrary";
 import { useBoardStore } from "../store/board";
 import "./prompts.css";
+import { toast } from "../store/toast";
 
 /**
  * "★ Lưu" + "📚 Dùng lại" next to a prompt field in step 2. Saving keeps
@@ -18,7 +19,6 @@ export function PromptLibraryButtons({ kind, getText, onApply }: {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<SavedPrompt[] | null>(null);
   const [q, setQ] = useState("");
-  const [note, setNote] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -29,17 +29,16 @@ export function PromptLibraryButtons({ kind, getText, onApply }: {
   async function save() {
     const text = getText().trim();
     if (!text) {
-      setNote("ô này đang trống");
+      toast.warning("Ô này đang trống, chưa có gì để lưu.");
       return;
     }
     const title = window.prompt("Tên gợi nhớ cho prompt này", text.split(/\s+/).slice(0, 6).join(" "));
     if (title === null) return;
     try {
       await savePrompt({ kind, text, title: title.trim() || undefined, source_board_id: boardId });
-      setNote("✓ đã lưu");
-      setTimeout(() => setNote(null), 2500);
+      toast.success(`Đã lưu prompt "${title.trim() || text.split(/\s+/).slice(0, 6).join(" ")}" vào Prompt đã lưu.`);
     } catch (err) {
-      setNote(err instanceof Error ? err.message : "lưu thất bại");
+      toast.error(err instanceof Error ? err.message : "Lưu prompt thất bại.");
     }
   }
 
@@ -55,7 +54,6 @@ export function PromptLibraryButtons({ kind, getText, onApply }: {
     <span className="qt-plib">
       <button type="button" className="qt-link" onClick={() => void save()} title="Lưu nội dung ô này vào thư viện prompt">★ Lưu</button>
       <button type="button" className="qt-link" onClick={() => setOpen((v) => !v)} title="Chọn một prompt đã lưu cho ô này">📚 Dùng lại</button>
-      {note && <small className="qt-plib__note">{note}</small>}
       {open && (
         <div className="qt-plib__pop" onClick={(e) => e.preventDefault()}>
           <div className="qt-plib__head">

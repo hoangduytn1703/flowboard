@@ -108,6 +108,12 @@ async def lifespan(app: FastAPI):
     # be re-uploaded into the project it already lives in on first reuse.
     from flowboard.services.media_project_sync import backfill_identity_mappings
     backfill_identity_mappings()
+    # Sample prompts for "Prompt đã lưu", once per seeds version.
+    from flowboard.services.prompt_seeds import seed_on_start
+    try:
+        seed_on_start()
+    except Exception as exc:  # noqa: BLE001 — samples are a nicety, never block start-up
+        logger.warning("prompt seeds skipped: %s", exc)
     worker = get_worker()
     ws_task = asyncio.create_task(run_ws_server(), name="ext-ws-server")
     worker_task = asyncio.create_task(worker.start(), name="request-worker")

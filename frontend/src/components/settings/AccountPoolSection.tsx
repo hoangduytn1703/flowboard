@@ -7,6 +7,7 @@ import {
   upsertPoolAccount,
   type PoolStatus,
 } from "../../api/accountPool";
+import { toast } from "../../store/toast";
 
 function fmt(n: number | null): string {
   return n === null ? "—" : n.toLocaleString("vi-VN");
@@ -25,7 +26,6 @@ export function AccountPoolSection({ onProjectChange }: { onProjectChange?: () =
   const [email, setEmail] = useState("");
   const [project, setProject] = useState("");
   const [busy, setBusy] = useState<"" | "add" | "auto" | string>("");
-  const [note, setNote] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -41,12 +41,11 @@ export function AccountPoolSection({ onProjectChange }: { onProjectChange?: () =
 
   async function run(key: string, fn: () => Promise<PoolStatus>, okNote?: string) {
     setBusy(key);
-    setNote(null);
     try {
       setStatus(await fn());
-      if (okNote) setNote(okNote);
+      if (okNote) toast.success(okNote);
     } catch (err) {
-      setNote(err instanceof Error ? err.message : "lỗi");
+      toast.error(err instanceof Error ? err.message : "lỗi");
     } finally {
       setBusy("");
     }
@@ -142,7 +141,6 @@ export function AccountPoolSection({ onProjectChange }: { onProjectChange?: () =
           {busy === "add" ? "Đang thêm…" : "+ Thêm"}
         </button>
       </div>
-      {note && <div className="settings-panel__hint">{note}</div>}
       <div className="settings-panel__hint">
         Mỗi tài khoản Google Pro có 100 credit/tháng (~4 clip Omni 8 s). Khi tài khoản đang dùng không đủ credit cho
         clip kế tiếp, agent ghim project của tài khoản tiếp theo, mở tab Flow cho tài khoản đó và chờ bạn đổi tài khoản

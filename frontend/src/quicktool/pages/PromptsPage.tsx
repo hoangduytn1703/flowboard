@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   PROMPT_KIND_LABEL,
+  SAMPLE_TAG,
   deleteSavedPrompt,
+  restoreSamplePrompts,
   listSavedPrompts,
   patchSavedPrompt,
   savePrompt,
@@ -10,8 +12,11 @@ import {
   type SavedPrompt,
 } from "../../api/promptLibrary";
 import "../prompts.css";
+import { toast, useToastOn } from "../../store/toast";
 
 const KINDS: PromptKind[] = ["image", "video", "narration"];
+/** Three cards a row, five rows a page. */
+const PER_PAGE = 15;
 
 /** /prompts — the saved prompts, grouped by kind, editable in place. */
 export function PromptsPage() {
@@ -19,6 +24,9 @@ export function PromptsPage() {
   const [kind, setKind] = useState<PromptKind | "">("");
   const [q, setQ] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [tag, setTag] = useState("");
+  const [page, setPage] = useState(1);
+  useToastOn(error, "error", () => setError(null));
   const [draft, setDraft] = useState<{ kind: PromptKind; title: string; text: string }>({ kind: "image", title: "", text: "" });
 
   async function load() {
@@ -32,6 +40,8 @@ export function PromptsPage() {
   }
 
   useEffect(() => { void load(); }, [kind]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A new filter starts from the first page.
+  useEffect(() => { setPage(1); }, [kind, tag, items === null]);
   useEffect(() => {
     const prev = document.title;
     document.title = "Prompt đã lưu · Flowboard";
@@ -62,6 +72,26 @@ export function PromptsPage() {
     await load();
   }
 
+  async function restoreSamples() {
+    setError(null);
+    try {
+      const { added } = await restoreSamplePrompts();
+      if (added) toast.success(`Đã thêm lại ${added} prompt mẫu.`);
+      else toast.info("Đã có đủ prompt mẫu, không thiếu cái nào.");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "lỗi");
+    }
+  }
+
+  // Groups to filter by: every tag in the list except the "sample" marker.
+  const tags = Array.from(new Set((items ?? []).flatMap((p) => p.tags).filter((t) => t !== SAMPLE_TAG))).sort();
+  const filtered = (items ?? []).filter((p) => !tag || p.tags.includes(tag));
+  const pages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
+  // Deleting the last card of the last page must not leave an empty page.
+  const current = Math.min(page, pages);
+  const shown = filtered.slice((current - 1) * PER_PAGE, current * PER_PAGE);
+
   async function remove(p: SavedPrompt) {
     if (!window.confirm(`Xoá prompt "${p.title}"?`)) return;
     await deleteSavedPrompt(p.id);
@@ -87,6 +117,8 @@ export function PromptsPage() {
             <input type="search" className="qt-plib-page__search" placeholder="tìm theo tên hoặc nội dung" value={q}
                    onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void load(); }} />
             <button type="button" className="qt-btn qt-btn--ghost qt-btn--small" onClick={() => void load()}>Tìm</button>
+            <button type="button" className="qt-btn qt-btn--ghost qt-btn--small" onClick={() => void restoreSamples()}
+                    title="Thêm lại các prompt mẫu có sẵn đã bị xoá">↺ Prompt mẫu</button>
           </div>
         </div>
 
@@ -112,24 +144,47 @@ export function PromptsPage() {
           </div>
         </section>
 
-        {error && <div className="qt-banner qt-banner--error">{error}</div>}
-        {items === null && <div className="qt-empty qt-empty--big"><span className="qt-spinner" /> Đang tải…</div>}
+        {tags.length > 0 && (
+          <div className="qt-plib-tags" role="group" aria-label="Lọc theo nhóm">
+            <button type="button" className={`qt-plib-tag${!tag ? " qt-plib-tag--active" : ""}`} onClick={() => setTag("")}>Tất cả</button>
+            {tags.map((t) => (
+              <button key={t} type="button" className={`qt-plib-tag${tag === t ? " qt-plib-tag--active" : ""}`} onClick={() => setTag(tag === t ? "" : t)}>{t}</button>
+            ))}
+          </div>
+        )}
+                {items === null && <div className="qt-empty qt-empty--big"><span className="qt-spinner" /> Đang tải…</div>}
         {items && items.length === 0 && <div className="qt-empty qt-empty--big">Chưa có prompt nào.</div>}
 
         <div className="qt-plib-page__list">
-          {(items ?? []).map((p) => (
+          {shown.map((p) => (
             <article key={p.id} className="qt-plib-card">
               <div className="qt-plib-card__head">
                 <span className={`qt-plib-card__kind qt-plib-card__kind--${p.kind}`}>{PROMPT_KIND_LABEL[p.kind]}</span>
-                <button type="button" className="qt-plib-card__title" onClick={() => void rename(p)} title="Đổi tên">{p.title} ✎</button>
-                <small>dùng {p.uses} lần{p.source_board_id ? <> · từ <Link to={`/clips/${p.source_board_id}`}>clip #{p.source_board_id}</Link></> : null}</small>
+                {p.tags.includes(SAMPLE_TAG) && <span className="qt-plib-card__sample" title="Prompt mẫu có sẵn — sửa hay xoá tuỳ ý">Mẫu</span>}
                 <button type="button" className="qt-link qt-link--danger" onClick={() => void remove(p)}>Xoá</button>
               </div>
-              <textarea className="qt-textarea" rows={p.kind === "narration" ? 2 : 3} defaultValue={p.text} key={`${p.id}-${p.text}`}
+              <button type="button" className="qt-plib-card__title" onClick={() => void rename(p)} title={`${p.title} — bấm để đổi tên`}>{p.title} ✎</button>
+              <small className="qt-plib-card__meta">
+                dùng {p.uses} lần{p.source_board_id ? <> · từ <Link to={`/clips/${p.source_board_id}`}>clip #{p.source_board_id}</Link></> : null}
+              </small>
+              <textarea className="qt-textarea qt-plib-card__text" rows={p.kind === "narration" ? 3 : 6} defaultValue={p.text} key={`${p.id}-${p.text}`}
                         onBlur={(e) => void editText(p, e.target.value)} />
             </article>
           ))}
         </div>
+        {pages > 1 && (
+          <nav className="qt-pager" aria-label="Phân trang">
+            <button type="button" className="qt-btn qt-btn--ghost qt-btn--small" disabled={current <= 1} onClick={() => setPage(current - 1)}>← Trước</button>
+            {Array.from({ length: pages }, (_, i) => i + 1).map((n) => (
+              <button key={n} type="button" aria-current={n === current ? "page" : undefined}
+                      className={`qt-pager__num${n === current ? " qt-pager__num--active" : ""}`} onClick={() => setPage(n)}>{n}</button>
+            ))}
+            <button type="button" className="qt-btn qt-btn--ghost qt-btn--small" disabled={current >= pages} onClick={() => setPage(current + 1)}>Sau →</button>
+            <span className="qt-pager__info">
+              {(current - 1) * PER_PAGE + 1}–{Math.min(current * PER_PAGE, filtered.length)} / {filtered.length}
+            </span>
+          </nav>
+        )}
       </div>
     </>
   );

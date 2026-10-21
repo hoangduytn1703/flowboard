@@ -197,6 +197,9 @@ class Product(SQLModel, table=True):
     price: str = ""
     # Vietnamese selling points, one per line — the script note and caption.
     selling_points: str = ""
+    # Who it is for: male / female / unisex / "" (unknown) — the clip's model
+    # must match a male / female product (services/product_gender.py).
+    gender: str = ""
     link: str = ""
     notes: str = ""
     media_ids: list = Field(default_factory=list, sa_column=Column(JSON))

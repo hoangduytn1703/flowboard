@@ -9,6 +9,7 @@ import { useGenerationStore } from "../store/generation";
 import { getLatestRelease, isNewerVersion, type LatestRelease } from "../api/github";
 import { SettingsPanel } from "./SettingsPanel";
 import packageJson from "../../package.json";
+import { toast } from "../store/toast";
 
 const APP_VERSION: string = packageJson.version;
 
@@ -120,8 +121,10 @@ export function AccountPanel({
       setStorePaygateTier({ paygateTier: null });
       setPollsWithoutTier(0);
       setPollNonce((n) => n + 1);
-    } catch {
+      toast.info("Đã đăng xuất khỏi tài khoản Flow. Đăng nhập lại trên tab flow.google.com rồi bấm \"Quét extension\".");
+    } catch (err) {
       // non-fatal: re-poll will reflect the real state in 5s anyway
+      toast.error(`Đăng xuất chưa xong: ${err instanceof Error ? err.message : "lỗi"}`);
     } finally {
       setLogoutPending(false);
     }

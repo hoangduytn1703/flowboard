@@ -186,3 +186,15 @@ def test_delete_does_not_touch_media_file(client):
         # Clean up the fixture file so we don't leak into the test temp dir.
         if media_file.exists():
             media_file.unlink()
+
+
+def test_patch_can_replace_the_photo_of_a_saved_item(client):
+    a = client.post("/api/references", json={"media_id": "11111111-1111-1111-1111-111111111111", "kind": "character", "label": "Vy", "ai_brief": "old"}).json()
+    client.post("/api/references", json={"media_id": "22222222-2222-2222-2222-222222222222", "kind": "character", "label": "Tuấn"})
+    r = client.patch(f"/api/references/{a['id']}", json={"media_id": "33333333-3333-3333-3333-333333333333", "aspect_ratio": "IMAGE_ASPECT_RATIO_PORTRAIT", "label": "Vy 2"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["media_id"] == "33333333-3333-3333-3333-333333333333" and body["label"] == "Vy 2" and body["ai_brief"] is None
+    # a photo another saved item already uses is refused
+    r = client.patch(f"/api/references/{a['id']}", json={"media_id": "22222222-2222-2222-2222-222222222222"})
+    assert r.status_code == 409

@@ -23,7 +23,7 @@ import time
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from flowboard.services.llm import registry, secrets
 from flowboard.services.llm.base import LLMError
@@ -545,6 +545,8 @@ _PREVIEW_FILE_RE = re.compile(r"^[0-9a-f]{8,40}\.(mp3|wav)$")
 class _VoicePreviewBody(BaseModel):
     voice: str
     style: Optional[str] = None
+    # A line of one's own instead of the fixed sample (a saved model's line).
+    text: Optional[str] = Field(default=None, max_length=300)
 
 
 @router.post("/voices/preview")
@@ -555,7 +557,7 @@ async def preview_voice(body: _VoicePreviewBody) -> dict:
         raise HTTPException(400, f"unknown voice {body.voice!r}")
     style = (body.style or "").strip()[:160] or None
     try:
-        path = await tts.preview(body.voice, style if tts.is_gemini_voice(body.voice) else None)
+        path = await tts.preview(body.voice, style if tts.is_gemini_voice(body.voice) else None, body.text)
     except tts.TTSError as exc:
         raise HTTPException(502, str(exc))
     if not _PREVIEW_FILE_RE.fullmatch(path.name):

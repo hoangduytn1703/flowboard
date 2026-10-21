@@ -7,6 +7,8 @@ import {
   type BoardSummary,
   type BoardTemplate,
   type QuicktoolState,
+  getProduct,
+  type ProductGender,
 } from "../api/client";
 import { ProductsPanel } from "../components/ProductsPanel";
 import { SettingsPanel } from "../components/SettingsPanel";
@@ -27,6 +29,7 @@ import { ModelsPage } from "./pages/ModelsPage";
 import { PromptsPage } from "./pages/PromptsPage";
 import { useFlowCredits } from "../components/credits";
 import { AccountSwitchBanner } from "../components/AccountSwitchBanner";
+import { useToastOn } from "../store/toast";
 
 /** Wizard steps and their URL slugs: /clips/:id/<slug>. */
 const STEPS = [
@@ -141,7 +144,6 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
   const queue = useQuicktoolStore((s) => s.queue);
   const runQueue = useQuicktoolStore((s) => s.runQueue);
   const stopQueue = useQuicktoolStore((s) => s.stopQueue);
-  const auto = useQuicktoolStore((s) => s.auto);
   const autoMessage = useQuicktoolStore((s) => s.autoMessage);
   const videoModel = useSettingsStore((s) => s.videoModel);
   const videoQuality = useSettingsStore((s) => s.videoQuality);
@@ -245,11 +247,6 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
             {autoMessage ? ` · ${autoMessage}` : ""}
           </div>
         )}
-        {!queue.running && auto === "idle" && (queue.done.length > 0 || Object.keys(queue.failed).length > 0) && (
-          <div className={`qt-banner${Object.keys(queue.failed).length ? " qt-banner--error" : ""}`}>
-            Hàng đợi xong: {queue.done.length} clip hoàn tất{Object.keys(queue.failed).length ? `, ${Object.keys(queue.failed).length} lỗi (xem trên thẻ clip)` : ""}.
-          </div>
-        )}
         {summaries !== null && summaries.length === 0 && (
           <div className="qt-empty-state qt-empty-state--library">
             <div className="qt-empty-state__icon">🎬</div>
@@ -342,6 +339,7 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
   const autoMessage = useQuicktoolStore((s) => s.autoMessage);
   const error = useQuicktoolStore((s) => s.error);
   const clearError = useQuicktoolStore((s) => s.clearError);
+  useToastOn(error, "error", clearError);
   const runAuto = useQuicktoolStore((s) => s.runAuto);
   const stopAuto = useQuicktoolStore((s) => s.stopAuto);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -361,6 +359,15 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
     ? { 1: "Nguồn & thiết lập", 2: "Lời kể từng đoạn", 3: "Tạo ảnh minh hoạ", 4: "Sắp xếp & chèn clip", 5: "Ghép & lồng tiếng" }
     : {};
   const step = stepOf(stepSlug);
+  // Who the clip's product is for: step 1 only offers models of that gender.
+  const [productGender, setProductGender] = useState<ProductGender>("");
+  useEffect(() => {
+    const pid = qt.product_id;
+    if (!pid) { setProductGender(""); return; }
+    let alive = true;
+    getProduct(pid).then((p) => { if (alive) setProductGender(p.gender ?? ""); }).catch(() => { if (alive) setProductGender(""); });
+    return () => { alive = false; };
+  }, [qt.product_id]);
   const { credits: flowCredits } = useFlowCredits();
   useTitle(loaded && boardName ? `${boardName} · Bước ${step ?? qt.step ?? 1}` : "Đang mở clip…");
 
@@ -480,12 +487,6 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
           {autoMessage ?? "Đang chạy…"}
         </div>
       )}
-      {error && (
-        <div className="qt-banner qt-banner--error" role="alert">
-          {error}
-          <button type="button" className="qt-link" onClick={clearError}>đóng</button>
-        </div>
-      )}
 
       <ol className="qt-stepper">
         {STEPS.map((s) => {
@@ -521,6 +522,7 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
           {step === 1 && (
             <StepSetup
               key={routeId}
+              productGender={productGender}
               roles={roles}
               sourceMediaId={(qt as { source_media_id?: string }).source_media_id ?? null}
               personRequired={!!template?.person_required || qt.reference?.category === "fashion"}

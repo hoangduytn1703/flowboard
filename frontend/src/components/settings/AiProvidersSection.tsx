@@ -14,6 +14,7 @@ import {
 import { FeatureConfigRow, type FeatureTest } from "./FeatureConfigRow";
 import { ProviderSetupModal } from "./ProviderSetupModal";
 import { getLlmConfigCached, getLlmProvidersCached, LLM_CONFIG_POLL_MS } from "../llmConfigCache";
+import { toast } from "../../store/toast";
 
 /**
  * Per-feature provider configuration. Each of Auto-prompt / Vision /
@@ -132,7 +133,6 @@ export function AiProvidersSection() {
   >({});
   const [applying, setApplying] = useState(false);
   const [helpFor, setHelpFor] = useState<LLMProviderName | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
 
   const aliveRef = useRef(true);
   useEffect(() => {
@@ -182,11 +182,6 @@ export function AiProvidersSection() {
     setDraft(draftFrom(config));
   }, [config, draft]);
 
-  function showToast(msg: string) {
-    setToast(msg);
-    setTimeout(() => setToast(null), 4000);
-  }
-
   function patchFeature(feature: LLMFeature, patch: Partial<LLMFeatureConfig>) {
     setDraft((prev) => (prev ? { ...prev, [feature]: { ...prev[feature], ...patch } } : prev));
   }
@@ -217,15 +212,10 @@ export function AiProvidersSection() {
       const { models } = await getLlmProviderModels(name, true);
       if (!aliveRef.current) return;
       setCatalogs((prev) => ({ ...prev, [name]: models }));
-      showToast(
-        models.length > 0
-          ? `${PROVIDER_LABEL[name]}: ${models.length} model.`
-          : `${PROVIDER_LABEL[name]} không trả về model nào — hãy nhập ID model.`,
-      );
+      if (models.length > 0) toast.success(`${PROVIDER_LABEL[name]}: ${models.length} model.`);
+      else toast.warning(`${PROVIDER_LABEL[name]} không trả về model nào — hãy nhập ID model.`);
     } catch (err) {
-      showToast(
-        `Không làm mới được danh sách model: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      toast.error(`Không làm mới được danh sách model: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       if (aliveRef.current) {
         setRefreshingModels((prev) => ({ ...prev, [name]: false }));
@@ -268,7 +258,7 @@ export function AiProvidersSection() {
         body[feature] = { provider: pin.provider, model: pin.model, effort: pin.effort };
       }
       await setLlmConfig(body);
-      showToast("Đã lưu cài đặt AI provider.");
+      toast.success("Đã lưu cài đặt AI provider.");
       const fresh = await refresh(true);
       if (fresh && aliveRef.current) setDraft(draftFrom(fresh));
       // Broadcast so the badge + ForcedSetupGate refresh immediately
@@ -277,9 +267,7 @@ export function AiProvidersSection() {
       // no shared store coupling.
       window.dispatchEvent(new CustomEvent("flowboard:llm-config-changed"));
     } catch (err) {
-      showToast(
-        `Không áp dụng được: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      toast.error(`Không áp dụng được: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       if (aliveRef.current) setApplying(false);
     }
@@ -396,12 +384,6 @@ export function AiProvidersSection() {
           {applying ? "Đang áp dụng…" : dirty ? "Áp dụng thay đổi" : "Đã lưu"}
         </button>
       </div>
-
-      {toast && (
-        <div className="ai-providers-section__toast" role="alert">
-          {toast}
-        </div>
-      )}
 
       <ProviderSetupModal
         provider={helpFor ?? "claude"}

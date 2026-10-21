@@ -3,10 +3,11 @@ import {
   characterBadges,
   characterPhotoUrl,
   defaultCharacterLabel,
+  voiceOf,
   type CharacterMeta,
   type SavedCharacter,
 } from "../../api/characters";
-import { mediaUrl, patchNode, setBoardModelMode, type QuicktoolState } from "../../api/client";
+import { VOICES, allowedModelGenders, mediaUrl, patchNode, setBoardModelMode, type ProductGender, type QuicktoolState } from "../../api/client";
 import { CHARACTER_COUNTRIES, CHARACTER_GENDERS, CHARACTER_VIBES } from "../../constants/character";
 import type { CountryKey, GenderKey, VibeKey } from "../../constants/character";
 import { buildCharacterPrompt } from "../../lib/characterPrompt";
@@ -17,6 +18,7 @@ import { useCharactersStore } from "../../store/references";
 import { useSettingsStore } from "../../store/settings";
 import { hasMedia, isBusy, type ClipRoles } from "../roles";
 import "../models.css";
+import { toast, useToastOn } from "../../store/toast";
 
 function setNodeData(n: FlowNode, patch: Record<string, unknown>) {
   useBoardStore.getState().updateNodeData(n.id, patch);
@@ -39,8 +41,10 @@ function modelMeta(model: FlowNode, product: string | undefined): CharacterMeta 
 }
 
 /** Step 1 — the inputs: product photos, the model, the render settings. */
-export function StepSetup({ roles, sourceMediaId = null, personRequired = false, hands = null }: {
+export function StepSetup({ roles, sourceMediaId = null, personRequired = false, hands = null, productGender = "" }: {
   roles: ClipRoles;
+  /** Who the clip's product is for; a men's / women's product only gets models of that gender. */
+  productGender?: ProductGender;
   sourceMediaId?: string | null;
   /** Clothes: the clip must show a person, so no hands-only switch. */
   personRequired?: boolean;
@@ -110,6 +114,11 @@ export function StepSetup({ roles, sourceMediaId = null, personRequired = false,
   }
 
   const model = roles.model;
+  const allowedGenders = allowedModelGenders(productGender);
+  const genderLocked = productGender === "male" || productGender === "female";
+  const forWhom = productGender === "male" ? "nam" : "nữ";
+  const modelGender = (model?.data.charGender as string) ?? "female";
+  const modelGenderWrong = !!model && genderLocked && !allowedGenders.includes(modelGender as "female" | "male");
   const boardId = useBoardStore((s) => s.boardId);
   const boardName = useBoardStore((s) => s.boardName || undefined);
 
@@ -118,10 +127,10 @@ export function StepSetup({ roles, sourceMediaId = null, personRequired = false,
   const characters = useCharactersStore((s) => s.items);
   const charactersLoaded = useCharactersStore((s) => s.loaded);
   const charactersError = useCharactersStore((s) => s.error);
+  useToastOn(charactersError ? `Không tải được thư viện người mẫu: ${charactersError}` : null, "error");
   const loadCharacters = useCharactersStore((s) => s.load);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [savingModel, setSavingModel] = useState(false);
-  const [modelNote, setModelNote] = useState<string | null>(null);
   useEffect(() => { void loadCharacters(); }, [loadCharacters]);
   const modelMediaId = model && hasMedia(model) ? (model.data.mediaId as string) : null;
   const modelSaved = !!modelMediaId && characters.some((c) => c.mediaId === modelMediaId);
@@ -133,7 +142,6 @@ export function StepSetup({ roles, sourceMediaId = null, personRequired = false,
     const name = window.prompt("Đặt tên cho người mẫu này (để dùng lại cho sản phẩm khác):", fallback);
     if (name === null) return;
     setSavingModel(true);
-    setModelNote(null);
     try {
       const row = await useCharactersStore.getState().save({
         media_id: modelMediaId,
@@ -144,9 +152,9 @@ export function StepSetup({ roles, sourceMediaId = null, personRequired = false,
         source_board_id: boardId,
         source_node_short_id: typeof model.data.shortId === "string" ? model.data.shortId : null,
       });
-      setModelNote(`✓ Đã lưu "${row.label}" vào thư viện người mẫu.`);
+      toast.success(`Đã lưu "${row.label}" vào thư viện người mẫu. Đặt giọng đọc và câu nói cho người mẫu ở trang Người mẫu đã lưu.`);
     } catch (err) {
-      setModelNote(`Không lưu được người mẫu: ${err instanceof Error ? err.message : "lỗi"}`);
+      toast.error(`Không lưu được người mẫu: ${err instanceof Error ? err.message : "lỗi"}`);
     } finally {
       setSavingModel(false);
     }
@@ -176,13 +184,46 @@ export function StepSetup({ roles, sourceMediaId = null, personRequired = false,
       }).catch(() => {});
     }
     setPickerOpen(false);
-    setModelNote(`Đang dùng người mẫu "${c.label}" từ thư viện. Các cảnh sẽ lấy ảnh này làm tham chiếu.`);
+    void applyModelVoice(c);
+  }
+
+  /** The saved model's voice becomes the clip's voice-over (export node), and
+   * its line, if any, opens scene 1's voice line. */
+  async function applyModelVoice(c: SavedCharacter) {
+    const said: string[] = [`Đang dùng người mẫu "${c.label}". Các cảnh sẽ lấy ảnh này làm tham chiếu.`];
+    try {
+      const voice = voiceOf(c);
+      const expId = await useQuicktoolStore.getState().ensureExportNode();
+      if (expId) {
+        const patch: Record<string, unknown> = { voice, voiceStyle: c.meta.voiceStyle ?? "" };
+        useBoardStore.getState().updateNodeData(expId, patch);
+        const dbId = parseInt(expId, 10);
+        if (!isNaN(dbId)) await patchNode(dbId, { data: patch });
+        said.push(`Giọng đọc của clip: ${VOICES[voice] ?? voice}.`);
+      }
+      const line = c.meta.line?.trim();
+      const first = roles.scenes[0]?.video;
+      if (line && first) {
+        const cur = typeof first.data.narration === "string" ? first.data.narration.trim() : "";
+        if (!cur.startsWith(line)) {
+          const narration = cur ? `${line} ${cur}` : line;
+          useBoardStore.getState().updateNodeData(first.id, { narration });
+          const dbId = parseInt(first.id, 10);
+          if (!isNaN(dbId)) await patchNode(dbId, { data: { narration } });
+          said.push("Đã thêm câu nói của người mẫu vào đầu lời thoại cảnh 1.");
+        }
+      }
+      toast.success(said.join(" "));
+    } catch (err) {
+      toast.error(`Đã đổi người mẫu nhưng chưa đặt được giọng đọc: ${err instanceof Error ? err.message : "lỗi"}`);
+    }
   }
   const [handGender, setHandGender] = useState<"female" | "male">(hands?.gender === "hands_male" ? "male" : "female");
   const [handCountry, setHandCountry] = useState(hands?.country ?? (model?.data.charCountry as string) ?? "vn");
   const [handLook, setHandLook] = useState(hands?.look ?? "");
   const [switching, setSwitching] = useState(false);
   const [switchError, setSwitchError] = useState<string | null>(null);
+  useToastOn(switchError, "error", () => setSwitchError(null));
   const handsMode = !model && !!hands;
 
   /** Person ⇄ hands on the existing board: the agent rewrites the scene
@@ -291,15 +332,14 @@ export function StepSetup({ roles, sourceMediaId = null, personRequired = false,
             {switching && <span className="qt-mode__busy">Đang đổi…</span>}
           </div>
         )}
-        {switchError && <p className="product-form__error" role="alert">{switchError}</p>}
         {handsMode ? (
           <div className="qt-model__form">
             <label className="qt-field">
               <span>Bàn tay</span>
               <select value={handGender} disabled={switching}
                       onChange={(e) => { const g = e.target.value as "female" | "male"; setHandGender(g); void applyMode("hands", { gender: g }); }}>
-                <option value="female">Tay nữ</option>
-                <option value="male">Tay nam</option>
+                {allowedGenders.includes("female") && <option value="female">Tay nữ</option>}
+                {allowedGenders.includes("male") && <option value="male">Tay nam</option>}
               </select>
             </label>
             <label className="qt-field">
@@ -331,10 +371,23 @@ export function StepSetup({ roles, sourceMediaId = null, personRequired = false,
             <div className="qt-model__form">
               <label className="qt-field">
                 <span>Giới tính</span>
-                <select value={(model.data.charGender as string) ?? "female"} onChange={(e) => setNodeData(model, { charGender: e.target.value })}>
-                  {CHARACTER_GENDERS.map((g) => <option key={g.key} value={g.key}>{g.label}</option>)}
+                <select value={modelGender} onChange={(e) => setNodeData(model, { charGender: e.target.value })}>
+                  {CHARACTER_GENDERS
+                    .filter((g) => allowedGenders.includes(g.key) || g.key === modelGender)
+                    .map((g) => <option key={g.key} value={g.key} disabled={!allowedGenders.includes(g.key)}>{g.label}</option>)}
                 </select>
               </label>
+              {modelGenderWrong && (
+                <div className="qt-gender-warn qt-field--wide" role="alert">
+                  Sản phẩm này dành cho <strong>{forWhom}</strong> nhưng người mẫu đang là {modelGender === "male" ? "nam" : "nữ"}.
+                  <button type="button" className="qt-btn qt-btn--small"
+                          onClick={() => setNodeData(model, { charGender: allowedGenders[0] })}>
+                    Đổi sang người mẫu {forWhom}
+                  </button>
+                  {hasMedia(model) && <small> Sau khi đổi, bấm "Tạo lại người mẫu" hoặc chọn mẫu {forWhom} từ thư viện để có ảnh mới.</small>}
+                </div>
+              )}
+              {genderLocked && !modelGenderWrong && <small className="qt-field--wide qt-gender-note">Sản phẩm dành cho {forWhom}: chỉ dùng người mẫu {forWhom}.</small>}
               <label className="qt-field">
                 <span>Quốc gia</span>
                 <select value={(model.data.charCountry as string) ?? "vn"} onChange={(e) => setNodeData(model, { charCountry: e.target.value })}>
@@ -379,7 +432,6 @@ export function StepSetup({ roles, sourceMediaId = null, personRequired = false,
                   </button>
                 )}
               </div>
-              {modelNote && <p className="qt-card__hint qt-field--wide" role="status">{modelNote}</p>}
             </div>
           </div>
         ) : (
@@ -414,6 +466,7 @@ export function StepSetup({ roles, sourceMediaId = null, personRequired = false,
               <div className="qt-models-picker__grid">
                 {characters.map((c) => {
                   const current = c.mediaId === modelMediaId;
+                  const wrongGender = genderLocked && !!c.meta.gender && !allowedGenders.includes(c.meta.gender as "female" | "male");
                   return (
                     <div key={c.id} className={`qt-model-card${current ? " qt-model-card--current" : ""}`}>
                       <img className="qt-model-card__photo" src={characterPhotoUrl(c)} alt={c.label} loading="lazy" />
@@ -421,16 +474,17 @@ export function StepSetup({ roles, sourceMediaId = null, personRequired = false,
                       <div className="qt-badges">
                         {characterBadges(c.meta).map((b) => <span key={b} className="qt-badge">{b}</span>)}
                       </div>
-                      <button type="button" className={`qt-btn qt-btn--small${current ? "" : " qt-btn--accent"}`}
-                              disabled={current || isBusy(model)} onClick={() => applySavedModel(c)}>
-                        {current ? "Đang dùng" : "Dùng người mẫu này"}
+                      <div className="qt-model-card__voice" title="Giọng đọc của người mẫu — thành giọng đọc của clip khi dùng">🎙 {VOICES[voiceOf(c)]?.split(" · ")[0] ?? voiceOf(c)}</div>
+                      <button type="button" className={`qt-btn qt-btn--small${current || wrongGender ? "" : " qt-btn--accent"}`}
+                              disabled={current || wrongGender || isBusy(model)} onClick={() => applySavedModel(c)}
+                              title={wrongGender ? `Sản phẩm dành cho ${forWhom}` : undefined}>
+                        {current ? "Đang dùng" : wrongGender ? `Không hợp đồ ${forWhom}` : "Dùng người mẫu này"}
                       </button>
                     </div>
                   );
                 })}
               </div>
             )}
-            {charactersError && <p className="product-form__error" role="alert">Không tải được thư viện: {charactersError}</p>}
             <p className="qt-card__hint">Người mẫu đã lưu dùng chung cho mọi sản phẩm. Quản lý trong mục "Người mẫu đã lưu" ở thanh bên.</p>
           </div>
         )}

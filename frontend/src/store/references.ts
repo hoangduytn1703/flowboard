@@ -4,6 +4,7 @@ import {
   listCharacters,
   renameCharacter,
   saveCharacter,
+  updateCharacter,
   updateCharacterMeta,
   type SaveCharacterInput,
   type SavedCharacter,
@@ -172,6 +173,10 @@ export interface CharactersState {
   load(force?: boolean): Promise<void>;
   save(input: SaveCharacterInput): Promise<SavedCharacter>;
   rename(id: number, label: string): Promise<void>;
+  /** Save the edit form: name, meta, maybe a new photo. */
+  update(id: number, patch: { label?: string; meta?: SavedCharacter["meta"]; media_id?: string; aspect_ratio?: string | null }): Promise<SavedCharacter>;
+  /** Merge ``patch`` into the model's meta (voice, line, …). */
+  updateMeta(id: number, patch: Partial<SavedCharacter["meta"]>): Promise<void>;
   remove(id: number): Promise<void>;
   isSaved(mediaId: string | null | undefined): boolean;
 }
@@ -218,6 +223,24 @@ export const useCharactersStore = create<CharactersState>((set, get) => ({
 
   async rename(id, label) {
     const row = await renameCharacter(id, label);
+    set({ items: get().items.map((c) => (c.id === row.id ? row : c)) });
+  },
+
+  async update(id, patch) {
+    const meta = patch.meta
+      ? Object.fromEntries(Object.entries(patch.meta).filter(([, v]) => v !== undefined && v !== "")) as SavedCharacter["meta"]
+      : undefined;
+    const row = await updateCharacter(id, { ...patch, meta });
+    set({ items: get().items.map((c) => (c.id === row.id ? row : c)) });
+    return row;
+  },
+
+  async updateMeta(id, patch) {
+    const cur = get().items.find((c) => c.id === id);
+    if (!cur) return;
+    // PATCH replaces the meta dict: send the whole thing.
+    const meta = Object.fromEntries(Object.entries({ ...cur.meta, ...patch }).filter(([, v]) => v !== undefined && v !== ""));
+    const row = await updateCharacterMeta(id, meta);
     set({ items: get().items.map((c) => (c.id === row.id ? row : c)) });
   },
 

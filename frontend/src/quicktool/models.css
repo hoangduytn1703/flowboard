@@ -99,3 +99,64 @@
 .qt-models-page__hint strong { color: var(--text); }
 .qt-models-page__hint ol { margin: 6px 0 0; padding-left: 20px; }
 .qt-models-page__count { font-weight: 500; color: var(--muted); }
+
+/* Voice picker + "Nghe thử" (models page, model library). */
+.qt-voice-field { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.qt-voice-field select {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--panel-high);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.qt-voice-field .qt-btn { white-space: nowrap; }
+
+/* Saved-model card: voice + line fields. */
+.qt-model-card__field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.qt-model-card__field small { opacity: 0.8; }
+.qt-model-card__field input {
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--panel-high);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+/* "+ Tạo người mẫu" panel. */
+.qt-model-create__body { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 18px; align-items: start; }
+.qt-model-create__photo img, .qt-model-create__empty {
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  object-fit: cover;
+  border-radius: 10px;
+  background: var(--panel-high);
+}
+.qt-model-create__empty { display: grid; place-items: center; padding: 12px; text-align: center; font-size: 14px; color: var(--muted); border: 1px dashed var(--border); box-sizing: border-box; }
+.qt-model-create__form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.qt-model-create__form .qt-field--wide { grid-column: 1 / -1; }
+@media (max-width: 900px) {
+  .qt-model-create__body { grid-template-columns: 1fr; }
+  .qt-model-create__photo { max-width: 220px; }
+  .qt-model-create__form { grid-template-columns: 1fr 1fr; }
+}
+.qt-model-card__voice { font-size: 13px; color: var(--muted); }
+.qt-voice-field--compact .qt-btn { min-width: 34px; padding-left: 8px; padding-right: 8px; }
+.qt-voice-field--compact select { font-size: 13px; }
+.qt-voice-preview--icon { min-width: 32px; padding-left: 8px; padding-right: 8px; }
+.qt-model-card__voiceline { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 14px; color: var(--text); }
+.qt-model-card__voiceline small { color: var(--muted); }
+.qt-model-card__line { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qt-model-create__photo { display: flex; flex-direction: column; gap: 8px; }
+.qt-model-create__photo-actions { display: flex; flex-direction: column; gap: 6px; }
+.qt-model-create__badge { align-self: flex-start; padding: 2px 8px; font-size: 12px; color: #fbbf24; background: rgba(251, 191, 36, 0.12); border-radius: 999px; }
+
+/* Step 1: the model's gender vs the product's. */
+.qt-gender-warn { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; font-size: 14px;
+  color: var(--text); background: rgba(251, 191, 36, 0.12); border: 1px solid rgba(251, 191, 36, 0.45); border-radius: 8px; }
+.qt-gender-note { font-size: 13px; color: var(--muted); }

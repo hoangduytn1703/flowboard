@@ -61,7 +61,14 @@
 }
 .qt-plib-page__search { min-width: 260px; }
 .qt-plib-page__add { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
-.qt-plib-page__list { display: flex; flex-direction: column; gap: 10px; }
+.qt-plib-page__list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  align-items: stretch;
+}
+@media (max-width: 1100px) { .qt-plib-page__list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .qt-plib-page__list { grid-template-columns: 1fr; } }
 .qt-plib-card {
   display: flex;
   flex-direction: column;
@@ -87,3 +94,45 @@
 .qt-plib-card__kind--video { color: #fbbf24; }
 .qt-plib-card__kind--narration { color: #4ade80; }
 .qt-plib-card .qt-link--danger { margin-left: auto; }
+
+/* Group filter + "sample" badge on the /prompts page. */
+.qt-plib-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.qt-plib-tag {
+  padding: 4px 12px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--muted);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.qt-plib-tag--active { color: var(--text); border-color: #ff6a2b; background: rgba(255, 106, 43, 0.12); }
+.qt-plib-card__sample {
+  padding: 1px 8px;
+  font-size: 12px;
+  border-radius: 999px;
+  color: #a5b4fc;
+  background: rgba(165, 180, 252, 0.12);
+}
+
+/* Cards in the grid: the text box takes the height left over. */
+.qt-plib-card__text { flex: 1; field-sizing: fixed; resize: vertical; }
+.qt-plib-card__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+
+.qt-pager { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; justify-content: center; margin-top: 4px; }
+.qt-pager__num {
+  min-width: 36px;
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--muted);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.qt-pager__num--active { color: var(--text); border-color: #ff6a2b; background: rgba(255, 106, 43, 0.12); }
+.qt-pager__info { margin-left: 8px; font-size: 14px; color: var(--muted); }
+.qt-plib-card__title { text-align: left; }
+.qt-plib-card__meta { font-size: 13px; color: var(--muted); margin-top: -2px; }

@@ -1312,6 +1312,20 @@ export interface BoardTemplate {
 
 // ── Product library ──────────────────────────────────────────────────────────
 
+export type ProductGender = "" | "male" | "female" | "unisex";
+
+export const PRODUCT_GENDERS: [ProductGender, string][] = [
+  ["", "Không rõ / không quan trọng"],
+  ["male", "Nam"],
+  ["female", "Nữ"],
+  ["unisex", "Unisex (cả nam và nữ)"],
+];
+
+/** Model genders a product allows: a men's product only men, a women's only women. */
+export function allowedModelGenders(g: ProductGender | undefined | null): ("female" | "male")[] {
+  return g === "male" ? ["male"] : g === "female" ? ["female"] : ["female", "male"];
+}
+
 export type ProductCategory = "fashion" | "cosmetics" | "food" | "grocery" | "home" | "other";
 
 export const PRODUCT_CATEGORIES: [ProductCategory, string][] = [
@@ -1332,6 +1346,9 @@ export interface Product {
   price: string;
   /** Vietnamese, one selling point per line. */
   selling_points: string;
+  /** Who it is for: male / female / unisex / "" (unknown). The clip's model
+   * must match a male / female product. */
+  gender: ProductGender;
   link: string;
   notes: string;
   /** Flow media ids, first = main photo. */
@@ -1395,6 +1412,19 @@ export async function importProductsFromTikTok(): Promise<TikTokImportResult> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({}),
   });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
+}
+
+/** Import the Shopee product page open in Chrome (via the extension). */
+export async function importProductFromShopee(): Promise<TikTokImportResult & { name?: string }> {
+  const res = await fetch("/api/products/import-shopee", { method: "POST" });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
+}
+
+export async function getProduct(id: number): Promise<Product> {
+  const res = await fetch(`/api/products/${id}`);
   if (!res.ok) throw new Error(await extractErrorMessage(res));
   return res.json();
 }
@@ -1752,11 +1782,11 @@ export interface ExportItem {
 /** `POST /api/llm/voices/preview`: one fixed sample sentence spoken by
  * `voice` (`style` applies to Gemini voices); play the URL with
  * `new Audio(url)`. The agent caches it per voice + style. */
-export async function previewVoice(voice: string, style?: string): Promise<{ url: string; voice: string }> {
+export async function previewVoice(voice: string, style?: string, text?: string): Promise<{ url: string; voice: string }> {
   const res = await fetch("/api/llm/voices/preview", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ voice, style: style || null }),
+    body: JSON.stringify({ voice, style: style || null, text: text?.trim() || null }),
   });
   if (!res.ok) throw new Error(await extractErrorMessage(res));
   return res.json();

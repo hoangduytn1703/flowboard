@@ -5,7 +5,7 @@
 //
 // Thin wrappers over the references routes. Kept apart from the generic
 // `ReferenceItem` surface in ./client because that one has no `meta`.
-import { api, mediaUrl } from "./client";
+import { DEFAULT_VOICE, VOICES, api, mediaUrl } from "./client";
 import {
   CHARACTER_GENDERS,
   countryLabel,
@@ -23,6 +23,13 @@ export interface CharacterMeta {
   prompt?: string;
   /** Name of the product / clip the model was first made for. */
   product?: string;
+  /** The model's own voice (a `VOICES` id); see `voiceOf()` for the default. */
+  voice?: string;
+  /** Gemini voices only: how the voice reads ("vui vẻ, nói nhanh"). */
+  voiceStyle?: string;
+  /** Optional line the model says: put in front of scene 1's voice line
+   * when the model is used on a clip, and read by "Nghe thử". */
+  line?: string;
 }
 
 export interface SavedCharacter {
@@ -84,6 +91,9 @@ function mapRow(row: CharacterRowWire): SavedCharacter {
       extras: str(m.extras),
       prompt: str(m.prompt),
       product: str(m.product),
+      voice: str(m.voice),
+      voiceStyle: str(m.voiceStyle),
+      line: str(m.line),
     },
     createdAt: row.created_at,
   };
@@ -120,12 +130,37 @@ export async function updateCharacterMeta(id: number, meta: CharacterMeta): Prom
   return mapRow(row);
 }
 
+/** Edit a saved model: name, form/voice/line (whole meta dict), and
+ * optionally a new photo. */
+export async function updateCharacter(id: number, patch: {
+  label?: string;
+  meta?: CharacterMeta;
+  media_id?: string;
+  aspect_ratio?: string | null;
+}): Promise<SavedCharacter> {
+  const row = await api<CharacterRowWire>(`/api/references/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+  return mapRow(row);
+}
+
 export async function deleteCharacter(id: number): Promise<void> {
   // 204 No Content: api<T>() would choke on the empty body.
   const res = await fetch(`/api/references/${id}`, { method: "DELETE" });
   if (!res.ok && res.status !== 404) {
     throw new Error(`deleteCharacter: ${res.status} ${res.statusText}`);
   }
+}
+
+/** Default voice for a model of ``gender``: Edge Nam Minh for men, Hoài My otherwise. */
+export function defaultVoiceFor(gender: string | undefined): string {
+  return gender === "male" ? "vi-VN-NamMinhNeural" : DEFAULT_VOICE;
+}
+
+/** The voice a saved model speaks with: its own pick, else the default for its gender. */
+export function voiceOf(c: Pick<SavedCharacter, "meta">): string {
+  return c.meta.voice && c.meta.voice in VOICES ? c.meta.voice : defaultVoiceFor(c.meta.gender);
 }
 
 export function characterPhotoUrl(c: Pick<SavedCharacter, "mediaId">): string {

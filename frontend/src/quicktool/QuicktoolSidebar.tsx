@@ -6,7 +6,7 @@ import { useSettingsStore } from "../store/settings";
 
 /**
  * Left rail of the Quicktool screen, modelled on the reference app: a
- * brand block, the one "+ Clip mới" entry (it opens the dialog that picks
+ * brand block, "Clip của tôi" (its page has the "+ Clip mới" button that opens the dialog that picks
  * the clip kind), the libraries, and the switch to the node canvas underneath.
  */
 export function QuicktoolSidebar() {
@@ -14,7 +14,7 @@ export function QuicktoolSidebar() {
   const boardId = useBoardStore((s) => s.boardId);
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  const homeActive = pathname === "/clips";
+  const homeActive = pathname === "/clips" || pathname === "/clips/new" || pathname === "/clips/from-video";
   const is = (path: string) => pathname === path || pathname.startsWith(path + "/");
   return (
     <aside className="qt-sidebar">
@@ -31,15 +31,6 @@ export function QuicktoolSidebar() {
           onClick={() => navigate("/clips")}
         >
           <span className="qt-nav__icon">🎬</span> Clip của tôi
-        </button>
-
-        <button
-          type="button"
-          className={`qt-nav__item${is("/clips/new") || is("/clips/from-video") ? " qt-nav__item--active" : ""}`}
-          onClick={() => navigate("/clips/new")}
-          title="Tạo clip quảng cáo mới: chọn sản phẩm và kiểu clip (mỹ phẩm, quần áo, đồ ăn, review, theo video mẫu, theo link)"
-        >
-          <span className="qt-nav__icon">⚡</span> + Clip mới
         </button>
 
         <div className="qt-nav__group">Thư viện</div>

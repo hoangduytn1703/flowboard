@@ -56,6 +56,12 @@ class TikTokImportError(RuntimeError):
     """The message is written for the person in front of the screen."""
 
 
+def _guess_gender(title: str) -> str:
+    from flowboard.services.product_gender import guess
+
+    return guess(title)
+
+
 def guess_category(title: str) -> str:
     low = f" {title.lower()} "
     for category, words in _CATEGORY_WORDS.items():
@@ -124,7 +130,8 @@ def pdp_url(tab_url: Optional[str]) -> Optional[str]:
     return m.group(1) if m else None
 
 
-def save_draft(draft: dict[str, Any], image_url: str, source_url: str) -> tuple[list[dict[str, Any]], int]:
+def save_draft(draft: dict[str, Any], image_url: str, source_url: str,
+               source: str = "TikTok") -> tuple[list[dict[str, Any]], int]:
     """Save one fully-read product (name, English description, selling
     points …). Returns ``(created, skipped)`` like :func:`save_products`;
     a product already in the library under the same link is skipped."""
@@ -138,8 +145,9 @@ def save_draft(draft: dict[str, Any], image_url: str, source_url: str) -> tuple[
             category=str(draft.get("category") or "other"),
             price=str(draft.get("price") or ""),
             selling_points=str(draft.get("selling_points") or ""),
+            gender=str(draft.get("gender") or "") if draft.get("gender") in ("male", "female", "unisex") else "",
             link=link,
-            notes=f"Nhập từ TikTok ({source_url[:200]})",
+            notes=f"Nhập từ {source} ({source_url[:200]})",
         )
         s.add(row)
         s.commit()
@@ -171,6 +179,7 @@ def save_products(items: list[dict[str, Any]], source_url: str) -> tuple[list[di
             row = Product(
                 name=name, price=price, link=link,
                 category=guess_category(name),
+                gender=_guess_gender(name),
                 notes=f"Nhập từ TikTok ({source_url[:200]})",
             )
             s.add(row)

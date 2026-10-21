@@ -14,7 +14,7 @@ from flowboard.db import get_session
 from flowboard.db.models import Product, _utcnow
 from flowboard.services import media as media_service
 from flowboard.services.products import list_products, product_dict
-from flowboard.services import product_link, tiktok_import
+from flowboard.services import product_gender, product_link, tiktok_import
 from flowboard.services.llm import gemini_api
 from flowboard.services.templates import CATEGORIES
 
@@ -27,6 +27,7 @@ class ProductBody(BaseModel):
     category: Optional[str] = None
     price: Optional[str] = Field(default=None, max_length=60)
     selling_points: Optional[str] = Field(default=None, max_length=2000)
+    gender: Optional[str] = None  # male / female / unisex / "" (unknown)
     link: Optional[str] = Field(default=None, max_length=500)
     notes: Optional[str] = Field(default=None, max_length=2000)
     media_ids: Optional[list[str]] = Field(default=None, max_length=12)
@@ -53,6 +54,10 @@ def _apply(row: Product, body: ProductBody) -> None:
         row.media_ids = list(dict.fromkeys(ids))  # de-dupe, keep order
     if "aspect_ratio" in fields:
         row.aspect_ratio = body.aspect_ratio
+    if "gender" in fields and body.gender is not None:
+        if body.gender not in ("", *product_gender.GENDERS):
+            raise HTTPException(400, f"invalid gender {body.gender!r}; must be male / female / unisex or empty")
+        row.gender = body.gender
     if not row.name:
         raise HTTPException(400, "name is required")
 
@@ -66,6 +71,9 @@ def get_products() -> list[dict]:
 def create_product(body: ProductBody) -> dict:
     row = Product(name="")
     _apply(row, body)
+    # Not given: guess it from the words ("áo thun nam", "váy", "unisex"…).
+    if "gender" not in body.model_fields_set:
+        row.gender = product_gender.guess(row.name, row.description)
     with get_session() as s:
         s.add(row)
         s.commit()
@@ -170,6 +178,29 @@ async def import_from_tiktok(body: TikTokImportBody) -> dict:
         "tab_url": scraped.get("tabUrl"),
         "tab_title": scraped.get("tabTitle"),
         "diag": scraped.get("diag"),
+    }
+
+
+@router.post("/import-shopee")
+async def import_from_shopee() -> dict:
+    """Read the Shopee product page open in the user's Chrome (extension
+    ``read_open_tab``) and add that product. Same answer shape as
+    ``/import-tiktok``; the photo is uploaded to Flow in the background."""
+    if not gemini_api.configured():
+        raise HTTPException(400, "Chưa có Gemini API key — thêm trong Settings → Gemini API keys.")
+    try:
+        page = await product_link.read_open_shopee_tab()
+        read = await product_link.extract_from_page(page)
+    except product_link.ProductLinkError as exc:
+        raise HTTPException(400, str(exc))
+    created, skipped = tiktok_import.save_draft(read["draft"], read["image_url"] or "", page["tab_url"], source="Shopee")
+    if created:
+        tiktok_import.start_photo_task(created)
+    return {
+        "single_product": True, "found": 1, "created": len(created), "skipped": skipped,
+        "photos_pending": len([c for c in created if c.get("image")]),
+        "tab_url": page["tab_url"], "tab_title": page["tab_title"], "diag": None,
+        "name": read["draft"]["name"],
     }
 
 

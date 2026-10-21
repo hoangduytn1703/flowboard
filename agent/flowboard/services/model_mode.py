@@ -48,6 +48,9 @@ def set_model_mode(board_id: int, *, mode: str, gender: str = "female", country:
         board = s.get(Board, board_id)
         if board is None:
             raise LookupError("board not found")
+        from flowboard.services.product_gender import check
+
+        check(product, gender)
         if mode == "hands" and _person_required(board, product):
             raise PersonRequiredError(
                 "Quần áo cần người mẫu mặc để thấy form và độ vừa, nên không dùng được chế độ chỉ quay bàn tay."

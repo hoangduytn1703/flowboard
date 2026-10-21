@@ -16,6 +16,7 @@ import { deriveRoles, hasMedia, isBusy, type ClipRoles } from "../quicktool/role
 import { useBoardStore, type FlowNode } from "./board";
 import { useGenerationStore } from "./generation";
 import type { CountryKey, GenderKey, VibeKey } from "../constants/character";
+import { toast } from "./toast";
 
 /**
  * The Quicktool wizard's driver. It owns no media state of its own: every
@@ -602,6 +603,11 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
       }
     }
     set({ queue: { ...get().queue, current: null, pending: [], running: false }, auto: "idle", autoMessage: null });
+    // Said as a toast from here, not from the library page: the page may not be open any more.
+    const { done, failed } = get().queue;
+    const bad = Object.keys(failed).length;
+    if (bad) toast.warning(`Hàng đợi xong: ${done.length} clip hoàn tất, ${bad} clip lỗi (xem trên thẻ clip trong "Clip của tôi").`);
+    else if (done.length) toast.success(`Hàng đợi xong: ${done.length} clip đã tạo xong.`);
   },
 
   stopQueue() {

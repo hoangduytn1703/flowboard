@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { checkPool, dismissPoolSwitch, getPool, openPoolFlowTab, type PoolStatus } from "../api/accountPool";
+import { toast } from "../store/toast";
 
 /**
  * Orange bar across the top of the Quicktool screen while the agent waits
@@ -11,7 +12,6 @@ import { checkPool, dismissPoolSwitch, getPool, openPoolFlowTab, type PoolStatus
 export function AccountSwitchBanner() {
   const [status, setStatus] = useState<PoolStatus | null>(null);
   const [busy, setBusy] = useState<"" | "open" | "check">("");
-  const [note, setNote] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -38,12 +38,12 @@ export function AccountSwitchBanner() {
 
   async function openTab() {
     setBusy("open");
-    setNote(null);
     try {
       const r = await openPoolFlowTab(pending!.to_email);
-      setNote(r.ok ? "Đã mở tab Flow — chọn đúng tài khoản ở góc phải trên rồi bấm \"Đã đổi, kiểm tra\"." : "Extension không mở được tab — mở flow.google.com tay.");
+      if (r.ok) toast.info("Đã mở tab Flow — chọn đúng tài khoản ở góc phải trên rồi bấm \"Đã đổi, kiểm tra\".");
+      else toast.warning("Extension không mở được tab — mở flow.google.com tay.");
     } catch (err) {
-      setNote(err instanceof Error ? err.message : "lỗi");
+      toast.error(err instanceof Error ? err.message : "lỗi");
     } finally {
       setBusy("");
     }
@@ -51,16 +51,15 @@ export function AccountSwitchBanner() {
 
   async function check() {
     setBusy("check");
-    setNote(null);
     try {
       const r = await checkPool();
       setStatus(r.status);
-      if (r.switched) setNote(`Xong — đang dùng ${r.email} (${r.credits ?? "?"} credit). Việc đang chờ sẽ chạy tiếp.`);
-      else if (r.error === "account_also_exhausted") setNote(`${r.email} cũng hết credit — agent đã chuyển sang tài khoản kế.`);
-      else if (r.error) setNote(`Chưa đọc được tab Flow: ${r.error}`);
-      else setNote(`Tab Flow đang ở ${r.email ?? "tài khoản khác"} — hãy chuyển sang ${pending!.to_email}.`);
+      if (r.switched) toast.success(`Xong — đang dùng ${r.email} (${r.credits ?? "?"} credit). Việc đang chờ sẽ chạy tiếp.`);
+      else if (r.error === "account_also_exhausted") toast.warning(`${r.email} cũng hết credit — agent đã chuyển sang tài khoản kế.`);
+      else if (r.error) toast.error(`Chưa đọc được tab Flow: ${r.error}`);
+      else toast.warning(`Tab Flow đang ở ${r.email ?? "tài khoản khác"} — hãy chuyển sang ${pending!.to_email}.`);
     } catch (err) {
-      setNote(err instanceof Error ? err.message : "lỗi");
+      toast.error(err instanceof Error ? err.message : "lỗi");
     } finally {
       setBusy("");
     }
@@ -73,7 +72,6 @@ export function AccountSwitchBanner() {
         {pending.from_email ? `${pending.from_email} ${pending.reason}. ` : `${pending.reason}. `}
         Đã ghim project của <strong>{pending.to_email}</strong>. Trên tab Flow, bấm avatar → <em>Chuyển đổi tài khoản</em> →
         chọn <strong>{pending.to_email}</strong>. Việc đang chạy sẽ chờ.
-        {note && <div className="qt-switch__note">{note}</div>}
       </div>
       <div className="qt-switch__actions">
         <button type="button" className="qt-btn qt-btn--small" disabled={busy !== ""} onClick={() => void openTab()}>

@@ -25,6 +25,7 @@ def product_dict(row: Product) -> dict[str, Any]:
         "category": row.category,
         "price": row.price,
         "selling_points": row.selling_points,
+        "gender": row.gender or "",
         "link": row.link,
         "notes": row.notes,
         "media_ids": list(row.media_ids or []),
@@ -51,6 +52,10 @@ class TemplateBuildError(LookupError):
     """Unknown template or product; the message is meant for the caller."""
 
 
+def _template_default_gender(template: dict) -> Optional[str]:
+    return next((str(i.get("default") or "") for i in template.get("inputs", []) if i.get("key") == "charGender"), None)
+
+
 def template_board_spec(
     template_id: Optional[str],
     inputs: Optional[dict[str, str]] = None,
@@ -70,5 +75,9 @@ def template_board_spec(
         raise TemplateBuildError(f"unknown template {template_id!r}")
     if product is None:
         return template, render(template, inputs), None
+    # A men's / women's product cannot be shown on a model of the other gender.
+    from flowboard.services.product_gender import check
+
+    check(product, (inputs or {}).get("charGender") or _template_default_gender(template))
     spec = apply_product(render(template, product_inputs(template, product, inputs)), product)
     return template, spec, product

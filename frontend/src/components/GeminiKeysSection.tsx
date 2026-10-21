@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getGeminiKeys, setGeminiKeys, testGeminiKeys, type GeminiKeyState } from "../api/client";
+import { toast } from "../store/toast";
 
 /**
  * Settings → Gemini API keys. Several keys pasted at once; the agent
@@ -11,7 +12,6 @@ export function GeminiKeysSection() {
   const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState<"" | "save" | "test">("");
-  const [note, setNote] = useState<string | null>(null);
   const [results, setResults] = useState<Record<string, string>>({});
 
   async function refresh() {
@@ -28,16 +28,15 @@ export function GeminiKeysSection() {
 
   async function save() {
     setBusy("save");
-    setNote(null);
     try {
       const res = await setGeminiKeys(draft);
       setKeys(res.keys);
       setDraft("");
       setEditing(false);
       setResults({});
-      setNote(`Đã lưu ${res.count} key.`);
+      toast.success(`Đã lưu ${res.count} key.`);
     } catch (err) {
-      setNote(err instanceof Error ? err.message : "lưu thất bại");
+      toast.error(err instanceof Error ? err.message : "lưu thất bại");
     } finally {
       setBusy("");
     }
@@ -45,7 +44,6 @@ export function GeminiKeysSection() {
 
   async function test() {
     setBusy("test");
-    setNote(null);
     try {
       const res = await testGeminiKeys();
       setKeys(res.keys);
@@ -54,9 +52,10 @@ export function GeminiKeysSection() {
         r.ok ? `✓ ${r.latency_ms} ms` : `✗ ${r.error}${r.detail ? ` — ${r.detail.slice(0, 80)}` : ""}`,
       ])));
       const ok = res.results.filter((r) => r.ok).length;
-      setNote(`${ok}/${res.results.length} key dùng được.`);
+      const text = `${ok}/${res.results.length} key dùng được.`;
+      if (ok === res.results.length) toast.success(text); else toast.warning(text);
     } catch (err) {
-      setNote(err instanceof Error ? err.message : "kiểm tra thất bại");
+      toast.error(err instanceof Error ? err.message : "kiểm tra thất bại");
     } finally {
       setBusy("");
     }
@@ -118,7 +117,6 @@ export function GeminiKeysSection() {
           )}
         </div>
       )}
-      {note && <div className="settings-panel__hint">{note}</div>}
     </div>
   );
 }

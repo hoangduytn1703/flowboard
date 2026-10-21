@@ -142,6 +142,14 @@ export function SettingsPanel({
   // Check GitHub for a newer release. Cached in sessionStorage by
   // the helper, so re-opening the dialog doesn't burn API quota.
   const [latestRelease, setLatestRelease] = useState<LatestRelease | null>(null);
+  // Sign-out takes two clicks; the second one must come within a few seconds.
+  const [confirmLogout, setConfirmLogout] = useState(false);
+  useEffect(() => {
+    if (!confirmLogout) return;
+    const t = setTimeout(() => setConfirmLogout(false), 5000);
+    return () => clearTimeout(t);
+  }, [confirmLogout]);
+  useEffect(() => { if (!open) setConfirmLogout(false); }, [open]);
   useEffect(() => {
     if (!open) return;
     let alive = true;
@@ -285,6 +293,8 @@ export function SettingsPanel({
         </button>
       </div>
 
+      {/* Two columns: short sections sit side by side, long ones span both. */}
+      <div className="settings-panel__grid">
       <div className="settings-panel__section">
         <div className="settings-panel__label">Gói tài khoản</div>
         <div className="settings-panel__value settings-panel__value--readonly">
@@ -411,7 +421,7 @@ export function SettingsPanel({
           videoModel="veo" + the matching quality; selecting Omni Flash
           stamps videoModel="omni_flash" (duration is picked per dispatch
           in the GenerationDialog). */}
-      <div className="settings-panel__section">
+      <div className="settings-panel__section settings-panel__section--wide">
         <div className="settings-panel__label">Model video</div>
         <div className="settings-panel__radio-group">
           {VIDEO_QUALITIES.map((q) => {
@@ -471,14 +481,6 @@ export function SettingsPanel({
         </div>
       </div>
 
-      <AccountPoolSection onProjectChange={onFlowProjectChange} />
-
-      <FlowAccountsSection onProjectChange={onFlowProjectChange} />
-
-      <GeminiKeysSection />
-
-      <ImageProvidersSection />
-
       <div className="settings-panel__section">
         <div className="settings-panel__label">Model ảnh</div>
         <div className="settings-panel__radio-group">
@@ -502,6 +504,16 @@ export function SettingsPanel({
           ))}
         </div>
       </div>
+
+
+      <ImageProvidersSection />
+
+      <AccountPoolSection onProjectChange={onFlowProjectChange} />
+
+      <FlowAccountsSection onProjectChange={onFlowProjectChange} />
+
+      <GeminiKeysSection />
+
 
       <div className="settings-panel__section">
         <div className="settings-panel__label">Thông tin</div>
@@ -539,15 +551,28 @@ export function SettingsPanel({
         // Sign out lives here (not in the AccountPanel chip) so the
         // chip stays narrow enough for the email + status row to
         // render without ellipsizing on default sidebar widths.
-        <div className="settings-panel__section settings-panel__section--logout">
+        <div className="settings-panel__section settings-panel__section--logout settings-panel__section--wide">
           <button
             type="button"
-            className="settings-panel__logout-btn"
-            onClick={onLogout}
+            className={`settings-panel__logout-btn${confirmLogout ? " settings-panel__logout-btn--armed" : ""}`}
+            onClick={() => {
+              if (!confirmLogout) { setConfirmLogout(true); return; }
+              setConfirmLogout(false);
+              void onLogout();
+            }}
             disabled={logoutPending}
           >
-            {logoutPending ? "Đang đăng xuất…" : "Đăng xuất khỏi tài khoản Flow"}
+            {logoutPending
+              ? "Đang đăng xuất…"
+              : confirmLogout
+                ? "Bấm lần nữa để đăng xuất (việc tạo ảnh/video sẽ dừng cho tới khi đăng nhập lại)"
+                : "Đăng xuất khỏi tài khoản Flow"}
           </button>
+          {confirmLogout && (
+            <button type="button" className="qt-link settings-panel__logout-cancel" onClick={() => setConfirmLogout(false)}>
+              Huỷ, không đăng xuất
+            </button>
+          )}
           <div className="settings-panel__hint">
             Xoá thông tin tài khoản đã lưu và báo extension bỏ token đang giữ
             trong bộ nhớ. Kết nối WebSocket vẫn mở nên đăng nhập lại không
@@ -555,6 +580,7 @@ export function SettingsPanel({
           </div>
         </div>
       )}
+      </div>
       </div>
     </div>
   );

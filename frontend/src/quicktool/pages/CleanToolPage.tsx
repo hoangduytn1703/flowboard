@@ -22,6 +22,7 @@ import {
 import type { AiStatus, CleanBand, CleanBox, CleanJob, CleanVideo, EraseMethod } from "../../api/clean";
 import "../quicktool.css";
 import "../clean.css";
+import { useToastOn } from "../../store/toast";
 
 const BOX_COLORS = ["#ff6a2b", "#38bdf8", "#a3e635", "#f472b6", "#facc15", "#c084fc"];
 const BAND_COLOR = "#facc15";
@@ -55,6 +56,7 @@ export function CleanToolPage() {
   const [video, setVideo] = useState<CleanVideo | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  useToastOn(uploadError, "error", () => setUploadError(null));
   const [dragOver, setDragOver] = useState(false);
   const fileInput = useRef<HTMLInputElement | null>(null);
 
@@ -70,6 +72,7 @@ export function CleanToolPage() {
   const [method, setMethod] = useState<EraseMethod>("delogo");
   const [boxBusy, setBoxBusy] = useState(false);
   const [boxError, setBoxError] = useState<string | null>(null);
+  useToastOn(boxError, "error", () => setBoxError(null));
 
   // ── AI ──────────────────────────────────────────────────────────────
   const [ai, setAi] = useState<AiStatus | null>(null);
@@ -77,6 +80,7 @@ export function CleanToolPage() {
   const [detectInfo, setDetectInfo] = useState<string | null>(null);
   const [detecting, setDetecting] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  useToastOn(aiError, "error", () => setAiError(null));
   const [job, setJob] = useState<CleanJob | null>(null);
   const [bandBlurBusy, setBandBlurBusy] = useState(false);
 
@@ -337,7 +341,6 @@ export function CleanToolPage() {
               </>
             )}
           </label>
-          {uploadError && <p className="clean-error">{uploadError}</p>}
           {video && (
             <div className="clean-meta">
               <span>Kích thước <strong>{video.width}×{video.height}</strong></span>
@@ -424,7 +427,6 @@ export function CleanToolPage() {
                     Bỏ hết
                   </button>
                 </div>
-                {boxError && <p className="clean-error">{boxError}</p>}
               </section>
 
               {/* 3 · AI subtitle bands */}
@@ -494,7 +496,6 @@ export function CleanToolPage() {
                     </div>
                   </>
                 )}
-                {aiError && <p className="clean-error">{aiError}</p>}
               </section>
             </div>
           </div>

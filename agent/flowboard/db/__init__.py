@@ -4,7 +4,7 @@ from sqlalchemy.engine import Engine
 from .session import engine, get_session
 from .session import init_db as _init_db_tables
 
-__all__ = ["engine", "get_session", "init_db", "ensure_reference_meta_column"]
+__all__ = ["engine", "get_session", "init_db", "ensure_reference_meta_column", "ensure_product_gender_column"]
 
 
 def ensure_reference_meta_column(db_engine: Engine = engine) -> bool:
@@ -30,7 +30,30 @@ def ensure_reference_meta_column(db_engine: Engine = engine) -> bool:
         return True
 
 
+def ensure_product_gender_column(db_engine: Engine = engine) -> bool:
+    """Add ``product.gender`` to a DB created before the column existed (same
+    non-destructive pattern as :func:`ensure_reference_meta_column`)."""
+    with db_engine.connect() as conn:
+        insp = inspect(conn)
+        if not insp.has_table("product"):
+            return False
+        if "gender" in {c["name"] for c in insp.get_columns("product")}:
+            return False
+        conn.exec_driver_sql("ALTER TABLE product ADD COLUMN gender VARCHAR DEFAULT ''")
+        # Products saved before the column existed get a guess from their
+        # name / description, once — afterwards "" means the user said "unknown".
+        from flowboard.services.product_gender import guess
+
+        for pid, name, desc in conn.exec_driver_sql("SELECT id, name, description FROM product").fetchall():
+            g = guess(name, desc)
+            if g:
+                conn.exec_driver_sql("UPDATE product SET gender = ? WHERE id = ?", (g, pid))
+        conn.commit()
+        return True
+
+
 def init_db() -> None:
     """Create tables and apply the lightweight column migrations."""
     _init_db_tables()
     ensure_reference_meta_column(engine)
+    ensure_product_gender_column(engine)

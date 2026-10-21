@@ -1,13 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import {
   PRODUCT_CATEGORIES,
+  PRODUCT_GENDERS,
+  type ProductGender,
   createProduct,
   bulkDeleteProducts,
   deleteProduct,
   describeMedia,
+  importProductFromShopee,
   importProductsFromTikTok,
   productFromLink,
   uploadImageFromUrl,
+  listBoardSummaries,
   listProducts,
   mediaUrl,
   updateProduct,
@@ -17,12 +21,55 @@ import {
   type ProductDraft,
 } from "../api/client";
 import { useGenerationStore } from "../store/generation";
+import { toast, useToastOn } from "../store/toast";
+
+/** Products per page: five to a row, five rows in the grid; a list row is taller. */
+const GRID_PER_PAGE = 25;
+const LIST_PER_PAGE = 15;
+
+type SortKey = "newest" | "oldest" | "name_asc" | "name_desc" | "price_asc" | "price_desc" | "clips";
+const SORTS: [SortKey, string][] = [
+  ["newest", "Mới thêm nhất"],
+  ["oldest", "Cũ nhất"],
+  ["name_asc", "Tên A → Z"],
+  ["name_desc", "Tên Z → A"],
+  ["price_asc", "Giá thấp → cao"],
+  ["price_desc", "Giá cao → thấp"],
+  ["clips", "Nhiều clip nhất"],
+];
+
+/** "76.064đ" / "₫ 79.434" / "399k" → a number to sort by; null when there is none. */
+function priceValue(price: string): number | null {
+  const t = (price || "").toLowerCase().replace(/\s/g, "");
+  const m = t.match(/(\d[\d.,]*)(k|tr|triệu)?/);
+  if (!m) return null;
+  let n = parseFloat(m[1].replace(/[.,]/g, ""));
+  if (Number.isNaN(n)) return null;
+  if (m[2] === "k") n *= 1000;
+  else if (m[2]) n *= 1_000_000;
+  return n;
+}
+
+const VIEW_KEY = "flowboard.products.view";
+function loadView(): "grid" | "list" {
+  try { return window.localStorage.getItem(VIEW_KEY) === "list" ? "list" : "grid"; } catch { return "grid"; }
+}
+
+function genderShort(g: ProductGender): string {
+  return g === "male" ? "Nam" : g === "female" ? "Nữ" : g === "unisex" ? "Unisex" : "";
+}
+
+function fmtDate(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("vi-VN");
+}
 
 /** Most photos a product keeps; the first three reach the board. */
 const MAX_PHOTOS = 6;
 
 type Draft = Required<Pick<ProductDraft,
-  "name" | "description" | "category" | "price" | "selling_points" | "link" | "notes" | "media_ids"
+  "name" | "description" | "category" | "price" | "selling_points" | "link" | "notes" | "media_ids" | "gender"
 >> & { aspect_ratio: string | null };
 
 function emptyDraft(): Draft {
@@ -32,6 +79,7 @@ function emptyDraft(): Draft {
     category: "fashion",
     price: "",
     selling_points: "",
+    gender: "",
     link: "",
     notes: "",
     media_ids: [],
@@ -46,6 +94,7 @@ function draftOf(p: Product): Draft {
     category: p.category,
     price: p.price,
     selling_points: p.selling_points,
+    gender: p.gender ?? "",
     link: p.link,
     notes: p.notes,
     media_ids: [...p.media_ids],
@@ -75,15 +124,22 @@ export function ProductsPanel({
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [busy, setBusy] = useState<"" | "save" | "upload" | "describe" | "delete">("");
   const [error, setError] = useState<string | null>(null);
+  // Failures are toasts (the old red line under the buttons was easy to miss).
+  useToastOn(error, "error", () => setError(null));
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [importing, setImporting] = useState(false);
   // Multi-select on the list: ids ticked, and whether the bulk delete is armed.
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [bulkConfirm, setBulkConfirm] = useState(false);
+  // List controls: search, sort, category filter, grid/list view, page.
+  const [q, setQ] = useState("");
+  const [sort, setSort] = useState<SortKey>("newest");
+  const [catFilter, setCatFilter] = useState<ProductCategory | "">("");
+  const [view, setView] = useState<"grid" | "list">(loadView);
+  const [page, setPage] = useState(1);
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
   const [linkBusy, setLinkBusy] = useState(false);
-  const [importNote, setImportNote] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   /** Pull the products off the TikTok tab that is open in Chrome. Photos
@@ -92,21 +148,19 @@ export function ProductsPanel({
   async function importTikTok() {
     setImporting(true);
     setError(null);
-    setImportNote(null);
     try {
       const r = await importProductsFromTikTok();
       await refresh();
       if (r.found === 0) {
-        setError(
+        toast.warning(
           `Không đọc được sản phẩm nào từ tab "${r.tab_title ?? r.tab_url ?? "TikTok"}". ` +
           "Hãy mở đúng trang danh sách sản phẩm (showcase), kéo xuống cho hiện đủ thẻ rồi thử lại. " +
           `(thông tin dò: ${r.diag?.anchorHits ?? 0} link sản phẩm, ${r.diag?.imgs ?? 0} ảnh)`,
         );
       } else {
-        setImportNote(
-          `Tìm thấy ${r.found} sản phẩm: thêm mới ${r.created}, bỏ qua ${r.skipped} (đã có).` +
-          (r.photos_pending ? ` Đang tải ${r.photos_pending} ảnh về, vài giây mỗi ảnh…` : ""),
-        );
+        const text = `Tìm thấy ${r.found} sản phẩm: thêm mới ${r.created}, bỏ qua ${r.skipped} (đã có).` +
+          (r.photos_pending ? ` Đang tải ${r.photos_pending} ảnh về, vài giây mỗi ảnh…` : "");
+        if (r.created) toast.success(text); else toast.warning(text);
         for (let i = 0; i < 12 && r.photos_pending; i++) {
           await new Promise((res) => setTimeout(res, 5000));
           await refresh();
@@ -114,6 +168,27 @@ export function ProductsPanel({
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "nhập từ TikTok thất bại");
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  /** The Shopee product page open in Chrome becomes one product (photo
+   * arrives afterwards, uploaded in the background). */
+  async function importShopee() {
+    setImporting(true);
+    setError(null);
+    try {
+      const r = await importProductFromShopee();
+      await refresh();
+      if (r.created) toast.success(`Đã thêm "${r.name ?? "sản phẩm"}" từ Shopee.${r.photos_pending ? " Đang tải ảnh về, vài giây…" : ""}`);
+      else toast.warning(`"${r.name ?? "Sản phẩm này"}" đã có trong danh sách (trùng link), không thêm lại.`);
+      for (let i = 0; i < 6 && r.photos_pending; i++) {
+        await new Promise((res) => setTimeout(res, 5000));
+        await refresh();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "nhập từ Shopee thất bại");
     } finally {
       setImporting(false);
     }
@@ -162,10 +237,15 @@ export function ProductsPanel({
     });
   }
 
-  function toggleAll() {
+  /** Tick / untick every product on the page being shown. */
+  function toggleAll(ids: number[]) {
     setBulkConfirm(false);
-    const all = (products ?? []).map((p) => p.id);
-    setSelected((prev) => (prev.size === all.length ? new Set() : new Set(all)));
+    setSelected((prev) => {
+      const next = new Set(prev);
+      const allOn = ids.length > 0 && ids.every((id) => next.has(id));
+      for (const id of ids) { if (allOn) next.delete(id); else next.add(id); }
+      return next;
+    });
   }
 
   async function deleteSelected() {
@@ -188,7 +268,18 @@ export function ProductsPanel({
     }
   }
 
+  // How many clips each product already has (board.data.quicktool.product_id).
+  const [clipCounts, setClipCounts] = useState<Record<number, number>>({});
+
   async function refresh() {
+    listBoardSummaries().then((boards) => {
+      const counts: Record<number, number> = {};
+      for (const b of boards) {
+        const pid = (b.data?.quicktool as { product_id?: number | null } | undefined)?.product_id;
+        if (typeof pid === "number") counts[pid] = (counts[pid] ?? 0) + 1;
+      }
+      setClipCounts(counts);
+    }).catch(() => {});
     try {
       const list = await listProducts();
       setProducts(list);
@@ -271,31 +362,33 @@ export function ProductsPanel({
     }
   }
 
-  async function save(): Promise<Product | null> {
+  /** Save, say so, and go back to the list. Making a clip is a separate step,
+   * from the list. */
+  async function save() {
     if (!draft.name.trim()) {
       setError("Cần nhập tên sản phẩm");
-      return null;
+      return;
     }
     setError(null);
     setBusy("save");
     try {
-      const saved = editing === "new" || editing === null
-        ? await createProduct(draft)
-        : await updateProduct(editing, draft);
+      const isNew = editing === "new" || editing === null;
+      // A new product left on "Không rõ": let the agent guess from its name.
+      const { gender, ...rest } = draft;
+      const saved = isNew
+        ? await createProduct(gender ? draft : rest)
+        : await updateProduct(editing as number, draft);
+      if (isNew && !gender && saved.gender) {
+        toast.info(`Tự nhận "${saved.name}" là đồ dành cho ${saved.gender === "male" ? "nam" : saved.gender === "female" ? "nữ" : "cả nam và nữ"} — sửa ở mục "Dành cho" nếu sai.`);
+      }
       await refresh();
-      setEditing(saved.id);
-      return saved;
+      toast.success(isNew ? `Đã thêm sản phẩm "${saved.name}".` : `Đã lưu thay đổi cho "${saved.name}".`);
+      setEditing(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "lưu thất bại");
-      return null;
     } finally {
       setBusy("");
     }
-  }
-
-  async function saveAndMakeClip() {
-    const saved = await save();
-    if (saved) onMakeClip(saved);
   }
 
   async function remove() {
@@ -306,8 +399,10 @@ export function ProductsPanel({
     }
     setBusy("delete");
     try {
+      const name = draft.name;
       await deleteProduct(editing);
       await refresh();
+      toast.success(`Đã xoá sản phẩm "${name}".`);
       setEditing(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "xoá thất bại");
@@ -319,6 +414,39 @@ export function ProductsPanel({
 
   const categoryLabel = (c: ProductCategory) =>
     PRODUCT_CATEGORIES.find(([v]) => v === c)?.[1] ?? c;
+
+  function chooseView(v: "grid" | "list") {
+    setView(v);
+    setPage(1);
+    try { window.localStorage.setItem(VIEW_KEY, v); } catch { /* the choice just is not remembered */ }
+  }
+
+  const needle = q.trim().toLowerCase();
+  const filtered = (products ?? []).filter((p) =>
+    (!catFilter || p.category === catFilter)
+    && (!needle || [p.name, p.description, p.link, p.price, categoryLabel(p.category)].some((t) => (t || "").toLowerCase().includes(needle))));
+  const sorted = [...filtered].sort((a, b) => {
+    const byDate = (x: Product, y: Product) => (y.created_at ?? "").localeCompare(x.created_at ?? "") || y.id - x.id;
+    switch (sort) {
+      case "oldest": return -byDate(a, b);
+      case "name_asc": return a.name.localeCompare(b.name, "vi");
+      case "name_desc": return b.name.localeCompare(a.name, "vi");
+      case "clips": return (clipCounts[b.id] ?? 0) - (clipCounts[a.id] ?? 0) || byDate(a, b);
+      case "price_asc":
+      case "price_desc": {
+        const pa = priceValue(a.price), pb = priceValue(b.price);
+        if (pa === null && pb === null) return byDate(a, b);
+        if (pa === null) return 1;          // no price: always last
+        if (pb === null) return -1;
+        return (sort === "price_asc" ? pa - pb : pb - pa) || byDate(a, b);
+      }
+      default: return byDate(a, b);
+    }
+  });
+  const perPage = view === "grid" ? GRID_PER_PAGE : LIST_PER_PAGE;
+  const pages = Math.max(1, Math.ceil(sorted.length / perPage));
+  const current = Math.min(page, pages);
+  const shown = sorted.slice((current - 1) * perPage, current * perPage);
 
   const inner = (
     <>
@@ -332,8 +460,21 @@ export function ProductsPanel({
               Lưu sản phẩm một lần (ảnh thật, mô tả, điểm bán), sau đó bấm <strong>Tạo clip</strong> để
               dựng board quảng cáo có sẵn ảnh và prompt.
             </p>
+            <div className="product-toolbar">
+              <button type="button" className="project-modal__btn project-modal__btn--primary" onClick={() => openForm(null)}>+ Thêm sản phẩm</button>
+              <button type="button" className="project-modal__btn" onClick={() => setLinkOpen((v) => !v)} aria-expanded={linkOpen}>🔗 Thêm từ link</button>
+              <button type="button" className="project-modal__btn" onClick={importTikTok} disabled={importing}
+                      title="Mở trang showcase / shop của bạn trên TikTok (đã đăng nhập) trong Chrome trước khi bấm">
+                {importing ? "Đang đọc…" : "📥 Nhập từ TikTok"}
+              </button>
+              <button type="button" className="project-modal__btn" onClick={importShopee} disabled={importing}
+                      title="Mở trang chi tiết sản phẩm trên Shopee (đã đăng nhập) trong Chrome trước khi bấm">
+                {importing ? "Đang đọc…" : "🛒 Nhập từ Shopee"}
+              </button>
+              {!asPage && <button type="button" className="project-modal__btn product-toolbar__close" onClick={onClose}>Đóng</button>}
+            </div>
             {linkOpen && (
-              <div className="qt-ref__link product-linkrow" style={{ marginBottom: 12 }}>
+              <div className="qt-ref__link product-linkrow">
                 <input
                   className="project-modal__input"
                   type="url"
@@ -349,16 +490,38 @@ export function ProductsPanel({
                 </button>
               </div>
             )}
+
+            {(products?.length ?? 0) > 0 && (
+              <div className="product-controls">
+                <input type="search" className="product-controls__search" placeholder="Tìm theo tên, mô tả, link, giá…"
+                       value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} />
+                <select value={catFilter} onChange={(e) => { setCatFilter(e.target.value as ProductCategory | ""); setPage(1); }} aria-label="Lọc theo ngành hàng">
+                  <option value="">Tất cả ngành</option>
+                  {PRODUCT_CATEGORIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+                <select value={sort} onChange={(e) => { setSort(e.target.value as SortKey); setPage(1); }} aria-label="Sắp xếp">
+                  {SORTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+                <div className="product-controls__view" role="group" aria-label="Kiểu hiển thị">
+                  <button type="button" className={view === "grid" ? "is-active" : ""} aria-pressed={view === "grid"} onClick={() => chooseView("grid")} title="Dạng lưới">▦ Lưới</button>
+                  <button type="button" className={view === "list" ? "is-active" : ""} aria-pressed={view === "list"} onClick={() => chooseView("list")} title="Dạng danh sách">☰ Danh sách</button>
+                </div>
+              </div>
+            )}
+
             {(products?.length ?? 0) > 0 && (
               <div className="product-bulk">
                 <label className="product-bulk__all">
-                  <input type="checkbox" checked={selected.size > 0 && selected.size === products!.length}
-                         onChange={toggleAll} disabled={!!busy} />
-                  <span>Chọn tất cả ({products!.length})</span>
+                  <input type="checkbox" checked={shown.length > 0 && shown.every((p) => selected.has(p.id))}
+                         onChange={() => toggleAll(shown.map((p) => p.id))} disabled={!!busy} />
+                  <span>Chọn trang này ({shown.length})</span>
                 </label>
+                <span className="product-bulk__count">
+                  {sorted.length === (products?.length ?? 0) ? `${sorted.length} sản phẩm` : `${sorted.length} / ${products!.length} sản phẩm`}
+                </span>
                 {selected.size > 0 && (
                   <>
-                    <span className="product-bulk__count">Đã chọn {selected.size}</span>
+                    <span className="product-bulk__count">· đã chọn {selected.size}</span>
                     <button type="button" className="project-modal__btn" onClick={() => { setSelected(new Set()); setBulkConfirm(false); }} disabled={!!busy}>
                       Bỏ chọn
                     </button>
@@ -369,63 +532,88 @@ export function ProductsPanel({
                 )}
               </div>
             )}
-            <div className="product-grid">
-              <button type="button" className="product-card product-card--add" onClick={() => openForm(null)}>
-                <span className="product-card__plus" aria-hidden="true">+</span>
-                <span>Thêm sản phẩm</span>
-              </button>
-              <button type="button" className="product-card product-card--add" onClick={() => setLinkOpen((v) => !v)}>
-                <span className="product-card__plus" aria-hidden="true">🔗</span>
-                <span>Thêm từ link</span>
-              </button>
-              {products === null && <span className="project-modal__hint">Đang tải…</span>}
-              {products !== null && products.length === 0 && (
-                <p className="qt-empty-state">
-                  Chưa có sản phẩm nào. Bấm <strong>🔗 Thêm từ link</strong> để dán link TikTok Shop / Shopee,
-                  hoặc <strong>+ Thêm sản phẩm</strong> để nhập tay.
-                </p>
-              )}
-              {(products ?? []).map((p) => (
-                <div key={p.id} className={`product-card${selected.has(p.id) ? " product-card--selected" : ""}`}>
-                  <input type="checkbox" className="product-card__check" checked={selected.has(p.id)}
-                         onChange={() => toggleSelected(p.id)} aria-label={`Chọn ${p.name}`} disabled={!!busy} />
-                  <button type="button" className="product-card__main" onClick={() => openForm(p)} title="Sửa">
-                    {p.media_ids[0] ? (
-                      <img className="product-card__thumb" src={mediaUrl(p.media_ids[0])} alt="" />
-                    ) : (
-                      <span className="product-card__thumb product-card__thumb--empty">chưa có ảnh</span>
-                    )}
-                    <span className="product-card__name">{p.name}</span>
-                    <span className="product-card__meta">
-                      {categoryLabel(p.category)}{p.price ? ` · ${p.price}` : ""}
+
+            {products === null && <span className="project-modal__hint">Đang tải…</span>}
+            {products !== null && products.length === 0 && (
+              <p className="qt-empty-state">
+                Chưa có sản phẩm nào. Bấm <strong>🔗 Thêm từ link</strong> để dán link TikTok Shop / Shopee,
+                hoặc <strong>+ Thêm sản phẩm</strong> để nhập tay.
+              </p>
+            )}
+            {products !== null && products.length > 0 && sorted.length === 0 && (
+              <p className="qt-empty-state">Không có sản phẩm nào khớp bộ lọc. <button type="button" className="qt-link" onClick={() => { setQ(""); setCatFilter(""); }}>Xoá bộ lọc</button></p>
+            )}
+
+            {view === "grid" ? (
+              <div className="product-grid product-grid--five">
+                {shown.map((p) => (
+                  <div key={p.id} className={`product-card${selected.has(p.id) ? " product-card--selected" : ""}`}>
+                    <input type="checkbox" className="product-card__check" checked={selected.has(p.id)}
+                           onChange={() => toggleSelected(p.id)} aria-label={`Chọn ${p.name}`} disabled={!!busy} />
+                    <button type="button" className="product-card__main" onClick={() => openForm(p)} title="Sửa">
+                      {p.media_ids[0] ? (
+                        <img className="product-card__thumb" src={mediaUrl(p.media_ids[0])} alt="" />
+                      ) : (
+                        <span className="product-card__thumb product-card__thumb--empty">chưa có ảnh</span>
+                      )}
+                      <span className="product-card__name">{p.name}</span>
+                      <span className="product-card__meta">
+                        {categoryLabel(p.category)}{p.gender ? ` · ${genderShort(p.gender)}` : ""}{p.price ? ` · ${p.price}` : ""}
+                      </span>
+                      <span className={`product-card__clips${clipCounts[p.id] ? "" : " product-card__clips--none"}`}>
+                        {clipCounts[p.id] ? `🎬 ${clipCounts[p.id]} clip` : "Chưa có clip"}
+                      </span>
+                    </button>
+                    <button type="button" className="project-modal__btn project-modal__btn--primary product-card__clip" onClick={() => onMakeClip(p)}>
+                      🎬 Tạo clip
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="product-list" role="table" aria-label="Danh sách sản phẩm">
+                {shown.map((p) => (
+                  <div key={p.id} role="row" className={`product-row${selected.has(p.id) ? " product-row--selected" : ""}`}>
+                    <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggleSelected(p.id)}
+                           aria-label={`Chọn ${p.name}`} disabled={!!busy} />
+                    <button type="button" className="product-row__main" onClick={() => openForm(p)} title="Sửa">
+                      {p.media_ids[0] ? (
+                        <img className="product-row__thumb" src={mediaUrl(p.media_ids[0])} alt="" />
+                      ) : (
+                        <span className="product-row__thumb product-row__thumb--empty">?</span>
+                      )}
+                      <span className="product-row__name">{p.name}</span>
+                    </button>
+                    <span className="product-row__cat">{categoryLabel(p.category)}{p.gender ? ` · ${genderShort(p.gender)}` : ""}</span>
+                    <span className="product-row__price">{p.price || "—"}</span>
+                    <span className={`product-row__clips${clipCounts[p.id] ? "" : " product-card__clips--none"}`}>
+                      {clipCounts[p.id] ? `🎬 ${clipCounts[p.id]}` : "—"}
                     </span>
-                  </button>
-                  <button
-                    type="button"
-                    className="project-modal__btn project-modal__btn--primary product-card__clip"
-                    onClick={() => onMakeClip(p)}
-                  >
-                    🎬 Tạo clip
-                  </button>
-                </div>
-              ))}
-            </div>
-            {importNote && <p className="project-modal__hint">{importNote}</p>}
-            {error && <p className="product-form__error" role="alert">{error}</p>}
-            <div className="project-modal__actions">
-              <button type="button" className="project-modal__btn" onClick={importTikTok} disabled={importing}
-                      title="Mở trang showcase / shop của bạn trên TikTok (đã đăng nhập) trong Chrome trước khi bấm">
-                {importing ? "Đang đọc TikTok…" : "📥 Nhập từ TikTok"}
-              </button>
-              {!asPage && <button type="button" className="project-modal__btn" onClick={onClose}>Đóng</button>}
-            </div>
+                    <span className="product-row__date">{fmtDate(p.created_at)}</span>
+                    <span className="product-row__actions">
+                      <button type="button" className="project-modal__btn" onClick={() => openForm(p)}>Sửa</button>
+                      <button type="button" className="project-modal__btn project-modal__btn--primary" onClick={() => onMakeClip(p)}>🎬 Tạo clip</button>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {pages > 1 && (
+              <nav className="qt-pager" aria-label="Phân trang">
+                <button type="button" className="qt-btn qt-btn--ghost qt-btn--small" disabled={current <= 1} onClick={() => setPage(current - 1)}>← Trước</button>
+                {Array.from({ length: pages }, (_, i) => i + 1).map((n) => (
+                  <button key={n} type="button" aria-current={n === current ? "page" : undefined}
+                          className={`qt-pager__num${n === current ? " qt-pager__num--active" : ""}`} onClick={() => setPage(n)}>{n}</button>
+                ))}
+                <button type="button" className="qt-btn qt-btn--ghost qt-btn--small" disabled={current >= pages} onClick={() => setPage(current + 1)}>Sau →</button>
+                <span className="qt-pager__info">{(current - 1) * perPage + 1}–{Math.min(current * perPage, sorted.length)} / {sorted.length}</span>
+              </nav>
+            )}
           </>
         ) : (
           <>
             <div className="product-form">
-              {error && /ảnh|upload|project/i.test(error) && (
-                <p className="product-form__error product-form__error--photo" role="alert">{error}</p>
-              )}
               <div className="product-photos">
                 {draft.media_ids.map((id, i) => (
                   <div key={id} className={`product-photo${i === 0 ? " product-photo--main" : ""}`}>
@@ -499,6 +687,16 @@ export function ProductsPanel({
                   </select>
                 </label>
                 <label className="tpl-inputs__field">
+                  <span>Dành cho (người mẫu phải cùng giới)</span>
+                  <select
+                    className="project-modal__input"
+                    value={draft.gender}
+                    onChange={(e) => set("gender", e.target.value as ProductGender)}
+                  >
+                    {PRODUCT_GENDERS.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+                  </select>
+                </label>
+                <label className="tpl-inputs__field">
                   <span>Giá</span>
                   <input
                     className="project-modal__input"
@@ -563,7 +761,6 @@ export function ProductsPanel({
                 />
               </label>
             </div>
-            {error && !/ảnh|upload|project/i.test(error) && <p className="product-form__error" role="alert">{error}</p>}
             <div className="project-modal__actions">
               {typeof editing === "number" && (
                 <button
@@ -578,16 +775,8 @@ export function ProductsPanel({
               <button type="button" className="project-modal__btn" onClick={() => setEditing(null)} disabled={!!busy}>
                 ← Danh sách
               </button>
-              <button type="button" className="project-modal__btn" onClick={save} disabled={!!busy}>
+              <button type="button" className="project-modal__btn project-modal__btn--primary" onClick={save} disabled={!!busy}>
                 {busy === "save" ? "Đang lưu…" : "Lưu"}
-              </button>
-              <button
-                type="button"
-                className="project-modal__btn project-modal__btn--primary"
-                onClick={saveAndMakeClip}
-                disabled={!!busy}
-              >
-                Lưu & tạo clip
               </button>
             </div>
           </>

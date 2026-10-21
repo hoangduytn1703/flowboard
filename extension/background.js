@@ -236,6 +236,10 @@ function connectToAgent() {
         }
       } else if (msg.method === 'batch_rpc') {
         await handleBatchRpc(msg);
+      } else if (msg.method === 'read_open_tab') {
+        await handleReadOpenTab(msg);
+      } else if (msg.method === 'read_page') {
+        await handleReadPage(msg);
       } else if (msg.method === 'scrape_page') {
         await handleScrapePage(msg);
       } else if (msg.method === 'read_account') {
@@ -571,6 +575,94 @@ async function readAccountInPage() {
   }
   if (!out) return { error: 'ACCOUNT_PANEL_NOT_FOUND', tier };
   return { ...out, tier };
+}
+
+// ─── Read one product page in a background tab (Shopee) ─────
+//
+// Shopee renders its product pages in JavaScript and only for a signed-in
+// browser, so the agent cannot fetch them. This opens the link in an inactive
+// tab of the user's own Chrome, waits until the product has rendered, reads
+// what a product card needs, and closes the tab again. Nothing is clicked.
+
+const READ_PAGE_HOSTS = /^https:\/\/([a-z0-9-]+\.)*(shopee\.vn|shp\.ee)\//i;
+
+async function handleReadPage(msg) {
+  const { id, params } = msg;
+  const { url, timeoutMs = 25000, minText = 1500 } = params || {};
+  if (!READ_PAGE_HOSTS.test(url || '')) {
+    sendToAgent({ id, status: 400, error: 'URL_NOT_ALLOWED' });
+    return;
+  }
+  let tab = null;
+  try {
+    tab = await chrome.tabs.create({ url, active: false });
+    const deadline = Date.now() + timeoutMs;
+    let result = null;
+    while (Date.now() < deadline) {
+      await sleep(1200);
+      let t;
+      try { t = await chrome.tabs.get(tab.id); } catch { break; }
+      if (/\/verify\/|\/buyer\/login/.test(t.url || '')) {
+        result = { blocked: true, url: t.url };
+        break;
+      }
+      if (t.status !== 'complete') continue;
+      const [r] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id }, func: readProductPageInPage, args: [minText],
+      });
+      if (r?.result) result = r.result;
+      if (r?.result?.ready) break;
+    }
+    sendToAgent({ id, status: 200, data: JSON.stringify(result || { timeout: true }) });
+  } catch (e) {
+    sendToAgent({ id, status: 500, error: e?.message || 'READ_PAGE_FAILED' });
+  } finally {
+    if (tab?.id) chrome.tabs.remove(tab.id).catch(() => {});
+  }
+}
+
+// "Nhập từ Shopee": read the Shopee product page the user already has open
+// (active tab first, else the most recently used one). Nothing is opened.
+async function handleReadOpenTab(msg) {
+  const { id } = msg;
+  try {
+    const tabs = await chrome.tabs.query({ url: ['https://shopee.vn/*', 'https://*.shopee.vn/*'] });
+    if (!tabs.length) {
+      sendToAgent({ id, status: 404, error: 'NO_SHOPEE_TAB' });
+      return;
+    }
+    const tab = tabs.find((t) => t.active) || tabs.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0];
+    const [r] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: readProductPageInPage, args: [1500] });
+    sendToAgent({ id, status: 200, data: JSON.stringify({ ...(r?.result || {}), tabUrl: tab.url, tabTitle: tab.title }) });
+  } catch (e) {
+    sendToAgent({ id, status: 500, error: e?.message || 'READ_TAB_FAILED' });
+  }
+}
+
+// Runs inside the page: must be self-contained.
+function readProductPageInPage(minText) {
+  const text = document.body ? document.body.innerText || '' : '';
+  const meta = (n) => (document.querySelector(`meta[property="${n}"], meta[name="${n}"]`) || {}).content || '';
+  const ld = [];
+  document.querySelectorAll('script[type="application/ld+json"]').forEach((s) => {
+    try { ld.push(JSON.parse(s.textContent)); } catch (e) { /* not JSON */ }
+  });
+  const images = Array.from(document.images)
+    .map((i) => ({ src: i.currentSrc || i.src, w: i.naturalWidth, h: i.naturalHeight }))
+    .filter((i) => i.src && i.src.startsWith('http') && i.w >= 300 && i.h >= 300)
+    .sort((a, b) => b.w * b.h - a.w * a.h)
+    .slice(0, 8);
+  const hasProduct = ld.some((x) => JSON.stringify(x).includes('"Product"'));
+  return {
+    ready: hasProduct || text.length >= minText,
+    url: location.href,
+    title: document.title,
+    description: meta('og:description') || meta('description'),
+    ogImage: meta('og:image'),
+    ld,
+    images,
+    text: text.slice(0, 15000),
+  };
 }
 
 async function handleScrapePage(msg) {

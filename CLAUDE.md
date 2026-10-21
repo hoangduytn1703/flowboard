@@ -31,6 +31,9 @@ Tạo ảnh/video đi qua Google Flow (cần gói Pro/Ultra) bằng extension Ch
   (`FLOWBOARD_ERASE_PYTHON`, `FLOWBOARD_ERASE_ROOT`); thiếu thì chỉ có chế độ khoanh vùng.
 
 ## Bẫy đã gặp (đừng lặp lại)
+- **Sửa file lớn bằng script: tính điểm cuối bằng `index()` của chính đoạn cần xoá, đừng trỏ tới marker ở xa** — 21/10 một lệnh xoá nhầm ~11 nghìn ký tự CSS của `quicktool.css` (phục hồi từ git HEAD + dựng lại phần chưa commit; luôn `git diff --stat` ngay sau khi sửa file lớn).
+- **TikTok lúc có lúc không trả trang "Security Check"** thay cho trang sản phẩm (thấy thật 21/10): `product_link.fetch_page` nhận diện trang chặn (`_looks_blocked`), thử lại 1 lần sau 3 s rồi báo lỗi — trước đó đã lưu một sản phẩm tên "Security Check".
+- **Vite có lúc giữ bản biên dịch RỖNG của một file vừa sửa** (21/10: `AccountPanel.tsx` trả 0 byte → cả app trắng, lỗi "does not provide an export named …" dù `tsc` sạch). Kiểm tra `curl -s -o /dev/null -w '%{size_download}' localhost:5174/src/<file>`; sửa bằng `touch <file>`.
 - **Gemini chậm/treo không hẳn do key rẻ, mà do model**: đo cùng một câu hỏi, `gemini-3.1-flash-lite` ~4 s, `3.5-flash` ~21 s (nhiều thinking token), `3.7`/`3.8-flash` quá 40 s. Việc đọc sản phẩm từ link dùng `product_link.EXTRACT_MODEL` (lite, ~13 s cả quy trình). Kịch bản clip (`analyze`) vẫn dùng model mặc định, có thể chậm; chưa đổi vì chưa so chất lượng. Fallback chỉ xử lý 503, không xử lý treo/timeout.
 - **`NANO_BANANA_2` (NARWHAL) bị Flow từ chối** (`ogiZ0b failed: [5]`). Dùng `NANO_BANANA_PRO`. Giá trị đã lưu trong localStorage được ưu tiên hơn mặc định.
 - Video: mặc định Omni Flash. Flow tự sinh giọng tiếng Anh vào video → `flow_sdk.silent_prompt()` thêm câu "no speech"; ở bước Ghép chọn "Tiếng gốc của clip" = nhỏ lại/tắt hẳn.
@@ -46,7 +49,7 @@ Tạo ảnh/video đi qua Google Flow (cần gói Pro/Ultra) bằng extension Ch
 - Frontend `frontend/src/quicktool/`: `QuicktoolApp.tsx` (route + wizard 5 bước), `NewClipDialog.tsx` (chọn sản phẩm, kiểu clip, "Số clip" N clip/1 sản phẩm), `quicktool.css`. `components/ProductsPanel.tsx` (trang `/products`, chọn nhiều + xoá). Cỡ chữ: thang riêng (chữ nội dung 16px); Canvas cố ý giữ chữ nhỏ.
 - **Chế độ chỉ bàn tay**: ô "Giới tính mẫu" của mọi kiểu clip có thêm `Tay nữ` / `Tay nam` (`hands_female` / `hands_male`). `templates.render()` khi đó bỏ node nhân vật + cạnh nối, thêm câu "HANDS-ONLY SHOT…" vào prompt ảnh/video (không viết lại từng prompt), mô tả tay lấy từ ô `handLook` (mặc định "beautiful, well-groomed hands…"), quốc gia từ `charCountry`. **`fashion_ad` (quần áo) bắt buộc có người** (`person_required`): không có lựa chọn tay trên UI, backend/chat agent trả lỗi `PersonRequiredError` nếu gửi `hands_*`. Clip "theo video mẫu / link": màn review có ô **Người mẫu** (AI gợi ý / Nữ / Nam / Tay nữ / Tay nam / Không có người) + Quốc gia, gửi `character` lên `/api/reference-video/build` → `reference_video._character_for`. **Bước 1 wizard** có nút gạt Người mẫu ⇄ Chỉ bàn tay: `POST /api/boards/{id}/model-mode` (`services/model_mode.py`) xoá/tạo lại node nhân vật + cạnh, thêm/bỏ câu `HANDS_MARKER` trong prompt cảnh (idempotent), lưu `quicktool.hands`. Sản phẩm/kiểu thời trang bị từ chối ở cả ba chỗ. **Chưa tạo thử clip thật** để xem Flow vẽ tay có ổn không (kiểu quần áo chỉ tay có thể gượng).
 - **Bước 1 · Sản phẩm nhận nhiều ảnh** (tối đa `MAX_PRODUCT_PHOTOS = 4`, `store/quicktool.ts`): "+ Thêm góc khác" tạo node `visual_asset` mới nối vào đúng các cảnh mà ảnh chính đang nối, rồi upload; "Bỏ ảnh" xoá node phụ (không xoá ảnh chính). Upload qua Flow mất ~10–15 s/ảnh.
-- Sidebar: "+ Clip mới" (mở hộp "Clip mới"; 8 mẫu theo ngành hàng + 2 nguồn có sẵn chọn ở mục 2), Sản phẩm, Người mẫu đã lưu (`/models`), Prompt đã lưu (`/prompts`), Lịch sử & credit (`/history`), Xoá chữ / logo (`/tools/clean`), Canvas, Cài đặt; cuối sidebar có `CreditBadge` (credit Flow).
+- Sidebar: "Clip của tôi" (trang này có nút + thẻ "Clip mới" mở hộp "Clip mới": 8 mẫu theo ngành hàng + 2 nguồn có sẵn chọn ở mục 2; **sidebar không còn mục "+ Clip mới"**, 21/10), Sản phẩm, Người mẫu đã lưu (`/models`), Prompt đã lưu (`/prompts`), Lịch sử & credit (`/history`), Xoá chữ / logo (`/tools/clean`), Canvas, Cài đặt; cuối sidebar có `CreditBadge` (credit Flow).
 - Trang TikTok `shop.tiktok.com/.../pdp/<id>` đọc được không cần đăng nhập; ảnh `ibyteimg` đổi `resize-webp:260:260` → `800:800` để lấy ảnh to. Giá trên trang có nhiều mức nên Gemini có thể chọn sai: để người dùng kiểm tra.
 
 - **Tạo drama** (2026-10-20): thẻ "📰 Tạo drama" trong hộp Clip mới — dán link bài viết hoặc gõ
@@ -152,6 +155,87 @@ Tạo ảnh/video đi qua Google Flow (cần gói Pro/Ultra) bằng extension Ch
     (`/api/prompt-library`, lưu trùng text = trả bản cũ, `/use` đếm lượt), bước 2 mỗi ô có "★ Lưu" / "📚 Dùng lại"
     (`quicktool/PromptLibraryButtons.tsx`), trang `/prompts` sửa tại chỗ.
 
+- **Prompt mẫu có sẵn** (21/10): `agent/flowboard/prompt_seeds.json` (43 mẫu: 14 ảnh, 12 chuyển động, 17 lời thoại;
+  nhóm hook / chi tiết / demo / chốt đơn / chỉ tay + theo ngành). `services/prompt_seeds.py`: `seed_on_start()` (gọi trong
+  `main.lifespan`) thêm một lần mỗi `version` (AppSetting `prompt_seeds_version`) — mẫu bị xoá không tự quay lại;
+  `POST /api/prompt-library/samples` thêm lại mẫu thiếu. Mẫu có tag `mẫu có sẵn`. Trang `/prompts`: lưới 3 cột, phân trang 15 thẻ/trang (5 hàng; lọc nào cũng về trang 1), nhãn "Mẫu", lọc
+  theo nhóm, nút "↺ Prompt mẫu". **Thêm/sửa mẫu: sửa JSON rồi tăng `version`.** Lời thoại ≤ 24 từ, không nêu
+  giảm giá/số liệu/công dụng y tế (test `test_prompt_seeds.py` kiểm tra quy ước).
+
+- **Hộp Clip mới ↔ Sản phẩm đang bán** (21/10): mục 3 ô **"Sản phẩm đang bán"** là `<select>` các sản phẩm đã lưu, cùng
+  state `productId` với thẻ ở mục 1 (chưa có sản phẩm → trống, bị khoá). Mục 1 có thẻ **"🔗 Thêm sản phẩm từ link"**:
+  `productFromLink` → upload ảnh (`ensureProjectId` + `uploadImageFromUrl`) → `createProduct` → chọn luôn (~12 s).
+  Ô **Bối cảnh**: `quicktool/SuggestField.tsx` (gõ tự do + "▾ Chọn", Esc chỉ đóng danh sách) với `quicktool/suggestions.ts`
+  `BACKDROPS` theo category của **sản phẩm đã chọn**, không có thì theo kiểu clip (nhãn Việt, giá trị Anh). Trang Sản phẩm:
+  mỗi thẻ hiện "🎬 N clip" / "Chưa có clip" (đếm `board.data.quicktool.product_id` từ `listBoardSummaries`).
+  Chọn sản phẩm vẫn đổi kiểu clip sang mẫu hợp ngành của nó (hành vi cũ).
+
+- **Link Shopee** (21/10): server không đọc được (trang chỉ là khung JS, API 403, trình duyệt lạ bị đẩy sang "Cần đăng nhập").
+  `product_link.get_page()` chuyển link `shopee.vn` / `s.shopee.vn` / `shp.ee` (`BROWSER_ONLY_HOSTS`) sang
+  `read_via_extension()` → lệnh extension **`read_page`** (bản **0.4.0**, manifest thêm quyền shopee.vn, shp.ee,
+  susercontent.com): mở link trong tab nền Chrome của người dùng (đã đăng nhập Shopee), chờ tối đa 25 s đến khi có
+  JSON-LD Product hoặc ≥ 1500 ký tự, đọc title/og/JSON-LD/ảnh lớn/innerText, đóng tab. `page_from_browser()` ưu tiên
+  tên + ảnh + giá trong JSON-LD; ảnh `_tn` → ảnh gốc; `clean_link` bỏ query. Dùng cho mọi chỗ đọc link: "Thêm từ link"
+  (trang Sản phẩm + hộp Clip mới) và kiểu clip "Theo link sản phẩm". Lỗi rõ ràng khi chưa đăng nhập / captcha / extension cũ.
+  Test `test_shopee_link.py`. **Chưa thử với trang Shopee thật** (máy dev không đăng nhập Shopee).
+  Trang Sản phẩm có nút **"🛒 Nhập từ Shopee"**: `POST /api/products/import-shopee` → `read_open_shopee_tab()` → lệnh
+  extension **`read_open_tab`** (bản **0.4.1**) đọc tab Shopee đang mở (tab đang xem, không thì tab dùng gần nhất), bắt
+  buộc là trang chi tiết sản phẩm (`-i.<shop>.<item>` / `/product/<shop>/<item>` hoặc có JSON-LD Product) →
+  `extract_from_page` → `save_draft(source="Shopee")`, ảnh tải nền. Extension bản cũ: báo cần Reload ngay, không chờ.
+
+- **Trang Sản phẩm đang bán — danh sách** (21/10, `components/ProductsPanel.tsx`): hàng nút trên cùng (+ Thêm sản phẩm,
+  🔗 Thêm từ link, 📥 Nhập từ TikTok, 🛒 Nhập từ Shopee) rồi hàng điều khiển: tìm kiếm (tên/mô tả/link/giá/ngành), lọc
+  ngành, sắp xếp (mới/cũ nhất, tên A→Z/Z→A, giá thấp→cao/cao→thấp — `priceValue()` hiểu "399k", "76.064đ", "₫ 1.250.000", "2tr",
+  không có giá luôn xuống cuối —, nhiều clip nhất), nút **Lưới / Danh sách** (nhớ trong localStorage `flowboard.products.view`).
+  Lưới 5 cột (4/3/2 khi hẹp) × 5 hàng = 25 SP/trang; danh sách 15 dòng/trang (checkbox, ảnh, tên, ngành, giá, số clip, ngày
+  thêm, Sửa, Tạo clip). Phân trang dùng `.qt-pager` (chung với `/prompts`); đổi bộ lọc/sắp xếp/kiểu xem về trang 1. "Chọn trang này"
+  chọn các SP của trang đang xem; vẫn xoá hàng loạt. Đã thử với 32 SP.
+
+- **Thông báo = toast** (21/10): `store/toast.ts` (`toast.success|info|warning|error(msg)`, hook `useToastOn(message, kind, clear)`
+  để component giữ state thông báo rồi bật toast), `components/Toaster.tsx` (một chồng ở góc phải trên, tối đa 4, z-index 1200
+  trên mọi hộp thoại; mỗi toast có nhãn Lỗi/Lưu ý/Thông báo/Thành công, thanh đếm ngược, rê chuột thì giữ lại, nút ×; thời gian
+  theo độ dài chữ, lỗi lâu hơn; lỗi trong các store board/chat/generation/pipeline vẫn tự lên toast lỗi). **Quy ước: kết quả
+  của một hành động (đã lưu, đã thêm, trùng, thất bại) → toast; trạng thái cần ở lại trên trang (đang chạy, node lỗi, thiếu ảnh,
+  lỗi tải kèm nút "Thử lại") → giữ inline.** Đã chuyển: trang Sản phẩm (nhập TikTok/Shopee/thêm từ link), hộp Clip mới (lỗi, "đã tạo
+  N clip" — mở clip 1 ngay, không chờ 1,5 s), Prompt đã lưu (lưu / thêm lại mẫu), Người mẫu, bước 1/5 của wizard, lỗi `quicktool` store,
+  hàng đợi xong (toast từ `runQueue`, không phụ thuộc trang đang mở), Lịch sử (chạy lại), Xoá chữ/logo, Cài đặt (key Gemini,
+  tài khoản Flow, hàng tài khoản, nguồn ảnh, AI provider) và `AccountSwitchBanner`. Code mới: dùng toast, đừng thêm dòng `product-form__error`.
+  Form sản phẩm: **"Lưu" → toast "Đã thêm / Đã lưu thay đổi" → về danh sách** (bỏ nút "Lưu & tạo clip"; tạo clip bấm từ thẻ/dòng
+  trong danh sách); xoá sản phẩm cũng toast. Đã thử thêm → sửa → xoá trên UI.
+
+- **Người mẫu đã lưu: tạo / sửa ngay trên trang + giọng đọc + câu nói** (21/10): trang `/models` có một form dùng chung
+  **`ModelEditor`** (`pages/ModelsPage.tsx`) cho "+ Tạo người mẫu" và "✎ Sửa" trên thẻ: ảnh + giới tính / quốc gia / phong cách
+  / mô tả thêm / tên / giọng (+ phong cách đọc nếu giọng Gemini) / câu nói. **Ảnh AI hay upload chỉ là xem trước — chỉ lưu khi
+  bấm "★ Lưu vào thư viện" / "Lưu thay đổi"** (nút khoá khi chưa có ảnh). AI = `quicktool/standaloneImage.ts`
+  `generateStandaloneImage()` (request `gen_image` **không có node**, poll `/api/requests/{id}`; ~26 s, 1 lượt ảnh Flow); ảnh vừa
+  tạo có thể 404 vài giây đầu → `RetryImg`. Sửa: đổi ảnh (AI/upload, có "Giữ ảnh cũ"), không tự vẽ lại ảnh khi đổi thông tin.
+  `PATCH /api/references/{id}` nhận thêm `media_id` / `aspect_ratio` / `ai_brief` (đổi ảnh xoá ai_brief cũ; ảnh đã thuộc mục khác → 409).
+  Thẻ người mẫu chỉ hiển thị (🎙 giọng + ▶ nghe thử, 💬 câu nói) + Sửa / Mở clip gốc / Xoá.
+  `Reference.meta` có **`voice`**, `voiceStyle`, **`line`** (tuỳ chọn); `api/characters.ts` `voiceOf()` = giọng riêng hoặc mặc
+  định theo giới tính (`defaultVoiceFor`: nam → Nam Minh, còn lại → Hoài My). Bước 1 "Dùng người mẫu này" → `applyModelVoice`:
+  giọng thành `voice` của node xuất video (`ensureExportNode`), câu nói **thêm vào đầu lời thoại cảnh 1** (nếu chưa có); picker
+  bước 1 hiện 🎙 giọng. `quicktool/VoiceField.tsx`: `VoiceField` (chọn giọng + nghe thử) và `VoicePreview` (chỉ nút ▶);
+  `/api/llm/voices/preview` nhận `text` (Edge ~9 s lần đầu, sau đó cache).
+
+- **Sản phẩm "Dành cho" Nam / Nữ / Unisex — người mẫu phải cùng giới** (21/10): cột `Product.gender` (male / female / unisex /
+  "" = không rõ; migration `db.ensure_product_gender_column` thêm cột và **đoán một lần** cho sản phẩm cũ).
+  `services/product_gender.py`: `guess()` theo từ khoá ("nam" trừ "Việt Nam/miền Nam", "nữ", "unisex", "nam nữ", váy/đầm…),
+  `check(product, char_gender)` → `GenderMismatchError` (400). Tạo sản phẩm không gửi `gender` → tự đoán; đọc từ link → Gemini
+  điền (`_PRODUCT_SCHEMA.gender`), TikTok/Shopee giữ lại. Chặn ở: `products.template_board_spec` (kể cả giới tính mặc định của
+  template), `reference_video._character_for` (cả gợi ý của AI), `model_mode` (bàn tay), chat agent. UI: form sản phẩm có ô
+  "Dành cho"; hộp Clip mới lọc ô Giới tính mẫu (+ tự chuyển Nữ→Nam khi chọn đồ nam) và màn review link/video; Bước 1 lọc ô giới
+  tính / bàn tay, cảnh báo + nút "Đổi sang người mẫu nam" nếu clip cũ đang sai, thư viện khoá mẫu khác giới ("Không hợp đồ nam").
+  Unisex / không rõ: không chặn. Bước 1 sửa `charGender` thẳng lên node (không qua backend) nên chỉ UI chặn ở đó.
+- **Hộp Cài đặt rộng 880 px, hai cột** (`.settings-panel__grid`; mục dài thêm `settings-panel__section--wide`): Gói | Project,
+  Model video (rộng, 2 cột lựa chọn), Model ảnh | Nguồn tạo ảnh, Danh sách tài khoản | Tài khoản Flow, Gemini key | Thông tin,
+  Đăng xuất (rộng). ≤ 760 px về 1 cột.
+
+- **Khung focus** (21/10, cuối `styles.css`): bấm chuột không còn viền trắng của trình duyệt (`:focus { outline: none }`);
+  bàn phím (Tab) có quầng cam mờ `:focus-visible { box-shadow: 0 0 0 2px rgba(255,106,43,.45) }`. Ô nhập giữ kiểu viền riêng.
+
+- **Đăng xuất Flow phải bấm 2 lần** (21/10, `SettingsPanel.tsx`): lần đầu nút đổi thành "Bấm lần nữa để đăng xuất…" + "Huỷ",
+  tự quay lại sau 5 s / khi đóng hộp; xong có toast (`AccountPanel.handleLogout`). Nút chỉ có ở hộp Cài đặt mở từ ⚙ cạnh tài khoản.
+
 ## Việc đang dở / chưa kiểm chứng
 - **Nhập từ TikTok bằng extension** (`scrape_page` trong `extension/background.js`) mới test trên HTML giả, chưa chạy trên trang TikTok thật. Trang chi tiết sản phẩm thì chỉ lấy sản phẩm chính (không lấy "sản phẩm liên quan").
 - **Chưa thử thật (20/10)**: prompt 4 mẫu clip mới qua Flow; chế độ chỉ bàn tay qua Flow; tình huống hết credit → tự chuyển
@@ -173,3 +257,17 @@ Tạo ảnh/video đi qua Google Flow (cần gói Pro/Ultra) bằng extension Ch
 - **20/10 tối** — Hàng tài khoản Flow tự chuyển khi hết credit + banner đổi tài khoản (FB-034). Thử thật: chuyển tay qua UI; chưa thử hết credit thật.
 - **20/10 tối** — Thư viện prompt (bước 2 "★ Lưu" / "📚 Dùng lại", trang `/prompts`); thử thật trên UI. Commit + push `b7cfdf1` (gộp mọi việc 20/10). Test 743 pass.
 - **20/10** — Viết lại quy tắc: code xong phải ghi Nhật ký + cập nhật các mục trên ngay.
+- **21/10** — Bỏ mục "+ Clip mới" trùng ở sidebar (`QuicktoolSidebar.tsx`); "Clip của tôi" sáng cả khi hộp Clip mới mở. Kiểm tra bằng `tsc`, chưa chụp UI.
+- **21/10** — 43 prompt mẫu có sẵn trong "Prompt đã lưu" (`prompt_seeds.json`, tự thêm khi agent khởi động, nút "↺ Prompt mẫu", lọc theo nhóm). Đã thử trên UI; chưa thử chạy prompt mẫu qua Flow.
+- **21/10** — Trang `/prompts`: lưới 3 cột (2 cột ≤1100px, 1 cột ≤760px), phân trang 15/trang, đầu thẻ gọn (loại + Mẫu + Xoá / tên / số lần dùng). Đã thử trên UI.
+- **21/10** — Hộp Clip mới: ô "Sản phẩm" và "Bối cảnh" có nút "▾ Chọn" gợi ý theo ngành của kiểu clip (+ sản phẩm đã lưu). Đã thử trên UI (chọn bối cảnh, chọn sản phẩm đã lưu, Esc).
+- **21/10** — Hộp Clip mới: ô "Sản phẩm" thành danh sách sản phẩm đang bán (đồng bộ mục 1), bỏ gợi ý loại sản phẩm chung; thêm sản phẩm từ link ngay trong hộp; bối cảnh gợi ý theo ngành của sản phẩm; trang Sản phẩm hiện số clip. Sửa lỗi lưu trang "Security Check" thành sản phẩm. Đã thử thật (link TikTok, upload ảnh), test `test_products.py` 8 pass.
+- **21/10** — Nhập sản phẩm từ link Shopee qua extension (`read_page`, extension 0.4.0 → phải Reload). Test giả lập 18 pass; chưa thử link Shopee thật.
+- **21/10** — Nút "🛒 Nhập từ Shopee" ở trang Sản phẩm (đọc tab Shopee đang mở, extension 0.4.1). Test 47 pass; chưa thử với tab Shopee thật.
+- **21/10** — Trang Sản phẩm: nút thêm/nhập gom lên một hàng, tìm kiếm + lọc ngành + sắp xếp (7 kiểu), chế độ Lưới/Danh sách, lưới 5 cột × 5 hàng và phân trang (15/trang ở chế độ danh sách). Đã thử trên UI với 32 sản phẩm tạm (đã xoá).
+- **21/10** — Hệ thống toast 4 loại (thành công/thông tin/lưu ý/lỗi) thay cho dòng chữ mờ và toast lỗi một dòng; chuyển ~20 chỗ báo kết quả sang toast. Đã thử trên UI (xếp chồng, rê chuột giữ, đóng); các luồng Cài đặt chưa bấm thử từng cái.
+- **21/10** — Form sản phẩm: Lưu xong báo toast và quay về danh sách, bỏ "Lưu & tạo clip".
+- **21/10** — Trang Người mẫu: tạo người mẫu ngay trên trang (AI hoặc ảnh thật), mỗi mẫu có giọng đọc (mặc định theo giới tính, đổi được) và câu nói tuỳ chọn; dùng mẫu cho clip thì giọng → giọng đọc clip, câu nói → đầu lời thoại cảnh 1. Đã thử thật (1 ảnh AI qua Flow, upload, đổi giọng, nghe thử, áp vào clip tạm); mẫu thử đã xoá.
+- **21/10** — Người mẫu: upload/AI chỉ xem trước, bấm Lưu mới lưu; thêm "✎ Sửa" (tên, ảnh, thông tin, giọng, câu nói) bằng cùng một form; API đổi ảnh của mục đã lưu. Đã thử thật tạo → sửa (đổi tên, giọng Gemini, đổi ảnh) → lưu; mẫu thử đã xoá.
+- **21/10** — Sản phẩm có "Dành cho" (Nam/Nữ/Unisex, tự đoán + AI điền), chặn chọn người mẫu khác giới ở hộp Clip mới, review link/video, Bước 1, thư viện và backend; hộp Cài đặt rộng gấp đôi, hai cột. Đã thử trên UI với sản phẩm thật (áo ba lỗ → nam); test 85 pass.
+- **21/10** — Bỏ viền trắng khi bấm vào nút/mục menu (giữ quầng cam khi dùng Tab); đăng xuất Flow cần xác nhận. Commit + push gộp mọi việc 21/10.

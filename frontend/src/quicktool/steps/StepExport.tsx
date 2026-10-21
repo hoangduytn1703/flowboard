@@ -8,6 +8,7 @@ import { useBoardStore, type FlowboardNodeData } from "../../store/board";
 import { useQuicktoolStore } from "../../store/quicktool";
 import { hasMedia, isBusy, type ClipRoles } from "../roles";
 import "../voices.css";
+import { useToastOn } from "../../store/toast";
 
 // ── voice preview ───────────────────────────────────────────────────────────
 // Only one sample plays at a time, whichever button started it.
@@ -26,6 +27,7 @@ function stopSample() {
 function VoicePreviewButton({ voice, style }: { voice: string; style?: string }) {
   const [state, setState] = useState<"idle" | "loading" | "playing">("idle");
   const [error, setError] = useState<string | null>(null);
+  useToastOn(error, "error", () => setError(null));
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   function stop() {
@@ -75,7 +77,6 @@ function VoicePreviewButton({ voice, style }: { voice: string; style?: string })
       >
         {state === "loading" ? "Đang tạo…" : state === "playing" ? "■ Dừng" : "▶ Nghe thử"}
       </button>
-      {error && <div className="product-form__error">{error}</div>}
     </>
   );
 }
@@ -180,6 +181,7 @@ export function StepExport({ roles }: { roles: ClipRoles }) {
   const bgmVolume = BGM_VOLUMES.some(([v]) => v === exp?.data.bgmVolume) ? (exp!.data.bgmVolume as number) : BGM_DEFAULT_VOLUME;
   const [bgmUploading, setBgmUploading] = useState(false);
   const [bgmError, setBgmError] = useState<string | null>(null);
+  useToastOn(bgmError ? `Nhạc nền: ${bgmError}` : null, "error", () => setBgmError(null));
 
   async function pickMusic(file: File | undefined) {
     if (!file) return;
@@ -212,6 +214,7 @@ export function StepExport({ roles }: { roles: ClipRoles }) {
   const [coverScene, setCoverScene] = useState<string | null>(null);
   const [coverBusy, setCoverBusy] = useState(false);
   const [coverError, setCoverError] = useState<string | null>(null);
+  useToastOn(coverError ? `Ảnh bìa: ${coverError}` : null, "error", () => setCoverError(null));
   const title = coverTitle ?? boardName;
   const selectedScene = sceneImages.find((s) => s.mediaId === coverScene)?.mediaId ?? sceneImages[0]?.mediaId ?? null;
   const coverMediaId = typeof exp?.data.coverMediaId === "string" && exp.data.coverMediaId ? exp.data.coverMediaId : null;
@@ -374,7 +377,6 @@ export function StepExport({ roles }: { roles: ClipRoles }) {
                 <small className="qt-hint">Không bắt buộc — nhạc lặp suốt clip, nhỏ dần ở cuối.</small>
               </div>
             )}
-            {bgmError && <div className="product-form__error">{bgmError}</div>}
           </div>
           <label className="qt-check">
             <input type="checkbox" checked={subtitles} disabled={busy} onChange={(e) => setOption({ subtitles: e.target.checked })} />
@@ -469,7 +471,6 @@ export function StepExport({ roles }: { roles: ClipRoles }) {
                   {coverBusy ? "Đang tạo…" : coverMediaId ? "Tạo lại ảnh bìa" : "Tạo ảnh bìa"}
                 </button>
               </div>
-              {coverError && <div className="product-form__error">{coverError}</div>}
               {coverMediaId && (
                 <>
                   <img className="qt-cover__preview" src={mediaUrl(coverMediaId)} alt="Ảnh bìa" />

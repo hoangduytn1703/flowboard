@@ -41,6 +41,10 @@ class ReferenceCreate(BaseModel):
 
 class ReferencePatch(BaseModel):
     label: Optional[str] = None
+    # A new photo for the same saved item (e.g. editing a saved model).
+    media_id: Optional[str] = None
+    aspect_ratio: Optional[str] = None
+    ai_brief: Optional[str] = None
     pinned: Optional[bool] = None
     position: Optional[int] = None
     tags: Optional[list[str]] = None
@@ -193,6 +197,22 @@ def patch_reference(ref_id: int, body: ReferencePatch):
             row.tags = list(body.tags)
         if "meta" in fields and body.meta is not None:
             row.meta = dict(body.meta)
+        if "media_id" in fields and body.media_id and body.media_id != row.media_id:
+            from flowboard.services import media as media_service
+
+            new_id = media_service.normalize_media_id(body.media_id)
+            if not media_service.is_valid_media_id(new_id):
+                raise HTTPException(400, "invalid media_id")
+            taken = s.exec(select(Reference).where(Reference.media_id == new_id)).first()
+            if taken is not None and taken.id != row.id:
+                raise HTTPException(409, f"ảnh này đã thuộc một mục khác trong thư viện ({taken.label or taken.id})")
+            row.media_id = new_id
+            # The old brief described the old photo.
+            row.ai_brief = body.ai_brief if "ai_brief" in fields else None
+        elif "ai_brief" in fields:
+            row.ai_brief = body.ai_brief
+        if "aspect_ratio" in fields and body.aspect_ratio:
+            row.aspect_ratio = body.aspect_ratio
         s.add(row)
         s.commit()
         s.refresh(row)

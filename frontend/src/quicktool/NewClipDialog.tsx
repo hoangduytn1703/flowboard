@@ -7,6 +7,9 @@ import {
   buildDrama,
   buildFromReferenceVideo,
   createBoardFromTemplate,
+  createProduct,
+  productFromLink,
+  uploadImageFromUrl,
   fetchReferenceVideo,
   listProducts,
   mediaUrl,
@@ -14,11 +17,16 @@ import {
   type BoardTemplate,
   type DramaPlan,
   type CharacterPick,
+  allowedModelGenders,
   type Product,
   type ReferenceAnalysis,
   type ReferenceUpload,
 } from "../api/client";
 import { useBoardStore } from "../store/board";
+import { SuggestField } from "./SuggestField";
+import { BACKDROPS, backdropGroups } from "./suggestions";
+import { useGenerationStore } from "../store/generation";
+import { toast, useToastOn } from "../store/toast";
 import "./newclip.css";
 
 /** The "kind of clip" card that is not a template: an uploaded ad video. */
@@ -153,8 +161,9 @@ export function NewClipDialog({
   const [extraSettings, setExtraSettings] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Failures are toasts: the red line above the buttons was easy to miss in a tall dialog.
+  useToastOn(error, "error", () => setError(null));
   // "Số clip" > 1: how many were just made, shown while clip #1 opens.
-  const [createdCount, setCreatedCount] = useState<number | null>(null);
   // Seconds since the current analysis (link / video / story) started.
   const [elapsed, setElapsed] = useState(0);
   // Reference-video mode.
@@ -208,6 +217,50 @@ export function NewClipDialog({
     return () => clearInterval(timer);
   }, [analyzing]);
 
+  async function reloadProducts(): Promise<Product[]> {
+    const list = await listProducts().catch(() => [] as Product[]);
+    setProducts(list);
+    return list;
+  }
+
+  // Adding a product without leaving the dialog: paste its link, the agent
+  // reads the page, the product is saved to "Sản phẩm đang bán" and picked.
+  const [addLinkOpen, setAddLinkOpen] = useState(false);
+  const [addLink, setAddLink] = useState("");
+  const [addingProduct, setAddingProduct] = useState(false);
+  async function addProductFromLink() {
+    const url = addLink.trim();
+    if (!url || addingProduct) return;
+    setAddingProduct(true);
+    setError(null);
+    try {
+      const r = await productFromLink(url);
+      let media_ids: string[] = [];
+      let aspect_ratio: string | null = null;
+      if (r.image_url) {
+        try {
+          const projectId = await useGenerationStore.getState().ensureProjectId();
+          if (projectId) {
+            const up = await uploadImageFromUrl(r.image_url, projectId);
+            media_ids = [up.media_id];
+            aspect_ratio = up.aspect_ratio ?? null;
+          }
+        } catch {
+          // The card is still useful without a photo; it can be added later.
+        }
+      }
+      const saved = await createProduct({ ...r.draft, media_ids, aspect_ratio });
+      await reloadProducts();
+      pickProduct(saved);
+      setAddLink("");
+      setAddLinkOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "không đọc được link sản phẩm");
+    } finally {
+      setAddingProduct(false);
+    }
+  }
+
   useEffect(() => {
     listProducts().then((list) => {
       setProducts(list);
@@ -223,6 +276,31 @@ export function NewClipDialog({
     setInputs(Object.fromEntries(template.inputs.map((i) => [i.key, i.default ?? ""])));
     setExtraSettings([]);
   }, [kind]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Can this model pick (female / male / hands_*) be used with the chosen product? */
+  function genderAllowed(v: string): boolean {
+    const g = v.replace(/^hands_/, "");
+    if (g !== "female" && g !== "male") return true;
+    return allowedModelGenders(product?.gender).includes(g);
+  }
+  // Review screen: an AI-suggested model of the wrong gender for the product
+  // (a woman for a men's shirt) is replaced by an allowed one up front.
+  useEffect(() => {
+    const suggested = shown?.character?.gender;
+    if (pickGender === "auto" && suggested && !genderAllowed(suggested)) {
+      setPickGender(allowedModelGenders(product?.gender)[0]);
+    } else if (pickGender !== "auto" && pickGender !== "none" && !genderAllowed(pickGender)) {
+      setPickGender(pickGender.startsWith("hands_") ? `hands_${allowedModelGenders(product?.gender)[0]}` as CharacterPick["gender"] : allowedModelGenders(product?.gender)[0]);
+    }
+  }, [shown?.character?.gender, product?.id ?? null, product?.gender, pickGender]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Picking a men's product while "Nữ" is selected switches it to "Nam" (and back).
+  useEffect(() => {
+    const cur = inputs.charGender;
+    if (!cur || genderAllowed(cur)) return;
+    const allowed = allowedModelGenders(product?.gender)[0];
+    setInputs((p) => ({ ...p, charGender: cur.startsWith("hands_") ? `hands_${allowed}` : allowed }));
+  }, [product?.id ?? null, product?.gender, inputs.charGender]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // "Tên gọi trong lời thoại" follows the chosen product (its name), and goes
   // back to the template's wording when the product is cleared. Runs after
@@ -295,7 +373,9 @@ export function NewClipDialog({
     const typed = extraSettings[n - 1];
     if (typed !== undefined) return typed;
     const first = inputs.setting ?? "";
-    const ideas = (SETTING_IDEAS[kind] ?? SETTING_IDEAS.fashion_ad).filter((x) => x !== first);
+    const category = (template?.category as string | undefined) ?? "";
+    const pool = SETTING_IDEAS[kind] ?? (BACKDROPS[category] ?? Object.values(BACKDROPS).flat()).map((b) => b.value);
+    const ideas = pool.filter((x) => x !== first);
     return ideas[(n - 1) % ideas.length];
   }
 
@@ -375,11 +455,11 @@ export function NewClipDialog({
       setBusy(false);
       return;
     }
-    // Say what happened before leaving: N boards appeared in the library
-    // and clip #1 opens; the others wait there (the dialog stays locked
-    // meanwhile, so nothing can be clicked twice).
-    setCreatedCount(ids.length);
-    window.setTimeout(() => onCreated(ids[0]), 1500);
+    // N boards appeared in the library and clip #1 opens; the others wait
+    // there. The toast outlives the dialog, so there is no need to hold it
+    // open to say so.
+    toast.success(`Đã tạo ${ids.length} clip trong "Clip của tôi". Đang mở clip 1, các clip còn lại nằm ở thư viện.`);
+    onCreated(ids[0]);
   }
 
   /** A TikTok / YouTube link: the agent downloads it, then it is the
@@ -487,10 +567,10 @@ export function NewClipDialog({
                           ? `AI gợi ý: ${shown.character.gender === "male" ? "nam" : "nữ"} · ${shown.character.country.toUpperCase()}`
                           : "AI gợi ý: không có người"}
                       </option>
-                      <option value="female">Nữ</option>
-                      <option value="male">Nam</option>
-                      {!pickPersonRequired && <option value="hands_female">Tay nữ (không lộ mặt)</option>}
-                      {!pickPersonRequired && <option value="hands_male">Tay nam (không lộ mặt)</option>}
+                      {genderAllowed("female") && <option value="female">Nữ</option>}
+                      {genderAllowed("male") && <option value="male">Nam</option>}
+                      {!pickPersonRequired && genderAllowed("female") && <option value="hands_female">Tay nữ (không lộ mặt)</option>}
+                      {!pickPersonRequired && genderAllowed("male") && <option value="hands_male">Tay nam (không lộ mặt)</option>}
                       <option value="none">Không có người (chỉ sản phẩm)</option>
                     </select>
                   </label>
@@ -563,7 +643,7 @@ export function NewClipDialog({
             </button>
             {products.length === 0 && (
               <p className="qt-new__hint">
-                Chưa có sản phẩm nào. Thêm ở <Link to="/products">Sản phẩm đang bán</Link> để dùng lại ảnh và mô tả cho nhiều clip.
+                Chưa có sản phẩm nào. Dán link để thêm ngay, hoặc thêm ở <Link to="/products">Sản phẩm đang bán</Link>.
               </p>
             )}
             {products.map((p) => (
@@ -588,7 +668,23 @@ export function NewClipDialog({
                 </span>
               </button>
             ))}
+            <button type="button" className="qt-new__product qt-new__product--add" onClick={() => setAddLinkOpen((v) => !v)}
+                    disabled={pickLocked || addingProduct} title="Dán link TikTok Shop / Shopee… để lưu sản phẩm mới và dùng luôn">
+              <span className="qt-new__product-thumb qt-new__product-thumb--empty">🔗</span>
+              <span>Thêm sản phẩm từ link</span>
+            </button>
           </div>
+          {addLinkOpen && (
+            <div className="qt-ref__link qt-new__addlink">
+              <input className="project-modal__input" type="url" autoFocus value={addLink} disabled={addingProduct}
+                     placeholder="Dán link sản phẩm: TikTok Shop / Shopee / Lazada / web shop…"
+                     onChange={(e) => setAddLink(e.target.value)}
+                     onKeyDown={(e) => { if (e.key === "Enter") void addProductFromLink(); }} />
+              <button type="button" className="qt-btn qt-btn--accent" onClick={() => void addProductFromLink()} disabled={addingProduct || !addLink.trim()}>
+                {addingProduct ? "AI đang đọc…" : "Lưu & chọn"}
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="qt-new__section">
@@ -731,17 +827,44 @@ export function NewClipDialog({
             <div className="qt-new__label">3 · Thiết lập</div>
             <div className="tpl-inputs">
               {template.inputs
-                // The product's description fills {{product}}; its spoken
-                // name stays editable (prefilled with the product's name).
-                .filter((i) => !(product && i.key === "product"))
-                .map((i) => (
+                // "Sản phẩm" is the list of products being sold (same choice
+                // as step 1); the spoken name stays editable.
+                .map((i) => i.key === "product" ? (
+                  <label key={i.key} className="tpl-inputs__field">
+                    <span>Sản phẩm đang bán</span>
+                    <select className="project-modal__input" value={productId ?? ""} disabled={pickLocked || products.length === 0}
+                            onChange={(e) => pickProduct(products.find((p) => p.id === Number(e.target.value)) ?? null)}>
+                      <option value="">{products.length ? "— Không chọn (upload ảnh ở bước 1) —" : "Chưa có sản phẩm"}</option>
+                      {products.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}{p.price ? ` · ${p.price}` : ""}</option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
                   <label key={i.key} className="tpl-inputs__field">
                     <span>{i.label}</span>
                     {i.type === "select" ? (
-                      <select className="project-modal__input" value={inputs[i.key] ?? i.default ?? ""}
-                              onChange={(e) => setInputs((p) => ({ ...p, [i.key]: e.target.value }))} disabled={locked}>
-                        {(i.options ?? []).map(([v, label]) => <option key={v} value={v}>{label}</option>)}
-                      </select>
+                      <>
+                        <select className="project-modal__input" value={inputs[i.key] ?? i.default ?? ""}
+                                onChange={(e) => setInputs((p) => ({ ...p, [i.key]: e.target.value }))} disabled={locked}>
+                          {(i.options ?? [])
+                            // A men's / women's product: only models of that gender (hands too).
+                            .filter(([v]) => i.key !== "charGender" || genderAllowed(v))
+                            .map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+                        </select>
+                        {i.key === "charGender" && product && (product.gender === "male" || product.gender === "female") && (
+                          <small className="qt-new__hint">Sản phẩm dành cho {product.gender === "male" ? "nam" : "nữ"} — chỉ chọn được người mẫu {product.gender === "male" ? "nam" : "nữ"}.</small>
+                        )}
+                      </>
+                    ) : i.key === "setting" ? (
+                      <SuggestField
+                        value={inputs[i.key] ?? ""}
+                        placeholder={i.placeholder ?? i.default ?? ""}
+                        onChange={(v) => setInputs((p) => ({ ...p, [i.key]: v }))}
+                        disabled={locked}
+                        // Backdrops that suit the chosen product, else the clip kind.
+                        groups={backdropGroups((product?.category as string | undefined) ?? (template.category as string | undefined))}
+                      />
                     ) : (
                       <input className="project-modal__input" type="text" maxLength={200}
                              value={inputs[i.key] ?? ""} placeholder={i.placeholder ?? i.default ?? ""}
@@ -874,12 +997,6 @@ export function NewClipDialog({
           </div>
         )}
 
-        {error && <p className="product-form__error" role="alert">{error}</p>}
-        {createdCount !== null && (
-          <p className="qt-new__created" role="status">
-            ✓ Đã tạo {createdCount} clip trong "Clip của tôi" — đang mở clip 1…
-          </p>
-        )}
         <div className="project-modal__actions">
           {isDrama && (dramaPhase === "review" || dramaPhase === "building") ? (
             <>

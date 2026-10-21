@@ -286,7 +286,7 @@ def set_board_model_mode(board_id: int, body: ModelModeBody):
         )
     except PersonRequiredError as exc:
         raise HTTPException(400, str(exc))
-    except ValueError as exc:
+    except ValueError as exc:  # GenderMismatchError included
         raise HTTPException(400, str(exc))
 
 

@@ -62,10 +62,11 @@ PREVIEW_TEXT = ("Xin chào, đây là giọng đọc mẫu cho clip bán hàng c
                 "Sản phẩm này đang giảm giá hôm nay, đặt ngay kẻo hết nhé!")
 
 
-async def preview(voice: str, style: Optional[str] = None) -> Path:
-    """The sample sentence spoken by ``voice`` (``style`` matters for Gemini
-    voices only); the file lives under ``TTS_DIR``."""
-    narration = await synthesize(PREVIEW_TEXT, voice, 0, style)
+async def preview(voice: str, style: Optional[str] = None, text: Optional[str] = None) -> Path:
+    """The sample sentence (or ``text``, e.g. a saved model's own line)
+    spoken by ``voice`` (``style`` matters for Gemini voices only); the file
+    lives under ``TTS_DIR``, cached by text + voice + style like any line."""
+    narration = await synthesize((text or "").strip() or PREVIEW_TEXT, voice, 0, style)
     return narration.path
 
 
