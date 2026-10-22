@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Header, Request as FastAPIRequest
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from flowboard.config import EXTENSION_WS_PORT, WS_HOST
 from flowboard.db import get_session, init_db
@@ -14,6 +15,8 @@ from flowboard.routes import activity, auth, boards, chat, edges, flow_debug, fl
 from flowboard.routes import provider_jobs as provider_jobs_route
 from flowboard.routes import drama as drama_route
 from flowboard.routes import export_extras as export_extras_route
+from flowboard.routes import account as account_route
+from flowboard import accounts
 from flowboard.routes import history as history_route
 from flowboard.routes import prompt_library as prompt_library_route
 from flowboard.routes import video_clean as video_clean_route
@@ -98,9 +101,10 @@ def _recover_orphan_running_requests() -> int:
     return touched
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    init_db()
+def _prepare_account_data() -> None:
+    """Runs on the data store of the account that just became active (and
+    once at start-up when login is off): orphan jobs, media bookkeeping,
+    sample prompts."""
     recovered = _recover_orphan_running_requests()
     if recovered:
         logger.info("recovered %d orphan in-flight request(s) → failed", recovered)
@@ -114,6 +118,15 @@ async def lifespan(app: FastAPI):
         seed_on_start()
     except Exception as exc:  # noqa: BLE001 — samples are a nicety, never block start-up
         logger.warning("prompt seeds skipped: %s", exc)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Login + per-account data: with FLOWBOARD_AUTH=off this opens the
+    # default DB right away; otherwise the data store opens at first login.
+    if _prepare_account_data not in accounts.after_activate:
+        accounts.after_activate.append(_prepare_account_data)
+    accounts.startup()
     worker = get_worker()
     ws_task = asyncio.create_task(run_ws_server(), name="ext-ws-server")
     worker_task = asyncio.create_task(worker.start(), name="request-worker")
@@ -142,6 +155,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+#: Reachable without a login: logging in itself, health, and the extension's
+#: callback (authenticated by its own secret).
+OPEN_PATHS = {"/api/account/login", "/api/account/me", "/api/account/register", "/api/health", "/api/ext/callback"}
+
+
+@app.middleware("http")
+async def _require_login(request: FastAPIRequest, call_next):
+    path = request.url.path
+    if accounts.auth_enabled() and (path.startswith("/api/") or path.startswith("/media/")) and path not in OPEN_PATHS:
+        user = accounts.user_from_request(request)
+        if user is None:
+            return JSONResponse({"detail": "Chưa đăng nhập"}, status_code=401)
+        try:
+            await asyncio.to_thread(accounts.activate, user)
+        except accounts.AccountBusy as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=409)
+    return await call_next(request)
+
+
+app.include_router(account_route.router)
 app.include_router(boards.router)
 app.include_router(templates.router)
 app.include_router(nodes.router)

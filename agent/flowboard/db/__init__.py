@@ -1,13 +1,16 @@
+from __future__ import annotations
+
 from sqlalchemy import inspect
 from sqlalchemy.engine import Engine
 
-from .session import engine, get_session
+from .session import NoActiveAccount, current_engine, engine, get_session, has_engine, make_engine, set_engine
 from .session import init_db as _init_db_tables
 
-__all__ = ["engine", "get_session", "init_db", "ensure_reference_meta_column", "ensure_product_gender_column"]
+__all__ = ["engine", "get_session", "init_db", "current_engine", "set_engine", "make_engine", "has_engine", "NoActiveAccount",
+           "ensure_reference_meta_column", "ensure_product_gender_column"]
 
 
-def ensure_reference_meta_column(db_engine: Engine = engine) -> bool:
+def ensure_reference_meta_column(db_engine: Engine | None = None) -> bool:
     """Add ``reference.meta`` to a DB created before the column existed.
 
     Same non-destructive ``ALTER TABLE … ADD COLUMN`` pattern as the
@@ -18,6 +21,7 @@ def ensure_reference_meta_column(db_engine: Engine = engine) -> bool:
     Returns True when the column was added, False when nothing had to be
     done (fresh DB, no table yet, or already migrated).
     """
+    db_engine = db_engine or current_engine()
     with db_engine.connect() as conn:
         insp = inspect(conn)
         if not insp.has_table("reference"):
@@ -30,9 +34,10 @@ def ensure_reference_meta_column(db_engine: Engine = engine) -> bool:
         return True
 
 
-def ensure_product_gender_column(db_engine: Engine = engine) -> bool:
+def ensure_product_gender_column(db_engine: Engine | None = None) -> bool:
     """Add ``product.gender`` to a DB created before the column existed (same
     non-destructive pattern as :func:`ensure_reference_meta_column`)."""
+    db_engine = db_engine or current_engine()
     with db_engine.connect() as conn:
         insp = inspect(conn)
         if not insp.has_table("product"):
@@ -52,8 +57,10 @@ def ensure_product_gender_column(db_engine: Engine = engine) -> bool:
         return True
 
 
-def init_db() -> None:
-    """Create tables and apply the lightweight column migrations."""
-    _init_db_tables()
-    ensure_reference_meta_column(engine)
-    ensure_product_gender_column(engine)
+def init_db(target: Engine | None = None) -> None:
+    """Create tables and apply the lightweight column migrations on
+    ``target`` (default: the current account's engine)."""
+    target = target or current_engine()
+    _init_db_tables(target)
+    ensure_reference_meta_column(target)
+    ensure_product_gender_column(target)

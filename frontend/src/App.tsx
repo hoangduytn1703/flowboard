@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { Board } from "./canvas/Board";
@@ -18,6 +18,9 @@ import { QuicktoolApp } from "./quicktool/QuicktoolApp";
 import { useBoardStore } from "./store/board";
 import { useReferencesStore } from "./store/references";
 import { useSettingsStore } from "./store/settings";
+import { getAccountMe, type AccountMe } from "./api/account";
+import { LoginPage } from "./components/LoginPage";
+import { useAccountStore } from "./store/account";
 
 /**
  * Routes:
@@ -26,7 +29,31 @@ import { useSettingsStore } from "./store/settings";
  *   /canvas, /canvas/:id                                           → node canvas
  *   /                                                              → last used mode
  */
+/**
+ * Nothing loads before the login is known: the stores would hit 401 and
+ * toast errors. Once logged in the rest of the app mounts; a 401 from any
+ * later call (session expired, agent restarted) brings the login back.
+ */
 export function App() {
+  const [state, setState] = useState<"checking" | "in" | "out">("checking");
+  const setMe = useAccountStore((s) => s.setMe);
+
+  useEffect(() => {
+    let alive = true;
+    getAccountMe()
+      .then((me) => { if (alive) { setMe(me); setState("in"); } })
+      .catch(() => { if (alive) setState("out"); });
+    const onUnauthorized = () => { setMe(null); setState("out"); };
+    window.addEventListener("flowboard:unauthorized", onUnauthorized);
+    return () => { alive = false; window.removeEventListener("flowboard:unauthorized", onUnauthorized); };
+  }, [setMe]);
+
+  if (state === "checking") return <AppLoading />;
+  if (state === "out") return <LoginPage onLoggedIn={(me: AccountMe) => { setMe(me); setState("in"); }} />;
+  return <AppInner key={useAccountStore.getState().me?.username ?? "local"} />;
+}
+
+function AppInner() {
   const loadInitialBoard = useBoardStore((s) => s.loadInitialBoard);
   const loadReferences = useReferencesStore((s) => s.load);
   const loading = useBoardStore((s) => s.loading);

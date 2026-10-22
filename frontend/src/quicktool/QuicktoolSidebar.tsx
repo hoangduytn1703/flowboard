@@ -1,5 +1,6 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { AccountPanel } from "../components/AccountPanel";
+import { UserChip } from "../components/UserChip";
 import { CreditBadge } from "../components/CreditBadge";
 import { useBoardStore } from "../store/board";
 import { useSettingsStore } from "../store/settings";
@@ -68,6 +69,7 @@ export function QuicktoolSidebar() {
       </nav>
 
       <div className="qt-sidebar__credit"><CreditBadge /></div>
+      <UserChip />
       <AccountPanel />
     </aside>
   );

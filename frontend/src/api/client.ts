@@ -7,6 +7,9 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
   if (!res.ok) {
+    // Session gone (logged out elsewhere, agent restarted with auth on):
+    // the auth gate listens for this and shows the login page.
+    if (res.status === 401) window.dispatchEvent(new Event("flowboard:unauthorized"));
     throw new Error(`${res.status} ${res.statusText}`);
   }
   return res.json() as Promise<T>;

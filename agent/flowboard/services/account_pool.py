@@ -170,8 +170,10 @@ class AccountPool:
         """flow_client calls this after every successful ``read_account``:
         the signed-in account joins the pool (with the pinned project when
         it has none yet) and its credits are refreshed."""
+        from flowboard.db import has_engine
+
         email = _norm_email(info.get("email"))
-        if not email:
+        if not email or not has_engine():  # nobody logged in yet: nothing to record into
             return
         acc = self.get(email)
         pid = None

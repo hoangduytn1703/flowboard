@@ -30,6 +30,37 @@ Tạo ảnh/video đi qua Google Flow (cần gói Pro/Ultra) bằng extension Ch
 - Tuỳ chọn: công cụ AI xoá phụ đề cần repo `pyvideotrans` có `.venv` (torch CUDA) + `models/lama/big-lama.pt`
   (`FLOWBOARD_ERASE_PYTHON`, `FLOWBOARD_ERASE_ROOT`); thiếu thì chỉ có chế độ khoanh vùng.
 
+## Đăng nhập & dữ liệu theo tài khoản (phase 1.5, 22/10)
+Mục tiêu người dùng: đăng nhập ở máy nào cũng thấy đúng dữ liệu của mình ("như web thường"). Làm 2 bước:
+**Bước A (xong 22/10, chạy trên máy)**: đăng nhập + tách dữ liệu theo tài khoản. **Bước B (chưa)**: trỏ dữ liệu tài khoản lên
+cloud — Postgres Neon (vùng Singapore, schema riêng mỗi tài khoản) + bucket B2 cho media — chờ người dùng tạo 2 tài khoản đó.
+- `flowboard/accounts.py`: kho **trung tâm** `storage/accounts.db` (bảng `account_user`, `account_session`; SQLAlchemy Core,
+  metadata riêng — KHÔNG nằm trong `SQLModel.metadata` để `create_all`/`drop_all` của dữ liệu không đụng tới; sau này
+  `FLOWBOARD_CENTRAL_DB_URL` trỏ lên cloud). Mật khẩu `pbkdf2_sha256` 200k vòng (stdlib). Phiên = cookie `fb_session`
+  (httponly, 30 ngày), cache 5 phút trong RAM. Tài khoản tạo sẵn khi kho trống: **`akiragosho` / `Password@123`**
+  (`FLOWBOARD_SEED_USER/PASSWORD`). Đăng ký thêm chỉ khi `FLOWBOARD_ALLOW_REGISTER=1` (`POST /api/account/register`),
+  hoặc gọi `accounts.create_user()` trong Python.
+- **Dữ liệu mỗi tài khoản**: `storage/accounts/<username>/` (`flowboard.db`, `media/`, `chat_uploads/`). Cột `backend` (JSON)
+  của user nói dữ liệu ở đâu: `{"type":"sqlite"}` hôm nay, `{"type":"postgres","url":…}` ở bước B.
+- **Một tài khoản active tại một thời điểm** (agent lái Chrome bên cạnh): request có cookie hợp lệ → middleware `_require_login`
+  (`main.py`) gọi `accounts.activate(user)` → đổi engine (`db.set_engine`) + đổi `config.STORAGE_DIR/DB_PATH`,
+  `media.MEDIA_CACHE_DIR`, `tts.TTS_DIR` (các hằng module được gán lại — đừng `from … import MEDIA_CACHE_DIR` ở nơi khác)
+  → `init_db` + hook `after_activate` (phục hồi job mồ côi, backfill media, prompt mẫu). Đổi sang tài khoản khác thì chờ
+  worker rảnh tối đa 30 s, không thì 409. Lần đầu seed-user đăng nhập mà còn dữ liệu cũ (`storage/flowboard.db`) → **di dời**
+  vào thư mục tài khoản (đã làm thật 22/10: 297 file media, DB giữ nguyên).
+- Routes: `routes/account.py` — `POST /api/account/login|logout|password|register`, `GET /api/account/me` (401 khi chưa đăng
+  nhập). Mọi `/api/*` và `/media/*` khác đều cần cookie, trừ `OPEN_PATHS` trong `main.py` (login, me, register, health, ext callback).
+- **`FLOWBOARD_AUTH=off`** = chế độ cũ không đăng nhập (dữ liệu `storage/flowboard.db`); **bộ test chạy ở chế độ này**
+  (`conftest.py`), riêng `test_account_login.py` tự bật auth. Khi auth bật, `db.session._state["engine"]` khởi đầu là **None**:
+  `get_session()` trước khi đăng nhập ném `NoActiveAccount` (bẫy đã gặp: extension kết nối ngay lúc khởi động →
+  `account_pool.on_account_read` mở DB cũ qua engine mặc định → Windows khoá file → di dời thất bại; giờ hook đó bỏ qua
+  khi `db.has_engine()` False).
+- Frontend: `App.tsx` = cổng đăng nhập (`GET /api/account/me` → `LoginPage` hay app; sự kiện `flowboard:unauthorized` do
+  `api()` bắn khi gặp 401 → về trang đăng nhập), `store/account.ts`, `components/LoginPage.tsx`, `components/UserChip.tsx`
+  (sidebar: 👤 tên + Đăng xuất), `api/account.ts`. Đã thử thật bằng Playwright: đăng nhập sai/đúng, dữ liệu hiện, F5 giữ phiên, đăng xuất.
+- Phase B sẽ cần: engine Postgres theo schema (`make_engine(url)` đã nhận URL bất kỳ; migration `ALTER` kiểu SQLite trong
+  `db/session.py` chỉ chạy khi dialect = sqlite), kho file S3 theo tài khoản (thiết kế đã có từ 21/10, bị revert).
+
 ## Bẫy đã gặp (đừng lặp lại)
 - **Sửa file lớn bằng script: tính điểm cuối bằng `index()` của chính đoạn cần xoá, đừng trỏ tới marker ở xa** — 21/10 một lệnh xoá nhầm ~11 nghìn ký tự CSS của `quicktool.css` (phục hồi từ git HEAD + dựng lại phần chưa commit; luôn `git diff --stat` ngay sau khi sửa file lớn).
 - **TikTok lúc có lúc không trả trang "Security Check"** thay cho trang sản phẩm (thấy thật 21/10): `product_link.fetch_page` nhận diện trang chặn (`_looks_blocked`), thử lại 1 lần sau 3 s rồi báo lỗi — trước đó đã lưu một sản phẩm tên "Security Check".
@@ -283,3 +314,5 @@ Tạo ảnh/video đi qua Google Flow (cần gói Pro/Ultra) bằng extension Ch
 - **21/10** — Bỏ viền trắng khi bấm vào nút/mục menu (giữ quầng cam khi dùng Tab); đăng xuất Flow cần xác nhận. Commit + push gộp mọi việc 21/10.
 - **21/10** — Người mẫu: bấm vào thẻ là mở form sửa (bỏ nút "✎ Sửa"); nút Xoá thành nút đỏ như form sản phẩm; sửa lỗi nút đỏ hover bị đổi thành nền tối (mọi chỗ dùng `project-modal__btn--danger`). Đã thử trên UI (bấm thẻ → form sửa; ▶ / Xoá không mở form). Commit + push.
 - **22/10** — Gộp "Nhập từ TikTok" + "Nhập từ Shopee" thành một nút **"📥 Nhập từ tab đang mở"**: tự nhận tab TikTok / Shopee, trang sản phẩm hay showcase, nhập nhiều tab một lần (bảng chọn + kết quả từng tab). `services/tab_import.py`, `GET /api/products/open-tabs`, `POST /api/products/import-tabs`, extension **0.5.0** (`list_shop_tabs`, `read_tab`, `scrape_page` nhận `tabId`) → **phải Reload extension**. Test `test_tab_import.py` (15) pass, cả bộ 836 pass + 1 lỗi có sẵn; UI thử bằng dữ liệu giả + agent thật báo đúng "cần Reload 0.5.0"; chưa thử tab thật. Commit + push.
+- **22/10** — Phase 1.5 bước A: đăng nhập (`akiragosho` / `Password@123`) + dữ liệu tách theo tài khoản trong `storage/accounts/<user>/`; mọi API cần cookie; test `test_account_login.py` 7 pass, cả bộ 786 pass; thử thật trên UI (Playwright) và API. Dữ liệu cũ đã dời vào tài khoản akiragosho. Chờ Neon + B2 để làm bước B (dữ liệu lên cloud).
+
