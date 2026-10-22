@@ -1316,3 +1316,36 @@ async def test_refine_prompt_adds_the_guard_for_an_image_fed_by_a_product_photo(
 def test_restore_product_guard_leaves_a_plain_prompt_alone():
     out = prompt_synth.restore_product_guard("A quiet street at dusk.", "street at dusk", image_with_product=False)
     assert out == "A quiet street at dusk."
+
+
+@pytest.mark.asyncio
+async def test_revise_prompt_sends_current_prompt_and_request_and_keeps_the_guard(client, monkeypatch):
+    """"Tạo lại" with a request: the current prompt + the user's change
+    request go to the LLM in REVISE MODE; the guard sentences the current
+    prompt carried survive; the node is not written."""
+    from flowboard.db import get_session
+    from flowboard.db.models import Node
+
+    ids = _seed_board_with_chain()
+    captured: dict = {}
+
+    async def stub_run(feature, prompt, *, system_prompt=None, timeout=0):
+        captured["prompt"], captured["system"] = prompt, system_prompt
+        return "Medium shot of the model smiling broadly in a darker pink t-shirt."
+
+    monkeypatch.setattr(prompt_synth, "run_llm", stub_run)
+    current = "Medium shot of the model in a pink t-shirt. " + prompt_synth.PRODUCT_GUARD[0]
+    out = await prompt_synth.revise_prompt(ids["target_id"], "cười tươi hơn, áo hồng đậm hơn", current=current)
+    assert "REVISE MODE" in captured["system"] and "VERBATIM" in captured["system"]
+    assert "CURRENT PROMPT:\n" + current in captured["prompt"]
+    assert "cười tươi hơn, áo hồng đậm hơn" in captured["prompt"]
+    assert out.startswith("Medium shot of the model smiling") and out.count(prompt_synth.PRODUCT_GUARD[0]) == 1
+    with get_session() as s:
+        assert (s.get(Node, ids["target_id"]).data or {}).get("prompt") != out
+
+
+@pytest.mark.asyncio
+async def test_revise_prompt_route_rejects_an_empty_request(client):
+    ids = _seed_board_with_chain()
+    r = client.post("/api/prompt/revise", json={"node_id": ids["target_id"], "request": "  "})
+    assert r.status_code == 502

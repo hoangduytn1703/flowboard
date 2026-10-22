@@ -1,16 +1,20 @@
 import { useRef, useState } from "react";
-import { mediaUrl } from "../../api/client";
+import { useNavigate } from "react-router-dom";
+import { mediaUrl, patchNode } from "../../api/client";
+import { useBoardStore } from "../../store/board";
 import type { FlowNode } from "../../store/board";
-import { useGenerationStore } from "../../store/generation";
+import { FLOW_DROPPED_VIDEO, useGenerationStore } from "../../store/generation";
 import { useQuicktoolStore } from "../../store/quicktool";
 import { useSettingsStore } from "../../store/settings";
 import { useFlowCredits } from "../../components/credits";
 import { creditsPerClip, hasMedia, isBusy, type ClipRoles } from "../roles";
+import { toast } from "../../store/toast";
+import { knownFlowCheck } from "../flowModelCheck";
 
 function statusLabel(n: FlowNode | null): string {
   if (!n) return "chưa có node";
   if (isBusy(n)) return n.data.autoPromptStatus === "pending" ? "đang viết prompt…" : "đang tạo…";
-  if (n.data.status === "error") return `lỗi: ${String(n.data.error ?? "").slice(0, 80)}`;
+  if (n.data.status === "error") return flowDropped(n.data.error) ? "Flow bỏ lượt này" : `lỗi: ${String(n.data.error ?? "không rõ").slice(0, 80)}`;
   if (hasMedia(n)) return "xong";
   return "chưa tạo";
 }
@@ -21,6 +25,91 @@ function statusTone(n: FlowNode | null): string {
   if (isBusy(n)) return "busy";
   if (n.data.status === "error") return "error";
   return hasMedia(n) ? "done" : "idle";
+}
+
+/** A video that ended as `timeout` — new wording, or the old one still stored on the node. */
+function flowDropped(error: unknown): boolean {
+  const e = String(error ?? "");
+  return e.startsWith(FLOW_DROPPED_VIDEO.slice(0, 24)) || /timeout_waiting_video|Timed out|FLOW_DROPPED_JOB/i.test(e);
+}
+
+/** One-tap requests for "Tạo lại theo yêu cầu" (Vietnamese; the agent rewrites the English prompt). */
+const QUICK_REQUESTS: Record<"image" | "video", string[]> = {
+  image: [
+    "Người mẫu cười tươi, tự nhiên hơn",
+    "Sản phẩm to và rõ hơn, đúng màu như ảnh gốc",
+    "Bối cảnh sáng sủa, gọn gàng hơn",
+    "Đổi góc chụp khác",
+    "Toàn thân, thấy rõ cả quần áo",
+  ],
+  video: [
+    "Chuyển động chậm, nhẹ nhàng hơn",
+    "Người mẫu không nói, không mấp máy môi",
+    "Camera đứng yên",
+    "Sản phẩm luôn nằm trong khung hình",
+    "Động tác tự nhiên, không bị méo tay",
+  ],
+};
+
+/** The box under a tile after "Tạo lại…": type what to change (or pick a
+ * quick request), then regenerate with a revised prompt — or as before. */
+function RegenBox({ node, kind, onSubmit, onClose }: {
+  node: FlowNode;
+  kind: "image" | "video";
+  onSubmit(request: string): void;
+  onClose(): void;
+}) {
+  const [text, setText] = useState("");
+  const prev = typeof node.data.prevPrompt === "string" ? node.data.prevPrompt : "";
+  const last = typeof node.data.lastRequest === "string" ? node.data.lastRequest : "";
+
+  function addQuick(q: string) {
+    setText((t) => (t.trim() ? `${t.trim().replace(/[.,;]$/, "")}, ${q.charAt(0).toLowerCase()}${q.slice(1)}` : q));
+  }
+
+  function restorePrev() {
+    const dbId = parseInt(node.id, 10);
+    const patch = { prompt: prev, prevPrompt: "", lastRequest: "" };
+    useBoardStore.getState().updateNodeData(node.id, patch);
+    if (!isNaN(dbId)) patchNode(dbId, { data: patch }).catch(() => {});
+    toast.info("Đã đưa prompt về như trước lần sửa gần nhất (chưa tạo lại).");
+  }
+
+  return (
+    <div className="qt-regen" onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}>
+      <label className="qt-regen__label" htmlFor={`regen-${node.id}`}>
+        Muốn {kind === "image" ? "ảnh" : "video"} mới khác thế nào?
+      </label>
+      <textarea
+        id={`regen-${node.id}`}
+        className="qt-textarea qt-regen__input"
+        rows={2}
+        autoFocus
+        placeholder={kind === "image" ? "VD: áo hồng đậm hơn, người mẫu cười, bỏ cái đèn phía sau…" : "VD: quay chậm lại, người mẫu xoay người khoe áo, không nói…"}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && text.trim()) onSubmit(text); }}
+      />
+      <div className="qt-regen__chips">
+        {QUICK_REQUESTS[kind].map((q) => (
+          <button key={q} type="button" className="qt-regen__chip" onClick={() => addQuick(q)}>+ {q}</button>
+        ))}
+      </div>
+      {last && (
+        <div className="qt-regen__last">
+          Lần trước đã yêu cầu: “{last}”
+          {prev && <> · <button type="button" className="qt-regen__link" onClick={restorePrev}>↺ Về prompt trước đó</button></>}
+        </div>
+      )}
+      <div className="qt-regen__actions">
+        <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={!text.trim()} onClick={() => onSubmit(text)}>
+          ✨ Tạo lại theo yêu cầu
+        </button>
+        <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={() => onSubmit("")}>Tạo lại y như cũ</button>
+        <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={onClose}>Huỷ</button>
+      </div>
+    </div>
+  );
 }
 
 /** Steps 3 and 4 — the same grid, once for scene images, once for clips. */
@@ -35,6 +124,11 @@ export function StepMedia({ roles, kind }: { roles: ClipRoles; kind: "image" | "
   const videoQuality = useSettingsStore((s) => s.videoQuality);
   const { credits: flowCredits } = useFlowCredits();
   const [uploading, setUploading] = useState<number | null>(null);
+  // Scene whose "Tạo lại…" box is open.
+  const [regenFor, setRegenFor] = useState<number | null>(null);
+  const navigate = useNavigate();
+  const boardId = useBoardStore((s) => s.boardId);
+  const modelCheck = knownFlowCheck(roles.model);
   const fileRef = useRef<HTMLInputElement>(null);
   const pendingScene = useRef<number | null>(null);
 
@@ -63,6 +157,11 @@ export function StepMedia({ roles, kind }: { roles: ClipRoles; kind: "image" | "
     } finally {
       setUploading(null);
     }
+  }
+
+  function regenerate(sceneIndex: number, request: string) {
+    setRegenFor(null);
+    void (kind === "image" ? generateScene(sceneIndex, request) : generateVideo(sceneIndex, request));
   }
 
   function startAll() {
@@ -101,12 +200,12 @@ export function StepMedia({ roles, kind }: { roles: ClipRoles; kind: "image" | "
         </div>
         {kind === "video" && (
           <p className="qt-card__hint">
-            Mỗi clip 8 giây bằng {videoModel === "omni_flash" ? "Omni Flash (~25 credit)" : "Veo 3.1"}, mất 1–3 phút. Clip hỏng thì bấm "Tạo lại" ở cảnh đó,
+            Mỗi clip 8 giây bằng {videoModel === "omni_flash" ? "Omni Flash (~12 credit)" : "Veo 3.1"}, mất 1–3 phút. Clip chưa ưng thì bấm "Tạo lại…" ở cảnh đó và ghi muốn sửa gì,
             hoặc <strong>⬆ Dùng video của bạn</strong> để thay bằng cảnh quay thật (mp4/mov, tối đa 200 MB, không tốn credit).
           </p>
         )}
         {kind === "image" && (
-          <p className="qt-card__hint">Mỗi ảnh mất khoảng 20–60 giây; ảnh chưa ưng thì bấm "Tạo lại" ở cảnh đó.</p>
+          <p className="qt-card__hint">Mỗi ảnh mất khoảng 20–60 giây; ảnh chưa ưng thì bấm "Tạo lại…" ở cảnh đó và ghi muốn sửa gì (tiếng Việt cũng được).</p>
         )}
         <div className="qt-grid">
           {items.map(({ scene, node }) => (
@@ -139,9 +238,13 @@ export function StepMedia({ roles, kind }: { roles: ClipRoles; kind: "image" | "
                   type="button"
                   className="qt-btn qt-btn--small"
                   disabled={!node || isBusy(node) || running || (kind === "video" && !hasMedia(scene.image))}
-                  onClick={() => void (kind === "image" ? generateScene(scene.index) : generateVideo(scene.index))}
+                  onClick={() => {
+                    // A first render goes straight out; a redo asks what to change.
+                    if (node && hasMedia(node)) setRegenFor(regenFor === scene.index ? null : scene.index);
+                    else void (kind === "image" ? generateScene(scene.index) : generateVideo(scene.index));
+                  }}
                 >
-                  {node && hasMedia(node) ? "Tạo lại" : "Tạo"}
+                  {node && hasMedia(node) ? (regenFor === scene.index ? "Đóng" : "Tạo lại…") : "Tạo"}
                 </button>
                 {node && hasMedia(node) && (
                   <button type="button" className="qt-btn qt-btn--small qt-btn--ghost"
@@ -158,6 +261,28 @@ export function StepMedia({ roles, kind }: { roles: ClipRoles; kind: "image" | "
                   </button>
                 )}
               </div>
+              {kind === "video" && node && !isBusy(node) && node.data.status === "error"
+                && flowDropped(node.data.error) && (
+                <div className="qt-dropped">
+                  <p>{FLOW_DROPPED_VIDEO}</p>
+                  {roles.model && modelCheck?.status !== "ok" ? (
+                    <>
+                      <p>{modelCheck?.status === "blocked"
+                        ? "Đã kiểm tra: Flow chặn gương mặt người mẫu của clip này — đổi người mẫu rồi tạo lại ảnh cảnh."
+                        : "Nguyên nhân hay gặp nhất: gương mặt người mẫu. Ở Bước 1 bấm \"🎬 Kiểm tra với Flow\" để biết chắc, chặn thì đổi người mẫu."}</p>
+                      <button type="button" className="qt-btn qt-btn--small qt-btn--accent"
+                              onClick={() => boardId !== null && navigate(`/clips/${boardId}/setup`)}>
+                        Sang Bước 1 · người mẫu
+                      </button>
+                    </>
+                  ) : (
+                    <p>Thử: bấm "Tạo" lại, đổi ảnh cảnh này ở bước 3 sang góc cận sản phẩm, hoặc ⬆ Dùng video của bạn.</p>
+                  )}
+                </div>
+              )}
+              {regenFor === scene.index && node && hasMedia(node) && !isBusy(node) && (
+                <RegenBox node={node} kind={kind} onSubmit={(r) => regenerate(scene.index, r)} onClose={() => setRegenFor(null)} />
+              )}
             </div>
           ))}
           {items.length === 0 && <div className="qt-empty">Board chưa có cảnh nào.</div>}

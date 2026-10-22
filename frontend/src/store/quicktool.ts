@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import {
-  autoPrompt, createEdge, createNode, patchBoardData, patchNode, uploadImage, uploadReferenceVideo,
+  autoPrompt, createEdge, createNode, patchBoardData, patchNode, revisePromptApi, uploadImage, uploadReferenceVideo,
   writeNarrationApi, type ExportItem, type QuicktoolState,
 } from "../api/client";
 
@@ -37,10 +37,12 @@ interface QuicktoolStore {
   /** Re-read `Board.data.quicktool.step` for the active board. */
   syncFromBoard(): void;
   roles(): ClipRoles;
-  generateModel(): Promise<boolean>;
-  generateScene(sceneIndex: number): Promise<boolean>;
+  /** `force`: render a new face even when the node already has one ("Tạo lại người mẫu"). */
+  generateModel(force?: boolean): Promise<boolean>;
+  /** `request` (any language): rewrite the scene's prompt to do what it asks before generating again. */
+  generateScene(sceneIndex: number, request?: string): Promise<boolean>;
   generateAllScenes(): Promise<void>;
-  generateVideo(sceneIndex: number): Promise<boolean>;
+  generateVideo(sceneIndex: number, request?: string): Promise<boolean>;
   generateAllVideos(): Promise<void>;
   writeNarrations(): Promise<boolean>;
   /** The board's export node, created when missing. Returns its rfId. */
@@ -140,6 +142,27 @@ function stillRunning(get: () => QuicktoolStore): boolean {
   return a !== "stopped" && a !== "failed" && a !== "idle";
 }
 
+/** The node's prompt rewritten by the LLM to honour the user's change
+ * request, saved on the node (the previous one kept as `prevPrompt` so it
+ * can be restored). `null` = failed, already reported with a toast. */
+async function reviseNodePrompt(node: FlowNode, current: string, request: string, label: string): Promise<string | null> {
+  const dbId = parseInt(node.id, 10);
+  if (isNaN(dbId)) return null;
+  const board = useBoardStore.getState();
+  const req = request.trim();
+  board.updateNodeData(node.id, { autoPromptStatus: "pending" });
+  try {
+    const { prompt } = await revisePromptApi(dbId, req, current);
+    board.updateNodeData(node.id, { prompt, prevPrompt: current, lastRequest: req, autoPromptStatus: "done" });
+    patchNode(dbId, { data: { prompt, prevPrompt: current, lastRequest: req } }).catch(() => {});
+    return prompt;
+  } catch (err) {
+    board.updateNodeData(node.id, { autoPromptStatus: "failed" });
+    toast.error(`${label}: không sửa được prompt theo yêu cầu (${err instanceof Error ? err.message : "lỗi"}).`);
+    return null;
+  }
+}
+
 export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
   step: 1,
   auto: "idle",
@@ -163,10 +186,10 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
     return deriveRoles(nodes, edges);
   },
 
-  async generateModel() {
+  async generateModel(force = false) {
     const model = get().roles().model;
     if (!model) return true; // templates without a model (none today) just skip
-    if (hasMedia(model) || isBusy(model)) return true;
+    if (isBusy(model) || (hasMedia(model) && !force)) return true;
     const d = model.data;
     const prompt = buildCharacterPrompt(
       (d.charGender as GenderKey | undefined) ?? "female",
@@ -181,12 +204,16 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
     return ok;
   },
 
-  async generateScene(sceneIndex) {
+  async generateScene(sceneIndex, request) {
     const scene = get().roles().scenes.find((s) => s.index === sceneIndex);
     if (!scene || isBusy(scene.image)) return false;
     let prompt = typeof scene.image.data.prompt === "string" ? scene.image.data.prompt.trim() : "";
     const dbId = parseInt(scene.image.id, 10);
-    if (!prompt && !isNaN(dbId)) {
+    if (request?.trim()) {
+      const revised = await reviseNodePrompt(scene.image, prompt, request, `Cảnh ${sceneIndex}`);
+      if (revised === null) return false;
+      prompt = revised;
+    } else if (!prompt && !isNaN(dbId)) {
       useBoardStore.getState().updateNodeData(scene.image.id, { autoPromptStatus: "pending" });
       try {
         prompt = (await autoPrompt(dbId)).prompt;
@@ -210,13 +237,17 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
     }
   },
 
-  async generateVideo(sceneIndex) {
+  async generateVideo(sceneIndex, request) {
     const scene = get().roles().scenes.find((s) => s.index === sceneIndex);
     if (!scene?.video || !hasMedia(scene.image) || isBusy(scene.video)) return false;
     const video = scene.video;
     let prompt = typeof video.data.prompt === "string" ? video.data.prompt.trim() : "";
     const dbId = parseInt(video.id, 10);
-    if (!prompt && !isNaN(dbId)) {
+    if (request?.trim()) {
+      const revised = await reviseNodePrompt(video, prompt, request, `Video ${sceneIndex}`);
+      if (revised === null) return false;
+      prompt = revised;
+    } else if (!prompt && !isNaN(dbId)) {
       useBoardStore.getState().updateNodeData(video.id, { autoPromptStatus: "pending" });
       try {
         prompt = (await autoPrompt(dbId, { camera: "static" })).prompt;

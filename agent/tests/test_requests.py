@@ -1018,7 +1018,7 @@ def test_omni_flash_credit_cost_table():
     the contract so a Pro user doesn't get surprised by a silent rebase."""
     from flowboard.services.flow_sdk import OMNI_FLASH_CREDIT_COST
 
-    assert OMNI_FLASH_CREDIT_COST == {4: 15, 6: 20, 8: 25, 10: 30}
+    assert OMNI_FLASH_CREDIT_COST == {4: 6, 6: 9, 8: 12, 10: 15}
 
 
 def test_omni_flash_resolve_model():
@@ -1031,3 +1031,53 @@ def test_omni_flash_resolve_model():
     import pytest as _pt
     with _pt.raises(ValueError, match="unsupported"):
         resolve_omni_flash_model(5)
+
+
+@pytest.mark.asyncio
+async def test_video_jobs_run_side_by_side_but_other_jobs_stay_sequential(monkeypatch):
+    """Four video jobs that each wait on Flow overlap (up to the limit);
+    the worker's active_count covers jobs still waiting for a slot."""
+    import asyncio
+
+    from flowboard.db import get_session
+    from flowboard.db.models import Request
+    from flowboard.worker import processor as proc
+
+    monkeypatch.setenv("FLOWBOARD_VIDEO_PARALLEL", "3")
+    running = {"now": 0, "peak": 0}
+
+    async def slow_video(params):
+        running["now"] += 1
+        running["peak"] = max(running["peak"], running["now"])
+        await asyncio.sleep(0.2)
+        running["now"] -= 1
+        return {"media_ids": ["m"], "media_entries": [{"media_id": "m"}]}, None
+
+    w = proc.WorkerController(handlers={"gen_video_omni": slow_video})
+    ids = []
+    with get_session() as s:
+        for _ in range(4):
+            r = Request(type="gen_video_omni", params={}, status="queued")
+            s.add(r); s.commit(); s.refresh(r); ids.append(r.id)
+    loop = asyncio.create_task(w.start())
+    for rid in ids:
+        w.enqueue(rid)
+    await asyncio.sleep(0.05)
+    assert w.active_count == 4
+    await asyncio.sleep(0.05)
+    await w.drain()
+    w.request_shutdown(); await loop
+    assert running["peak"] == 3
+    with get_session() as s:
+        assert {s.get(Request, i).status for i in ids} == {"done"}
+
+
+def test_video_poll_budget_can_be_shortened_for_probes():
+    from flowboard.worker import processor as proc
+
+    full = proc.VIDEO_POLL_MAX_CYCLES
+    assert proc._poll_cycles({}) == full
+    assert proc._poll_cycles({"max_wait_s": 150}) == 15
+    assert proc._poll_cycles({"max_wait_s": 5}) == 6      # clamped to 60 s
+    assert proc._poll_cycles({"max_wait_s": 9999}) == 30  # clamped to 300 s
+    assert proc._poll_cycles({"max_wait_s": "x"}) == full

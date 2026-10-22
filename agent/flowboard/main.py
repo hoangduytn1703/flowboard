@@ -18,6 +18,7 @@ from flowboard.routes import export_extras as export_extras_route
 from flowboard.routes import account as account_route
 from flowboard.routes import cloud as cloud_route
 from flowboard import accounts
+from flowboard.services.account_pool import account_pool
 from flowboard.routes import history as history_route
 from flowboard.routes import prompt_library as prompt_library_route
 from flowboard.routes import video_clean as video_clean_route
@@ -127,6 +128,8 @@ async def lifespan(app: FastAPI):
     # default DB right away; otherwise the data store opens at first login.
     if _prepare_account_data not in accounts.after_activate:
         accounts.after_activate.append(_prepare_account_data)
+    if account_pool.after_login not in accounts.after_activate:
+        accounts.after_activate.append(account_pool.after_login)
     accounts.startup()
     from flowboard.services import file_store
     file_store.install_hooks()

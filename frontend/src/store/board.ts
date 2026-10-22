@@ -112,6 +112,11 @@ export interface FlowboardNodeData extends Record<string, unknown> {
   coverMediaId?: string;
   /** Export node: dialogue voices — `[A] … [B] …` tag → voice id (max 4). */
   speakers?: Record<string, string>;
+  /** Image/video node: the prompt before the last "Tạo lại theo yêu cầu" and that request. */
+  prevPrompt?: string;
+  lastRequest?: string;
+  /** Character node: verdict of "Kiểm tra với Flow" (flowModelCheck.ts). */
+  flowCheck?: { status: "ok" | "blocked" | "running"; at: number; requestId?: number; mediaId?: string };
 }
 
 export type FlowNode = Node<FlowboardNodeData>;
@@ -358,6 +363,9 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           bgmVolume: n.data["bgmVolume"] as number | undefined,
           coverMediaId: n.data["coverMediaId"] as string | undefined,
           speakers: n.data["speakers"] as Record<string, string> | undefined,
+          prevPrompt: n.data["prevPrompt"] as string | undefined,
+          lastRequest: n.data["lastRequest"] as string | undefined,
+          flowCheck: n.data["flowCheck"] as FlowboardNodeData["flowCheck"],
           // The worker persists the partial-failure summary onto the
           // node now, so a cold load has to read it back — otherwise a
           // batch where some variants were blocked reloads looking
@@ -440,6 +448,9 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           bgmVolume: n.data["bgmVolume"] as number | undefined,
           coverMediaId: n.data["coverMediaId"] as string | undefined,
           speakers: n.data["speakers"] as Record<string, string> | undefined,
+          prevPrompt: n.data["prevPrompt"] as string | undefined,
+          lastRequest: n.data["lastRequest"] as string | undefined,
+          flowCheck: n.data["flowCheck"] as FlowboardNodeData["flowCheck"],
           // The worker persists the partial-failure summary onto the
           // node now, so a cold load has to read it back — otherwise a
           // batch where some variants were blocked reloads looking
@@ -564,6 +575,9 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           bgmVolume: n.data["bgmVolume"] as number | undefined,
           coverMediaId: n.data["coverMediaId"] as string | undefined,
           speakers: n.data["speakers"] as Record<string, string> | undefined,
+          prevPrompt: n.data["prevPrompt"] as string | undefined,
+          lastRequest: n.data["lastRequest"] as string | undefined,
+          flowCheck: n.data["flowCheck"] as FlowboardNodeData["flowCheck"],
           error: n.data["error"] as string | undefined,
         },
       }));

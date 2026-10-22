@@ -1522,6 +1522,21 @@ export async function refinePromptApi(
   return res.json();
 }
 
+/** "Tạo lại" with a request: the node's prompt rewritten to do what the user asked. */
+export async function revisePromptApi(
+  nodeId: number,
+  request: string,
+  current?: string,
+): Promise<{ node_id: number; prompt: string }> {
+  const res = await fetch("/api/prompt/revise", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ node_id: nodeId, request, current: current ?? null }),
+  });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
+}
+
 export interface SplitStoryboardResult {
   storyboard: string;
   panels: number;

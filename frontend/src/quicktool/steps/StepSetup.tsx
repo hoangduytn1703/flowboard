@@ -15,6 +15,7 @@ import { useBoardStore, type FlowNode } from "../../store/board";
 import { useGenerationStore } from "../../store/generation";
 import { MAX_PRODUCT_PHOTOS, useQuicktoolStore } from "../../store/quicktool";
 import { useCharactersStore } from "../../store/references";
+import { checkModelNode, knownFlowCheck } from "../flowModelCheck";
 import { useSettingsStore } from "../../store/settings";
 import { hasMedia, isBusy, type ClipRoles } from "../roles";
 import "../models.css";
@@ -41,6 +42,46 @@ function modelMeta(model: FlowNode, product: string | undefined): CharacterMeta 
 }
 
 /** Step 1 — the inputs: product photos, the model, the render settings. */
+/** "🎬 Kiểm tra với Flow": one short probe clip from the model photo alone. */
+function FlowCheckButton({ node }: { node: FlowNode }) {
+  const [busy, setBusy] = useState(false);
+  const check = knownFlowCheck(node);
+  const running = busy || check?.status === "running";
+  async function run() {
+    if (!window.confirm("Thử tạo 1 video 8 giây chỉ từ ảnh người mẫu để xem Flow có chặn gương mặt này không (~12 credit nếu qua, bị chặn thì được hoàn, mất 1–3 phút). Tiếp tục?")) return;
+    setBusy(true);
+    try {
+      const v = await checkModelNode(node);
+      if (v.status === "ok") toast.success("Flow làm video với người mẫu này được.");
+      else toast.warning("Flow chặn video của người mẫu này (giống người thật / người nổi tiếng). Nên đổi người mẫu trước khi tạo video.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Kiểm tra thất bại.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <button type="button" className="qt-btn qt-btn--ghost" disabled={running || isBusy(node)} onClick={() => void run()}
+            title="Tạo thử 1 video ngắn từ ảnh người mẫu để biết Flow có chặn gương mặt này không">
+      {running ? "Đang kiểm tra với Flow…" : check?.status ? "🎬 Kiểm tra lại với Flow" : "🎬 Kiểm tra với Flow"}
+    </button>
+  );
+}
+
+function FlowCheckNote({ node }: { node: FlowNode }) {
+  const check = knownFlowCheck(node);
+  if (check?.status === "ok") return <p className="qt-card__hint qt-field--wide qt-flowcheck qt-flowcheck--ok">✓ Đã thử: Flow làm video với gương mặt này được.</p>;
+  if (check?.status === "blocked") {
+    return (
+      <p className="qt-card__hint qt-field--wide qt-flowcheck qt-flowcheck--blocked">
+        ✕ Flow chặn video có gương mặt này (bị coi là giống người thật / người nổi tiếng) — mọi cảnh có người mẫu sẽ không ra video.
+        Hãy "Tạo lại người mẫu", chọn mẫu khác trong thư viện hoặc upload ảnh người thật, rồi tạo lại ảnh cảnh.
+      </p>
+    );
+  }
+  return null;
+}
+
 export function StepSetup({ roles, sourceMediaId = null, personRequired = false, hands = null, productGender = "" }: {
   roles: ClipRoles;
   /** Who the clip's product is for; a men's / women's product only gets models of that gender. */
@@ -413,7 +454,7 @@ export function StepSetup({ roles, sourceMediaId = null, personRequired = false,
                 />
               </label>
               <div className="qt-field--wide qt-row">
-                <button type="button" className="qt-btn" disabled={isBusy(model)} onClick={() => void generateModel()}>
+                <button type="button" className="qt-btn" disabled={isBusy(model)} onClick={() => void generateModel(true)}>
                   {hasMedia(model) ? "Tạo lại người mẫu" : "Tạo người mẫu"}
                 </button>
                 <button type="button" className="qt-btn qt-btn--ghost" onClick={() => pickPhoto(model)}>
@@ -431,7 +472,9 @@ export function StepSetup({ roles, sourceMediaId = null, personRequired = false,
                     {modelSaved ? "✓ Đã lưu" : savingModel ? "Đang lưu…" : "★ Lưu người mẫu"}
                   </button>
                 )}
+                {modelMediaId && model && <FlowCheckButton node={model} />}
               </div>
+              {model && <FlowCheckNote node={model} />}
             </div>
           </div>
         ) : (

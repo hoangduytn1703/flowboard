@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Optional
@@ -305,6 +306,17 @@ VIDEO_POLL_INTERVAL_S = 10.0
 VIDEO_POLL_MAX_CYCLES = 30
 
 
+def _poll_cycles(params: dict) -> int:
+    """Poll budget for one video job. ``params.max_wait_s`` (60–300 s)
+    shortens it for probes such as the "does Flow accept this model" check,
+    where a clip that is not back in ~2 minutes means Flow dropped it."""
+    raw = params.get("max_wait_s") if isinstance(params, dict) else None
+    if isinstance(raw, (int, float)) and raw > 0:
+        wait = min(max(float(raw), 60.0), 300.0)
+        return max(1, int(round(wait / VIDEO_POLL_INTERVAL_S)))
+    return VIDEO_POLL_MAX_CYCLES
+
+
 def _is_request_canceled(rid: Optional[int]) -> bool:
     """Return True iff the cancel endpoint flipped this row to canceled.
 
@@ -452,7 +464,7 @@ async def _handle_gen_video(params: dict) -> tuple[dict, Optional[str]]:
     # and aggregate the outcome at the end so partial batches still
     # surface the variants that did succeed.
     while (
-        poll_attempts < VIDEO_POLL_MAX_CYCLES
+        poll_attempts < _poll_cycles(params)
         and not all(done_by_name.values())
     ):
         await asyncio.sleep(VIDEO_POLL_INTERVAL_S)
@@ -811,7 +823,7 @@ async def _handle_gen_video_omni(params: dict) -> tuple[dict, Optional[str]]:
     rid = params.get("__request_id")
 
     while (
-        poll_attempts < VIDEO_POLL_MAX_CYCLES
+        poll_attempts < _poll_cycles(params)
         and not all(done_by_name.values())
     ):
         await asyncio.sleep(VIDEO_POLL_INTERVAL_S)
@@ -1333,14 +1345,32 @@ def _commit_settlement(
         )
 
 
+#: Request types that spend minutes polling Flow; they run side by side (up
+#: to :data:`PARALLEL_LIMIT` at once) instead of one after another, so four
+#: clips take about as long as one. Flow's own UI queues several videos too.
+PARALLEL_TYPES = frozenset({"gen_video", "gen_video_omni"})
+
+
+def _parallel_limit() -> int:
+    try:
+        return max(1, int(os.environ.get("FLOWBOARD_VIDEO_PARALLEL", "3")))
+    except ValueError:
+        return 3
+
+
 class WorkerController:
-    """Single-consumer async queue worker."""
+    """Async queue worker: one job at a time, except video generations,
+    which run concurrently up to :func:`_parallel_limit`."""
 
     def __init__(self, handlers: Optional[dict[str, Handler]] = None) -> None:
         self._queue: asyncio.Queue[int] = asyncio.Queue()
         self._handlers = dict(handlers or _DEFAULT_HANDLERS)
         self._shutdown = asyncio.Event()
         self._active = 0
+        # Parallel jobs handed to a task but not yet inside _process_one.
+        self._spawned = 0
+        self._slots: Optional[asyncio.Semaphore] = None
+        self._tasks: set[asyncio.Task] = set()
         self._started_at: Optional[float] = None
 
     # ── enqueue ────────────────────────────────────────────────────────────
@@ -1356,19 +1386,52 @@ class WorkerController:
                 rid = await asyncio.wait_for(self._queue.get(), timeout=0.5)
             except asyncio.TimeoutError:
                 continue
-            await self._process_one(rid)
+            if self._request_type(rid) in PARALLEL_TYPES:
+                self._spawn_parallel(rid)
+            else:
+                await self._process_one(rid)
+
+    def _request_type(self, rid: int) -> Optional[str]:
+        try:
+            with get_session() as s:
+                req = s.get(Request, rid)
+                return req.type if req is not None else None
+        except Exception:  # noqa: BLE001 — fall back to the sequential path
+            return None
+
+    def _spawn_parallel(self, rid: int) -> None:
+        if self._slots is None:
+            self._slots = asyncio.Semaphore(_parallel_limit())
+        slots = self._slots
+        self._spawned += 1
+
+        async def run() -> None:
+            entered = False
+            try:
+                async with slots:
+                    # No await between these two: active_count never dips.
+                    entered = True
+                    self._spawned -= 1
+                    await self._process_one(rid)
+            finally:
+                if not entered:  # cancelled while waiting for a slot
+                    self._spawned -= 1
+
+        task = asyncio.create_task(run())
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
     def request_shutdown(self) -> None:
         self._shutdown.set()
 
     async def drain(self) -> None:
         # Wait for any in-flight task to finish.
-        while self._active > 0:
+        while self.active_count > 0:
             await asyncio.sleep(0.05)
 
     @property
     def active_count(self) -> int:
-        return self._active
+        return self._active + self._spawned
 
     @property
     def uptime_s(self) -> Optional[float]:
@@ -1485,6 +1548,11 @@ class WorkerController:
                         logger.exception(
                             "worker: node completion patch failed for rid=%s", rid
                         )
+                elif _expects_media(req.type):
+                    # Keep the reason on the node too: a reloaded page reads
+                    # node.data.error, and without it the card says "lỗi:"
+                    # with nothing after it (a timed-out video, 2026-10-22).
+                    node_patch = {"error": str(err)[:300]}
                 # Mirror onto the node in the same commit. Node.status uses
                 # the vocabulary the cards render (idle|queued|running|
                 # done|error), so both terminal failure modes collapse to

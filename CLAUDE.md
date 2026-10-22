@@ -114,6 +114,29 @@ của người dùng (console.neon.tech, secure.backblaze.com).
 - **Kill uvicorn thì worker con có thể mồ côi và giữ cổng 8355** → extension nối vào tiến trình cũ (`extension_disconnected`). Kill theo PID cả cây, **không dùng `pkill -f`** (giết luôn shell). `--reload` từng treo ở "Waiting for connections to close": Makefile đã có `--timeout-graceful-shutdown 3`.
 - Wizard (`QuicktoolApp.tsx`) chỉ `switchBoard(id)` khi board có trong `boards` **và** `boardsLoaded` (store) đã true; không thì xoá clip sẽ gọi lại board vừa xoá → toast 404, còn mở thẳng link khi danh sách chưa tải thì bị đẩy về `/clips`.
 - `PATCH /api/boards/{id}` gộp `data` một cấp (để lưu `step` không xoá `template_id`/`product_id`).
+- **Frontend bỏ mọi trường `node.data` không có trong danh sách** khi tải board (`store/board.ts`, 3 chỗ map `n.data[...]`
+  + kiểu `FlowboardNodeData`): thêm trường mới lưu trên node thì phải thêm vào cả 3 chỗ, không thì F5 là mất (dính 22/10 với `lastRequest`).
+- **Viết lại prompt bằng LLM hay làm mất tên sản phẩm** (thay "Women's short-sleeved round-neck t-shirt" bằng "the product" → Flow vẽ
+  áo vest, thấy thật 22/10). Mọi system prompt viết lại phải dặn giữ nguyên mô tả sản phẩm (`_REVISE_SUFFIX` có câu VERBATIM).
+- **Hàng tài khoản Flow từng tự "chuyển nhầm" sang project của tài khoản Google khác** (dính 22/10, nguyên nhân lớn nhất của
+  chuỗi timeout): `account_pool._CREDIT_ERROR` dò chữ `credit`/`paygate` → khớp `FLOW_DROPPED_JOB` ("… refunded the credits") →
+  `mark_exhausted(email, 0)` → job sau `ensure_credits` ghim project của tài khoản kế (hoangduytn173, `dfba8ba8`) trong khi tab Flow
+  vẫn là HoangDuyTN1703 → mọi ảnh/video gửi vào project lạ, video bị bỏ hết. Thêm: từ khi có đăng nhập, `on_account_read` lúc
+  extension kết nối (trước khi login) bị bỏ qua nên credit thật không bao giờ ghi đè con số 0. Đã sửa: `is_credit_error()` hẹp
+  (insufficient / not enough credit / quota exceeded / resource_exhausted…, loại trừ FLOW_DROPPED_JOB / refund / timeout / paygate_tier),
+  `account_pool.after_login()` (hook `after_activate`) phát lại lần đọc tab Flow cuối, số dư ≥ `REVIVE_CREDITS` (50) xoá cờ exhausted.
+  **Thấy timeout hàng loạt: xem `GET /api/auth/pool` (pinned_project_id, exhausted) trước khi nghi gì khác.**
+- **Video "Timed out" thường KHÔNG phải Flow chậm mà là Flow bỏ lượt** (22/10, đo thật): Flow nhận lệnh Omni, trả operation id,
+  rồi bỏ không báo — poll `jwpduf` trả "Media not found." từ đầu đến cuối, job không bao giờ vào listing, credit được hoàn. Chạy
+  cùng ảnh trong giao diện Flow thì Flow nói rõ: "câu lệnh có thể vi phạm chính sách về video liên quan đến **người nổi tiếng**".
+  **Có gương mặt bị Flow chặn thật**: mặt "#rm60" bị bỏ 5/5 lần trong đúng project (chân dung lẫn ảnh cảnh, Omni lẫn Veo), cùng
+  prompt với mặt khác thì ra video ~60 s. Nhưng các "mặt mới bị chặn" chiều 22/10 (7 mặt) là **kết quả sai do ghim nhầm project**
+  (xem mục trên) — chạy lại trong đúng project thì 4/4 mặt mới đều qua. Mặt bị chặn thì mọi cảnh có người đó đều chết; vẽ lại ảnh "không lộ mặt" **không đủ** (cảnh 3 cắt mặt
+  vẫn bị bỏ; "từ cằm xuống" bị vẽ thành không mặc quần → dính bộ lọc khác) — đừng làm nút tự sửa kiểu đó. Cách đúng: kiểm tra người
+  mẫu trước (nút "🎬 Kiểm tra với Flow", xem Chỗ cần biết) rồi đổi mẫu nếu bị chặn. Thư viện có mẫu "Lisa" mô tả "like Lisa of
+  blackpink" — chắc chắn bị chặn.
+  **Omni 4 s bị Flow bỏ** (cùng ảnh/prompt: 4 s bỏ sau 52 s, 8 s ra sau 68 s; mới thử 1 lần) — dùng 8 s. Thăm dò: `GET /api/flow/operations/{op}/lookup`, `/inflight`, `/listing` (`routes/flow_debug.py`).
+  Tab Claude in Chrome là profile khác (akiragosho2000); project của extension mở được bằng `flow.google.com/u/5/project/<id>`.
 - `Product.media_ids` là media id của **Flow**, thuộc project lúc upload; ảnh gốc nằm trong `storage/media` (đổi project thì `media_project_sync` upload lại).
 
 ## Chỗ cần biết trong code
@@ -314,6 +337,30 @@ của người dùng (console.neon.tech, secure.backblaze.com).
 - **Khung focus** (21/10, cuối `styles.css`): bấm chuột không còn viền trắng của trình duyệt (`:focus { outline: none }`);
   bàn phím (Tab) có quầng cam mờ `:focus-visible { box-shadow: 0 0 0 2px rgba(255,106,43,.45) }`. Ô nhập giữ kiểu viền riêng.
 
+- **"Tạo lại…" có ô yêu cầu** (22/10, bước 3 ảnh + bước 4 video, `quicktool/steps/StepMedia.tsx` `RegenBox`): cảnh đã có
+  ảnh/video thì nút "Tạo lại…" mở ô "Muốn … khác thế nào?" (gõ tiếng Việt, 5 gợi ý nhanh mỗi loại, Ctrl+Enter) với "✨ Tạo lại theo yêu
+  cầu" / "Tạo lại y như cũ" / "Huỷ". Theo yêu cầu → `POST /api/prompt/revise {node_id, request, current}` (`prompt_synth.revise_prompt`,
+  `_REVISE_SUFFIX`, giữ câu bảo vệ sản phẩm, tối đa 1200 ký tự) → lưu `prompt` mới + `prevPrompt` + `lastRequest` lên node → tạo lại
+  (`generateScene/generateVideo(index, request)` trong `store/quicktool.ts`, helper `reviseNodePrompt`). Ô hiện "Lần trước đã yêu cầu …"
+  và "↺ Về prompt trước đó" (chỉ đổi prompt, chưa tạo).
+
+- **Video chạy song song** (22/10, `worker/processor.py`): `WorkerController` vẫn một hàng, nhưng `PARALLEL_TYPES` (`gen_video`,
+  `gen_video_omni`) được tách thành task riêng, tối đa `FLOWBOARD_VIDEO_PARALLEL` (mặc định 3) cùng lúc; `active_count` = đang chạy +
+  đang chờ slot. Thử thật: 3 video bắt đầu cùng 07:53:40, xong cùng 07:59:47 (trước đây nối đuôi ~6 phút mỗi cái). Ảnh vẫn tuần tự.
+  Job lỗi/timeout của loại có media giờ ghi `node.data.error` (trước chỉ ghi trên request → F5 thấy "lỗi:" trống).
+  Bước 4: video timeout hiện "Flow bỏ lượt này" + hộp `.qt-dropped` (`FLOW_DROPPED_VIDEO` trong `store/generation.ts`, nhận cả
+  `timeout_waiting_video` / `FLOW_DROPPED_JOB` / chữ "Timed out" cũ) gợi ý tạo lại / đổi ảnh cảnh / dùng video của bạn.
+  **Giá Omni Flash 8 s = 12 credit** (Flow báo + trừ thật 22/10, trước ghi 25): `flow_sdk.OMNI_FLASH_CREDIT_COST = {4:6, 6:9, 8:12, 10:15}`
+  (4/6/10 s là ước 1,5 credit/s), `account_pool` dùng chung bảng này, frontend `settings.ts` + `roles.creditsPerClip`.
+
+- **"🎬 Kiểm tra với Flow" cho người mẫu** (22/10, `quicktool/flowModelCheck.ts`): `probeModel(mediaId)` gửi `gen_video_omni`
+  8 s chỉ với ảnh người mẫu làm nguyên liệu + `max_wait_s: 150` (worker `_poll_cycles(params)`, kẹp 60–300 s) → `done` = qua
+  (~12 credit, ~70 s), `timeout`/`FLOW_DROPPED_JOB` = bị chặn (hoàn credit, ~3 phút). Kết quả `flowCheck {status, at, requestId}`
+  lưu trên node nhân vật (whitelist `store/board.ts`) và `meta.flowCheck` của mẫu cùng ảnh trong thư viện (`characterBadges` hiện
+  "✓ Flow làm video được" / "✕ Flow chặn video" ở `/models` + picker). Bước 1: nút + dòng kết luận (`FlowCheckButton`/`FlowCheckNote`
+  trong `StepSetup.tsx`). Bước 4: hộp "Flow bỏ lượt này" nói nguyên nhân là người mẫu + nút "Sang Bước 1 · người mẫu".
+  (Đã thử thêm câu "original fictional person, natural everyday look…" vào `buildCharacterPrompt` rồi gỡ: mặt ra giống ảnh thật hơn.)
+
 - **Đăng xuất Flow phải bấm 2 lần** (21/10, `SettingsPanel.tsx`): lần đầu nút đổi thành "Bấm lần nữa để đăng xuất…" + "Huỷ",
   tự quay lại sau 5 s / khi đóng hộp; xong có toast (`AccountPanel.handleLogout`). Nút chỉ có ở hộp Cài đặt mở từ ⚙ cạnh tài khoản.
 
@@ -325,6 +372,8 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   upscale 2K/4K, storyboard lưới trong wizard ("storyboard 2"), trim / chèn chữ lên video thật.
 - Còn trong báo cáo UX chưa sửa: Canvas chat dock quá to, toolbar Canvas tiếng Anh, "req ✗" không bấm được, thư viện tham chiếu cũ.
 - Test `test_chat_agent.py::test_gen_video_renders_on_veo_only_when_asked` lỗi sẵn trên Linux (22/10, lỗi cả khi chưa có thay đổi mới), chưa xem nguyên nhân.
+- **Người mẫu bị Flow chặn**: đã có nút kiểm tra; chưa tự kiểm tra khi tạo người mẫu mới (tốn ~12 credit/lần nên để người dùng bấm).
+  Omni 4/6/10 s chưa thử lại (4 s bị bỏ 1 lần — có thể cũng do lỗi ghim nhầm project lúc đó).
 - Chọn gói Pro/Ultra ngay trong Cài đặt (hiện sửa `.env`).
 - Triển khai cho người khác: **để sau**. Hướng đã bàn: bạn cài local (đóng gói script + agent phục vụ giao diện build sẵn) là rẻ nhất; chạy trên server cần sửa extension (địa chỉ server, `wss`), đăng nhập, và vì hệ thống là một người dùng nên mỗi người một bản. Vercel đơn thuần không chạy được agent.
 - Test trên Windows (20/10): 743 pass khi bỏ 5 file lỗi do môi trường — `test_llm_gemini.py` (CLI `agy`), `test_llm_secrets.py::…0600`
@@ -359,4 +408,8 @@ của người dùng (console.neon.tech, secure.backblaze.com).
 - **22/10** — Bước B (code, chưa nối thật): Postgres theo schema mỗi tài khoản + `move_to_cloud`, kho file S3 theo tài khoản (`file_store.py`), `Asset.local_path` tương đối, routes `/api/cloud/*`, Cài đặt → "Dữ liệu của tài khoản". Test 833 pass, 2 skip chờ Neon, 1 lỗi quyền file 0600 có sẵn trên Windows. Đã thử trên UI: mục Dữ liệu hiện đúng trạng thái "trên máy này". Chờ người dùng đưa Neon URL + B2 key.
 - **22/10** — Bước B chạy thật: tạo project Neon `flowboard` (Singapore) + bucket B2 `flowboard-media-akira` + key qua Claude in Chrome; sửa 4 lỗi gặp khi nối thật (Neon pooler/search_path, UTCDateTime, id text, test đụng kho thật); `POST /api/cloud/migrate` chuyển akiragosho lên `acct_akiragosho` (346 dòng), media đẩy lên B2 nền; UI Cài đặt báo "trên cloud (Postgres)". Máy cty: chỉ cần thêm `FLOWBOARD_CENTRAL_DB_URL` vào `.env`. Chưa commit.
 - **22/10** — API key + cấu hình provider (`secrets:<user>` trên Neon, tự chép từ file lần đầu) và tuỳ chọn UI (`ui_prefs`, `/api/account/prefs`) đi theo tài khoản; project Flow ghim vốn đã theo tài khoản. Thử thật: restart → 7 key Gemini thấy trên Neon, prefs ghi/đọc; UI đăng nhập gọi GET prefs. Test login 8 pass, cả bộ 833 pass. Chưa commit.
+- **22/10** — "Tạo lại…" ở bước 3/4 có ô nhập yêu cầu (tiếng Việt) + gợi ý nhanh: AI sửa prompt theo yêu cầu rồi tạo lại, nhớ yêu cầu lần trước, nút về prompt cũ. `POST /api/prompt/revise`. Thử thật cảnh 4 (ảnh): lần 1 AI làm mất tên áo → ra áo vest, đã sửa (giữ nguyên mô tả sản phẩm) → lần 2 đúng áo, đúng yêu cầu; sửa luôn lỗi F5 mất `lastRequest`. Video theo yêu cầu chưa thử với Flow (tốn credit). Test 42 pass. Chưa commit.
+- **22/10** — Điều tra "timeout + tạo clip lâu": nguyên nhân là Flow lặng lẽ bỏ video có mặt người mẫu (bộ lọc người nổi tiếng, xác nhận bằng giao diện Flow; credit được hoàn) + worker chạy video nối đuôi (4 cảnh × 5–6 phút). Sửa: video chạy song song tối đa 3, lỗi ghi lên node, bước 4 báo "Flow bỏ lượt này" + gợi ý, giá Omni 8 s = 12 credit. Đã thử thật (3 video song song ~6 phút); test 837 pass (+1 lỗi 0600 có sẵn). Thử nút "vẽ lại không lộ mặt" thất bại nên đã bỏ; ảnh cảnh 1/3 của clip 1 đã trả về bản cũ. Chưa commit.
+- **22/10** — Tìm ra thủ phạm video bị Flow bỏ: gương mặt người mẫu (thí nghiệm A–E + 2 probe, đổi từng yếu tố). Thêm "🎬 Kiểm tra với Flow" (Bước 1, lưu kết quả lên node + thư viện, huy hiệu ở /models), Bước 4 chỉ thẳng sang đổi người mẫu, prompt người mẫu mới tránh giống người nổi tiếng, worker nhận `max_wait_s`. Đã thử thật: người mẫu clip 1 → "chặn" (191 s), ảnh mẫu 10/10 → qua (68 s); phát hiện Omni 4 s bị bỏ. Chưa commit.
+- **22/10 tối** — Sửa lỗi lớn: hàng tài khoản Flow coi `FLOW_DROPPED_JOB` ("refunded the credits") là hết credit → ghim project của tài khoản Google khác → mọi job rơi vào project lạ (`account_pool.is_credit_error`, `after_login`, `REVIVE_CREDITS`); "Tạo lại người mẫu" không làm gì khi đã có ảnh (`generateModel(force)`); kết luận kiểm tra Flow gắn với `mediaId`; gỡ câu "natural everyday look" khỏi prompt người mẫu (làm mặt giống ảnh thật hơn). Đã ghim lại `b5633a75`, credit thật 930. Test pool 11 pass. Thử nghiệm hôm nay tốn ~120 credit. Clip 1 vẫn chưa có video (người mẫu hiện tại bị chặn; người dùng sẽ tự tạo lại). Commit + push.
 

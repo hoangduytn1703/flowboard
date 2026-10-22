@@ -1418,3 +1418,49 @@
 .product-card__clips { font-size: 13px; color: #4ade80; }
 .product-card__clips--none { color: var(--muted); }
 .product-row__price { font-size: 15px; }
+
+/* "Tạo lại…" box under a scene tile (steps 3 and 4) */
+.qt-regen {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid rgba(255, 106, 43, 0.35);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.qt-regen__label { font-size: 14px; font-weight: 600; }
+.qt-regen__input { min-height: 56px; font-size: 14px; }
+.qt-regen__chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.qt-regen__chip {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.qt-regen__chip:hover { color: var(--text, #fff); border-color: rgba(255, 106, 43, 0.6); }
+.qt-regen__last { font-size: 12px; color: var(--muted); }
+.qt-regen__link { padding: 0; border: 0; background: none; color: #ff8a5c; font-size: 12px; cursor: pointer; text-decoration: underline; }
+.qt-regen__actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* step 4: a clip Flow dropped (face filter) — reason + one-click fix */
+.qt-dropped {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.08);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.qt-dropped p { margin: 0; }
+
+/* step 1: verdict of "Kiểm tra với Flow" for the model photo */
+.qt-flowcheck { margin: 0; padding: 6px 10px; border-radius: 8px; }
+.qt-flowcheck--ok { color: #86efac; background: rgba(34, 197, 94, 0.08); }
+.qt-flowcheck--blocked { color: #fca5a5; background: rgba(239, 68, 68, 0.1); }

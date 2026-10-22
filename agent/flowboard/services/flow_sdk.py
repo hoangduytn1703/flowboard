@@ -105,8 +105,10 @@ OMNI_FLASH_VALID_ASPECTS: set[str] = {
     "VIDEO_ASPECT_RATIO_LANDSCAPE",
 }
 # Informational — backend doesn't enforce, frontend surfaces to the user
-# at dispatch time so the credit cost is visible before submit.
-OMNI_FLASH_CREDIT_COST: dict[int, int] = {4: 15, 6: 20, 8: 25, 10: 30}
+# at dispatch time so the credit cost is visible before submit. 8 s = 12 is
+# what Flow quoted and charged on a Pro account on 2026-10-22 (it was 25);
+# the other lengths assume the same 1.5 credit/second.
+OMNI_FLASH_CREDIT_COST: dict[int, int] = {4: 6, 6: 9, 8: 12, 10: 15}
 
 
 def resolve_omni_flash_model(duration_s: int) -> str:

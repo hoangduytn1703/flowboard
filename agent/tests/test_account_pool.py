@@ -43,8 +43,8 @@ def _signed_in(email, credits=None):
 
 
 def test_job_cost_from_params():
-    assert ap.job_cost({"duration_s": 8}) == 25
-    assert ap.job_cost({"duration_s": 4, "variant_count": 2}) == 30
+    assert ap.job_cost({"duration_s": 8}) == 12
+    assert ap.job_cost({"duration_s": 4, "variant_count": 2}) == 12
     assert ap.job_cost({"video_quality": "quality", "start_media_id": "x"}) == 100
     assert ap.job_cost({"start_media_id": "x"}) == 20
     assert ap.job_cost({"prompt": "an image"}) == 0
@@ -145,9 +145,9 @@ def test_note_result_decrements_and_flags_credit_errors(pool):
     _signed_in("a@gmail.com")
     p.upsert("a@gmail.com", project_id="11111111-1111-4111-8111-111111111111", credits=50)
     p.note_result({"duration_s": 8}, None)
-    assert p.get("a@gmail.com")["credits"] == 25
+    assert p.get("a@gmail.com")["credits"] == 38
     p.note_result({"prompt": "img"}, None)
-    assert p.get("a@gmail.com")["credits"] == 25
+    assert p.get("a@gmail.com")["credits"] == 38
     p.note_result({"duration_s": 8}, "RESOURCE_EXHAUSTED: insufficient credits")
     acc = p.get("a@gmail.com")
     assert acc["credits"] == 0 and acc["exhausted_at"]
@@ -165,3 +165,28 @@ def test_pool_routes(client, pool, monkeypatch):
     assert client.post("/api/auth/pool/switch", json={"email": "zz@gmail.com"}).status_code == 404
     assert client.delete("/api/auth/pool/accounts/c@gmail.com").status_code == 200
     assert client.delete("/api/auth/pool/accounts/c@gmail.com").status_code == 404
+
+
+def test_only_real_credit_errors_mark_an_account_dry():
+    """FLOW_DROPPED_JOB ('… refunded the credits'), timeouts and paygate
+    errors once flagged a full account as dry and pinned another account's
+    project (2026-10-22)."""
+    from flowboard.services.flow_sdk import FLOW_DROPPED_JOB
+
+    assert ap.is_credit_error("RESOURCE_EXHAUSTED: insufficient credits")
+    assert ap.is_credit_error("Not enough credits to generate")
+    assert not ap.is_credit_error(FLOW_DROPPED_JOB)
+    assert not ap.is_credit_error("timeout_waiting_video")
+    assert not ap.is_credit_error("paygate_tier_unknown")
+    assert not ap.is_credit_error(None)
+
+
+def test_dropped_video_does_not_exhaust_the_account(pool):
+    from flowboard.services.flow_sdk import FLOW_DROPPED_JOB
+
+    p, _ = pool
+    _signed_in("a@gmail.com")
+    p.upsert("a@gmail.com", project_id="11111111-1111-4111-8111-111111111111", credits=500)
+    p.note_result({"duration_s": 8}, FLOW_DROPPED_JOB)
+    acc = p.get("a@gmail.com")
+    assert acc["credits"] == 500 and not acc.get("exhausted_at")

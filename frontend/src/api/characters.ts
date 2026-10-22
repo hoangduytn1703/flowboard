@@ -30,6 +30,17 @@ export interface CharacterMeta {
   /** Optional line the model says: put in front of scene 1's voice line
    * when the model is used on a clip, and read by "Nghe thử". */
   line?: string;
+  /** Last "Kiểm tra với Flow": does Flow make videos of this face? */
+  flowCheck?: FlowCheck;
+}
+
+/** Verdict of the Flow video probe (quicktool/flowModelCheck.ts). */
+export interface FlowCheck {
+  status: "ok" | "blocked" | "running";
+  at: number;
+  requestId?: number;
+  /** The photo the verdict is about — a new face needs a new check. */
+  mediaId?: string;
 }
 
 export interface SavedCharacter {
@@ -181,6 +192,13 @@ export function defaultCharacterLabel(meta: CharacterMeta): string {
 
 /** The badges shown under a saved model: gender, country, vibe. */
 export function characterBadges(meta: CharacterMeta): string[] {
-  return [genderLabel(meta.gender), countryLabel(meta.country), vibeLabel(meta.vibe)]
+  return [genderLabel(meta.gender), countryLabel(meta.country), vibeLabel(meta.vibe), flowCheckBadge(meta.flowCheck)]
     .filter((p): p is string => !!p);
+}
+
+/** Short label for the "Kiểm tra với Flow" verdict, or null when unknown. */
+export function flowCheckBadge(check: FlowCheck | undefined | null): string | null {
+  if (check?.status === "ok") return "✓ Flow làm video được";
+  if (check?.status === "blocked") return "✕ Flow chặn video";
+  return null;
 }

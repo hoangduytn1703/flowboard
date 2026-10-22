@@ -58,6 +58,24 @@ async def refine_prompt(body: RefinePromptBody) -> AutoPromptResponse:
     return AutoPromptResponse(node_id=body.node_id, prompt=text)
 
 
+class RevisePromptBody(BaseModel):
+    node_id: int
+    request: str
+    # The prompt to revise; defaults to the one stored on the node.
+    current: Optional[str] = None
+
+
+@router.post("/revise", response_model=AutoPromptResponse)
+async def revise_prompt(body: RevisePromptBody) -> AutoPromptResponse:
+    """"Tạo lại" with a request: the node's prompt rewritten to do what the
+    user asked (any language). Nothing is persisted."""
+    try:
+        text = await prompt_synth.revise_prompt(body.node_id, body.request, current=body.current)
+    except prompt_synth.PromptSynthError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return AutoPromptResponse(node_id=body.node_id, prompt=text)
+
+
 class AutoPromptBatchBody(BaseModel):
     node_id: int
     count: int

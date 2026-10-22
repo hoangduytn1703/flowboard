@@ -374,7 +374,7 @@ function attachPoll(rfId: string, requestId: number, opts: PollOpts) {
           // generation failure.
           const errMsg =
             req.status === "timeout"
-              ? `Timed out after 5 minutes (${req.error ?? "video_timeout"})`
+              ? FLOW_DROPPED_VIDEO
               : (req.error ?? "unknown");
           useBoardStore.getState().updateNodeData(rfId, { status: "error", error: errMsg });
           useGenerationStore.setState((s) => {
@@ -598,6 +598,15 @@ function attachSidecarPoll(rfId: string, requestId: number, type: SidecarType) {
   }));
   scheduleNextPoll();
 }
+
+/** Shown when a video request ends in `timeout`: Flow accepted the job and
+ * then dropped it without a word (credits come back). On 2026-10-22 every
+ * clip of the photoreal model timed out this way, and the same image run
+ * through Flow's own UI came back "may violate our policy on videos of
+ * public figures" — so the safety filter, not a slow queue. StepMedia keys
+ * its hint box on this prefix. */
+export const FLOW_DROPPED_VIDEO =
+  "Flow nhận rồi bỏ video này (credit được hoàn), không nói lý do. Thường là bộ lọc an toàn của Flow: người mẫu trông như người thật / người nổi tiếng.";
 
 export const useGenerationStore = create<GenerationState>((set, get) => ({
   active: {},

@@ -27,7 +27,7 @@ export interface ClipRoles {
 
 /** Rough Flow credits for one 8 s clip, for the "are you sure" prompts. */
 export function creditsPerClip(model: string, quality?: string): number {
-  if (model === "omni_flash") return 25;
+  if (model === "omni_flash") return 12; // Pro, 8 s — Flow charged 12 on 2026-10-22
   return quality && /quality|high/i.test(quality) ? 100 : 20;
 }
 

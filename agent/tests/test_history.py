@@ -89,7 +89,7 @@ def test_list_projection(client):
 
     omni = by_type["gen_video_omni"]
     assert omni["status"] == "failed" and omni["error"] == "PUBLIC_ERROR_UNSAFE_GENERATION"
-    assert omni["credits_estimate"] == 25 and omni["thumbnail"] is None and omni["can_retry"] is True
+    assert omni["credits_estimate"] == 12 and omni["thumbnail"] is None and omni["can_retry"] is True
 
     exp = by_type["export_video"]
     assert exp["board"] is None and exp["node"] is None and exp["can_retry"] is False
@@ -144,7 +144,7 @@ def test_summary_counts(client):
     today = body["today"]
     assert today["jobs"] == 5 and today["done"] == 3 and today["error"] == 1
     # Veo fast + omni 8 s (failed jobs still spent credits); images/export/vision are free.
-    assert today["credits_estimate"] == history_route.VEO_CREDITS["fast"] + 25
+    assert today["credits_estimate"] == history_route.VEO_CREDITS["fast"] + 12
     assert body["week"] == today
     assert body["total_media"] == 4  # 2 images + 1 video + 1 export
 
@@ -167,8 +167,8 @@ def test_credits_estimate_table():
     assert ce("gen_video", {"video_quality": "quality", "variant_count": 2}) == 200
     assert ce("gen_video", {"video_quality": "fast_relaxed"}) == 0
     assert ce("gen_video", {"video_quality": "weird"}) is None
-    assert ce("gen_video_omni", {"duration_s": 4}) == 15
-    assert ce("gen_video_omni", {}) == 25
+    assert ce("gen_video_omni", {"duration_s": 4}) == 6
+    assert ce("gen_video_omni", {}) == 12
     assert ce("gen_video_omni", {"duration_s": 99}) is None
     assert ce("gen_image", {}) == 0 and ce("mystery_type", {}) is None
 

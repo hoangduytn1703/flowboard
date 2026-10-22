@@ -27,6 +27,7 @@ from typing import Any, Optional
 from flowboard.db import get_session
 from flowboard.db.models import AppSetting
 from flowboard.services.flow_client import flow_client
+from flowboard.services.flow_sdk import OMNI_FLASH_CREDIT_COST
 from flowboard.services.flow_project import effective_project_id, normalize_project_id, set_override
 
 logger = logging.getLogger(__name__)
@@ -38,8 +39,25 @@ SWITCH_WAIT_S = 15 * 60
 SWITCH_POLL_S = 12.0
 #: Credits per Veo clip by quality (same table as routes/history.py).
 VEO_CREDITS = {"lite": 10, "fast": 20, "quality": 100, "lite_relaxed": 0, "fast_relaxed": 0}
-OMNI_CREDITS = {4: 15, 6: 20, 8: 25, 10: 30}
-_CREDIT_ERROR = re.compile(r"credit|quota|paygate|insufficient|resource_exhausted|không đủ", re.I)
+OMNI_CREDITS = OMNI_FLASH_CREDIT_COST  # one table: flow_sdk
+# Flow saying the account is out of credits. Deliberately narrow: a bare
+# "credit" also matches FLOW_DROPPED_JOB ("… refunded the credits") and
+# "paygate" matches paygate_tier_unknown — both once flagged a full account
+# as dry and pinned another Google account's project (2026-10-22).
+_CREDIT_ERROR = re.compile(
+    r"insufficient|not enough credit|out of credit|no credits? (?:left|remaining)|credits? (?:exhausted|depleted)"
+    r"|quota (?:exceeded|exhausted)|resource_exhausted|không đủ credit|hết credit",
+    re.I,
+)
+_NOT_A_CREDIT_ERROR = re.compile(r"FLOW_DROPPED_JOB|refund|timeout_waiting_video|paygate_tier", re.I)
+
+
+#: A balance at or above this clears a stale "exhausted" flag (a few clips).
+REVIVE_CREDITS = 50
+
+
+def is_credit_error(error: Optional[str]) -> bool:
+    return bool(error) and bool(_CREDIT_ERROR.search(error)) and not _NOT_A_CREDIT_ERROR.search(error)
 
 
 def job_cost(params: dict) -> int:
@@ -94,6 +112,8 @@ class AccountPool:
         # {from_email, to_email, project_id, cost, since, reason}
         self.pending: Optional[dict] = None
         self.last_switch: Optional[dict] = None
+        # Latest Flow-tab reading (email, credits, tier), kept for after_login().
+        self.last_read: Optional[dict] = None
 
     job_cost = staticmethod(job_cost)
 
@@ -173,7 +193,9 @@ class AccountPool:
         from flowboard.db import has_engine
 
         email = _norm_email(info.get("email"))
-        if not email or not has_engine():  # nobody logged in yet: nothing to record into
+        if email:
+            self.last_read = dict(info)
+        if not email or not has_engine():  # nobody logged in yet: replayed by after_login()
             return
         acc = self.get(email)
         pid = None
@@ -186,9 +208,28 @@ class AccountPool:
             self.upsert(email, project_id=pid, credits=info.get("credits"), tier=info.get("tier"))
         except ValueError:
             return
+        credits = info.get("credits")
+        if isinstance(credits, int) and credits >= REVIVE_CREDITS:
+            # Flow itself shows a healthy balance: whatever flagged it dry was
+            # wrong or is over (it used to stay "exhausted" forever). A low
+            # balance (below a few clips) keeps the flag.
+            data = _load()
+            for a in data["accounts"]:
+                if a.get("email") == email and a.get("exhausted_at"):
+                    a["exhausted_at"] = None
+                    _save(data)
+                    break
         if self.pending and self.pending.get("to_email") == email:
             # The user put the Flow tab on the account we asked for.
             self.pending["seen_at"] = time.time()
+
+    def after_login(self) -> None:
+        """Replay the last Flow-tab reading once an account's data is open:
+        the extension usually connects (and reports real credits) before
+        anyone has logged in, when there is nowhere to write it."""
+        info = self.last_read
+        if info:
+            self.on_account_read(info)
 
     # ── the switch ─────────────────────────────────────────────────────────
     def next_account(self, cost: int, exclude: Optional[str]) -> Optional[dict]:
@@ -310,7 +351,7 @@ class AccountPool:
         if cost <= 0:
             return
         email = self.current_email()
-        if error and _CREDIT_ERROR.search(error):
+        if is_credit_error(error):
             # Flow said no: whatever we thought, this account is dry.
             self.mark_exhausted(email, 0)
             return

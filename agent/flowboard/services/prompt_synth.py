@@ -669,6 +669,69 @@ async def refine_prompt(node_id: int, draft: str, *, camera: Optional[str] = Non
         return text
 
 
+_REVISE_SUFFIX = (
+    "\n\nREVISE MODE: below is the CURRENT PROMPT that produced a result the "
+    "user did not like, and the USER'S CHANGE REQUEST (often Vietnamese, "
+    "possibly rough). Rewrite the current prompt so the next generation does "
+    "what the request asks. Keep everything the request does not touch — "
+    "subject, product, outfit, setting, framing, wording of constraints — "
+    "and change only what it asks for; when the request contradicts the "
+    "current prompt, the request wins. Copy the product's name and "
+    "description words from the current prompt VERBATIM (e.g. \"Women's "
+    "short-sleeved round-neck t-shirt\"): never shorten them to \"the "
+    "product\" or \"the item\" — the image model needs them to draw the "
+    "right garment. English, ONE prompt, same rules as above. Output only "
+    "the prompt."
+)
+
+#: A revised prompt keeps the template's constraint sentences, so it may run
+#: longer than a fresh auto-prompt.
+_REVISE_MAX_CHARS = 1200
+
+
+async def revise_prompt(node_id: int, request: str, *, current: Optional[str] = None) -> str:
+    """The node's current prompt rewritten to honour the user's change
+    request ("áo hồng đậm hơn", "người mẫu cười tươi"…) for a "Tạo lại".
+
+    ``current`` defaults to the prompt stored on the node. Nothing is
+    written here; the caller saves the result before dispatching."""
+    request = (request or "").strip()
+    if not request:
+        raise PromptSynthError("request is empty")
+    records, target = _collect_upstream(node_id)
+    if target is None:
+        raise PromptSynthError(f"node {node_id} not found")
+    current = (current if current is not None else str((target.data or {}).get("prompt") or "")).strip()
+    is_video = target.type == "video"
+    subject_count = len(_distinct_subjects(records))
+    base = _video_system_prompt(None, subject_count) if is_video else _image_system_prompt(subject_count)
+    user_msg = (
+        _format_user_message(records, target)
+        + f"\n\nCURRENT PROMPT:\n{current or '(none)'}"
+        + f"\n\nUSER'S CHANGE REQUEST:\n{request}"
+    )
+    async with record_activity(
+        "auto_prompt",
+        params={"node_id": node_id, "mode": "revise", "request": request[:200]},
+        node_id=node_id,
+    ) as activity:
+        try:
+            text = await run_llm("auto_prompt", user_msg, system_prompt=base + _REVISE_SUFFIX, timeout=90.0)
+        except LLMError as exc:
+            raise PromptSynthError(f"auto-prompt provider failed: {exc}") from exc
+        text = (text or "").strip().strip('"').strip("'")
+        if not text:
+            raise PromptSynthError("empty response from auto-prompt provider")
+        if len(text) > _REVISE_MAX_CHARS:
+            text = text[:_REVISE_MAX_CHARS].rstrip() + "…"
+        text = restore_product_guard(
+            text, current,
+            image_with_product=not is_video and any(r["type"] == "visual_asset" for r in records),
+        )
+        activity.set_result({"prompt": text, "request": request[:200]})
+        return text
+
+
 async def auto_prompt(node_id: int, *, camera: Optional[str] = None) -> str:
     """Compose a generation prompt by walking upstream + asking the
     configured Auto-Prompt provider.
