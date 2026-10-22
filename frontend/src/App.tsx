@@ -18,7 +18,7 @@ import { QuicktoolApp } from "./quicktool/QuicktoolApp";
 import { useBoardStore } from "./store/board";
 import { useReferencesStore } from "./store/references";
 import { useSettingsStore } from "./store/settings";
-import { getAccountMe, type AccountMe } from "./api/account";
+import { getAccountMe, getAccountPrefs, type AccountMe } from "./api/account";
 import { LoginPage } from "./components/LoginPage";
 import { useAccountStore } from "./store/account";
 
@@ -68,6 +68,10 @@ function AppInner() {
     // Fire-and-forget: panel renders the loading state inline and the
     // app stays usable even if references fail to hydrate.
     void loadReferences();
+    // Model picks etc. saved with the account (another machine's choices).
+    if (useAccountStore.getState().me?.auth) {
+      void getAccountPrefs().then((p) => useSettingsStore.getState().hydrateFromAccount(p)).catch(() => {});
+    }
   }, [loadInitialBoard, loadReferences]);
 
   if (loading && boardId === null) {

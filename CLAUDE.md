@@ -32,8 +32,10 @@ Tạo ảnh/video đi qua Google Flow (cần gói Pro/Ultra) bằng extension Ch
 
 ## Đăng nhập & dữ liệu theo tài khoản (phase 1.5, 22/10)
 Mục tiêu người dùng: đăng nhập ở máy nào cũng thấy đúng dữ liệu của mình ("như web thường"). Làm 2 bước:
-**Bước A (xong 22/10, chạy trên máy)**: đăng nhập + tách dữ liệu theo tài khoản. **Bước B (chưa)**: trỏ dữ liệu tài khoản lên
-cloud — Postgres Neon (vùng Singapore, schema riêng mỗi tài khoản) + bucket B2 cho media — chờ người dùng tạo 2 tài khoản đó.
+**Bước A (xong 22/10)**: đăng nhập + tách dữ liệu theo tài khoản. **Bước B (xong 22/10, đã chạy thật)**: dữ liệu tài khoản
+nằm trên cloud — Postgres **Neon** (project `flowboard`, vùng Singapore, schema riêng mỗi tài khoản) + bucket **Backblaze B2**
+`flowboard-media-akira` (endpoint `s3.us-east-005.backblazeb2.com`) cho media. Tài khoản Neon/B2 đăng nhập bằng Google/email
+của người dùng (console.neon.tech, secure.backblaze.com).
 - `flowboard/accounts.py`: kho **trung tâm** `storage/accounts.db` (bảng `account_user`, `account_session`; SQLAlchemy Core,
   metadata riêng — KHÔNG nằm trong `SQLModel.metadata` để `create_all`/`drop_all` của dữ liệu không đụng tới; sau này
   `FLOWBOARD_CENTRAL_DB_URL` trỏ lên cloud). Mật khẩu `pbkdf2_sha256` 200k vòng (stdlib). Phiên = cookie `fb_session`
@@ -58,8 +60,47 @@ cloud — Postgres Neon (vùng Singapore, schema riêng mỗi tài khoản) + bu
 - Frontend: `App.tsx` = cổng đăng nhập (`GET /api/account/me` → `LoginPage` hay app; sự kiện `flowboard:unauthorized` do
   `api()` bắn khi gặp 401 → về trang đăng nhập), `store/account.ts`, `components/LoginPage.tsx`, `components/UserChip.tsx`
   (sidebar: 👤 tên + Đăng xuất), `api/account.ts`. Đã thử thật bằng Playwright: đăng nhập sai/đúng, dữ liệu hiện, F5 giữ phiên, đăng xuất.
-- Phase B sẽ cần: engine Postgres theo schema (`make_engine(url)` đã nhận URL bất kỳ; migration `ALTER` kiểu SQLite trong
-  `db/session.py` chỉ chạy khi dialect = sqlite), kho file S3 theo tài khoản (thiết kế đã có từ 21/10, bị revert).
+- **Bước B — đã chạy thật 22/10 trên máy nhà** (akiragosho: 346 dòng → schema `acct_akiragosho`; 178 file media (236 MB, mọi Asset có file) đã lên B2; đã thử dời một file đi rồi gọi `/media/<id>` → tự tải về từ B2):
+  - `.env` mỗi máy thêm **`FLOWBOARD_CENTRAL_DB_URL=postgresql://…-pooler.c-3.ap-southeast-1.aws.neon.tech/neondb?sslmode=require`**
+    (chuỗi lấy ở Neon Console → Connect, hoặc chép từ `.env` máy nhà — **không commit**) → kho trung tâm (user/session/setting)
+    nằm trên Neon; `db.make_engine(url, schema=)` tạo engine Postgres (psycopg); migration `ALTER` kiểu SQLite chỉ chạy khi
+    dialect = sqlite. **Máy cty chỉ cần: `git pull`, `make install` (psycopg, boto3), thêm dòng đó vào `.env`, chạy, đăng nhập
+    `akiragosho` → thấy dữ liệu; B2 đã lưu trong kho trung tâm nên không phải nhập lại; file media tải về khi cần.**
+  - **Bẫy Neon (dính 22/10)**: host `-pooler` là PgBouncer chế độ transaction → từ chối `options=-c search_path` lúc kết nối và
+    `SET search_path` **mất sau mỗi transaction** (bảng bị tạo nhầm vào `public`). `make_engine(schema=…)` vì thế **bỏ `-pooler.`**
+    khỏi host (nối thẳng compute, pool 5+5) + `SET search_path` ở event `connect` + `schema_translate_map={None: schema}` để
+    ORM luôn ghi rõ schema. Kho trung tâm (không schema) vẫn dùng pooler.
+  - Dữ liệu tài khoản lên cloud: `accounts.move_to_cloud(username)` (route `POST /api/cloud/migrate`, nút "☁ Chuyển dữ liệu
+    lên cloud" ở Cài đặt → Dữ liệu): chép từng bảng SQLite → schema `acct_<user>` (JSON/datetime/bool đổi kiểu, `setval` sequence),
+    từ chối nếu schema đã có clip/sản phẩm, đổi `backend` của user thành `{"type":"postgres","schema":…}`; SQLite giữ làm sao lưu.
+    Sau đó `accounts.data_engine(user)` mở Postgres ở mọi máy có `FLOWBOARD_CENTRAL_DB_URL`.
+  - **File media** `services/file_store.py` (boto3, S3 API — B2/R2): key = `<username>/media/x.mp4`; Asset có file → đẩy nền
+    (event SQLAlchemy); `media.cached_path` thiếu file → tải về; `reconcile()` khi tài khoản active. Cấu hình lưu **kho trung tâm**
+    (`account_setting` khoá `s3`) nên mọi máy đăng nhập đều có; đặt ở Cài đặt → Dữ liệu (`PUT /api/cloud/s3`, kiểm tra ghi/xoá
+    thử trước khi lưu) hoặc env `FLOWBOARD_S3_*`. Khi chưa đăng nhập prefix là `local/`.
+  - **`Asset.local_path` lưu tương đối** (`db/paths.py`, kiểu `StoragePath`): ghi `media/x.mp4` khi file nằm trong thư mục dữ
+    liệu (ngoài thì giữ nguyên tuyệt đối); đọc ra đường dẫn tuyệt đối của máy đang chạy; đường dẫn tuyệt đối cũ của máy khác vẫn
+    đọc được; `normalize_asset_paths` chạy trong `init_db`. Bắt buộc cho Ubuntu + Windows dùng chung DB.
+  - `move_to_cloud` đổi kiểu khi chép: cột ngày của SQLModel là `UTCDateTime` (TypeDecorator → nhìn `.impl`), chuỗi SQLite
+    naive → gắn UTC; chỉ `setval` sequence cho bảng có `id` kiểu số (`providerjob.id` là text).
+  - Test: `test_db_paths.py`, `test_file_store.py` (S3 giả moto), `test_cloud_postgres.py` (**chỉ chạy khi có
+    `FLOWBOARD_TEST_PG_URL`**, tạo schema + user tạm rồi xoá bằng finalizer; 2 pass trên Neon thật).
+    **`conftest.py` ép `FLOWBOARD_CENTRAL_DB_URL=""` và `FLOWBOARD_S3_*=""`** — bẫy 22/10: `.env` có chuỗi Neon nên
+    `test_account_login.py` đã chạy thẳng lên kho thật (tạo user `ban`/`new`, đổi mật khẩu akiragosho; đã dọn + đặt lại).
+    `seed_default()` chỉ seed khi kho **trống** → user rác trên Neon làm mất `akiragosho`; dọn bằng SQL rồi gọi `seed_default()`.
+  - Mật khẩu/khóa: Neon URL chỉ trong `.env`; B2 key chỉ trong `account_setting` trên Neon (`PUT /api/cloud/s3`). Đổi key:
+    Backblaze → Application Keys (key `flowboard-app` chỉ cho bucket đó).
+- **Cái gì đi theo tài khoản (22/10)** — mọi thứ dưới đây nằm trên Neon nên đăng nhập máy nào cũng có:
+  - **API key Gemini / OpenAI / xAI + cấu hình provider** (`featureConfig`, `activeProviders`): `services/llm/secrets.py`
+    `read()/write()` khi auth bật + có tài khoản active → `account_setting` khoá **`secrets:<username>`** (cache RAM 60 s), lần đầu
+    tự chép `~/.flowboard/secrets.json` của máy lên (đã làm thật: 7 key Gemini). Không đăng nhập / `FLOWBOARD_SECRETS_PATH` (test)
+    → vẫn dùng file. File cũ trên máy không bị ghi nữa (chỉ còn là bản sao cũ).
+  - **Project Flow đang ghim** + `flow_project_for:<email>` + hàng tài khoản Flow: `AppSetting` trong DB tài khoản (có sẵn từ trước).
+    `.env` `FLOWBOARD_FLOW_PROJECT_ID` chỉ là dự phòng khi chưa ghim.
+  - **Tuỳ chọn UI** (model ảnh, chất lượng video, Omni/Veo, thời lượng, nguồn ảnh, chế độ Quicktool/Canvas): `AppSetting` **`ui_prefs`**
+    qua `GET/PUT /api/account/prefs`; `store/settings.ts` `hydrateFromAccount()` gọi trong `AppInner` sau khi đăng nhập (tài khoản chưa
+    có → đẩy giá trị localStorage hiện tại lên), mỗi setter ghi localStorage + PUT (debounce 400 ms). localStorage chỉ còn là cache.
+  - **Vẫn theo máy**: gói Pro/Ultra `FLOWBOARD_PAYGATE_TIER` trong `.env`, extension Chrome, Gemini key cho test.
 
 ## Bẫy đã gặp (đừng lặp lại)
 - **Sửa file lớn bằng script: tính điểm cuối bằng `index()` của chính đoạn cần xoá, đừng trỏ tới marker ở xa** — 21/10 một lệnh xoá nhầm ~11 nghìn ký tự CSS của `quicktool.css` (phục hồi từ git HEAD + dựng lại phần chưa commit; luôn `git diff --stat` ngay sau khi sửa file lớn).
@@ -315,4 +356,7 @@ cloud — Postgres Neon (vùng Singapore, schema riêng mỗi tài khoản) + bu
 - **21/10** — Người mẫu: bấm vào thẻ là mở form sửa (bỏ nút "✎ Sửa"); nút Xoá thành nút đỏ như form sản phẩm; sửa lỗi nút đỏ hover bị đổi thành nền tối (mọi chỗ dùng `project-modal__btn--danger`). Đã thử trên UI (bấm thẻ → form sửa; ▶ / Xoá không mở form). Commit + push.
 - **22/10** — Gộp "Nhập từ TikTok" + "Nhập từ Shopee" thành một nút **"📥 Nhập từ tab đang mở"**: tự nhận tab TikTok / Shopee, trang sản phẩm hay showcase, nhập nhiều tab một lần (bảng chọn + kết quả từng tab). `services/tab_import.py`, `GET /api/products/open-tabs`, `POST /api/products/import-tabs`, extension **0.5.0** (`list_shop_tabs`, `read_tab`, `scrape_page` nhận `tabId`) → **phải Reload extension**. Test `test_tab_import.py` (15) pass, cả bộ 836 pass + 1 lỗi có sẵn; UI thử bằng dữ liệu giả + agent thật báo đúng "cần Reload 0.5.0"; chưa thử tab thật. Commit + push.
 - **22/10** — Phase 1.5 bước A: đăng nhập (`akiragosho` / `Password@123`) + dữ liệu tách theo tài khoản trong `storage/accounts/<user>/`; mọi API cần cookie; test `test_account_login.py` 7 pass, cả bộ 786 pass; thử thật trên UI (Playwright) và API. Dữ liệu cũ đã dời vào tài khoản akiragosho. Chờ Neon + B2 để làm bước B (dữ liệu lên cloud).
+- **22/10** — Bước B (code, chưa nối thật): Postgres theo schema mỗi tài khoản + `move_to_cloud`, kho file S3 theo tài khoản (`file_store.py`), `Asset.local_path` tương đối, routes `/api/cloud/*`, Cài đặt → "Dữ liệu của tài khoản". Test 833 pass, 2 skip chờ Neon, 1 lỗi quyền file 0600 có sẵn trên Windows. Đã thử trên UI: mục Dữ liệu hiện đúng trạng thái "trên máy này". Chờ người dùng đưa Neon URL + B2 key.
+- **22/10** — Bước B chạy thật: tạo project Neon `flowboard` (Singapore) + bucket B2 `flowboard-media-akira` + key qua Claude in Chrome; sửa 4 lỗi gặp khi nối thật (Neon pooler/search_path, UTCDateTime, id text, test đụng kho thật); `POST /api/cloud/migrate` chuyển akiragosho lên `acct_akiragosho` (346 dòng), media đẩy lên B2 nền; UI Cài đặt báo "trên cloud (Postgres)". Máy cty: chỉ cần thêm `FLOWBOARD_CENTRAL_DB_URL` vào `.env`. Chưa commit.
+- **22/10** — API key + cấu hình provider (`secrets:<user>` trên Neon, tự chép từ file lần đầu) và tuỳ chọn UI (`ui_prefs`, `/api/account/prefs`) đi theo tài khoản; project Flow ghim vốn đã theo tài khoản. Thử thật: restart → 7 key Gemini thấy trên Neon, prefs ghi/đọc; UI đăng nhập gọi GET prefs. Test login 8 pass, cả bộ 833 pass. Chưa commit.
 

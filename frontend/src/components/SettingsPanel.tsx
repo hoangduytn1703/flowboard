@@ -10,6 +10,7 @@ import { GeminiKeysSection } from "./GeminiKeysSection";
 import { FlowAccountsSection } from "./settings/FlowAccountsSection";
 import { AccountPoolSection } from "./settings/AccountPoolSection";
 import { ImageProvidersSection } from "./settings/ImageProvidersSection";
+import { DataFolderSection } from "./settings/DataFolderSection";
 import {
   getPinnedFlowProject,
   setPinnedFlowProject,
@@ -546,6 +547,8 @@ export function SettingsPanel({
           </a>
         </div>
       </div>
+
+      <DataFolderSection />
 
       {onLogout && (
         // Sign out lives here (not in the AccountPanel chip) so the

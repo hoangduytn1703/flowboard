@@ -4,6 +4,8 @@ from typing import Optional
 from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, SQLModel, Column, JSON
 
+from flowboard.db.paths import StoragePath
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -99,7 +101,9 @@ class Asset(SQLModel, table=True):
     # Latest captured signed GCS URL (expires — refreshed when user reopens
     # Flow tab).
     url: Optional[str] = None
-    local_path: Optional[str] = None
+    # Stored relative to the account's data folder (``media/x.mp4``) so the
+    # same row works on every machine; reads give an absolute path here.
+    local_path: Optional[str] = Field(default=None, sa_column=Column(StoragePath()))
     mime: Optional[str] = None
     created_at: datetime = Field(default_factory=_utcnow)
 

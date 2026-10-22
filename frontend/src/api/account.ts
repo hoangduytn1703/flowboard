@@ -49,3 +49,14 @@ export async function loginWithMessage(username: string, password: string): Prom
   }
   return res.json();
 }
+
+/** UI preferences saved with the account (model picks, UI mode …). */
+export type AccountPrefs = Record<string, string | number | boolean>;
+
+export function getAccountPrefs() {
+  return api<AccountPrefs>("/api/account/prefs");
+}
+
+export function putAccountPrefs(prefs: AccountPrefs) {
+  return api<AccountPrefs>("/api/account/prefs", { method: "PUT", body: JSON.stringify(prefs) });
+}

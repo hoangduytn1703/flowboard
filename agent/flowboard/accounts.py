@@ -61,6 +61,12 @@ users = Table(
     Column("created_at", DateTime, nullable=False),
     Column("backend", Text, nullable=False, default="{}"),
 )
+#: Settings every machine should share once it logs in (the media bucket…).
+settings_t = Table(
+    "account_setting", central_md,
+    Column("key", String(64), primary_key=True),
+    Column("value", Text, nullable=False),
+)
 sessions = Table(
     "account_session", central_md,
     Column("token", String(64), primary_key=True),
@@ -109,7 +115,7 @@ _central: dict[str, Optional[Engine]] = {"engine": None}
 
 def central_engine() -> Engine:
     if _central["engine"] is None:
-        url = os.getenv("FLOWBOARD_CENTRAL_DB_URL") or str(Path(config.STORAGE_DIR) / "accounts.db")
+        url = central_url() or str(Path(config.STORAGE_DIR) / "accounts.db")
         Path(config.STORAGE_DIR).mkdir(parents=True, exist_ok=True)
         _central["engine"] = make_engine(url)
         central_md.create_all(_central["engine"])
@@ -120,6 +126,43 @@ def reset_central() -> None:
     """Tests: forget the central engine (the storage dir changed)."""
     _central["engine"] = None
     _session_cache.clear()
+
+
+def central_url() -> Optional[str]:
+    """The cloud central store (Neon) when configured — then account data
+    can live there too (one schema per account)."""
+    url = os.getenv("FLOWBOARD_CENTRAL_DB_URL", "").strip()
+    return url or None
+
+
+def get_setting(key: str) -> Any:
+    with central_engine().connect() as c:
+        row = c.execute(select(settings_t).where(settings_t.c.key == key)).first()
+    if row is None:
+        return None
+    try:
+        return json.loads(row.value)
+    except ValueError:
+        return row.value
+
+
+def set_setting(key: str, value: Any) -> None:
+    raw = json.dumps(value, ensure_ascii=False)
+    with central_engine().begin() as c:
+        if c.execute(select(settings_t.c.key).where(settings_t.c.key == key)).first():
+            c.execute(settings_t.update().where(settings_t.c.key == key).values(value=raw))
+        else:
+            c.execute(settings_t.insert().values(key=key, value=raw))
+
+
+def set_backend(username: str, backend: dict) -> None:
+    with central_engine().begin() as c:
+        c.execute(users.update().where(users.c.username == username).values(backend=json.dumps(backend)))
+    for tok, (u, at) in list(_session_cache.items()):
+        if u["username"] == username:
+            _session_cache[tok] = ({**u, "backend": backend}, at)
+    if _active["user"] and _active["user"]["username"] == username:
+        _active["user"]["backend"] = backend
 
 
 def _now() -> datetime:
@@ -305,19 +348,130 @@ def activate(user: dict) -> None:
         if user["username"] == SEED_USER:
             _adopt_legacy_data(dest)
         _point_storage(dest)
-        if backend.get("type") == "postgres" and backend.get("url"):
-            eng = make_engine(backend["url"])  # Phase B: schema per account
-        else:
-            eng = make_engine(dest / "flowboard.db")
+        eng = data_engine(user)
         set_engine(eng)
         init_db(eng)
         _active.update(user={k: v for k, v in user.items() if k != "password_hash"}, since=time.time())
-        logger.info("accounts: active account → %s (%s)", user["username"], dest)
+        logger.info("accounts: active account → %s (%s, %s)", user["username"], dest, backend.get("type") or "sqlite")
         for fn in list(after_activate):
             try:
                 fn()
             except Exception as exc:  # noqa: BLE001
                 logger.warning("accounts: after_activate hook %s failed: %s", getattr(fn, "__name__", fn), exc)
+        # Media of the account: upload what the bucket lacks, fetch what this machine lacks.
+        from flowboard.services import file_store
+        file_store.reset()
+        file_store.reconcile_in_background()
+
+
+def schema_for(username: str) -> str:
+    return "acct_" + "".join(ch if ch.isalnum() else "_" for ch in username.lower())
+
+
+def data_engine(user: dict) -> Engine:
+    """The engine for an account's data: its Postgres schema in the central
+    cloud database when its backend says so, else its SQLite file."""
+    backend = user.get("backend") or {}
+    if backend.get("type") == "postgres":
+        url = backend.get("url") or central_url()
+        if not url:
+            raise AuthError("Tài khoản này để dữ liệu trên cloud nhưng máy này chưa có FLOWBOARD_CENTRAL_DB_URL trong .env.")
+        return make_engine(url, schema=backend.get("schema") or schema_for(user["username"]))
+    return make_engine(account_dir(user["username"]) / "flowboard.db")
+
+
+def move_to_cloud(username: str) -> dict:
+    """Copy an account's SQLite data into its Postgres schema and switch the
+    account's backend to it (the SQLite file stays as a backup). Run with the
+    account NOT in the middle of a job."""
+    import sqlite3
+
+    from sqlalchemy import text
+    from sqlmodel import SQLModel
+
+    url = central_url()
+    if not url:
+        raise AuthError("Chưa có FLOWBOARD_CENTRAL_DB_URL (chuỗi kết nối Neon) trong .env.")
+    user = get_user(username)
+    if user is None:
+        raise AuthError("Không có tài khoản này.")
+    if (user.get("backend") or {}).get("type") == "postgres":
+        return {"moved": False, "reason": "already on cloud", "tables": {}}
+    src = account_dir(username) / "flowboard.db"
+    schema = schema_for(username)
+    dest = make_engine(url, schema=schema)
+    init_db(dest)
+    with dest.connect() as c:
+        n = (c.execute(text("SELECT count(*) FROM board")).scalar() or 0) + (c.execute(text("SELECT count(*) FROM product")).scalar() or 0)
+    if n:
+        raise AuthError(f"Schema {schema} trên cloud đã có {n} clip/sản phẩm — không chép đè. Xoá schema đó trước nếu muốn chép lại.")
+    copied: dict[str, int] = {}
+    if src.is_file():
+        srcdb = sqlite3.connect(str(src))
+        src_tables = {r[0] for r in srcdb.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        with dest.begin() as conn:
+            for table in SQLModel.metadata.sorted_tables:
+                if table.name not in src_tables:
+                    continue
+                src_cols = [r[1] for r in srcdb.execute(f"PRAGMA table_info({table.name})")]
+                cols = [c for c in table.columns if c.name in src_cols]
+                if not cols:
+                    continue
+                rows = srcdb.execute(f"SELECT {', '.join(c.name for c in cols)} FROM {table.name}").fetchall()
+                if not rows:
+                    continue
+                conn.execute(table.delete())  # seeds written by init_db on the empty side
+                conn.execute(table.insert(), [dict(zip([c.name for c in cols], _coerce_row(cols, r))) for r in rows])
+                copied[table.name] = len(rows)
+            # Sequences continue after the copied ids (integer ids only —
+            # ``providerjob.id`` and friends are text keys without a sequence).
+            from sqlalchemy import Integer as _Int
+
+            for table in SQLModel.metadata.sorted_tables:
+                if table.name not in copied or "id" not in table.columns:
+                    continue
+                id_type = table.columns["id"].type
+                if isinstance(getattr(id_type, "impl", id_type), _Int):
+                    q = 'SELECT setval(pg_get_serial_sequence(\'"%s"."%s"\', \'id\'), COALESCE((SELECT MAX(id) FROM "%s"."%s"), 1))' % (schema, table.name, schema, table.name)
+                    conn.exec_driver_sql(q)
+        srcdb.close()
+    set_backend(username, {"type": "postgres", "schema": schema})
+    dest.dispose()
+    return {"moved": True, "schema": schema, "tables": copied}
+
+
+def _coerce_row(cols: list, row: tuple) -> list:
+    """SQLite gives JSON as text and datetimes as strings; Postgres wants the real thing."""
+    import json as _json
+    from datetime import datetime as _dt
+    from datetime import timezone as _tz
+
+    from sqlalchemy import JSON as _JSON
+    from sqlalchemy import Boolean as _Bool
+    from sqlalchemy import DateTime as _DT
+
+    out = []
+    for col, val in zip(cols, row):
+        # SQLModel wraps DateTime in a TypeDecorator (UTCDateTime): look at ``impl``.
+        t = col.type
+        base = getattr(t, "impl", t)
+        if val is not None and isinstance(base, _JSON) and isinstance(val, str):
+            try:
+                val = _json.loads(val)
+            except ValueError:
+                pass
+        elif val is not None and isinstance(base, _DT) and isinstance(val, str):
+            try:
+                val = _dt.fromisoformat(val.replace("Z", "+00:00"))
+            except ValueError:
+                pass
+            else:
+                if val.tzinfo is None:  # SQLite rows are naive UTC; UTCDateTime insists on tz
+                    val = val.replace(tzinfo=_tz.utc)
+        elif val is not None and isinstance(base, _Bool) and isinstance(val, int):
+            val = bool(val)
+        out.append(val)
+    return out
 
 
 def deactivate() -> None:
@@ -343,4 +497,5 @@ def user_from_request(request: Any) -> Optional[dict]:
 def status() -> dict:
     u = active_user()
     return {"auth": auth_enabled(), "username": u["username"] if u else None,
-            "since": _active["since"], "storage_dir": str(config.STORAGE_DIR)}
+            "since": _active["since"], "storage_dir": str(config.STORAGE_DIR),
+            "backend": ((u or {}).get("backend") or {}).get("type", "sqlite"), "central_cloud": central_url() is not None}

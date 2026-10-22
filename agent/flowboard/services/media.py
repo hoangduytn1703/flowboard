@@ -92,6 +92,9 @@ def cached_path(media_id: str) -> Optional[Path]:
         p = Path(local)
         if p.is_file():
             return p
+        # Made on the other machine: fetch it from the account's bucket.
+        from flowboard.services import file_store
+        return file_store.ensure_local(local)
     return None
 
 

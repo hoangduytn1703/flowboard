@@ -17,11 +17,37 @@ from sqlmodel import Session, SQLModel, create_engine
 from flowboard.config import DB_PATH
 
 
-def make_engine(url_or_path: Union[str, Path]) -> Engine:
-    """An engine for a SQLite file path or any SQLAlchemy URL."""
+def make_engine(url_or_path: Union[str, Path], schema: Optional[str] = None) -> Engine:
+    """An engine for a SQLite file path or any SQLAlchemy URL. ``schema``
+    (Postgres) pins every connection's ``search_path`` to that schema — how
+    one Neon database holds one account per schema."""
     url = str(url_or_path)
     if "://" not in url:
         url = f"sqlite:///{url}"
+    if url.startswith("postgres"):
+        url = url.replace("postgres://", "postgresql+psycopg://", 1).replace("postgresql://", "postgresql+psycopg://", 1)
+        if schema:
+            # Neon's ``-pooler`` host is PgBouncer in transaction mode: a SET
+            # search_path is lost between transactions and startup ``options``
+            # are rejected, so a per-schema engine talks to the compute
+            # directly (same host without ``-pooler``; our own pool is small).
+            url = url.replace("-pooler.", ".", 1)
+        eng = create_engine(url, echo=False, pool_pre_ping=True, pool_size=5, max_overflow=5)
+        eng._fb_schema = schema  # type: ignore[attr-defined]
+        if schema:
+            # Raw ``text()`` SQL relies on the search_path (direct host, so it
+            # sticks to the pooled connection).
+            @event.listens_for(eng, "connect")
+            def _set_search_path(dbapi_conn, _connection_record) -> None:
+                cur = dbapi_conn.cursor()
+                cur.execute(f'SET search_path TO "{schema}", public')
+                cur.close()
+                dbapi_conn.commit()
+
+            # ORM / Core statements name the schema explicitly on top of that.
+            eng = eng.execution_options(schema_translate_map={None: schema})
+            eng._fb_schema = schema  # type: ignore[attr-defined]
+        return eng
     if url.startswith("sqlite"):
         eng = create_engine(url, echo=False, connect_args={"check_same_thread": False})
 
@@ -113,7 +139,19 @@ def init_db(target: Optional[Engine] = None) -> None:
                     conn.exec_driver_sql("ALTER TABLE board ADD COLUMN data JSON DEFAULT '{}'")
                     conn.commit()
 
+    if eng.dialect.name == "postgresql":
+        schema = _schema_of(eng)
+        if schema:
+            with eng.begin() as conn:
+                conn.exec_driver_sql(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
     SQLModel.metadata.create_all(eng)
+    # Absolute file paths written before 22/10 → relative to the data folder.
+    from flowboard.db.paths import normalize_asset_paths
+    normalize_asset_paths(eng)
+
+
+def _schema_of(eng: Engine) -> Optional[str]:
+    return getattr(eng, "_fb_schema", None)
 
 
 @contextmanager

@@ -16,6 +16,7 @@ from flowboard.routes import provider_jobs as provider_jobs_route
 from flowboard.routes import drama as drama_route
 from flowboard.routes import export_extras as export_extras_route
 from flowboard.routes import account as account_route
+from flowboard.routes import cloud as cloud_route
 from flowboard import accounts
 from flowboard.routes import history as history_route
 from flowboard.routes import prompt_library as prompt_library_route
@@ -127,6 +128,10 @@ async def lifespan(app: FastAPI):
     if _prepare_account_data not in accounts.after_activate:
         accounts.after_activate.append(_prepare_account_data)
     accounts.startup()
+    from flowboard.services import file_store
+    file_store.install_hooks()
+    if not accounts.auth_enabled():
+        file_store.reconcile_in_background()
     worker = get_worker()
     ws_task = asyncio.create_task(run_ws_server(), name="ext-ws-server")
     worker_task = asyncio.create_task(worker.start(), name="request-worker")
@@ -175,6 +180,7 @@ async def _require_login(request: FastAPIRequest, call_next):
 
 
 app.include_router(account_route.router)
+app.include_router(cloud_route.router)
 app.include_router(boards.router)
 app.include_router(templates.router)
 app.include_router(nodes.router)

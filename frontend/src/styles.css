@@ -6813,3 +6813,6 @@ button.chat-dock__presence[aria-expanded="true"] {
   color: var(--muted);
 }
 .user-chip__name { color: var(--text); font-weight: 600; }
+
+/* Settings → Dữ liệu: the bucket form */
+.data-sync__box { display: flex; flex-direction: column; gap: 6px; padding: 10px; margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; }

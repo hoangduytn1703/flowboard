@@ -5,6 +5,8 @@
   GET  /api/account/me        → 401 when not logged in
   POST /api/account/password  {current, new}
   POST /api/account/register  {username, password}  (only with FLOWBOARD_ALLOW_REGISTER=1)
+  GET  /api/account/prefs     → the UI preferences saved for this account (model picks …)
+  PUT  /api/account/prefs     {…} → stored in the account's database (follows the login)
 """
 from __future__ import annotations
 
@@ -15,8 +17,13 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from flowboard import accounts
+from flowboard.db import get_session, has_engine
+from flowboard.db.models import AppSetting
 
 router = APIRouter(prefix="/api/account", tags=["account"])
+
+#: AppSetting row (in the account's own database) holding the UI preferences.
+PREFS_KEY = "ui_prefs"
 
 
 class LoginBody(BaseModel):
@@ -96,3 +103,41 @@ def register(body: LoginBody) -> dict:
     except accounts.AuthError as exc:
         raise HTTPException(400, str(exc))
     return {"username": user["username"]}
+
+
+@router.get("/prefs")
+def get_prefs() -> dict:
+    """The preferences the browser keeps in localStorage, but per account:
+    image / video model, image source, UI mode … Empty when never saved."""
+    import json
+
+    if not has_engine():
+        return {}
+    with get_session() as s:
+        row = s.get(AppSetting, PREFS_KEY)
+    if row is None:
+        return {}
+    try:
+        data = json.loads(row.value)
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+@router.put("/prefs")
+def put_prefs(body: dict) -> dict:
+    import json
+
+    if not has_engine():
+        raise HTTPException(401, "Chưa đăng nhập")
+    clean = {k: v for k, v in body.items() if isinstance(k, str) and isinstance(v, (str, int, float, bool))}
+    with get_session() as s:
+        row = s.get(AppSetting, PREFS_KEY)
+        if row is None:
+            s.add(AppSetting(key=PREFS_KEY, value=json.dumps(clean, ensure_ascii=False)))
+        else:
+            row.value = json.dumps(clean, ensure_ascii=False)
+            s.add(row)
+        s.commit()
+    return clean
+

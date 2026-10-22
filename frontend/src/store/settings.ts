@@ -71,6 +71,7 @@ interface SettingsState {
   mediaProvider: MediaProviderKey;
   imageProvider: ImageProviderKey;
   uiMode: UiMode;
+  hydrateFromAccount(prefs: Record<string, string | number | boolean>): void;
   setImageModel(model: ImageModelKey): void;
   setImageProvider(p: ImageProviderKey): void;
   setUiMode(mode: UiMode): void;
@@ -114,12 +115,25 @@ function loadPersisted(): PersistShape {
   }
 }
 
+// The account's copy on the agent (AppSetting `ui_prefs`, so the picks
+// follow the login to another machine). localStorage stays as the instant
+// cache; the server write is debounced and fire-and-forget.
+let serverSync = false;
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
 function persist(state: PersistShape): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch {
     // Storage disabled / quota — non-fatal, just lose persistence.
   }
+  if (!serverSync) return;
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    const { v: _v, ...prefs } = state;
+    void import("../api/account").then(({ putAccountPrefs }) => putAccountPrefs(prefs as Record<string, string | number>)).catch(() => {});
+  }, 400);
 }
 
 const persisted = loadPersisted();
@@ -163,6 +177,29 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       ? persisted.imageProvider
       : "flow",
   uiMode: persisted.uiMode === "canvas" ? "canvas" : "quicktool",
+  /** Apply the preferences saved with the account (called once after login). */
+  hydrateFromAccount(prefs) {
+    const next: Partial<SettingsState> = {};
+    if (prefs.imageModel === "NANO_BANANA_PRO" || prefs.imageModel === "NANO_BANANA_2") next.imageModel = prefs.imageModel;
+    if (VALID_VIDEO_QUALITIES.includes(prefs.videoQuality as VideoQuality)) next.videoQuality = prefs.videoQuality as VideoQuality;
+    if (prefs.videoModel === "veo" || prefs.videoModel === "omni_flash") next.videoModel = prefs.videoModel;
+    if (OMNI_FLASH_DURATIONS.includes(prefs.omniFlashDuration as OmniFlashDuration)) next.omniFlashDuration = prefs.omniFlashDuration as OmniFlashDuration;
+    if (VALID_MEDIA_PROVIDERS.includes(prefs.mediaProvider as MediaProviderKey)) next.mediaProvider = prefs.mediaProvider as MediaProviderKey;
+    if (VALID_IMAGE_PROVIDERS.includes(prefs.imageProvider as ImageProviderKey)) next.imageProvider = prefs.imageProvider as ImageProviderKey;
+    if (prefs.uiMode === "canvas" || prefs.uiMode === "quicktool") next.uiMode = prefs.uiMode;
+    serverSync = true;
+    if (Object.keys(next).length === 0) {
+      // Nothing saved yet for this account: push what this browser has.
+      persist(snapshotPersist(get));
+      return;
+    }
+    set(next);
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshotPersist(get)));
+    } catch {
+      /* non-fatal */
+    }
+  },
   setImageModel(model) {
     set({ imageModel: model });
     persist(snapshotPersist(get));

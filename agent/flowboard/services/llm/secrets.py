@@ -71,9 +71,37 @@ def _path() -> Path:
     return Path(override) if override else _DEFAULT_PATH
 
 
-def read() -> dict:
-    """Load the full secrets document. Empty dict if file doesn't exist
-    or is corrupt — callers must handle missing keys themselves."""
+# ── Per-account storage ────────────────────────────────────────────────
+#
+# With login on, the document lives in the central store (``account_setting``
+# key ``secrets:<username>`` — on Neon when FLOWBOARD_CENTRAL_DB_URL is set),
+# so the keys follow the account to every machine. The first read on an
+# account without one adopts this machine's ``secrets.json``. Without login
+# (FLOWBOARD_AUTH=off, tests) the file is used as before.
+
+_CACHE_TTL_S = 60.0
+_cache: dict[str, tuple[float, dict]] = {}
+
+
+def _account_scope() -> Optional[str]:
+    """The username whose central document to use, or None for the file."""
+    if os.environ.get("FLOWBOARD_SECRETS_PATH"):
+        return None  # tests pin a file
+    try:
+        from flowboard import accounts
+    except Exception:  # pragma: no cover - import cycle guard
+        return None
+    if not accounts.auth_enabled():
+        return None
+    user = accounts.active_user()
+    return user["username"] if user else None
+
+
+def _central_key(username: str) -> str:
+    return f"secrets:{username}"
+
+
+def _read_file() -> dict:
     p = _path()
     if not p.exists():
         return {}
@@ -84,8 +112,47 @@ def read() -> dict:
         return {}
 
 
+def forget_cache() -> None:
+    _cache.clear()
+
+
+def read() -> dict:
+    """Load the full secrets document. Empty dict if nothing is stored —
+    callers must handle missing keys themselves."""
+    import time
+
+    username = _account_scope()
+    if username is None:
+        return _read_file()
+    hit = _cache.get(username)
+    if hit and time.monotonic() - hit[0] < _CACHE_TTL_S:
+        return json.loads(json.dumps(hit[1]))
+    from flowboard import accounts
+
+    doc = accounts.get_setting(_central_key(username))
+    if not isinstance(doc, dict):
+        doc = _read_file()
+        if doc:
+            accounts.set_setting(_central_key(username), doc)
+            logger.info("secrets: adopted this machine's secrets.json for account %s", username)
+        else:
+            doc = {}
+    _cache[username] = (time.monotonic(), doc)
+    return json.loads(json.dumps(doc))
+
+
 def write(payload: dict) -> None:
-    """Atomic write with mode 0o600. Creates parent dir if needed."""
+    """Persist the document: the account's central row when logged in,
+    else an atomic file write with mode 0o600 (parent dir created)."""
+    import time
+
+    username = _account_scope()
+    if username is not None:
+        from flowboard import accounts
+
+        accounts.set_setting(_central_key(username), payload)
+        _cache[username] = (time.monotonic(), json.loads(json.dumps(payload)))
+        return
     p = _path()
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(p.suffix + ".tmp")

@@ -11,6 +11,11 @@ os.environ["FLOWBOARD_DB"] = str(Path(_TMPDIR) / "test.db")
 # No login in the suite: the API is exercised directly on the default engine.
 # test_account_login.py switches auth on for its own client.
 os.environ["FLOWBOARD_AUTH"] = "off"
+# Never let a test touch the developer's real central store (Neon) or bucket
+# from .env: load_dotenv does not override values already in the environment.
+os.environ["FLOWBOARD_CENTRAL_DB_URL"] = ""
+for _k in ("FLOWBOARD_S3_ENDPOINT", "FLOWBOARD_S3_BUCKET", "FLOWBOARD_S3_KEY_ID", "FLOWBOARD_S3_SECRET"):
+    os.environ[_k] = ""
 # Force the deterministic mock planner in tests — never spawn `claude` subprocess.
 # Individual tests that want to exercise the CLI path patch the module directly.
 os.environ["FLOWBOARD_PLANNER_BACKEND"] = "mock"

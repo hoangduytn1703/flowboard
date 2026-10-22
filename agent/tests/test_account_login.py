@@ -115,3 +115,29 @@ def test_change_password(auth_app):
     auth_app.post("/api/account/logout")
     auth_app.cookies.clear()
     assert auth_app.post("/api/account/login", json={"username": "akiragosho", "password": "NewPass123"}).status_code == 200
+
+
+def test_secrets_and_prefs_follow_the_account(auth_app, tmp_path, monkeypatch):
+    """API keys live in the central store per account (adopted once from
+    this machine's secrets.json); UI preferences live in the account's DB."""
+    from flowboard.services.llm import secrets
+
+    local = tmp_path / "secrets.json"
+    local.write_text('{"geminiApiKeys": ["AIza-from-file"]}')
+    monkeypatch.delenv("FLOWBOARD_SECRETS_PATH", raising=False)
+    monkeypatch.setattr(secrets, "_DEFAULT_PATH", local)
+    secrets.forget_cache()
+    c = auth_app
+    assert c.post("/api/account/login", json={"username": "akiragosho", "password": "Password@123"}).status_code == 200
+    # First read adopts the file into the account's central row.
+    assert secrets.get_gemini_keys() == ["AIza-from-file"]
+    assert accounts.get_setting("secrets:akiragosho") == {"geminiApiKeys": ["AIza-from-file"]}
+    secrets.set_gemini_keys(["AIza-new"])
+    assert accounts.get_setting("secrets:akiragosho")["geminiApiKeys"] == ["AIza-new"]
+    assert '"AIza-new"' not in local.read_text()  # the file is not written any more
+    # Preferences round-trip through the account's own database.
+    assert c.get("/api/account/prefs").json() == {}
+    r = c.put("/api/account/prefs", json={"imageModel": "NANO_BANANA_PRO", "uiMode": "canvas", "nested": {"x": 1}})
+    assert r.status_code == 200 and r.json() == {"imageModel": "NANO_BANANA_PRO", "uiMode": "canvas"}
+    assert c.get("/api/account/prefs").json()["uiMode"] == "canvas"
+    secrets.forget_cache()
