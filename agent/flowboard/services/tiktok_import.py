@@ -81,8 +81,9 @@ def _version_tuple(v: Optional[str]) -> tuple[int, ...]:
         return (0,)
 
 
-async def scrape(max_items: int = 100) -> dict[str, Any]:
-    """Ask the extension to read the open TikTok tab."""
+async def scrape(max_items: int = 100, tab_id: Optional[int] = None) -> dict[str, Any]:
+    """Ask the extension to read the open TikTok tab (``tab_id``: that tab,
+    else the one in view / used last)."""
     client = get_flow_client()
     if not client.connected:
         raise TikTokImportError("Extension Chrome chưa kết nối. Mở lại Chrome và kiểm tra badge extension.")
@@ -95,7 +96,8 @@ async def scrape(max_items: int = 100) -> dict[str, Any]:
             "↻ Reload ở Flowboard extension (bản 0.2.0 trở lên), rồi bấm nhập lại."
         )
     resp = await client._send(
-        "scrape_page", {"maxItems": max_items, "scrolls": 14}, timeout=SCRAPE_TIMEOUT_S,
+        "scrape_page", {"maxItems": max_items, "scrolls": 14, **({"tabId": tab_id} if tab_id else {})},
+        timeout=SCRAPE_TIMEOUT_S,
     )
     err = resp.get("error")
     if err == "extension_disconnected":
@@ -110,6 +112,8 @@ async def scrape(max_items: int = 100) -> dict[str, Any]:
             "Chưa thấy tab TikTok nào. Mở trang showcase / shop của bạn trên TikTok (đã đăng nhập), "
             "rồi bấm nhập lại. Nếu vừa cập nhật extension, hãy reload extension ở chrome://extensions."
         )
+    if err == "TAB_CLOSED":
+        raise TikTokImportError("Tab TikTok này đã đóng.")
     if err:
         raise TikTokImportError(f"Extension không đọc được trang: {err}")
     try:

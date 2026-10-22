@@ -236,8 +236,10 @@ function connectToAgent() {
         }
       } else if (msg.method === 'batch_rpc') {
         await handleBatchRpc(msg);
-      } else if (msg.method === 'read_open_tab') {
-        await handleReadOpenTab(msg);
+      } else if (msg.method === 'list_shop_tabs') {
+        await handleListShopTabs(msg);
+      } else if (msg.method === 'read_tab') {
+        await handleReadTab(msg);
       } else if (msg.method === 'read_page') {
         await handleReadPage(msg);
       } else if (msg.method === 'scrape_page') {
@@ -621,21 +623,67 @@ async function handleReadPage(msg) {
   }
 }
 
-// "Nhập từ Shopee": read the Shopee product page the user already has open
-// (active tab first, else the most recently used one). Nothing is opened.
-async function handleReadOpenTab(msg) {
+// "Nhập từ tab đang mở": every TikTok / Shopee tab, so the agent can tell
+// which shop each one is and which are product pages. Nothing is read yet.
+const SHOP_TAB_PATTERNS = ['https://*.tiktok.com/*', 'https://shopee.vn/*', 'https://*.shopee.vn/*'];
+const SHOP_TAB_URL = /^https:\/\/([a-z0-9-]+\.)*(tiktok\.com|shopee\.vn)\//i;
+
+async function handleListShopTabs(msg) {
   const { id } = msg;
   try {
-    const tabs = await chrome.tabs.query({ url: ['https://shopee.vn/*', 'https://*.shopee.vn/*'] });
-    if (!tabs.length) {
-      sendToAgent({ id, status: 404, error: 'NO_SHOPEE_TAB' });
+    const tabs = await chrome.tabs.query({ url: SHOP_TAB_PATTERNS });
+    sendToAgent({
+      id, status: 200,
+      data: JSON.stringify({
+        tabs: tabs.map((t) => ({
+          id: t.id, url: t.url || '', title: t.title || '', active: !!t.active,
+          lastAccessed: t.lastAccessed || 0, discarded: !!t.discarded, status: t.status || '',
+        })),
+      }),
+    });
+  } catch (e) {
+    sendToAgent({ id, status: 500, error: e?.message || 'LIST_TABS_FAILED' });
+  }
+}
+
+/** A tab Chrome put to sleep (memory saver) or that is still loading:
+ *  reload / wait until it is complete, at most `ms`. */
+async function readyTab(tabId, ms) {
+  let t = await chrome.tabs.get(tabId);
+  if (t.discarded) {
+    await chrome.tabs.reload(tabId);
+    await sleep(800);
+  }
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    t = await chrome.tabs.get(tabId);
+    if (t.status === 'complete' && !t.discarded) return t;
+    await sleep(600);
+  }
+  return t;
+}
+
+// Read one tab in place: what readProductPageInPage sees, plus tabUrl / tabTitle. Nothing is clicked.
+async function handleReadTab(msg) {
+  const { id, params } = msg;
+  const { tabId, minText = 1500 } = params || {};
+  try {
+    const tab = await readyTab(tabId, 20000);
+    if (!SHOP_TAB_URL.test(tab.url || '')) {
+      sendToAgent({ id, status: 400, error: 'URL_NOT_ALLOWED' });
       return;
     }
-    const tab = tabs.find((t) => t.active) || tabs.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0];
-    const [r] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: readProductPageInPage, args: [1500] });
-    sendToAgent({ id, status: 200, data: JSON.stringify({ ...(r?.result || {}), tabUrl: tab.url, tabTitle: tab.title }) });
+    // A page that has just loaded renders its product a moment later.
+    let result = null;
+    for (let i = 0; i < 6; i++) {
+      const [r] = await chrome.scripting.executeScript({ target: { tabId }, func: readProductPageInPage, args: [minText] });
+      result = r?.result || result;
+      if (result?.ready) break;
+      await sleep(1200);
+    }
+    sendToAgent({ id, status: 200, data: JSON.stringify({ ...(result || {}), tabUrl: tab.url, tabTitle: tab.title }) });
   } catch (e) {
-    sendToAgent({ id, status: 500, error: e?.message || 'READ_TAB_FAILED' });
+    sendToAgent({ id, status: 500, error: /No tab with id/i.test(e?.message || '') ? 'TAB_CLOSED' : (e?.message || 'READ_TAB_FAILED') });
   }
 }
 
@@ -667,17 +715,27 @@ function readProductPageInPage(minText) {
 
 async function handleScrapePage(msg) {
   const { id, params } = msg;
-  const { urlPatterns, scrolls, maxItems } = params || {};
+  const { urlPatterns, scrolls, maxItems, tabId } = params || {};
   const patterns = Array.isArray(urlPatterns) && urlPatterns.length
     ? urlPatterns : ['https://*.tiktok.com/*'];
   try {
-    const tabs = await chrome.tabs.query({ url: patterns });
-    if (!tabs.length) {
-      sendToAgent({ id, status: 404, error: 'NO_TIKTOK_TAB' });
-      return;
+    let tab;
+    if (tabId) {
+      // A tab picked in "Nhập từ tab đang mở".
+      tab = await readyTab(tabId, 20000);
+      if (!/^https:\/\/([a-z0-9-]+\.)*tiktok\.com\//i.test(tab.url || '')) {
+        sendToAgent({ id, status: 400, error: 'URL_NOT_ALLOWED' });
+        return;
+      }
+    } else {
+      const tabs = await chrome.tabs.query({ url: patterns });
+      if (!tabs.length) {
+        sendToAgent({ id, status: 404, error: 'NO_TIKTOK_TAB' });
+        return;
+      }
+      // The tab the user is looking at wins; otherwise the most recently used.
+      tab = tabs.find((t) => t.active) || tabs.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0];
     }
-    // The tab the user is looking at wins; otherwise the most recently used.
-    const tab = tabs.find((t) => t.active) || tabs.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0];
     const [res] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: scrapeProductCardsInPage,

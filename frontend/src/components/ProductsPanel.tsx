@@ -7,8 +7,8 @@ import {
   bulkDeleteProducts,
   deleteProduct,
   describeMedia,
-  importProductFromShopee,
-  importProductsFromTikTok,
+  importOpenTabs,
+  listOpenShopTabs,
   productFromLink,
   uploadImageFromUrl,
   listBoardSummaries,
@@ -19,6 +19,8 @@ import {
   type Product,
   type ProductCategory,
   type ProductDraft,
+  type ShopTab,
+  type TabImportResult,
 } from "../api/client";
 import { useGenerationStore } from "../store/generation";
 import { toast, useToastOn } from "../store/toast";
@@ -128,6 +130,12 @@ export function ProductsPanel({
   useToastOn(error, "error", () => setError(null));
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [importing, setImporting] = useState(false);
+  // "Nhập từ tab đang mở": the open TikTok / Shopee tabs (null = picker closed),
+  // the ones ticked, and how each one went.
+  const [tabs, setTabs] = useState<ShopTab[] | null>(null);
+  const [pickedTabs, setPickedTabs] = useState<Set<number>>(new Set());
+  const [tabResults, setTabResults] = useState<Record<number, TabImportResult>>({});
+  const [scanning, setScanning] = useState(false);
   // Multi-select on the list: ids ticked, and whether the bulk delete is armed.
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [bulkConfirm, setBulkConfirm] = useState(false);
@@ -142,53 +150,67 @@ export function ProductsPanel({
   const [linkBusy, setLinkBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  /** Pull the products off the TikTok tab that is open in Chrome. Photos
-   * arrive afterwards (the agent uploads them in the background), so the list
-   * is refreshed a few times. */
-  async function importTikTok() {
-    setImporting(true);
+  /** "Nhập từ tab đang mở": list the TikTok / Shopee tabs open in Chrome.
+   * A single importable tab is imported at once; several open the picker
+   * (product pages and showcases ticked), so many links go in one click. */
+  async function scanTabs() {
+    setScanning(true);
     setError(null);
     try {
-      const r = await importProductsFromTikTok();
-      await refresh();
-      if (r.found === 0) {
-        toast.warning(
-          `Không đọc được sản phẩm nào từ tab "${r.tab_title ?? r.tab_url ?? "TikTok"}". ` +
-          "Hãy mở đúng trang danh sách sản phẩm (showcase), kéo xuống cho hiện đủ thẻ rồi thử lại. " +
-          `(thông tin dò: ${r.diag?.anchorHits ?? 0} link sản phẩm, ${r.diag?.imgs ?? 0} ảnh)`,
-        );
-      } else {
-        const text = `Tìm thấy ${r.found} sản phẩm: thêm mới ${r.created}, bỏ qua ${r.skipped} (đã có).` +
-          (r.photos_pending ? ` Đang tải ${r.photos_pending} ảnh về, vài giây mỗi ảnh…` : "");
-        if (r.created) toast.success(text); else toast.warning(text);
-        for (let i = 0; i < 12 && r.photos_pending; i++) {
-          await new Promise((res) => setTimeout(res, 5000));
-          await refresh();
-        }
+      const tabs = await listOpenShopTabs();
+      setTabResults({});
+      if (!tabs.length) {
+        setTabs(null);
+        toast.warning("Chưa thấy tab TikTok / Shopee nào trong Chrome. Mở trang sản phẩm (hoặc trang showcase / shop TikTok) rồi bấm lại.");
+        return;
       }
+      if (tabs.length === 1 && tabs[0].importable) {
+        setTabs(null);
+        await importTabs([tabs[0].id]);
+        return;
+      }
+      setTabs(tabs);
+      setPickedTabs(new Set(tabs.filter((t) => t.suggested).map((t) => t.id)));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "nhập từ TikTok thất bại");
+      setError(err instanceof Error ? err.message : "không đọc được các tab đang mở");
     } finally {
-      setImporting(false);
+      setScanning(false);
     }
   }
 
-  /** The Shopee product page open in Chrome becomes one product (photo
-   * arrives afterwards, uploaded in the background). */
-  async function importShopee() {
+  /** Import the chosen tabs; one result per tab, shown in the picker. Photos
+   * arrive afterwards (uploaded in the background), so the list is refreshed a few times. */
+  async function importTabs(ids: number[]) {
     setImporting(true);
     setError(null);
     try {
-      const r = await importProductFromShopee();
+      const r = await importOpenTabs(ids);
       await refresh();
-      if (r.created) toast.success(`Đã thêm "${r.name ?? "sản phẩm"}" từ Shopee.${r.photos_pending ? " Đang tải ảnh về, vài giây…" : ""}`);
-      else toast.warning(`"${r.name ?? "Sản phẩm này"}" đã có trong danh sách (trùng link), không thêm lại.`);
-      for (let i = 0; i < 6 && r.photos_pending; i++) {
+      setTabResults(Object.fromEntries(r.results.map((x) => [x.tab_id, x])));
+      // What went in is unticked, so "Nhập" again only retries the rest.
+      setPickedTabs((prev) => new Set([...prev].filter((id) => !r.results.find((x) => x.tab_id === id && x.ok))));
+      if (r.results.length === 1) {
+        const one = r.results[0];
+        if (!one.ok) setError(one.error ?? "không nhập được tab này");
+        else if (one.created) toast.success(one.kind === "product"
+          ? `Đã thêm "${one.names[0] ?? "sản phẩm"}" từ ${platformName(one.platform)}.${r.photos_pending ? " Đang tải ảnh về, vài giây…" : ""}`
+          : `Tìm thấy ${one.found} sản phẩm: thêm mới ${one.created}, bỏ qua ${one.skipped} (đã có).${r.photos_pending ? ` Đang tải ${r.photos_pending} ảnh về…` : ""}`);
+        else toast.warning(one.kind === "product"
+          ? `"${one.names[0] ?? "Sản phẩm này"}" đã có trong danh sách (trùng link), không thêm lại.`
+          : `Tìm thấy ${one.found} sản phẩm, tất cả đã có trong danh sách.`);
+      } else {
+        const parts = [`Đọc ${r.tabs} tab: thêm mới ${r.created} sản phẩm`];
+        if (r.skipped) parts.push(`bỏ qua ${r.skipped} (đã có)`);
+        if (r.failed) parts.push(`${r.failed} tab lỗi — xem trong danh sách tab`);
+        const text = parts.join(", ") + "." + (r.photos_pending ? ` Đang tải ${r.photos_pending} ảnh về…` : "");
+        if (r.created) toast.success(text); else if (r.failed === r.tabs) toast.error(text); else toast.warning(text);
+      }
+      for (let i = 0; i < 12 && r.photos_pending; i++) {
         await new Promise((res) => setTimeout(res, 5000));
         await refresh();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "nhập từ Shopee thất bại");
+      setError(err instanceof Error ? err.message : "nhập từ tab thất bại");
     } finally {
       setImporting(false);
     }
@@ -463,16 +485,29 @@ export function ProductsPanel({
             <div className="product-toolbar">
               <button type="button" className="project-modal__btn project-modal__btn--primary" onClick={() => openForm(null)}>+ Thêm sản phẩm</button>
               <button type="button" className="project-modal__btn" onClick={() => setLinkOpen((v) => !v)} aria-expanded={linkOpen}>🔗 Thêm từ link</button>
-              <button type="button" className="project-modal__btn" onClick={importTikTok} disabled={importing}
-                      title="Mở trang showcase / shop của bạn trên TikTok (đã đăng nhập) trong Chrome trước khi bấm">
-                {importing ? "Đang đọc…" : "📥 Nhập từ TikTok"}
-              </button>
-              <button type="button" className="project-modal__btn" onClick={importShopee} disabled={importing}
-                      title="Mở trang chi tiết sản phẩm trên Shopee (đã đăng nhập) trong Chrome trước khi bấm">
-                {importing ? "Đang đọc…" : "🛒 Nhập từ Shopee"}
+              <button type="button" className="project-modal__btn" onClick={scanTabs} disabled={importing || scanning}
+                      title="Đọc các tab TikTok / Shopee đang mở trong Chrome: trang sản phẩm, trang showcase / shop TikTok. Mở nhiều tab để nhập một lần.">
+                {scanning ? "Đang tìm tab…" : importing && !tabs ? "Đang đọc…" : "📥 Nhập từ tab đang mở"}
               </button>
               {!asPage && <button type="button" className="project-modal__btn product-toolbar__close" onClick={onClose}>Đóng</button>}
             </div>
+            {tabs && (
+              <TabPicker
+                tabs={tabs}
+                picked={pickedTabs}
+                results={tabResults}
+                busy={importing}
+                scanning={scanning}
+                onToggle={(id) => setPickedTabs((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(id)) next.delete(id); else next.add(id);
+                  return next;
+                })}
+                onImport={() => void importTabs([...pickedTabs])}
+                onRescan={() => void scanTabs()}
+                onClose={() => setTabs(null)}
+              />
+            )}
             {linkOpen && (
               <div className="qt-ref__link product-linkrow">
                 <input
@@ -795,6 +830,72 @@ export function ProductsPanel({
     >
       <div className="project-modal project-modal--wide" role="dialog" aria-modal="true" aria-labelledby="products-title">
         {inner}
+      </div>
+    </div>
+  );
+}
+
+function platformName(p: ShopTab["platform"]): string {
+  return p === "shopee" ? "Shopee" : "TikTok";
+}
+
+function kindLabel(t: ShopTab): string {
+  if (t.kind === "product") return "Trang 1 sản phẩm";
+  if (t.kind === "list") return "Danh sách sản phẩm";
+  return t.platform === "shopee" ? "Không phải trang chi tiết sản phẩm" : "Không giống trang shop";
+}
+
+function resultLine(r: TabImportResult): string {
+  if (!r.ok) return `✗ ${r.error ?? "lỗi"}`;
+  if (r.kind === "product") return r.created ? `✓ Đã thêm: ${r.names[0] ?? ""}` : `Đã có trong danh sách: ${r.names[0] ?? ""}`;
+  return `✓ ${r.found} sản phẩm: thêm ${r.created}, bỏ qua ${r.skipped} (đã có)`;
+}
+
+/** The open TikTok / Shopee tabs with a tick box each; how each import went appears under it. */
+function TabPicker({ tabs, picked, results, busy, scanning, onToggle, onImport, onRescan, onClose }: {
+  tabs: ShopTab[];
+  picked: Set<number>;
+  results: Record<number, TabImportResult>;
+  busy: boolean;
+  scanning: boolean;
+  onToggle: (id: number) => void;
+  onImport: () => void;
+  onRescan: () => void;
+  onClose: () => void;
+}) {
+  const shown = tabs.filter((t) => t.importable).length;
+  return (
+    <div className="tab-picker">
+      <div className="tab-picker__head">
+        <strong>Tab TikTok / Shopee đang mở</strong>
+        <span className="tab-picker__sub">{tabs.length} tab · {shown} nhập được</span>
+        <button type="button" className="qt-link" onClick={onRescan} disabled={busy || scanning}>↻ Quét lại</button>
+      </div>
+      <ul className="tab-picker__list">
+        {tabs.map((t) => {
+          const r = results[t.id];
+          return (
+            <li key={t.id} className={`tab-picker__row${t.importable ? "" : " tab-picker__row--off"}`}>
+              <label>
+                <input type="checkbox" checked={picked.has(t.id)} disabled={!t.importable || busy} onChange={() => onToggle(t.id)} />
+                <span className={`tab-picker__badge tab-picker__badge--${t.platform}`}>{platformName(t.platform)}</span>
+                <span className="tab-picker__title" title={t.url}>{t.title || t.url}</span>
+                <span className="tab-picker__kind">{kindLabel(t)}</span>
+              </label>
+              {r && <div className={`tab-picker__result${r.ok ? "" : " tab-picker__result--error"}`}>{resultLine(r)}</div>}
+            </li>
+          );
+        })}
+      </ul>
+      {tabs.some((t) => t.platform === "shopee" && !t.importable) && (
+        <p className="tab-picker__note">Tab Shopee tìm kiếm / trang shop không nhập được: bấm vào từng sản phẩm để mở trang chi tiết.</p>
+      )}
+      <div className="tab-picker__actions">
+        <button type="button" className="project-modal__btn project-modal__btn--primary" onClick={onImport} disabled={busy || picked.size === 0}>
+          {busy ? `Đang đọc ${picked.size} tab…` : `Nhập ${picked.size} tab đã chọn`}
+        </button>
+        <button type="button" className="project-modal__btn" onClick={onClose} disabled={busy}>Đóng</button>
+        {busy && <span className="tab-picker__sub">Mỗi trang sản phẩm mất khoảng 5–10 giây, đọc 3 tab một lúc.</span>}
       </div>
     </div>
   );

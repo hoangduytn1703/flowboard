@@ -1319,6 +1319,25 @@
 .product-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 12px; }
 .product-toolbar__close { margin-left: auto; }
 .product-linkrow { margin-bottom: 12px; }
+/* "Nhập từ tab đang mở": the open TikTok / Shopee tabs to pick from */
+.tab-picker { margin-bottom: 14px; padding: 12px 14px; background: var(--panel-high); border: 1px solid var(--border); border-radius: 10px; }
+.tab-picker__head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.tab-picker__head .qt-link { margin-left: auto; }
+.tab-picker__sub { font-size: 14px; color: var(--muted); }
+.tab-picker__list { list-style: none; margin: 0; padding: 0; max-height: 340px; overflow-y: auto; }
+.tab-picker__row { padding: 7px 4px; border-top: 1px solid var(--border); }
+.tab-picker__row:first-child { border-top: none; }
+.tab-picker__row label { display: flex; align-items: center; gap: 10px; cursor: pointer; min-width: 0; }
+.tab-picker__row--off label { cursor: default; opacity: 0.55; }
+.tab-picker__badge { flex-shrink: 0; padding: 1px 8px; font-size: 12px; font-weight: 600; border-radius: 999px; }
+.tab-picker__badge--tiktok { color: #fff; background: #25252d; border: 1px solid #fe2c55; }
+.tab-picker__badge--shopee { color: #fff; background: #ee4d2d; }
+.tab-picker__title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab-picker__kind { flex-shrink: 0; font-size: 13px; color: var(--muted); }
+.tab-picker__result { margin: 4px 0 0 30px; font-size: 14px; color: var(--success); }
+.tab-picker__result--error { color: #fca5a5; }
+.tab-picker__note { margin: 8px 0 0; font-size: 14px; color: var(--muted); }
+.tab-picker__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
 .product-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
 .product-controls__search {
   flex: 1 1 260px;

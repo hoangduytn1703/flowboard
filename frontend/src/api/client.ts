@@ -1395,30 +1395,58 @@ export async function productFromLink(url: string): Promise<ProductFromLink> {
   return res.json();
 }
 
-export interface TikTokImportResult {
+/** A TikTok / Shopee tab open in Chrome, as "Nhập từ tab đang mở" lists it. */
+export interface ShopTab {
+  id: number;
+  url: string;
+  title: string;
+  active: boolean;
+  platform: "tiktok" | "shopee";
+  /** product = one product page; list = a TikTok page of product cards; other = neither. */
+  kind: "product" | "list" | "other";
+  importable: boolean;
+  /** Ticked by default in the picker. */
+  suggested: boolean;
+}
+
+export interface TabImportResult {
+  tab_id: number;
+  platform: ShopTab["platform"];
+  kind: ShopTab["kind"];
+  title: string;
+  url: string;
+  ok: boolean;
   found: number;
   created: number;
   skipped: number;
-  photos_pending: number;
-  tab_url: string | null;
-  tab_title: string | null;
-  diag: { anchorHits: number; imgs: number; scrollables: number; samples: string[]; bodyText: string } | null;
+  names: string[];
+  error: string | null;
 }
 
-/** Read the products off the TikTok tab open in Chrome (via the extension). */
-export async function importProductsFromTikTok(): Promise<TikTokImportResult> {
-  const res = await fetch("/api/products/import-tiktok", {
+export interface TabsImport {
+  results: TabImportResult[];
+  tabs: number;
+  found: number;
+  created: number;
+  skipped: number;
+  failed: number;
+  photos_pending: number;
+}
+
+/** The TikTok / Shopee tabs open in Chrome (via the extension). */
+export async function listOpenShopTabs(): Promise<ShopTab[]> {
+  const res = await fetch("/api/products/open-tabs");
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return (await res.json()).tabs;
+}
+
+/** Import the chosen open tabs: product pages and TikTok showcase / shop pages alike. */
+export async function importOpenTabs(tabIds: number[]): Promise<TabsImport> {
+  const res = await fetch("/api/products/import-tabs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({}),
+    body: JSON.stringify({ tab_ids: tabIds }),
   });
-  if (!res.ok) throw new Error(await extractErrorMessage(res));
-  return res.json();
-}
-
-/** Import the Shopee product page open in Chrome (via the extension). */
-export async function importProductFromShopee(): Promise<TikTokImportResult & { name?: string }> {
-  const res = await fetch("/api/products/import-shopee", { method: "POST" });
   if (!res.ok) throw new Error(await extractErrorMessage(res));
   return res.json();
 }

@@ -45,7 +45,7 @@ Tạo ảnh/video đi qua Google Flow (cần gói Pro/Ultra) bằng extension Ch
 - `Product.media_ids` là media id của **Flow**, thuộc project lúc upload; ảnh gốc nằm trong `storage/media` (đổi project thì `media_project_sync` upload lại).
 
 ## Chỗ cần biết trong code
-- Backend `agent/flowboard/`: `routes/products.py` (CRUD, `from-link`, `import-tiktok`, `bulk-delete`), `services/product_link.py` (đọc trang sản phẩm bằng httpx + Gemini; chặn IP nội bộ), `services/tiktok_import.py`, `services/reference_video.py` (clip từ video mẫu / link: `/api/reference-video/analyze`, `analyze-link`, `build`), `services/video_export.py`, `services/flow_sdk.py`, `templates/*.json` (8 kiểu clip), `services/llm/gemini_api.py` (gọi Gemini bằng API key: xoay vòng nhiều key khi 429, key lỗi 400/401/403 nghỉ 6 h, 503 thử lại + lùi model `3.8-flash → 3.7 → 3.6 → 3.5 → 3.1-flash-lite`; `speak()` cho giọng Gemini TTS).
+- Backend `agent/flowboard/`: `routes/products.py` (CRUD, `from-link`, `open-tabs` + `import-tabs`, `bulk-delete`), `services/product_link.py` (đọc trang sản phẩm bằng httpx + Gemini; chặn IP nội bộ), `services/tiktok_import.py`, `services/reference_video.py` (clip từ video mẫu / link: `/api/reference-video/analyze`, `analyze-link`, `build`), `services/video_export.py`, `services/flow_sdk.py`, `templates/*.json` (8 kiểu clip), `services/llm/gemini_api.py` (gọi Gemini bằng API key: xoay vòng nhiều key khi 429, key lỗi 400/401/403 nghỉ 6 h, 503 thử lại + lùi model `3.8-flash → 3.7 → 3.6 → 3.5 → 3.1-flash-lite`; `speak()` cho giọng Gemini TTS).
 - Frontend `frontend/src/quicktool/`: `QuicktoolApp.tsx` (route + wizard 5 bước), `NewClipDialog.tsx` (chọn sản phẩm, kiểu clip, "Số clip" N clip/1 sản phẩm), `quicktool.css`. `components/ProductsPanel.tsx` (trang `/products`, chọn nhiều + xoá). Cỡ chữ: thang riêng (chữ nội dung 16px); Canvas cố ý giữ chữ nhỏ.
 - **Chế độ chỉ bàn tay**: ô "Giới tính mẫu" của mọi kiểu clip có thêm `Tay nữ` / `Tay nam` (`hands_female` / `hands_male`). `templates.render()` khi đó bỏ node nhân vật + cạnh nối, thêm câu "HANDS-ONLY SHOT…" vào prompt ảnh/video (không viết lại từng prompt), mô tả tay lấy từ ô `handLook` (mặc định "beautiful, well-groomed hands…"), quốc gia từ `charCountry`. **`fashion_ad` (quần áo) bắt buộc có người** (`person_required`): không có lựa chọn tay trên UI, backend/chat agent trả lỗi `PersonRequiredError` nếu gửi `hands_*`. Clip "theo video mẫu / link": màn review có ô **Người mẫu** (AI gợi ý / Nữ / Nam / Tay nữ / Tay nam / Không có người) + Quốc gia, gửi `character` lên `/api/reference-video/build` → `reference_video._character_for`. **Bước 1 wizard** có nút gạt Người mẫu ⇄ Chỉ bàn tay: `POST /api/boards/{id}/model-mode` (`services/model_mode.py`) xoá/tạo lại node nhân vật + cạnh, thêm/bỏ câu `HANDS_MARKER` trong prompt cảnh (idempotent), lưu `quicktool.hands`. Sản phẩm/kiểu thời trang bị từ chối ở cả ba chỗ. **Chưa tạo thử clip thật** để xem Flow vẽ tay có ổn không (kiểu quần áo chỉ tay có thể gượng).
 - **Bước 1 · Sản phẩm nhận nhiều ảnh** (tối đa `MAX_PRODUCT_PHOTOS = 4`, `store/quicktool.ts`): "+ Thêm góc khác" tạo node `visual_asset` mới nối vào đúng các cảnh mà ảnh chính đang nối, rồi upload; "Bỏ ảnh" xoá node phụ (không xoá ảnh chính). Upload qua Flow mất ~10–15 s/ảnh.
@@ -178,13 +178,21 @@ Tạo ảnh/video đi qua Google Flow (cần gói Pro/Ultra) bằng extension Ch
   tên + ảnh + giá trong JSON-LD; ảnh `_tn` → ảnh gốc; `clean_link` bỏ query. Dùng cho mọi chỗ đọc link: "Thêm từ link"
   (trang Sản phẩm + hộp Clip mới) và kiểu clip "Theo link sản phẩm". Lỗi rõ ràng khi chưa đăng nhập / captcha / extension cũ.
   Test `test_shopee_link.py`. **Chưa thử với trang Shopee thật** (máy dev không đăng nhập Shopee).
-  Trang Sản phẩm có nút **"🛒 Nhập từ Shopee"**: `POST /api/products/import-shopee` → `read_open_shopee_tab()` → lệnh
-  extension **`read_open_tab`** (bản **0.4.1**) đọc tab Shopee đang mở (tab đang xem, không thì tab dùng gần nhất), bắt
-  buộc là trang chi tiết sản phẩm (`-i.<shop>.<item>` / `/product/<shop>/<item>` hoặc có JSON-LD Product) →
-  `extract_from_page` → `save_draft(source="Shopee")`, ảnh tải nền. Extension bản cũ: báo cần Reload ngay, không chờ.
+
+- **"📥 Nhập từ tab đang mở" = một nút chung cho TikTok + Shopee, nhiều tab một lần** (22/10; thay 2 nút "Nhập từ TikTok" /
+  "Nhập từ Shopee" và route `import-tiktok` / `import-shopee`, lệnh extension `read_open_tab` đã bỏ). `services/tab_import.py`:
+  `GET /api/products/open-tabs` → lệnh extension **`list_shop_tabs`** (bản **0.5.0**, phải Reload) → `classify(url)`: Shopee
+  `-i.<shop>.<item>` / `/product/..` = `product`, trang Shopee khác = không nhập được; TikTok PDP (`tiktok_import.pdp_url`) =
+  `product`, showcase / shop / affiliate = `list`, còn lại `other` (vẫn tick được). `POST /api/products/import-tabs {tab_ids}`
+  liệt kê lại tab (không tin URL từ trình duyệt gửi lên), đọc 3 tab một lúc: `product` → lệnh **`read_tab`** (đánh thức tab bị
+  Chrome cho ngủ, chờ load) → `page_from_browser` → `extract_from_page` → `save_draft(source=Shopee|TikTok)`; tab TikTok bị
+  captcha / chưa hiện → `fetch_page` của agent. `list` → `scrape_page {tabId}` → `save_products`. Mỗi tab một kết quả, tab lỗi không
+  chặn tab khác; ảnh tải nền một hàng. UI (`ProductsPanel` `TabPicker`): 1 tab nhập được → nhập luôn; nhiều tab → bảng chọn (tick
+  sẵn trang sản phẩm + showcase), kết quả từng tab hiện dưới dòng, tab đã nhập tự bỏ tick. Test `test_tab_import.py`.
+  **Chưa thử với tab thật** (extension trên máy dev vẫn 0.4.1 lúc làm).
 
 - **Trang Sản phẩm đang bán — danh sách** (21/10, `components/ProductsPanel.tsx`): hàng nút trên cùng (+ Thêm sản phẩm,
-  🔗 Thêm từ link, 📥 Nhập từ TikTok, 🛒 Nhập từ Shopee) rồi hàng điều khiển: tìm kiếm (tên/mô tả/link/giá/ngành), lọc
+  🔗 Thêm từ link, 📥 Nhập từ tab đang mở) rồi hàng điều khiển: tìm kiếm (tên/mô tả/link/giá/ngành), lọc
   ngành, sắp xếp (mới/cũ nhất, tên A→Z/Z→A, giá thấp→cao/cao→thấp — `priceValue()` hiểu "399k", "76.064đ", "₫ 1.250.000", "2tr",
   không có giá luôn xuống cuối —, nhiều clip nhất), nút **Lưới / Danh sách** (nhớ trong localStorage `flowboard.products.view`).
   Lưới 5 cột (4/3/2 khi hẹp) × 5 hàng = 25 SP/trang; danh sách 15 dòng/trang (checkbox, ảnh, tên, ngành, giá, số clip, ngày
@@ -196,7 +204,7 @@ Tạo ảnh/video đi qua Google Flow (cần gói Pro/Ultra) bằng extension Ch
   trên mọi hộp thoại; mỗi toast có nhãn Lỗi/Lưu ý/Thông báo/Thành công, thanh đếm ngược, rê chuột thì giữ lại, nút ×; thời gian
   theo độ dài chữ, lỗi lâu hơn; lỗi trong các store board/chat/generation/pipeline vẫn tự lên toast lỗi). **Quy ước: kết quả
   của một hành động (đã lưu, đã thêm, trùng, thất bại) → toast; trạng thái cần ở lại trên trang (đang chạy, node lỗi, thiếu ảnh,
-  lỗi tải kèm nút "Thử lại") → giữ inline.** Đã chuyển: trang Sản phẩm (nhập TikTok/Shopee/thêm từ link), hộp Clip mới (lỗi, "đã tạo
+  lỗi tải kèm nút "Thử lại") → giữ inline.** Đã chuyển: trang Sản phẩm (nhập từ tab/thêm từ link), hộp Clip mới (lỗi, "đã tạo
   N clip" — mở clip 1 ngay, không chờ 1,5 s), Prompt đã lưu (lưu / thêm lại mẫu), Người mẫu, bước 1/5 của wizard, lỗi `quicktool` store,
   hàng đợi xong (toast từ `runQueue`, không phụ thuộc trang đang mở), Lịch sử (chạy lại), Xoá chữ/logo, Cài đặt (key Gemini,
   tài khoản Flow, hàng tài khoản, nguồn ảnh, AI provider) và `AccountSwitchBanner`. Code mới: dùng toast, đừng thêm dòng `product-form__error`.
@@ -238,12 +246,13 @@ Tạo ảnh/video đi qua Google Flow (cần gói Pro/Ultra) bằng extension Ch
   tự quay lại sau 5 s / khi đóng hộp; xong có toast (`AccountPanel.handleLogout`). Nút chỉ có ở hộp Cài đặt mở từ ⚙ cạnh tài khoản.
 
 ## Việc đang dở / chưa kiểm chứng
-- **Nhập từ TikTok bằng extension** (`scrape_page` trong `extension/background.js`) mới test trên HTML giả, chưa chạy trên trang TikTok thật. Trang chi tiết sản phẩm thì chỉ lấy sản phẩm chính (không lấy "sản phẩm liên quan").
+- **Nhập từ tab đang mở** (`list_shop_tabs` / `read_tab` / `scrape_page` trong `extension/background.js`, bản 0.5.0) mới test bằng extension giả + UI giả lập, chưa chạy trên tab TikTok / Shopee thật. Trang chi tiết sản phẩm thì chỉ lấy sản phẩm chính (không lấy "sản phẩm liên quan").
 - **Chưa thử thật (20/10)**: prompt 4 mẫu clip mới qua Flow; chế độ chỉ bàn tay qua Flow; tình huống hết credit → tự chuyển
   tài khoản; 2 Chrome profile cùng lúc; key OpenAI/xAI; nghe hội thoại nhiều giọng; hàng đợi nhiều clip với credit thật.
 - Chưa có: kịch bản khác nhau cho từng clip (hiện chỉ khác bối cảnh). Còn thiếu so với AI Dễ Ẹc (người dùng chưa chọn làm):
   upscale 2K/4K, storyboard lưới trong wizard ("storyboard 2"), trim / chèn chữ lên video thật.
 - Còn trong báo cáo UX chưa sửa: Canvas chat dock quá to, toolbar Canvas tiếng Anh, "req ✗" không bấm được, thư viện tham chiếu cũ.
+- Test `test_chat_agent.py::test_gen_video_renders_on_veo_only_when_asked` lỗi sẵn trên Linux (22/10, lỗi cả khi chưa có thay đổi mới), chưa xem nguyên nhân.
 - Chọn gói Pro/Ultra ngay trong Cài đặt (hiện sửa `.env`).
 - Triển khai cho người khác: **để sau**. Hướng đã bàn: bạn cài local (đóng gói script + agent phục vụ giao diện build sẵn) là rẻ nhất; chạy trên server cần sửa extension (địa chỉ server, `wss`), đăng nhập, và vì hệ thống là một người dùng nên mỗi người một bản. Vercel đơn thuần không chạy được agent.
 - Test trên Windows (20/10): 743 pass khi bỏ 5 file lỗi do môi trường — `test_llm_gemini.py` (CLI `agy`), `test_llm_secrets.py::…0600`
@@ -273,3 +282,4 @@ Tạo ảnh/video đi qua Google Flow (cần gói Pro/Ultra) bằng extension Ch
 - **21/10** — Sản phẩm có "Dành cho" (Nam/Nữ/Unisex, tự đoán + AI điền), chặn chọn người mẫu khác giới ở hộp Clip mới, review link/video, Bước 1, thư viện và backend; hộp Cài đặt rộng gấp đôi, hai cột. Đã thử trên UI với sản phẩm thật (áo ba lỗ → nam); test 85 pass.
 - **21/10** — Bỏ viền trắng khi bấm vào nút/mục menu (giữ quầng cam khi dùng Tab); đăng xuất Flow cần xác nhận. Commit + push gộp mọi việc 21/10.
 - **21/10** — Người mẫu: bấm vào thẻ là mở form sửa (bỏ nút "✎ Sửa"); nút Xoá thành nút đỏ như form sản phẩm; sửa lỗi nút đỏ hover bị đổi thành nền tối (mọi chỗ dùng `project-modal__btn--danger`). Đã thử trên UI (bấm thẻ → form sửa; ▶ / Xoá không mở form). Commit + push.
+- **22/10** — Gộp "Nhập từ TikTok" + "Nhập từ Shopee" thành một nút **"📥 Nhập từ tab đang mở"**: tự nhận tab TikTok / Shopee, trang sản phẩm hay showcase, nhập nhiều tab một lần (bảng chọn + kết quả từng tab). `services/tab_import.py`, `GET /api/products/open-tabs`, `POST /api/products/import-tabs`, extension **0.5.0** (`list_shop_tabs`, `read_tab`, `scrape_page` nhận `tabId`) → **phải Reload extension**. Test `test_tab_import.py` (15) pass, cả bộ 836 pass + 1 lỗi có sẵn; UI thử bằng dữ liệu giả + agent thật báo đúng "cần Reload 0.5.0"; chưa thử tab thật. Commit + push.

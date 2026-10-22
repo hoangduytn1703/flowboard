@@ -14,7 +14,7 @@ from flowboard.db import get_session
 from flowboard.db.models import Product, _utcnow
 from flowboard.services import media as media_service
 from flowboard.services.products import list_products, product_dict
-from flowboard.services import product_gender, product_link, tiktok_import
+from flowboard.services import product_gender, product_link, tab_import
 from flowboard.services.llm import gemini_api
 from flowboard.services.templates import CATEGORIES
 
@@ -81,6 +81,17 @@ def create_product(body: ProductBody) -> dict:
         return product_dict(row)
 
 
+@router.get("/open-tabs")
+async def get_open_tabs() -> dict:
+    """The TikTok / Shopee tabs open in the user's Chrome, each classified
+    (shop, product page / list of products, importable) for the picker of
+    "Nhập từ tab đang mở". Declared before ``/{product_id}`` so it is not read as an id."""
+    try:
+        return {"tabs": await tab_import.list_open_tabs()}
+    except tab_import.TabImportError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 @router.get("/{product_id}")
 def get_product(product_id: int) -> dict:
     with get_session() as s:
@@ -133,75 +144,20 @@ def bulk_delete_products(body: BulkDeleteBody) -> dict:
     return {"deleted": deleted}
 
 
-class TikTokImportBody(BaseModel):
-    max_items: int = Field(default=100, ge=1, le=300)
-    with_photos: bool = True
+class ImportTabsBody(BaseModel):
+    tab_ids: list[int] = Field(min_length=1, max_length=tab_import.MAX_TABS)
 
 
-@router.post("/import-tiktok")
-async def import_from_tiktok(body: TikTokImportBody) -> dict:
-    """Read the products off the TikTok tab the user has open (affiliate
-    showcase / shop) through the extension and add the new ones to the
-    library. Photos are fetched and uploaded to Flow in the background, so
-    the response lists products before they have one.
-
-    ``diag`` is the extension's own account of what it saw; it is what makes
-    a zero-result run debuggable, since TikTok's markup is not stable.
-    """
+@router.post("/import-tabs")
+async def import_from_tabs(body: ImportTabsBody) -> dict:
+    """Import the chosen open tabs: a product page becomes one product (read
+    in the tab, filled by Gemini), a TikTok showcase / shop page its product
+    cards. One result per tab; a tab that fails does not stop the others.
+    Photos are uploaded to Flow in the background afterwards."""
     try:
-        scraped = await tiktok_import.scrape(body.max_items)
-    except tiktok_import.TikTokImportError as exc:
+        return await tab_import.import_tabs(body.tab_ids)
+    except tab_import.TabImportError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    tab_url = str(scraped.get("tabUrl") or "")
-    items = scraped.get("items") or []
-    page_url = tiktok_import.pdp_url(tab_url)
-    if page_url:
-        # A product page: take that one product, not the related-products grid.
-        if not gemini_api.configured():
-            raise HTTPException(400, "Chưa có Gemini API key — thêm trong Settings → Gemini API keys.")
-        try:
-            read = await product_link.extract_product(page_url)
-        except product_link.ProductLinkError as exc:
-            raise HTTPException(502, str(exc))
-        items = [{"title": read["draft"]["name"]}]
-        created, skipped = tiktok_import.save_draft(read["draft"], read["image_url"] or "", tab_url)
-    else:
-        created, skipped = tiktok_import.save_products(items, tab_url)
-    if created and body.with_photos:
-        tiktok_import.start_photo_task(created)
-    return {
-        "single_product": bool(page_url),
-        "found": len(items),
-        "created": len(created),
-        "skipped": skipped,
-        "photos_pending": len([c for c in created if c.get("image")]) if body.with_photos else 0,
-        "tab_url": scraped.get("tabUrl"),
-        "tab_title": scraped.get("tabTitle"),
-        "diag": scraped.get("diag"),
-    }
-
-
-@router.post("/import-shopee")
-async def import_from_shopee() -> dict:
-    """Read the Shopee product page open in the user's Chrome (extension
-    ``read_open_tab``) and add that product. Same answer shape as
-    ``/import-tiktok``; the photo is uploaded to Flow in the background."""
-    if not gemini_api.configured():
-        raise HTTPException(400, "Chưa có Gemini API key — thêm trong Settings → Gemini API keys.")
-    try:
-        page = await product_link.read_open_shopee_tab()
-        read = await product_link.extract_from_page(page)
-    except product_link.ProductLinkError as exc:
-        raise HTTPException(400, str(exc))
-    created, skipped = tiktok_import.save_draft(read["draft"], read["image_url"] or "", page["tab_url"], source="Shopee")
-    if created:
-        tiktok_import.start_photo_task(created)
-    return {
-        "single_product": True, "found": 1, "created": len(created), "skipped": skipped,
-        "photos_pending": len([c for c in created if c.get("image")]),
-        "tab_url": page["tab_url"], "tab_title": page["tab_title"], "diag": None,
-        "name": read["draft"]["name"],
-    }
 
 
 class FromLinkBody(BaseModel):

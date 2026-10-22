@@ -115,8 +115,6 @@ def _looks_blocked(title: str, text: str) -> bool:
 #: in the user's own signed-in browser (``read_page``, extension >= 0.4.0).
 BROWSER_ONLY_HOSTS = ("shopee.vn", "shp.ee")
 MIN_READ_PAGE_VERSION = (0, 4, 0)
-#: First build that answers ``read_open_tab`` ("Nhập từ Shopee").
-MIN_READ_TAB_VERSION = (0, 4, 1)
 READ_PAGE_TIMEOUT_S = 45.0
 _LOGIN_WALL = re.compile(r"cần đăng nhập|đăng nhập để tiếp tục|chưa đăng nhập", re.I)
 
@@ -211,55 +209,9 @@ async def read_via_extension(url: str) -> dict[str, Any]:
     return page
 
 
-#: A Shopee product page address: ".../<slug>-i.<shop>.<item>" or "/product/<shop>/<item>".
+#: A Shopee product page address: ".../<slug>-i.<shop>.<item>" or "/product/<shop>/<item>"
+#: (``tab_import`` tells product tabs from search / shop tabs by it).
 _SHOPEE_PRODUCT_URL = re.compile(r"-i\.\d+\.\d+|/product/\d+/\d+", re.I)
-
-
-async def read_open_shopee_tab() -> dict[str, Any]:
-    """The Shopee product page the user has open in Chrome, read in place
-    (extension ``read_open_tab``). Adds ``tab_url`` / ``tab_title``."""
-    from flowboard.services.flow_client import get_flow_client
-
-    client = get_flow_client()
-    if not client.connected:
-        raise ProductLinkError("Extension Chrome chưa kết nối. Mở Chrome và kiểm tra badge extension.")
-    if _version_tuple(client.extension_version) < MIN_READ_PAGE_VERSION:
-        have = client.extension_version or "cũ"
-        raise ProductLinkError(
-            f"Extension đang là bản {have}, chưa biết đọc Shopee. Mở chrome://extensions, bấm ↻ Reload ở "
-            "Flowboard extension (bản 0.4.0 trở lên), rồi thử lại."
-        )
-    if _version_tuple(client.extension_version) < MIN_READ_TAB_VERSION:
-        raise ProductLinkError(
-            f"Extension đang là bản {client.extension_version or 'cũ'}, chưa biết lệnh đọc tab Shopee. Mở "
-            "chrome://extensions, bấm ↻ Reload ở Flowboard extension (bản 0.4.1 trở lên), rồi bấm lại."
-        )
-    resp = await client._send("read_open_tab", {}, timeout=20.0)
-    err = resp.get("error")
-    if err == "NO_SHOPEE_TAB":
-        raise ProductLinkError("Chưa thấy tab Shopee nào. Mở trang sản phẩm Shopee trong Chrome (đã đăng nhập) rồi bấm lại.")
-    if err == "timeout":
-        raise ProductLinkError("Chrome không trả lời. Reload extension ở chrome://extensions rồi thử lại.")
-    if err:
-        raise ProductLinkError(f"Extension không đọc được tab Shopee: {err}")
-    try:
-        raw = resp.get("data")
-        data = json.loads(raw) if isinstance(raw, str) else dict(raw or {})
-    except (TypeError, ValueError) as exc:
-        raise ProductLinkError("Extension trả về dữ liệu không đọc được") from exc
-    tab_url = str(data.get("tabUrl") or data.get("url") or "")
-    if "/verify/" in tab_url or "/buyer/login" in tab_url or _LOGIN_WALL.search(str(data.get("text") or "")[:600]):
-        raise ProductLinkError("Tab Shopee đang ở trang đăng nhập / xác minh. Đăng nhập Shopee trong Chrome, mở lại trang sản phẩm rồi bấm lại.")
-    page = page_from_browser(data)
-    if not _SHOPEE_PRODUCT_URL.search(tab_url) and not _ld_products(data.get("ld") or []):
-        raise ProductLinkError(
-            f"Tab Shopee đang mở (\"{data.get('tabTitle') or tab_url}\") không phải trang chi tiết một sản phẩm. "
-            "Bấm vào sản phẩm muốn nhập rồi bấm lại."
-        )
-    if len(page["text"]) < 300:
-        raise ProductLinkError("Trang sản phẩm Shopee chưa hiện xong. Đợi trang tải hết rồi bấm lại.")
-    page["tab_url"], page["tab_title"] = tab_url, str(data.get("tabTitle") or "")
-    return page
 
 
 async def get_page(url: str) -> dict[str, Any]:
