@@ -1496,11 +1496,16 @@ export async function createBoardFromTemplate(
   name: string,
   inputs: Record<string, string>,
   productId?: number | null,
+  /** Clip `index` of `of` for the same product: the agent writes each a different angle. */
+  variant?: { index: number; of: number },
 ): Promise<Board> {
   const res = await fetch("/api/boards/from-template", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ template_id: templateId, name, inputs, product_id: productId ?? null }),
+    body: JSON.stringify({
+      template_id: templateId, name, inputs, product_id: productId ?? null,
+      ...(variant ? { variant: variant.index, variant_of: variant.of } : {}),
+    }),
   });
   if (!res.ok) throw new Error(await extractErrorMessage(res));
   const body = (await res.json()) as Board & { nodes: Record<string, string> };

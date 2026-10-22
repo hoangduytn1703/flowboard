@@ -109,8 +109,35 @@ class Narration:
     words: list[Word] = field(default_factory=list)
 
 
+#: Bumped when the Gemini prompt changes, so cached lines are re-spoken
+#: (v2: style no longer read aloud).
+GEMINI_PROMPT_VERSION = "v2"
+
+
 def _cache_key(text: str, voice: str, rate: int, style: str = "") -> str:
+    if is_gemini_voice(voice):
+        voice = f"{voice}|{GEMINI_PROMPT_VERSION}"
     return hashlib.sha1(f"{voice}|{rate}|{style}|{text}".encode("utf-8")).hexdigest()[:20]
+
+
+def gemini_tts_prompt(text: str, style: Optional[str], rate: int = 0) -> str:
+    """The prompt Gemini TTS reads from: director's notes, then the transcript.
+
+    It used to be ``"<style>: <text>"``; with a bare style such as "GIỌNG HÀO
+    HỨNG" Gemini read the style aloud at the start of every clip (2026-10-22).
+    The notes are now a separate, labelled block that says not to voice it,
+    and only the transcript block is meant to be spoken."""
+    notes = [style.strip()] if style and style.strip() else ["tự nhiên, rõ ràng"]
+    if rate >= 15:
+        notes.append("nói nhanh hơn bình thường")
+    elif rate <= -15:
+        notes.append("nói chậm rãi")
+    return (
+        "Read the TRANSCRIPT below aloud in Vietnamese, exactly as written, nothing before or after it.\n"
+        "The DIRECTOR'S NOTES only describe how to sound — never say them.\n\n"
+        f"### DIRECTOR'S NOTES\nGiọng đọc: {', '.join(notes)}\n\n"
+        f"### TRANSCRIPT\n{text.strip()}"
+    )
 
 
 async def _synth_gemini(text: str, voice: str, rate: int, style: Optional[str], out: Path) -> None:
@@ -118,12 +145,7 @@ async def _synth_gemini(text: str, voice: str, rate: int, style: Optional[str], 
     becomes a hint too. Writes a WAV (24 kHz PCM) to ``out``."""
     from flowboard.services.llm import gemini_api
 
-    hints = [style.strip()] if style and style.strip() else ["Đọc tự nhiên, rõ ràng bằng tiếng Việt"]
-    if rate >= 15:
-        hints.append("nói nhanh hơn bình thường")
-    elif rate <= -15:
-        hints.append("nói chậm rãi")
-    prompt = f"{', '.join(hints)}: {text}"
+    prompt = gemini_tts_prompt(text, style, rate)
     try:
         wav = await gemini_api.speak(prompt, voice.split(":", 1)[1])
     except gemini_api.GeminiAPIError as exc:

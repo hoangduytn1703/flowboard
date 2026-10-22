@@ -438,17 +438,20 @@ export function NewClipDialog({
       return;
     }
     const ids: number[] = [];
-    try {
-      for (let n = 0; n < clipCount; n++) {
-        const setting = n === 0 ? sent.setting : settingFor(n);
-        const board = await createBoardFromTemplate(
-          kind, `${baseName} #${n + 1}`, { ...sent, ...(setting ? { setting } : {}) }, productId,
-        );
-        ids.push(board.id);
-      }
-    } catch (err) {
+    // Side by side: with a product each clip waits ~20 s for the agent to
+    // write its script, and each gets its own angle (variant n of N).
+    const results = await Promise.allSettled(Array.from({ length: clipCount }, (_, n) => {
+      const setting = n === 0 ? sent.setting : settingFor(n);
+      return createBoardFromTemplate(
+        kind, `${baseName} #${n + 1}`, { ...sent, ...(setting ? { setting } : {}) }, productId,
+        productId ? { index: n, of: clipCount } : undefined,
+      );
+    }));
+    for (const r of results) if (r.status === "fulfilled") ids.push(r.value.id);
+    const failed = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+    if (failed) {
       const made = ids.length ? ` (đã tạo ${ids.length}/${clipCount} clip)` : "";
-      setError((err instanceof Error ? err.message : "Không tạo được clip") + made);
+      setError((failed.reason instanceof Error ? failed.reason.message : "Không tạo được clip") + made);
     }
     await useBoardStore.getState().refreshBoardList();
     if (ids.length !== clipCount) {
@@ -1045,7 +1048,7 @@ export function NewClipDialog({
             <>
               <button type="button" className="project-modal__btn" onClick={onClose} disabled={locked}>Huỷ</button>
               <button type="button" className="project-modal__btn project-modal__btn--primary qt-btn--accent" onClick={createFromTemplate} disabled={locked || !template}>
-                {busy ? "Đang tạo…" : clipCount > 1 ? `Tạo ${clipCount} clip →` : "Tạo clip →"}
+                {busy ? (productId ? "AI đang viết kịch bản theo sản phẩm…" : "Đang tạo…") : clipCount > 1 ? `Tạo ${clipCount} clip →` : "Tạo clip →"}
               </button>
             </>
           )}

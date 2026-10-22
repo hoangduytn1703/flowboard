@@ -19,6 +19,10 @@ for _k in ("FLOWBOARD_S3_ENDPOINT", "FLOWBOARD_S3_BUCKET", "FLOWBOARD_S3_KEY_ID"
 # Force the deterministic mock planner in tests — never spawn `claude` subprocess.
 # Individual tests that want to exercise the CLI path patch the module directly.
 os.environ["FLOWBOARD_PLANNER_BACKEND"] = "mock"
+# Nor read the developer's real ~/.flowboard/secrets.json: with it, routes that
+# call run_llm (auto-prompt, script tailoring…) hit a real provider mid-test.
+# Tests that need a config write their own file (tmp_secrets_path fixtures).
+os.environ.setdefault("FLOWBOARD_SECRETS_PATH", str(Path(_TMPDIR) / "secrets.json"))
 
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlmodel import SQLModel  # noqa: E402

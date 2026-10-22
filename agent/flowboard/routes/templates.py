@@ -1,6 +1,7 @@
 """Board templates: list them, and create a board from one."""
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
@@ -13,6 +14,9 @@ from flowboard.services.products import TemplateBuildError, template_board_spec
 from flowboard.services.templates import PersonRequiredError
 from flowboard.services.product_gender import GenderMismatchError
 from flowboard.services.templates import list_templates
+from flowboard.services.script_tailor import TailorError, tailor_spec
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["templates"])
 
@@ -24,6 +28,11 @@ class FromTemplateBody(BaseModel):
     # A saved product: its photo lands on the product node, its description
     # and selling points fill the prompts and the script note.
     product_id: Optional[int] = None
+    # With a product: let the LLM rewrite the scenes for it (script_tailor).
+    tailor: bool = True
+    # Clip ``variant`` of ``variant_of`` for the same product → a different angle.
+    variant: int = Field(default=0, ge=0, le=20)
+    variant_of: int = Field(default=1, ge=1, le=20)
 
 
 @router.get("/templates")
@@ -32,7 +41,7 @@ def get_templates() -> list[dict]:
 
 
 @router.post("/boards/from-template")
-def create_board_from_template(body: FromTemplateBody) -> dict:
+async def create_board_from_template(body: FromTemplateBody) -> dict:
     """A new board with the template's nodes, prompts and edges already on it."""
     try:
         template, spec, product = template_board_spec(body.template_id, body.inputs, body.product_id)
@@ -40,6 +49,16 @@ def create_board_from_template(body: FromTemplateBody) -> dict:
         raise HTTPException(400, str(exc))
     except TemplateBuildError as exc:
         raise HTTPException(404, str(exc))
+    tailored = False
+    if product is not None and body.tailor:
+        try:
+            spec = await tailor_spec(spec, product, variant=body.variant, of=body.variant_of,
+                                     template_title=template.get("title") or "",
+                                     shown_as=(body.inputs or {}).get("product"))
+            tailored = True
+        except TailorError as exc:
+            # The template's own text still makes a usable clip.
+            logger.warning("from-template: script not tailored for product %s: %s", body.product_id, exc)
     default_name = template["title"] if product is None else f"{product['name']} — {template['title']}"
     with get_session() as s:
         # The Quicktool wizard reopens the clip from this: which template it
@@ -47,7 +66,7 @@ def create_board_from_template(body: FromTemplateBody) -> dict:
         board = Board(
             name=(body.name or "").strip() or default_name,
             data={"quicktool": {"template_id": template["id"], "product_id": body.product_id,
-                                "inputs": body.inputs, "step": 1}},
+                                "inputs": body.inputs, "step": 1, "tailored": tailored}},
         )
         s.add(board)
         s.commit()

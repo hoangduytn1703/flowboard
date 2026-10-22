@@ -113,6 +113,17 @@ của người dùng (console.neon.tech, secure.backblaze.com).
 - `video_export`: bản ffmpeg static có NVENC nhưng máy không có GPU → đã có kiểm tra mã hoá thử. File clip 0 byte = lỗi.
 - **Kill uvicorn thì worker con có thể mồ côi và giữ cổng 8355** → extension nối vào tiến trình cũ (`extension_disconnected`). Kill theo PID cả cây, **không dùng `pkill -f`** (giết luôn shell). `--reload` từng treo ở "Waiting for connections to close": Makefile đã có `--timeout-graceful-shutdown 3`.
 - Wizard (`QuicktoolApp.tsx`) chỉ `switchBoard(id)` khi board có trong `boards` **và** `boardsLoaded` (store) đã true; không thì xoá clip sẽ gọi lại board vừa xoá → toast 404, còn mở thẳng link khi danh sách chưa tải thì bị đẩy về `/clips`.
+- **Sau "⚡ Tạo video tự động", bấm bước 1–4 bị kéo về bước 5** (bug 22/10): effect trong `QuicktoolApp.tsx` điều hướng sang
+  `/export` mỗi khi `auto === "done"` mà đang ở bước khác — `auto` giữ "done" mãi nên mọi lần bấm bước đều bị kéo lại. Giờ chỉ
+  điều hướng một lần lúc `auto` vừa chuyển sang "done" (`prevAuto` ref). Effect dựa trên trạng thái kéo dài: luôn so với giá trị trước.
+- **Gemini TTS đọc luôn "phong cách đọc"** (bug 22/10: ô "GIỌNG HÀO HỨNG" → clip mở đầu bằng "Giọng hào hứng…"): prompt cũ
+  `"<style>: <text>"`. Giờ `tts.gemini_tts_prompt()` = câu lệnh "đọc TRANSCRIPT, đừng đọc ghi chú" + khối `### DIRECTOR'S NOTES`
+  + khối `### TRANSCRIPT`. Đo thật bằng Gemini chép lại: cách cũ đọc lẫn 2/3 câu, cách mới 0/3. **Cache giọng theo khoá
+  `_cache_key`** — đổi prompt Gemini thì tăng `GEMINI_PROMPT_VERSION` (đang "v2"), không thì "Ghép lại" vẫn dùng file cũ.
+- **Bộ test từng đọc file key thật `~/.flowboard/secrets.json` và gọi AI thật** (dính 22/10: route tạo clip gọi `run_llm` → test
+  chạy 97 s, kết quả lệ thuộc AI). `conftest.py` giờ đặt `FLOWBOARD_SECRETS_PATH` vào thư mục tạm; test cần cấu hình thì tự ghi file.
+- **Mẫu clip viết cứng chi tiết của một món điển hình** (fast_food_ad: "melted cheese", "lifts the top bun") → áp cho cơm cháy ra
+  prompt burger. Đừng sửa từng JSON: `script_tailor` viết lại theo sản phẩm (xem Chỗ cần biết).
 - `PATCH /api/boards/{id}` gộp `data` một cấp (để lưu `step` không xoá `template_id`/`product_id`).
 - **Frontend bỏ mọi trường `node.data` không có trong danh sách** khi tải board (`store/board.ts`, 3 chỗ map `n.data[...]`
   + kiểu `FlowboardNodeData`): thêm trường mới lưu trên node thì phải thêm vào cả 3 chỗ, không thì F5 là mất (dính 22/10 với `lastRequest`).
@@ -361,6 +372,16 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   trong `StepSetup.tsx`). Bước 4: hộp "Flow bỏ lượt này" nói nguyên nhân là người mẫu + nút "Sang Bước 1 · người mẫu".
   (Đã thử thêm câu "original fictional person, natural everyday look…" vào `buildCharacterPrompt` rồi gỡ: mặt ra giống ảnh thật hơn.)
 
+- **Kịch bản viết theo sản phẩm** (22/10, `services/script_tailor.py`): `POST /api/boards/from-template` có `product_id` →
+  `tailor_spec()` gửi một lượt `run_llm("auto_prompt")` (tên, ngành, giá, mô tả, điểm bán, ghi chú + các cảnh của mẫu) → mỗi cảnh
+  viết lại `image_prompt` / `video_prompt` (tiếng Anh, giữ mốc 0-3s/3-6s/6-8s, giữ ai có trong khung hình, bỏ chi tiết không đúng
+  sản phẩm) + lời thoại tiếng Việt ≤ 24 từ có điểm bán cụ thể, câu cuối kêu gọi mua. Giữ câu bảo vệ sản phẩm
+  (`restore_product_guard`) và câu `HANDS-ONLY` (tách ra trước, gắn lại sau). Body có `tailor` (mặc định true), `variant`/`variant_of`
+  (N clip/1 sản phẩm → mỗi clip một góc); mô tả người dùng gõ ở ô Sản phẩm → `shown_as` (giữ nguyên văn). Lỗi/sai số cảnh →
+  `TailorError` → giữ chữ của mẫu. `quicktool.tailored` lưu trên board. Hộp Clip mới tạo N clip **song song**, nút ghi "AI đang viết
+  kịch bản theo sản phẩm…". Thử thật với Cơm cháy (fast_food_ad, tay nữ): 15 s, hết burger, lời thoại có giòn rụm / sốt mắm / chà bông.
+  Chưa áp cho chat agent (`chat_agent.py` vẫn dùng chữ mẫu).
+
 - **Đăng xuất Flow phải bấm 2 lần** (21/10, `SettingsPanel.tsx`): lần đầu nút đổi thành "Bấm lần nữa để đăng xuất…" + "Huỷ",
   tự quay lại sau 5 s / khi đóng hộp; xong có toast (`AccountPanel.handleLogout`). Nút chỉ có ở hộp Cài đặt mở từ ⚙ cạnh tài khoản.
 
@@ -368,7 +389,7 @@ của người dùng (console.neon.tech, secure.backblaze.com).
 - **Nhập từ tab đang mở** (`list_shop_tabs` / `read_tab` / `scrape_page` trong `extension/background.js`, bản 0.5.0) mới test bằng extension giả + UI giả lập, chưa chạy trên tab TikTok / Shopee thật. Trang chi tiết sản phẩm thì chỉ lấy sản phẩm chính (không lấy "sản phẩm liên quan").
 - **Chưa thử thật (20/10)**: prompt 4 mẫu clip mới qua Flow; chế độ chỉ bàn tay qua Flow; tình huống hết credit → tự chuyển
   tài khoản; 2 Chrome profile cùng lúc; key OpenAI/xAI; nghe hội thoại nhiều giọng; hàng đợi nhiều clip với credit thật.
-- Chưa có: kịch bản khác nhau cho từng clip (hiện chỉ khác bối cảnh). Còn thiếu so với AI Dễ Ẹc (người dùng chưa chọn làm):
+- Kịch bản khác nhau cho từng clip: đã có khi tạo từ sản phẩm (`variant`), chưa có với clip không gắn sản phẩm. Còn thiếu so với AI Dễ Ẹc (người dùng chưa chọn làm):
   upscale 2K/4K, storyboard lưới trong wizard ("storyboard 2"), trim / chèn chữ lên video thật.
 - Còn trong báo cáo UX chưa sửa: Canvas chat dock quá to, toolbar Canvas tiếng Anh, "req ✗" không bấm được, thư viện tham chiếu cũ.
 - Test `test_chat_agent.py::test_gen_video_renders_on_veo_only_when_asked` lỗi sẵn trên Linux (22/10, lỗi cả khi chưa có thay đổi mới), chưa xem nguyên nhân.
@@ -412,4 +433,7 @@ của người dùng (console.neon.tech, secure.backblaze.com).
 - **22/10** — Điều tra "timeout + tạo clip lâu": nguyên nhân là Flow lặng lẽ bỏ video có mặt người mẫu (bộ lọc người nổi tiếng, xác nhận bằng giao diện Flow; credit được hoàn) + worker chạy video nối đuôi (4 cảnh × 5–6 phút). Sửa: video chạy song song tối đa 3, lỗi ghi lên node, bước 4 báo "Flow bỏ lượt này" + gợi ý, giá Omni 8 s = 12 credit. Đã thử thật (3 video song song ~6 phút); test 837 pass (+1 lỗi 0600 có sẵn). Thử nút "vẽ lại không lộ mặt" thất bại nên đã bỏ; ảnh cảnh 1/3 của clip 1 đã trả về bản cũ. Chưa commit.
 - **22/10** — Tìm ra thủ phạm video bị Flow bỏ: gương mặt người mẫu (thí nghiệm A–E + 2 probe, đổi từng yếu tố). Thêm "🎬 Kiểm tra với Flow" (Bước 1, lưu kết quả lên node + thư viện, huy hiệu ở /models), Bước 4 chỉ thẳng sang đổi người mẫu, prompt người mẫu mới tránh giống người nổi tiếng, worker nhận `max_wait_s`. Đã thử thật: người mẫu clip 1 → "chặn" (191 s), ảnh mẫu 10/10 → qua (68 s); phát hiện Omni 4 s bị bỏ. Chưa commit.
 - **22/10 tối** — Sửa lỗi lớn: hàng tài khoản Flow coi `FLOW_DROPPED_JOB` ("refunded the credits") là hết credit → ghim project của tài khoản Google khác → mọi job rơi vào project lạ (`account_pool.is_credit_error`, `after_login`, `REVIVE_CREDITS`); "Tạo lại người mẫu" không làm gì khi đã có ảnh (`generateModel(force)`); kết luận kiểm tra Flow gắn với `mediaId`; gỡ câu "natural everyday look" khỏi prompt người mẫu (làm mặt giống ảnh thật hơn). Đã ghim lại `b5633a75`, credit thật 930. Test pool 11 pass. Thử nghiệm hôm nay tốn ~120 credit. Clip 1 vẫn chưa có video (người mẫu hiện tại bị chặn; người dùng sẽ tự tạo lại). Commit + push.
+- **22/10 tối** — Sửa bug: chạy "Tạo video tự động" xong thì không bấm lại được bước 1–4 (luôn bị kéo về bước 5) — `QuicktoolApp.tsx` chỉ chuyển sang bước 5 một lần khi vừa xong. Kiểm tra bằng `tsc`; người dùng thử lại trên clip "Cơm cháy".
+- **22/10 tối** — Sửa bug giọng Gemini đọc luôn "phong cách đọc" ở đầu mỗi clip: prompt TTS tách ghi chú / lời thoại (`tts.gemini_tts_prompt`), khoá cache có phiên bản (`GEMINI_PROMPT_VERSION = "v2"`) để ghép lại thì đọc mới. Thử thật với 3 câu của clip Cơm cháy + Gemini chép lại: cũ 2/3 câu đọc lẫn, mới 0/3. Test TTS pass.
+- **22/10 tối** — Kịch bản clip viết theo mô tả + điểm bán của sản phẩm (`services/script_tailor.py`, gọi trong `POST /api/boards/from-template`): ảnh cảnh, chuyển động video, lời thoại; N clip/1 sản phẩm mỗi clip một góc, tạo song song. Thử thật với Cơm cháy: hết prompt burger, lời thoại nêu điểm bán, 15 s/clip (clip thử đã xoá). `conftest.py` không đọc key thật nữa. Cả bộ test 843 pass (+1 lỗi 0600 có sẵn). Commit + push (gộp sửa bước 1–4, giọng Gemini, kịch bản).
 

@@ -62,7 +62,13 @@ def test_gemini_voice_uses_the_key_pool_and_caches(tmp_path, monkeypatch):
     monkeypatch.setattr(gemini_api, "speak", fake_speak)
     n = asyncio.run(tts.synthesize("Xin chào mọi người", "gemini:Kore", 20, "giọng kể chuyện kịch tính"))
     assert n.path.suffix == ".wav" and n.words == [] and 0.9 <= n.duration <= 1.1
-    assert calls == [("giọng kể chuyện kịch tính, nói nhanh hơn bình thường: Xin chào mọi người", "Kore")]
+    # Style + rate go in a separate notes block; only the transcript is spoken
+    # ("<style>: <text>" made Gemini read the style aloud, 2026-10-22).
+    assert len(calls) == 1 and calls[0][1] == "Kore"
+    prompt = calls[0][0]
+    assert "giọng kể chuyện kịch tính, nói nhanh hơn bình thường" in prompt.split("### TRANSCRIPT")[0]
+    assert prompt.split("### TRANSCRIPT")[1].strip() == "Xin chào mọi người"
+    assert "never say them" in prompt
     # cached: the same line does not hit the service again
     asyncio.run(tts.synthesize("Xin chào mọi người", "gemini:Kore", 20, "giọng kể chuyện kịch tính"))
     assert len(calls) == 1

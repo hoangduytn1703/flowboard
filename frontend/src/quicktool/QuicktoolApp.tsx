@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   getTemplates,
@@ -411,9 +411,14 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
   useEffect(() => {
     if (loaded && step !== null && useQuicktoolStore.getState().step !== step) setStep(step);
   }, [loaded, step, setStep]);
-  // The auto run ends on the export step.
+  // The auto run ends on the export step — once, when it finishes. `auto`
+  // stays "done" afterwards, so keying on the value alone sent every later
+  // click on steps 1–4 straight back to step 5.
+  const prevAuto = useRef(auto);
   useEffect(() => {
-    if (auto === "done" && step !== 5 && loaded) navigate(`/clips/${routeId}/export`);
+    const finished = auto === "done" && prevAuto.current !== "done";
+    prevAuto.current = auto;
+    if (finished && step !== 5 && loaded) navigate(`/clips/${routeId}/export`);
   }, [auto, step, loaded, routeId, navigate]);
 
   function go(n: number) {
