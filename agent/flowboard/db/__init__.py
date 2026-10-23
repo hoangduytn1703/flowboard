@@ -7,7 +7,7 @@ from .session import NoActiveAccount, current_engine, engine, get_session, has_e
 from .session import init_db as _init_db_tables
 
 __all__ = ["engine", "get_session", "init_db", "current_engine", "set_engine", "make_engine", "has_engine", "NoActiveAccount",
-           "ensure_reference_meta_column", "ensure_product_gender_column"]
+           "ensure_reference_meta_column", "ensure_product_gender_column", "ensure_reference_media_id_not_unique"]
 
 
 def ensure_reference_meta_column(db_engine: Engine | None = None) -> bool:
@@ -57,6 +57,27 @@ def ensure_product_gender_column(db_engine: Engine | None = None) -> bool:
         return True
 
 
+def ensure_reference_media_id_not_unique(db_engine: Engine | None = None) -> bool:
+    """Turn the unique index on ``reference.media_id`` of an older DB into a
+    plain one, so a cloned model can share its original's photo. Works on
+    SQLite and on the account's Postgres schema (the connection's search
+    path is that schema). Returns True when an index was replaced."""
+    db_engine = db_engine or current_engine()
+    with db_engine.connect() as conn:
+        insp = inspect(conn)
+        if not insp.has_table("reference"):
+            return False
+        stale = [ix["name"] for ix in insp.get_indexes("reference")
+                 if ix.get("unique") and ix.get("column_names") == ["media_id"]]
+        if not stale:
+            return False
+        for name in stale:
+            conn.exec_driver_sql(f'DROP INDEX IF EXISTS "{name}"')
+        conn.exec_driver_sql('CREATE INDEX IF NOT EXISTS "ix_reference_media_id" ON reference (media_id)')
+        conn.commit()
+        return True
+
+
 def init_db(target: Engine | None = None) -> None:
     """Create tables and apply the lightweight column migrations on
     ``target`` (default: the current account's engine)."""
@@ -64,3 +85,4 @@ def init_db(target: Engine | None = None) -> None:
     _init_db_tables(target)
     ensure_reference_meta_column(target)
     ensure_product_gender_column(target)
+    ensure_reference_media_id_not_unique(target)

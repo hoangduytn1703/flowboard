@@ -147,3 +147,32 @@ def test_migration_noop_without_reference_table(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'empty.db'}")
     assert ensure_reference_meta_column(engine) is False
     engine.dispose()
+
+
+def test_migration_makes_media_id_non_unique(tmp_path):
+    """An older DB (unique index on media_id, as create_all made it) gets a
+    plain index, so a clone can share its original's photo; rows are kept."""
+    from flowboard.db import ensure_reference_media_id_not_unique
+
+    db = tmp_path / "old.db"
+    con = sqlite3.connect(db)
+    con.executescript(
+        """
+        CREATE TABLE reference (id INTEGER PRIMARY KEY, media_id VARCHAR NOT NULL, label VARCHAR NOT NULL,
+                                kind VARCHAR NOT NULL);
+        CREATE UNIQUE INDEX ix_reference_media_id ON reference (media_id);
+        INSERT INTO reference (media_id, label, kind) VALUES ('m-1', 'Vy', 'character');
+        """
+    )
+    con.commit()
+    con.close()
+
+    engine = create_engine(f"sqlite:///{db}")
+    assert ensure_reference_media_id_not_unique(engine) is True
+    assert ensure_reference_media_id_not_unique(engine) is False  # already done
+    ix = [i for i in inspect(engine).get_indexes("reference") if i["column_names"] == ["media_id"]]
+    assert ix and not ix[0]["unique"]
+    con = sqlite3.connect(db)
+    con.execute("INSERT INTO reference (media_id, label, kind) VALUES ('m-1', 'Vy', 'character')")
+    assert con.execute("SELECT COUNT(*) FROM reference WHERE media_id = 'm-1'").fetchone()[0] == 2
+    con.close()

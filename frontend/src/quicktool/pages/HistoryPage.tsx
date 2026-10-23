@@ -25,6 +25,7 @@ import {
 import { tierLabel, useFlowCredits } from "../../components/credits";
 import "../history.css";
 import { toast } from "../../store/toast";
+import { PageEmpty } from "../PageState";
 
 const PAGE_SIZE = 50;
 /** Re-poll the list while something is still queued / running. */
@@ -251,11 +252,13 @@ export function HistoryPage() {
               {Array.from({ length: 6 }, (_, i) => <SkeletonRow key={i} />)}
             </div>
           ) : rows.length === 0 ? (
-            <div className="qt-empty qt-empty--big">
-              {typeFilter || statusFilter || boardFilter
-                ? "Không có việc nào khớp bộ lọc."
-                : "Chưa có việc nào. Tạo clip đầu tiên ở mục Công cụ nhanh."}
-            </div>
+            typeFilter || statusFilter || boardFilter ? (
+              <PageEmpty icon="🔍" title="Không có việc nào khớp bộ lọc" compact />
+            ) : (
+              <PageEmpty icon="🕘" title="Chưa có việc nào">
+                Mỗi lần tạo ảnh, tạo video, đọc kịch bản… sẽ hiện ở đây kèm số credit đã dùng. Tạo clip đầu tiên ở <strong>Clip của tôi</strong>.
+              </PageEmpty>
+            )
           ) : (
             <div className="hist__list">
               {rows.map((row) => (

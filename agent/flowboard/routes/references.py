@@ -7,6 +7,7 @@ auto-managed media cache index): references have user-curated
 lifetime and metadata; cache files in storage/media/{id}.{ext} are
 owned by Asset and never touched on reference DELETE.
 """
+import copy
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Response
@@ -203,9 +204,6 @@ def patch_reference(ref_id: int, body: ReferencePatch):
             new_id = media_service.normalize_media_id(body.media_id)
             if not media_service.is_valid_media_id(new_id):
                 raise HTTPException(400, "invalid media_id")
-            taken = s.exec(select(Reference).where(Reference.media_id == new_id)).first()
-            if taken is not None and taken.id != row.id:
-                raise HTTPException(409, f"ảnh này đã thuộc một mục khác trong thư viện ({taken.label or taken.id})")
             row.media_id = new_id
             # The old brief described the old photo.
             row.ai_brief = body.ai_brief if "ai_brief" in fields else None
@@ -217,6 +215,27 @@ def patch_reference(ref_id: int, body: ReferencePatch):
         s.commit()
         s.refresh(row)
         return _row_dict(row)
+
+
+@router.post("/{ref_id}/clone")
+def clone_reference(ref_id: int):
+    """A copy of a saved item ("⧉ Nhân bản" on /models): same photo, name,
+    meta, tags — nothing checked for duplicates, the copy may be identical.
+    The new row is the newest, so it lists first."""
+    with get_session() as s:
+        row = s.get(Reference, ref_id)
+        if row is None:
+            raise HTTPException(404, "reference not found")
+        clone = Reference(
+            media_id=row.media_id, url=row.url, label=row.label, kind=row.kind, ai_brief=row.ai_brief,
+            aspect_ratio=row.aspect_ratio, tags=list(row.tags or []), pinned=row.pinned, position=row.position,
+            source_board_id=row.source_board_id, source_node_short_id=row.source_node_short_id,
+            meta=copy.deepcopy(row.meta or {}),
+        )
+        s.add(clone)
+        s.commit()
+        s.refresh(clone)
+        return _row_dict(clone)
 
 
 @router.delete("/{ref_id}", status_code=204)

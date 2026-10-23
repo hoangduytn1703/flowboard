@@ -25,6 +25,7 @@ import { VoiceField, VoicePreview } from "../VoiceField";
 import { generateStandaloneImage } from "../standaloneImage";
 import "../models.css";
 import { toast, useToastOn } from "../../store/toast";
+import { PageEmpty } from "../PageState";
 
 /** Longest model line: one 8-second clip holds about 24 words. */
 const MAX_LINE = 200;
@@ -88,13 +89,16 @@ export function ModelsPage() {
           <ol>
             <li>Thêm người mẫu: bấm <strong>+ Tạo người mẫu</strong> ở trên (tạo bằng AI hoặc upload ảnh người thật), hoặc ở Bước 1 của clip bấm <strong>★ Lưu người mẫu</strong>.</li>
             <li>Mỗi người mẫu có <strong>giọng đọc</strong> riêng (mặc định theo giới tính) và một <strong>câu nói</strong> tuỳ chọn. Khi dùng người mẫu cho clip, giọng này thành giọng đọc của clip, câu nói được thêm vào đầu lời thoại cảnh 1.</li>
-            <li>Bấm vào thẻ người mẫu để đổi tên, ảnh, thông tin, giọng, câu nói. Xoá chỉ bỏ khỏi thư viện, clip đã dùng người mẫu đó không bị ảnh hưởng.</li>
+            <li>Bấm vào thẻ người mẫu để đổi tên, ảnh, thông tin, giọng, câu nói. <strong>⧉ Nhân bản</strong> tạo một bản sao giống hệt (cùng ảnh) rồi mở form sửa bản sao — tiện để làm biến thể khác giọng / câu nói. Xoá chỉ bỏ khỏi thư viện, clip đã dùng người mẫu đó không bị ảnh hưởng.</li>
           </ol>
         </div>
 
 
-        {loaded && items.length === 0 && !error && (
-          <div className="qt-empty qt-empty--big">Chưa có người mẫu nào — bấm <strong>+ Tạo người mẫu</strong> để tạo ngay.</div>
+        {loaded && items.length === 0 && !error && editing !== "new" && (
+          <PageEmpty icon="👤" title="Chưa có người mẫu nào"
+                     actions={<button type="button" className="qt-btn qt-btn--accent" onClick={() => openEditor("new")}>+ Tạo người mẫu</button>}>
+            Tạo người mẫu bằng AI hoặc upload ảnh người thật, đặt giọng đọc và câu nói riêng — dùng lại cho mọi clip.
+          </PageEmpty>
         )}
 
         <div className="qt-home__grid">
@@ -106,7 +110,8 @@ export function ModelsPage() {
             </div>
           ))}
           {loaded && items.map((c) => (
-            <ModelCard key={c.id} item={c} active={editing !== "new" && editing?.id === c.id} onEdit={() => openEditor(c)} />
+            <ModelCard key={c.id} item={c} active={editing !== "new" && editing?.id === c.id} onEdit={() => openEditor(c)}
+                       onCloned={openEditor} />
           ))}
         </div>
       </div>
@@ -121,10 +126,30 @@ function formatDate(iso: string): string {
 }
 
 /** A saved model, read-only: photo, name, form badges, voice (with a
- * preview), line. Everything is changed in the editor ("✎ Sửa"). */
-function ModelCard({ item, active, onEdit }: { item: SavedCharacter; active: boolean; onEdit: () => void }) {
+ * preview), line. Clicking the card opens the editor; "⧉ Nhân bản" makes a
+ * copy and opens the editor on the copy. */
+function ModelCard({ item, active, onEdit, onCloned }: {
+  item: SavedCharacter;
+  active: boolean;
+  onEdit: () => void;
+  onCloned: (copy: SavedCharacter) => void;
+}) {
   const remove = useCharactersStore((s) => s.remove);
+  const clone = useCharactersStore((s) => s.clone);
   const [busy, setBusy] = useState(false);
+
+  async function onClone() {
+    setBusy(true);
+    try {
+      const copy = await clone(item.id);
+      toast.success(`Đã nhân bản "${item.label}" — đổi tên hoặc sửa bản sao ở form bên trên nếu cần.`);
+      onCloned(copy);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Không nhân bản được.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function onDelete() {
     if (!window.confirm(`Xoá người mẫu "${item.label}" khỏi thư viện? Clip đã dùng người mẫu này vẫn giữ ảnh.`)) return;
@@ -169,6 +194,10 @@ function ModelCard({ item, active, onEdit }: { item: SavedCharacter; active: boo
         {item.sourceBoardId !== null && (
           <Link className="qt-link" to={`/clips/${item.sourceBoardId}`} title="Mở clip đã tạo ra người mẫu này">Mở clip gốc ↗</Link>
         )}
+        <button type="button" className="project-modal__btn qt-model-card__clone" disabled={busy}
+                onClick={() => void onClone()} title="Tạo một bản sao giống hệt (ảnh, thông tin, giọng, câu nói) rồi mở form sửa bản sao">
+          ⧉ Nhân bản
+        </button>
         <button type="button" className="project-modal__btn project-modal__btn--danger qt-model-card__delete" disabled={busy}
                 onClick={() => void onDelete()}>
           Xoá

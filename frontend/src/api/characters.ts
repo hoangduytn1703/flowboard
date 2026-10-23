@@ -156,6 +156,13 @@ export async function updateCharacter(id: number, patch: {
   return mapRow(row);
 }
 
+/** A copy of a saved model (same photo, name, form, voice, line). Not
+ * checked for duplicates: the copy may be identical to the original. */
+export async function cloneCharacter(id: number): Promise<SavedCharacter> {
+  const row = await api<CharacterRowWire>(`/api/references/${id}/clone`, { method: "POST" });
+  return mapRow(row);
+}
+
 export async function deleteCharacter(id: number): Promise<void> {
   // 204 No Content: api<T>() would choke on the empty body.
   const res = await fetch(`/api/references/${id}`, { method: "DELETE" });

@@ -30,6 +30,7 @@ import { PromptsPage } from "./pages/PromptsPage";
 import { useFlowCredits } from "../components/credits";
 import { AccountSwitchBanner } from "../components/AccountSwitchBanner";
 import { useToastOn } from "../store/toast";
+import { PageEmpty, PageLoading } from "./PageState";
 
 /** Wizard steps and their URL slugs: /clips/:id/<slug>. */
 const STEPS = [
@@ -248,15 +249,13 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
           </div>
         )}
         {summaries !== null && summaries.length === 0 && (
-          <div className="qt-empty-state qt-empty-state--library">
-            <div className="qt-empty-state__icon">🎬</div>
-            <h3>Chưa có clip nào</h3>
-            <p>Bấm <strong>+ Clip mới</strong>, chọn kiểu clip và dán ảnh sản phẩm — AI viết kịch bản, tạo ảnh, tạo video và ghép lại có giọng đọc tiếng Việt.</p>
-            <div className="qt-row">
-              <button type="button" className="qt-btn qt-btn--accent qt-btn--big" onClick={() => navigate("/clips/new")}>+ Tạo clip đầu tiên</button>
-              <button type="button" className="qt-btn qt-btn--ghost" onClick={() => navigate("/products")}>Thêm sản phẩm trước</button>
-            </div>
-          </div>
+          <PageEmpty icon="🎬" title="Chưa có clip nào"
+                     actions={<>
+                       <button type="button" className="qt-btn qt-btn--accent qt-btn--big" onClick={() => navigate("/clips/new")}>+ Tạo clip đầu tiên</button>
+                       <button type="button" className="qt-btn qt-btn--ghost" onClick={() => navigate("/products")}>Thêm sản phẩm trước</button>
+                     </>}>
+            Bấm <strong>+ Clip mới</strong>, chọn kiểu clip và dán ảnh sản phẩm — AI viết kịch bản, tạo ảnh, tạo video và ghép lại có giọng đọc tiếng Việt.
+          </PageEmpty>
         )}
         <div className="qt-home__grid">
           {summaries === null && Array.from({ length: 6 }, (_, i) => (
@@ -359,15 +358,21 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
     ? { 1: "Nguồn & thiết lập", 2: "Lời kể từng đoạn", 3: "Tạo ảnh minh hoạ", 4: "Sắp xếp & chèn clip", 5: "Ghép & lồng tiếng" }
     : {};
   const step = stepOf(stepSlug);
-  // Who the clip's product is for: step 1 only offers models of that gender.
+  // Who the clip's product is for (step 1 only offers models of that gender)
+  // and its industry (step 2 offers the saved prompts of that industry first).
   const [productGender, setProductGender] = useState<ProductGender>("");
+  const [productCategory, setProductCategory] = useState<string | null>(null);
   useEffect(() => {
     const pid = qt.product_id;
-    if (!pid) { setProductGender(""); return; }
+    if (!pid) { setProductGender(""); setProductCategory(null); return; }
     let alive = true;
-    getProduct(pid).then((p) => { if (alive) setProductGender(p.gender ?? ""); }).catch(() => { if (alive) setProductGender(""); });
+    getProduct(pid)
+      .then((p) => { if (alive) { setProductGender(p.gender ?? ""); setProductCategory(p.category ?? null); } })
+      .catch(() => { if (alive) { setProductGender(""); setProductCategory(null); } });
     return () => { alive = false; };
   }, [qt.product_id]);
+  // No saved product (link / video clips): the industry read from the page, else the template's.
+  const clipCategory = productCategory ?? qt.reference?.category ?? (template?.category && template.category !== "any" ? template.category : null);
   const { credits: flowCredits } = useFlowCredits();
   useTitle(loaded && boardName ? `${boardName} · Bước ${step ?? qt.step ?? 1}` : "Đang mở clip…");
 
@@ -446,7 +451,7 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
     return (
       <>
         <header className="qt-header"><span className="qt-header__crumb">Đang mở clip…</span></header>
-        <div className="qt-home"><div className="qt-empty qt-empty--big"><span className="qt-spinner" /> Đang mở clip…</div></div>
+        <div className="qt-home"><PageLoading text="Đang mở clip…" /></div>
       </>
     );
   }
@@ -534,7 +539,7 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
               hands={qt.hands ?? null}
             />
           )}
-          {step === 2 && <StepScript roles={roles} />}
+          {step === 2 && <StepScript roles={roles} category={clipCategory} />}
           {step === 3 && <StepMedia roles={roles} kind="image" />}
           {step === 4 && (isDrama ? <StepSequence roles={roles} /> : <StepMedia roles={roles} kind="video" />)}
           {step === 5 && <StepExport roles={roles} />}

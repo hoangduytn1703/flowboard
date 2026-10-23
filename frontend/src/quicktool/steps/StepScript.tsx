@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { VOICE_GROUPS, patchNode, refinePromptApi } from "../../api/client";
 import { PromptLibraryButtons } from "../PromptLibraryButtons";
+import { sceneTagOf } from "../promptTags";
 import { useBoardStore, type FlowNode } from "../../store/board";
 import { useQuicktoolStore } from "../../store/quicktool";
 import type { ClipRoles } from "../roles";
@@ -49,8 +50,9 @@ function VoicePick({ node }: { node: FlowNode }) {
 }
 
 /** Step 2 — the script: one row per scene with its image prompt, motion
- * prompt and Vietnamese voice line, all editable in place. */
-export function StepScript({ roles }: { roles: ClipRoles }) {
+ * prompt and Vietnamese voice line, all editable in place. `category` (the
+ * product's industry) picks which saved prompts "📚 Chọn prompt" offers first. */
+export function StepScript({ roles, category }: { roles: ClipRoles; category: string | null }) {
   const writeNarrations = useQuicktoolStore((s) => s.writeNarrations);
   const [writing, setWriting] = useState(false);
   const [refining, setRefining] = useState<string | null>(null);
@@ -124,7 +126,9 @@ export function StepScript({ roles }: { roles: ClipRoles }) {
           "Viết lại" cũng được. Lời thoại tiếng Việt, ≤ 24 từ để vừa 8 giây.
         </p>
         <div className="qt-scenes">
-          {roles.scenes.map((s) => (
+          {roles.scenes.map((s) => {
+            const ctx = { category, scene: sceneTagOf(s.image.data.title as string | undefined, s.index, roles.scenes.length) };
+            return (
             <div key={s.image.id} className="qt-scene-row">
               <div className="qt-scene-row__num">{s.index}</div>
               <div className="qt-scene-row__fields">
@@ -136,7 +140,7 @@ export function StepScript({ roles }: { roles: ClipRoles }) {
                             onClick={() => refine(s.image)}>
                       {refining === s.image.id ? "đang viết…" : "✨ Viết lại chuẩn"}
                     </button>
-                    <PromptLibraryButtons kind="image"
+                    <PromptLibraryButtons kind="image" context={ctx}
                       getText={() => (useBoardStore.getState().nodes.find((n) => n.id === s.image.id)?.data.prompt as string) ?? ""}
                       onApply={(t) => saveField(s.image, "prompt", t)} />
                   </span>
@@ -158,7 +162,7 @@ export function StepScript({ roles }: { roles: ClipRoles }) {
                                 onClick={() => refine(s.video!, "static")}>
                           {refining === s.video.id ? "đang viết…" : "✨ Viết lại chuẩn"}
                         </button>
-                        <PromptLibraryButtons kind="video"
+                        <PromptLibraryButtons kind="video" context={ctx}
                           getText={() => (useBoardStore.getState().nodes.find((n) => n.id === s.video!.id)?.data.prompt as string) ?? ""}
                           onApply={(t) => saveField(s.video!, "prompt", t)} />
                       </span>
@@ -177,7 +181,7 @@ export function StepScript({ roles }: { roles: ClipRoles }) {
                         🎙 Lời thoại
                         <small className="qt-voice-count">{voiceCount(s.video)}/{MAX_VOICE_WORDS} từ</small>
                         <VoicePick node={s.video} />
-                        <PromptLibraryButtons kind="narration"
+                        <PromptLibraryButtons kind="narration" context={ctx}
                           getText={() => (useBoardStore.getState().nodes.find((n) => n.id === s.video!.id)?.data.narration as string) ?? ""}
                           onApply={(t) => { saveField(s.video!, "narration", t); setVoiceWords((p) => ({ ...p, [s.video!.id]: wordCount(t) })); }} />
                       </span>
@@ -230,7 +234,8 @@ export function StepScript({ roles }: { roles: ClipRoles }) {
                 )}
               </div>
             </div>
-          ))}
+            );
+          })}
           {roles.scenes.length === 0 && <div className="qt-empty">Board chưa có cảnh nào.</div>}
         </div>
         {roles.scenes.length > 0 && (

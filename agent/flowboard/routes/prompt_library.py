@@ -75,9 +75,17 @@ def create_prompt(body: PromptCreate) -> dict:
     if not text:
         raise HTTPException(400, "prompt trống")
     with get_session() as s:
-        # Saving the same text twice is a no-op: hand back the existing row.
+        # Saving the same text twice keeps one row: hand back the existing
+        # one, with any new labels (industry / kind of scene) added to it.
         existing = s.exec(select(SavedPrompt).where(SavedPrompt.kind == body.kind, SavedPrompt.text == text)).first()
         if existing is not None:
+            have = list(existing.tags or [])
+            extra = [t.strip() for t in (body.tags or []) if t.strip() and t.strip() not in have]
+            if extra:
+                existing.tags = (have + extra)[:10]
+                s.add(existing)
+                s.commit()
+                s.refresh(existing)
             return _row(existing)
         row = SavedPrompt(
             kind=body.kind, text=text, title=(body.title or "").strip() or _default_title(text),

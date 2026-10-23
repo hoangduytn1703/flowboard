@@ -136,3 +136,33 @@
 .qt-pager__info { margin-left: 8px; font-size: 14px; color: var(--muted); }
 .qt-plib-card__title { text-align: left; }
 .qt-plib-card__meta { font-size: 13px; color: var(--muted); margin-top: -2px; }
+
+/* "📚 Chọn prompt" in step 2: what the list is filtered for, sections by fit, labels */
+.qt-plib__ctx { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 2px 8px; font-size: 12px; color: var(--muted); }
+.qt-plib__chip { padding: 1px 8px; font-size: 12px; border-radius: 999px; border: 1px solid var(--border); color: var(--text); }
+.qt-plib__chip--industry { border-color: rgba(255, 106, 43, 0.5); background: rgba(255, 106, 43, 0.12); }
+.qt-plib__chip--scene { border-color: rgba(124, 92, 255, 0.5); background: rgba(124, 92, 255, 0.14); }
+.qt-plib__section + .qt-plib__section { margin-top: 10px; }
+.qt-plib__section-title { margin: 0 2px 4px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+.qt-plib__section-title small { font-weight: 400; text-transform: none; }
+.qt-plib__list small { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.qt-plib__tag { padding: 0 6px; font-style: normal; font-size: 11px; border-radius: 999px; background: var(--panel); border: 1px solid var(--border); }
+.qt-plib__more { display: block; margin: 8px 2px 2px; font-size: 13px; }
+.qt-plib__empty .qt-spinner { display: inline-block; vertical-align: -2px; margin-right: 6px; }
+
+/* /prompts: labels on a card (ngành + loại cảnh), editable */
+.qt-plib-labels { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.qt-plib-label {
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 1px 4px 1px 8px; font-size: 12px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--panel-high); color: var(--text);
+}
+.qt-plib-label--industry { border-color: rgba(255, 106, 43, 0.5); background: rgba(255, 106, 43, 0.12); }
+.qt-plib-label--scene { border-color: rgba(124, 92, 255, 0.5); background: rgba(124, 92, 255, 0.14); }
+.qt-plib-label button { padding: 0 4px; font: inherit; line-height: 1; color: var(--muted); background: none; border: none; cursor: pointer; }
+.qt-plib-label button:hover { color: var(--text); }
+.qt-plib-labels select {
+  padding: 1px 4px; font: inherit; font-size: 12px; color: var(--muted);
+  background: transparent; border: 1px dashed var(--border); border-radius: 999px; cursor: pointer;
+}
+.qt-plib-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }

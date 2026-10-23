@@ -195,6 +195,29 @@ def test_patch_can_replace_the_photo_of_a_saved_item(client):
     assert r.status_code == 200
     body = r.json()
     assert body["media_id"] == "33333333-3333-3333-3333-333333333333" and body["label"] == "Vy 2" and body["ai_brief"] is None
-    # a photo another saved item already uses is refused
+    # a photo another saved item already uses is fine (clones share their photo)
     r = client.patch(f"/api/references/{a['id']}", json={"media_id": "22222222-2222-2222-2222-222222222222"})
-    assert r.status_code == 409
+    assert r.status_code == 200 and r.json()["media_id"] == "22222222-2222-2222-2222-222222222222"
+
+
+def test_clone_copies_everything_and_allows_an_identical_copy(client):
+    meta = {"gender": "female", "country": "vn", "voice": "gemini:Kore", "line": "Hello cả nhà"}
+    a = client.post("/api/references", json={"media_id": "44444444-4444-4444-4444-444444444444", "kind": "character",
+                                             "label": "Vy", "aspect_ratio": "IMAGE_ASPECT_RATIO_PORTRAIT", "meta": meta}).json()
+    first = client.post(f"/api/references/{a['id']}/clone")
+    second = client.post(f"/api/references/{a['id']}/clone")
+    assert first.status_code == 200 and second.status_code == 200
+    for c in (first.json(), second.json()):
+        assert c["id"] != a["id"]
+        assert (c["media_id"], c["label"], c["kind"], c["meta"], c["aspect_ratio"]) == \
+            (a["media_id"], "Vy", "character", meta, "IMAGE_ASPECT_RATIO_PORTRAIT")
+    rows = client.get("/api/references?kind=character").json()
+    assert len(rows) == 3 and rows[0]["id"] == second.json()["id"]  # newest first
+    # the copy is its own row: renaming it leaves the original alone
+    client.patch(f"/api/references/{first.json()['id']}", json={"label": "Vy 2", "meta": {**meta, "line": "khác"}})
+    orig = next(r for r in client.get("/api/references?kind=character").json() if r["id"] == a["id"])
+    assert orig["label"] == "Vy" and orig["meta"]["line"] == "Hello cả nhà"
+    # deleting the original keeps the clones
+    assert client.delete(f"/api/references/{a['id']}").status_code == 204
+    assert len(client.get("/api/references?kind=character").json()) == 2
+    assert client.post("/api/references/999999/clone").status_code == 404

@@ -36,3 +36,14 @@ def test_save_list_use_and_delete(client):
     assert client.delete(f"/api/prompt-library/{row['id']}").status_code == 204
     assert client.delete(f"/api/prompt-library/{row['id']}").status_code == 404
     assert client.post("/api/prompt-library/999999/use").status_code == 404
+
+
+def test_saving_the_same_text_again_adds_the_new_labels(client):
+    first = client.post("/api/prompt-library", json={"kind": "image", "text": "a red dress on a model", "tags": ["thời trang"]}).json()
+    again = client.post("/api/prompt-library", json={"kind": "image", "text": "a red dress on a model", "tags": ["thời trang", "hook"]})
+    assert again.json()["id"] == first["id"]
+    assert again.json()["tags"] == ["thời trang", "hook"]
+    assert len(client.get("/api/prompt-library?kind=image").json()) == 1
+    # labels are edited on the page with PATCH
+    r = client.patch(f"/api/prompt-library/{first['id']}", json={"tags": ["mọi ngành", "chốt đơn"]})
+    assert r.json()["tags"] == ["mọi ngành", "chốt đơn"]

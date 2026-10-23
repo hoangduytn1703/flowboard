@@ -145,7 +145,10 @@ class Reference(SQLModel, table=True):
     re-upload.
     """
     id: Optional[int] = Field(default=None, primary_key=True)
-    media_id: str = Field(index=True, unique=True)
+    # Not unique: a cloned model ("⧉ Nhân bản" on /models) shares the photo
+    # of its original. ``db.ensure_reference_media_id_not_unique`` drops the
+    # unique index of older DBs.
+    media_id: str = Field(index=True)
     url: Optional[str] = None
     label: str = ""
     kind: str  # "image" | "character" | "visual_asset" | "storyboard_shot"

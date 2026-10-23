@@ -16,7 +16,7 @@ Tạo ảnh/video đi qua Google Flow (cần gói Pro/Ultra) bằng extension Ch
 
 ## Chạy
 - Python 3.11+, Node 20+, Chrome, **ffmpeg + ffprobe** trên PATH. Máy Linux không có sudo: `uv` và ffmpeg nằm ở `~/.local/bin` (nhớ `export PATH=$HOME/.local/bin:$PATH`).
-- `make install` (cần `python3-venv`; không có thì dùng `uv venv` + `uv pip install -e .` trong `agent/`), `cp .env.example .env`.
+- `make install` (cần `python3-venv`; không có thì dùng `uv venv` + `uv pip install -e ".[dev]"` trong `agent/` — `[dev]` có pytest + moto cho test; chạy lại sau mỗi lần `pyproject.toml` đổi), `cp .env.example .env`.
 - `make agent` (FastAPI :8434, WebSocket extension :8355) và `make frontend` (Vite :5174).
 - Extension: `chrome://extensions` → Load unpacked → `extension/`. Sửa extension thì phải **reload** nó. Cần một tab `flow.google.com` đã đăng nhập, để mở.
 - Project Flow: đặt trong Cài đặt (`PUT /api/flow/projects/pinned`, tự chuyển các board sang project mới). Gói Pro/Ultra: `FLOWBOARD_PAYGATE_TIER` trong `.env`.
@@ -258,8 +258,17 @@ của người dùng (console.neon.tech, secure.backblaze.com).
     (copy mediaId + charGender/Country/Vibe/Extras sang node); trang `/models`. `generateModel()` bỏ qua khi
     node đã có ảnh → muốn tạo lại phải chọn/upload ảnh khác.
   - **Thư viện prompt**: bảng `SavedPrompt` (kind image|video|narration, create_all tự tạo), `routes/prompt_library.py`
-    (`/api/prompt-library`, lưu trùng text = trả bản cũ, `/use` đếm lượt), bước 2 mỗi ô có "★ Lưu" / "📚 Dùng lại"
-    (`quicktool/PromptLibraryButtons.tsx`), trang `/prompts` sửa tại chỗ.
+    (`/api/prompt-library`, lưu trùng text = trả bản cũ **+ gộp nhãn mới**, `/use` đếm lượt), bước 2 mỗi ô có "★ Lưu" /
+    "📚 Chọn prompt" (`quicktool/PromptLibraryButtons.tsx`), trang `/prompts` sửa tại chỗ.
+  - **Prompt theo ngành + loại cảnh** (23/10): nhãn là chữ trong `SavedPrompt.tags` (cùng từ với prompt mẫu), định nghĩa ở
+    `quicktool/promptTags.ts`: ngành `INDUSTRY_TAG` (fashion→"thời trang", cosmetics→"mỹ phẩm", food→"đồ ăn", grocery→"tạp hoá",
+    home→"gia dụng", other→"khác", + "mọi ngành"), loại cảnh `SCENE_TAGS` (hook, chi tiết, demo, mở hộp, chốt đơn, chỉ tay, hội thoại).
+    `sceneTagOf(title, index, count)` đoán loại cảnh từ tên cảnh của template ("Cảnh 3 - Cận kết cấu" → chi tiết), không ra thì cảnh
+    đầu = hook, cuối = chốt đơn. Bước 2 (`StepScript` nhận `category` = ngành của sản phẩm, không có thì `qt.reference.category`
+    / ngành của template): "📚 Chọn prompt" → `groupPrompts()` chia **Hợp nhất** (cùng ngành/mọi ngành + cùng loại cảnh) → **Hợp ngành ·
+    cảnh khác** → **Chưa gắn ngành** → ngành khác ẩn sau nút "Xem cả N prompt ngành khác". "★ Lưu" tự gắn nhãn ngành + loại cảnh.
+    Trang `/prompts`: lọc theo ngành (có "Chưa gắn ngành") + loại cảnh, Thêm nhanh chọn ngành + loại cảnh, mỗi thẻ sửa nhãn
+    (chip cam = ngành, tím = loại cảnh, × bỏ, "+ nhãn" thêm / nhãn tuỳ ý). Prompt cũ lưu trước 23/10 không có nhãn → nhóm "Chưa gắn ngành".
 
 - **Prompt mẫu có sẵn** (21/10): `agent/flowboard/prompt_seeds.json` (43 mẫu: 14 ảnh, 12 chuyển động, 17 lời thoại;
   nhóm hook / chi tiết / demo / chốt đơn / chỉ tay + theo ngành). `services/prompt_seeds.py`: `seed_on_start()` (gọi trong
@@ -323,8 +332,12 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   bấm "★ Lưu vào thư viện" / "Lưu thay đổi"** (nút khoá khi chưa có ảnh). AI = `quicktool/standaloneImage.ts`
   `generateStandaloneImage()` (request `gen_image` **không có node**, poll `/api/requests/{id}`; ~26 s, 1 lượt ảnh Flow); ảnh vừa
   tạo có thể 404 vài giây đầu → `RetryImg`. Sửa: đổi ảnh (AI/upload, có "Giữ ảnh cũ"), không tự vẽ lại ảnh khi đổi thông tin.
-  `PATCH /api/references/{id}` nhận thêm `media_id` / `aspect_ratio` / `ai_brief` (đổi ảnh xoá ai_brief cũ; ảnh đã thuộc mục khác → 409).
-  Thẻ người mẫu: cả thẻ bấm được (Enter/Space cũng mở) → form sửa; ▶ nghe thử, "Mở clip gốc", nút Xoá đỏ
+  `PATCH /api/references/{id}` nhận thêm `media_id` / `aspect_ratio` / `ai_brief` (đổi ảnh xoá ai_brief cũ; ảnh trùng mục khác vẫn cho).
+  **⧉ Nhân bản** (23/10) trên thẻ: `POST /api/references/{id}/clone` chép nguyên (ảnh, tên, meta, tags), **không bắt trùng**, bản sao
+  lên đầu danh sách và mở luôn form sửa bản sao. Vì vậy `Reference.media_id` **không còn unique** (`db.ensure_reference_media_id_not_unique`
+  đổi index unique của DB cũ thành index thường, chạy trong `init_db`, SQLite + Postgres). `POST /api/references` vẫn idempotent theo
+  media_id (★ Lưu ở bước 1 không lưu đôi) — muốn có bản thứ hai thì dùng clone.
+  Thẻ người mẫu: cả thẻ bấm được (Enter/Space cũng mở) → form sửa; ▶ nghe thử, "Mở clip gốc", ⧉ Nhân bản, nút Xoá đỏ
   (`project-modal__btn--danger`) chặn lan click. Nút đỏ `--danger` giữ màu đỏ khi hover (trước đó hover thành nền tối).
   `Reference.meta` có **`voice`**, `voiceStyle`, **`line`** (tuỳ chọn); `api/characters.ts` `voiceOf()` = giọng riêng hoặc mặc
   định theo giới tính (`defaultVoiceFor`: nam → Nam Minh, còn lại → Hoài My). Bước 1 "Dùng người mẫu này" → `applyModelVoice`:
@@ -345,6 +358,11 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   Model video (rộng, 2 cột lựa chọn), Model ảnh | Nguồn tạo ảnh, Danh sách tài khoản | Tài khoản Flow, Gemini key | Thông tin,
   Đăng xuất (rộng). ≤ 760 px về 1 cột.
 
+- **Trạng thái đang tải / trống của trang** (23/10): `quicktool/PageState.tsx` — `PageLoading` (vòng xoay cam + chấm sáng, chữ ở giữa,
+  hiện sau 150 ms để tải nhanh không bị nháy) và `PageEmpty` (icon tròn, tiêu đề, gợi ý, nút hành động), căn giữa trang
+  (`.qt-pagestate`, min-height 58vh; `compact` cho modal/lọc rỗng). Đã dùng ở Sản phẩm (tải / chưa có / lọc rỗng), Người mẫu (chưa có),
+  Prompt (tải / chưa có), Lịch sử (chưa có / lọc rỗng), Clip của tôi (chưa có, "Đang mở clip…"). Lưới clip / người mẫu / lịch sử vẫn
+  dùng skeleton khi tải. **Trang mới: dùng hai component này, đừng viết dòng "Đang tải…" nhỏ.**
 - **Khung focus** (21/10, cuối `styles.css`): bấm chuột không còn viền trắng của trình duyệt (`:focus { outline: none }`);
   bàn phím (Tab) có quầng cam mờ `:focus-visible { box-shadow: 0 0 0 2px rgba(255,106,43,.45) }`. Ô nhập giữ kiểu viền riêng.
 
@@ -395,6 +413,9 @@ của người dùng (console.neon.tech, secure.backblaze.com).
 - Test `test_chat_agent.py::test_gen_video_renders_on_veo_only_when_asked` lỗi sẵn trên Linux (22/10, lỗi cả khi chưa có thay đổi mới), chưa xem nguyên nhân.
 - **Người mẫu bị Flow chặn**: đã có nút kiểm tra; chưa tự kiểm tra khi tạo người mẫu mới (tốn ~12 credit/lần nên để người dùng bấm).
   Omni 4/6/10 s chưa thử lại (4 s bị bỏ 1 lần — có thể cũng do lỗi ghim nhầm project lúc đó).
+- **Máy Linux (23/10) chạy đăng nhập cục bộ, chưa nối Neon** (người dùng chọn): `.env` chưa có `FLOWBOARD_CENTRAL_DB_URL` →
+  `storage/accounts.db` cục bộ, dữ liệu cũ (2 sản phẩm, 1 người mẫu) đã dời vào `storage/accounts/akiragosho/`, không đồng bộ với
+  máy nhà. Thêm chuỗi Neon sau này thì máy này dùng dữ liệu cloud; dữ liệu cục bộ vẫn nằm ở thư mục đó.
 - Chọn gói Pro/Ultra ngay trong Cài đặt (hiện sửa `.env`).
 - Triển khai cho người khác: **để sau**. Hướng đã bàn: bạn cài local (đóng gói script + agent phục vụ giao diện build sẵn) là rẻ nhất; chạy trên server cần sửa extension (địa chỉ server, `wss`), đăng nhập, và vì hệ thống là một người dùng nên mỗi người một bản. Vercel đơn thuần không chạy được agent.
 - Test trên Windows (20/10): 743 pass khi bỏ 5 file lỗi do môi trường — `test_llm_gemini.py` (CLI `agy`), `test_llm_secrets.py::…0600`
@@ -436,4 +457,7 @@ của người dùng (console.neon.tech, secure.backblaze.com).
 - **22/10 tối** — Sửa bug: chạy "Tạo video tự động" xong thì không bấm lại được bước 1–4 (luôn bị kéo về bước 5) — `QuicktoolApp.tsx` chỉ chuyển sang bước 5 một lần khi vừa xong. Kiểm tra bằng `tsc`; người dùng thử lại trên clip "Cơm cháy".
 - **22/10 tối** — Sửa bug giọng Gemini đọc luôn "phong cách đọc" ở đầu mỗi clip: prompt TTS tách ghi chú / lời thoại (`tts.gemini_tts_prompt`), khoá cache có phiên bản (`GEMINI_PROMPT_VERSION = "v2"`) để ghép lại thì đọc mới. Thử thật với 3 câu của clip Cơm cháy + Gemini chép lại: cũ 2/3 câu đọc lẫn, mới 0/3. Test TTS pass.
 - **22/10 tối** — Kịch bản clip viết theo mô tả + điểm bán của sản phẩm (`services/script_tailor.py`, gọi trong `POST /api/boards/from-template`): ảnh cảnh, chuyển động video, lời thoại; N clip/1 sản phẩm mỗi clip một góc, tạo song song. Thử thật với Cơm cháy: hết prompt burger, lời thoại nêu điểm bán, 15 s/clip (clip thử đã xoá). `conftest.py` không đọc key thật nữa. Cả bộ test 843 pass (+1 lỗi 0600 có sẵn). Commit + push (gộp sửa bước 1–4, giọng Gemini, kịch bản).
-
+- **23/10** — Máy Linux: pull bước B + 2 commit mới, cài thư viện (`uv pip install -e ".[dev]"`), chạy với đăng nhập cục bộ (chưa có Neon URL); đăng nhập akiragosho thấy đủ dữ liệu cũ, trang Sản phẩm có nút "Nhập từ tab đang mở". Thử bằng API + Playwright.
+- **23/10** — Người mẫu: nút **⧉ Nhân bản** (bản sao giống 100%, không bắt trùng, mở form sửa bản sao để đổi tên). `POST /api/references/{id}/clone`, `media_id` của `Reference` bỏ unique + migration. Test references/characters 20 pass (thêm test clone + migration), các test liên quan 177 pass (+1 lỗi có sẵn). Thử thật trên UI bằng mẫu tạm (đã xoá). Migration chạy thật trên SQLite máy Linux; **chưa chạy trên Postgres Neon** (máy nhà sẽ chạy khi khởi động).
+- **23/10** — Màn hình đang tải và màn hình trống ở các trang (Sản phẩm, Người mẫu, Prompt, Lịch sử, Clip của tôi) chuyển ra giữa trang, có vòng xoay mới và nút hành động (`quicktool/PageState.tsx`); bỏ CSS `qt-empty-state` cũ. Đã chụp UI thật (trang Sản phẩm tải chậm giả lập, trống; Người mẫu, Clip trống).
+- **23/10** — Prompt đã lưu theo ngành + loại cảnh: Bước 2 "📚 Chọn prompt" lọc/xếp theo ngành của sản phẩm và loại cảnh (hook, chi tiết, demo, chốt đơn…), ngành khác ẩn; "★ Lưu" tự gắn nhãn; trang `/prompts` lọc theo ngành / loại cảnh và sửa nhãn trên thẻ; lưu trùng text thì gộp nhãn. `quicktool/promptTags.ts`. Test prompt library 4 pass; thử thật trên UI với clip + sản phẩm thời trang tạm (đã xoá, đã đặt lại lượt dùng của mẫu). Commit + push gộp nhân bản người mẫu + màn tải/trống + prompt theo ngành.

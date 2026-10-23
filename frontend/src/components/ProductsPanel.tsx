@@ -24,6 +24,7 @@ import {
 } from "../api/client";
 import { useGenerationStore } from "../store/generation";
 import { toast, useToastOn } from "../store/toast";
+import { PageEmpty, PageLoading } from "../quicktool/PageState";
 
 /** Products per page: five to a row, five rows in the grid; a list row is taller. */
 const GRID_PER_PAGE = 25;
@@ -568,15 +569,21 @@ export function ProductsPanel({
               </div>
             )}
 
-            {products === null && <span className="project-modal__hint">Đang tải…</span>}
+            {products === null && <PageLoading text="Đang tải sản phẩm…" compact={!asPage} />}
             {products !== null && products.length === 0 && (
-              <p className="qt-empty-state">
-                Chưa có sản phẩm nào. Bấm <strong>🔗 Thêm từ link</strong> để dán link TikTok Shop / Shopee,
-                hoặc <strong>+ Thêm sản phẩm</strong> để nhập tay.
-              </p>
+              <PageEmpty icon="🛍️" title="Chưa có sản phẩm nào" compact={!asPage}
+                         actions={<>
+                           <button type="button" className="project-modal__btn project-modal__btn--primary" onClick={() => setLinkOpen(true)}>🔗 Thêm từ link</button>
+                           <button type="button" className="project-modal__btn" onClick={scanTabs} disabled={importing || scanning}>📥 Nhập từ tab đang mở</button>
+                           <button type="button" className="project-modal__btn" onClick={() => openForm(null)}>+ Nhập tay</button>
+                         </>}>
+                Dán link TikTok Shop / Shopee để AI đọc tên, giá, ảnh; hoặc mở trang sản phẩm trong Chrome rồi bấm
+                <strong> Nhập từ tab đang mở</strong> (nhiều tab một lần).
+              </PageEmpty>
             )}
             {products !== null && products.length > 0 && sorted.length === 0 && (
-              <p className="qt-empty-state">Không có sản phẩm nào khớp bộ lọc. <button type="button" className="qt-link" onClick={() => { setQ(""); setCatFilter(""); }}>Xoá bộ lọc</button></p>
+              <PageEmpty icon="🔍" title="Không có sản phẩm nào khớp bộ lọc" compact
+                         actions={<button type="button" className="project-modal__btn" onClick={() => { setQ(""); setCatFilter(""); }}>Xoá bộ lọc</button>} />
             )}
 
             {view === "grid" ? (

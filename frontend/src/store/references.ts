@@ -4,6 +4,7 @@ import {
   listCharacters,
   renameCharacter,
   saveCharacter,
+  cloneCharacter,
   updateCharacter,
   updateCharacterMeta,
   type SaveCharacterInput,
@@ -178,6 +179,8 @@ export interface CharactersState {
   /** Merge ``patch`` into the model's meta (voice, line, …). */
   updateMeta(id: number, patch: Partial<SavedCharacter["meta"]>): Promise<void>;
   remove(id: number): Promise<void>;
+  /** Copy a model; the copy lists first and is returned (to open it in the editor). */
+  clone(id: number): Promise<SavedCharacter>;
   isSaved(mediaId: string | null | undefined): boolean;
 }
 
@@ -247,6 +250,12 @@ export const useCharactersStore = create<CharactersState>((set, get) => ({
   async remove(id) {
     await deleteCharacter(id);
     set({ items: get().items.filter((c) => c.id !== id) });
+  },
+
+  async clone(id) {
+    const row = await cloneCharacter(id);
+    set({ items: [row, ...get().items] });
+    return row;
   },
 
   isSaved(mediaId) {
