@@ -65,37 +65,85 @@
   gap: 2px;
 }
 .qt-nav__group {
-  margin: 12px 8px 4px;
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-.qt-nav__item {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin: 14px 8px 6px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+/* a short accent dash before the name, a faint rule after it */
+.qt-nav__group::before {
+  content: "";
+  width: 10px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--qt-accent);
+}
+.qt-nav__group::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.qt-nav__item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   width: 100%;
   padding: 8px 10px;
   font: inherit;
-  font-size: 14px;
+  font-size: 15px;
+  font-weight: 500;
   text-align: left;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 10px;
   background: none;
   color: var(--text);
   cursor: pointer;
+  transition: background 0.12s, transform 0.12s;
 }
 .qt-nav__item:hover {
   background: var(--panel-high);
+  transform: translateX(2px);
 }
 .qt-nav__item--active {
-  background: var(--qt-accent-soft);
-  border-color: rgba(255, 106, 43, 0.35);
+  background: linear-gradient(90deg, rgba(255, 106, 43, 0.22), rgba(255, 106, 43, 0.06));
+  border-color: rgba(255, 106, 43, 0.4);
+  font-weight: 600;
 }
+.qt-nav__item--active::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--qt-accent);
+}
+/* icons sit in a small tinted tile so each row has a visual anchor */
 .qt-nav__icon {
-  width: 18px;
-  text-align: center;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  font-size: 15px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.qt-nav__item:hover .qt-nav__icon { background: rgba(255, 255, 255, 0.09); }
+.qt-nav__item--active .qt-nav__icon {
+  background: var(--qt-accent);
+  border-color: var(--qt-accent);
+  color: #fff;
+  filter: saturate(1.1);
 }
 .qt-nav__meta {
   margin-left: auto;
@@ -1510,3 +1558,24 @@
 @media (prefers-reduced-motion: reduce) {
   .qt-pagestate, .qt-pagestate__ring, .qt-pagestate__core { animation: none; }
 }
+
+/* step 2: "Viết lại kịch bản theo sản phẩm" box */
+.qt-tailor { margin: 0 0 12px; }
+
+/* step 5: clip order / skip / cut */
+.qt-arrange .qt-cliplist__num { grid-row: span 3; }
+.qt-arrange__tools { grid-column: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 2px; }
+.qt-arrange__tools .qt-btn { white-space: nowrap; }
+.qt-arrange--off { opacity: 0.5; }
+.qt-arrange__trim { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--muted); }
+.qt-arrange__trim input { width: 56px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: inherit; }
+
+/* step 5: text on the video */
+.qt-overlays { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; padding: 10px; border: 1px solid var(--border); border-radius: 10px; }
+.qt-overlays__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.qt-overlays__head small { color: var(--muted); font-size: 12px; }
+/* Step 5's column is narrow: text on its own line, then look / place, then time + delete. */
+.qt-overlay-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; align-items: center; padding-top: 8px; border-top: 1px dashed var(--border); }
+.qt-overlay-row .qt-textarea { grid-column: 1 / -1; min-height: 0; padding: 6px 8px; }
+.qt-overlay-row select { min-width: 0; padding: 5px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: inherit; }
+.qt-overlay-row > .qt-btn { justify-self: end; }

@@ -7,7 +7,9 @@ from .session import NoActiveAccount, current_engine, engine, get_session, has_e
 from .session import init_db as _init_db_tables
 
 __all__ = ["engine", "get_session", "init_db", "current_engine", "set_engine", "make_engine", "has_engine", "NoActiveAccount",
-           "ensure_reference_meta_column", "ensure_product_gender_column", "ensure_reference_media_id_not_unique"]
+           "ensure_reference_meta_column", "ensure_product_gender_column", "ensure_reference_media_id_not_unique",
+           "ensure_post_channel_column", "ensure_post_series_columns", "ensure_channel_link_columns",
+           "ensure_channel_categories_column", "ensure_product_aff_columns"]
 
 
 def ensure_reference_meta_column(db_engine: Engine | None = None) -> bool:
@@ -78,6 +80,99 @@ def ensure_reference_media_id_not_unique(db_engine: Engine | None = None) -> boo
         return True
 
 
+def ensure_post_channel_column(db_engine: Engine | None = None) -> bool:
+    """Add ``post.channel_id`` to a DB whose post table predates channels."""
+    db_engine = db_engine or current_engine()
+    with db_engine.connect() as conn:
+        insp = inspect(conn)
+        if not insp.has_table("post"):
+            return False
+        if "channel_id" in {c["name"] for c in insp.get_columns("post")}:
+            return False
+        conn.exec_driver_sql("ALTER TABLE post ADD COLUMN channel_id INTEGER")
+        conn.commit()
+        return True
+
+
+def ensure_post_series_columns(db_engine: Engine | None = None) -> bool:
+    """Add ``post.series`` / ``post.episode`` to a DB whose post table predates series."""
+    db_engine = db_engine or current_engine()
+    with db_engine.connect() as conn:
+        insp = inspect(conn)
+        if not insp.has_table("post"):
+            return False
+        cols = {c["name"] for c in insp.get_columns("post")}
+        added = False
+        if "series" not in cols:
+            conn.exec_driver_sql("ALTER TABLE post ADD COLUMN series VARCHAR DEFAULT ''")
+            added = True
+        if "episode" not in cols:
+            conn.exec_driver_sql("ALTER TABLE post ADD COLUMN episode INTEGER DEFAULT 0")
+            added = True
+        conn.commit()
+        return added
+
+
+def ensure_channel_link_columns(db_engine: Engine | None = None) -> bool:
+    """Add ``channel.link`` / ``channel.page_review`` to a DB from before them."""
+    db_engine = db_engine or current_engine()
+    with db_engine.connect() as conn:
+        insp = inspect(conn)
+        if not insp.has_table("channel"):
+            return False
+        cols = {c["name"] for c in insp.get_columns("channel")}
+        added = False
+        if "link" not in cols:
+            conn.exec_driver_sql("ALTER TABLE channel ADD COLUMN link VARCHAR DEFAULT ''")
+            added = True
+        if "page_review" not in cols:
+            json_type = "JSONB" if conn.dialect.name == "postgresql" else "JSON"
+            conn.exec_driver_sql(f"ALTER TABLE channel ADD COLUMN page_review {json_type}")
+            added = True
+        conn.commit()
+        return added
+
+
+def ensure_channel_categories_column(db_engine: Engine | None = None) -> bool:
+    """Add ``channel.categories`` (JSON list) and seed it from the single ``category``."""
+    db_engine = db_engine or current_engine()
+    with db_engine.connect() as conn:
+        insp = inspect(conn)
+        if not insp.has_table("channel"):
+            return False
+        if "categories" in {c["name"] for c in insp.get_columns("channel")}:
+            return False
+        json_type = "JSONB" if conn.dialect.name == "postgresql" else "JSON"
+        conn.exec_driver_sql(f"ALTER TABLE channel ADD COLUMN categories {json_type}")
+        for cid, cat in conn.exec_driver_sql("SELECT id, category FROM channel").fetchall():
+            value = f'["{cat}"]' if cat else "[]"
+            conn.exec_driver_sql("UPDATE channel SET categories = ? WHERE id = ?" if conn.dialect.name != "postgresql"
+                                 else "UPDATE channel SET categories = %s::jsonb WHERE id = %s", (value, cid))
+        conn.commit()
+        return True
+
+
+def ensure_product_aff_columns(db_engine: Engine | None = None) -> bool:
+    """Add ``product.aff_link`` / ``product.shop`` and ``post.first_comment``
+    to a DB from before affiliate links."""
+    db_engine = db_engine or current_engine()
+    added = False
+    with db_engine.connect() as conn:
+        insp = inspect(conn)
+        if insp.has_table("product"):
+            cols = {c["name"] for c in insp.get_columns("product")}
+            for col in ("aff_link", "shop"):
+                if col not in cols:
+                    conn.exec_driver_sql(f"ALTER TABLE product ADD COLUMN {col} VARCHAR DEFAULT ''")
+                    added = True
+        if insp.has_table("post"):
+            if "first_comment" not in {c["name"] for c in insp.get_columns("post")}:
+                conn.exec_driver_sql("ALTER TABLE post ADD COLUMN first_comment VARCHAR DEFAULT ''")
+                added = True
+        conn.commit()
+    return added
+
+
 def init_db(target: Engine | None = None) -> None:
     """Create tables and apply the lightweight column migrations on
     ``target`` (default: the current account's engine)."""
@@ -86,3 +181,8 @@ def init_db(target: Engine | None = None) -> None:
     ensure_reference_meta_column(target)
     ensure_product_gender_column(target)
     ensure_reference_media_id_not_unique(target)
+    ensure_post_channel_column(target)
+    ensure_post_series_columns(target)
+    ensure_channel_link_columns(target)
+    ensure_channel_categories_column(target)
+    ensure_product_aff_columns(target)

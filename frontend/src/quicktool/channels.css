@@ -1,0 +1,80 @@
+/* "Kênh của tôi" page + the channel card on step 1 */
+.qt-channels { display: flex; flex-direction: column; gap: 14px; }
+.qt-channels__grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .qt-channels__grid { grid-template-columns: 1fr; }
+}
+.qt-channels__list ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.qt-channels__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  background: var(--panel-high);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.qt-channels__item:hover { border-color: var(--muted); }
+.qt-channels__item.is-open { border-color: var(--qt-accent); background: rgba(255, 106, 43, 0.1); }
+.qt-channels__item small { color: var(--muted); font-size: 12px; }
+.qt-channels__detail { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.qt-channels__desc { margin: 0; font-size: 15px; line-height: 1.5; white-space: pre-wrap; }
+.qt-channels .qt-card__head { align-items: center; }
+.qt-channels .qt-stat--text strong { font-size: 14px; font-weight: 600; }
+.qt-channels__form { max-width: 720px; }
+.qt-channels__profile { display: flex; flex-direction: column; gap: 10px; }
+.qt-channels__summary {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 15px;
+  line-height: 1.5;
+  background: rgba(255, 106, 43, 0.1);
+  border-left: 3px solid var(--qt-accent);
+  border-radius: 6px;
+}
+.qt-channels__profile dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 14px;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.qt-channels__profile dt { color: var(--muted); font-weight: 600; }
+.qt-channels__profile dd { margin: 0; }
+.qt-channels__profile dd ul, .qt-channels__profile dd ol { margin: 0; padding-left: 18px; }
+.qt-channels__tags { color: #93c5fd; }
+.qt-clip-channel { grid-column: 1 / -1; }
+
+/* "🔎 Đánh giá kênh" */
+.qt-channels__review-body { display: flex; flex-direction: column; gap: 12px; font-size: 14px; line-height: 1.5; }
+.qt-channels__review-body h4 { margin: 0 0 4px; font-size: 14px; }
+.qt-channels__review-body h4 small { font-weight: 400; color: var(--muted); }
+.qt-channels__review-body ul, .qt-channels__review-body ol { margin: 0; padding-left: 18px; }
+.qt-channels__review a { color: #93c5fd; word-break: break-all; }
+.qt-channels__score { display: flex; align-items: baseline; gap: 4px; }
+.qt-channels__score strong { font-size: 34px; line-height: 1; color: var(--qt-accent); }
+.qt-channels__score span { color: var(--muted); }
+.qt-channels__score small { margin-left: 10px; color: var(--muted); font-size: 13px; }
+.qt-channels__criteria { list-style: none; padding: 0 !important; display: flex; flex-direction: column; gap: 6px; }
+.qt-channels__criteria li { display: grid; grid-template-columns: 170px minmax(80px, 1fr) 24px; gap: 4px 10px; align-items: center; }
+.qt-channels__criteria li small { grid-column: 1 / -1; color: var(--muted); font-size: 12px; margin-top: -2px; }
+.qt-channels__bar { height: 6px; background: var(--panel-high); border-radius: 999px; overflow: hidden; }
+.qt-channels__bar span { display: block; height: 100%; background: var(--qt-accent); }
+.qt-channels__cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.qt-channels__style { padding: 10px 12px; background: rgba(147, 197, 253, 0.08); border-left: 3px solid #93c5fd; border-radius: 6px; }
+.qt-channels__style p { margin: 0 0 6px; }
+@media (max-width: 700px) {
+  .qt-channels__cols { grid-template-columns: 1fr; }
+  .qt-channels__criteria li { grid-template-columns: 120px 1fr 24px; }
+}

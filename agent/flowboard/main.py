@@ -18,6 +18,10 @@ from flowboard.routes import export_extras as export_extras_route
 from flowboard.routes import account as account_route
 from flowboard.routes import cloud as cloud_route
 from flowboard import accounts
+from flowboard.routes import exports as exports_route
+from flowboard.routes import posts as posts_route
+from flowboard.routes import channels as channels_route
+from flowboard.routes import dub as dub_route
 from flowboard.services.account_pool import account_pool
 from flowboard.routes import history as history_route
 from flowboard.routes import prompt_library as prompt_library_route
@@ -211,6 +215,10 @@ app.include_router(auth.router)
 app.include_router(llm.router)
 app.include_router(image_providers_route.router)
 app.include_router(history_route.router)
+app.include_router(exports_route.router)
+app.include_router(posts_route.router)
+app.include_router(channels_route.router)
+app.include_router(dub_route.router)
 app.include_router(prompt_library_route.router)
 app.include_router(video_clean_route.router)
 app.include_router(activity.router)

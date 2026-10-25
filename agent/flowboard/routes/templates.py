@@ -14,7 +14,7 @@ from flowboard.services.products import TemplateBuildError, template_board_spec
 from flowboard.services.templates import PersonRequiredError
 from flowboard.services.product_gender import GenderMismatchError
 from flowboard.services.templates import list_templates
-from flowboard.services.script_tailor import TailorError, tailor_spec
+from flowboard.services.script_tailor import TailorError, tailor_board, tailor_spec
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +33,8 @@ class FromTemplateBody(BaseModel):
     # Clip ``variant`` of ``variant_of`` for the same product → a different angle.
     variant: int = Field(default=0, ge=0, le=20)
     variant_of: int = Field(default=1, ge=1, le=20)
+    # The channel (page) the clip is made for; optional.
+    channel_id: Optional[int] = None
 
 
 @router.get("/templates")
@@ -66,6 +68,7 @@ async def create_board_from_template(body: FromTemplateBody) -> dict:
         board = Board(
             name=(body.name or "").strip() or default_name,
             data={"quicktool": {"template_id": template["id"], "product_id": body.product_id,
+                                "channel_id": body.channel_id,
                                 "inputs": body.inputs, "step": 1, "tailored": tailored}},
         )
         s.add(board)
@@ -83,3 +86,26 @@ async def create_board_from_template(body: FromTemplateBody) -> dict:
                 s.commit()
         raise HTTPException(500, f"template {body.template_id!r} is invalid: {exc}")
     return {"id": board_id, "name": name, "created_at": created_at, "data": data, "nodes": created}
+
+
+class TailorScene(BaseModel):
+    image_id: int
+    video_id: Optional[int] = None
+
+
+class TailorBody(BaseModel):
+    scenes: list[TailorScene] = Field(min_length=1, max_length=20)
+    # Extra wish in Vietnamese ("nhấn mạnh giá", "giọng trẻ trung hơn").
+    instructions: Optional[str] = Field(default=None, max_length=500)
+
+
+@router.post("/boards/{board_id}/tailor")
+async def tailor_existing_board(board_id: int, body: TailorBody) -> dict:
+    """Bước 2 "✨ Viết lại kịch bản theo sản phẩm": rewrite this clip's
+    scenes from its product (old prompts kept as prevPrompt)."""
+    try:
+        return await tailor_board(board_id, [(sc.image_id, sc.video_id) for sc in body.scenes],
+                                  instructions=body.instructions)
+    except TailorError as exc:
+        raise HTTPException(400, str(exc))
+

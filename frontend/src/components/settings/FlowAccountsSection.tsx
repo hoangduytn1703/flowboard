@@ -121,12 +121,15 @@ export function FlowAccountsSection({ onProjectChange }: { onProjectChange?: () 
           {busy === "refresh" ? "Đang đọc…" : "↻ Đọc lại credit"}
         </button>
       </div>
-      <div className="settings-panel__hint">
+      <details className="settings-panel__more">
+        <summary>Cách thêm tài khoản Flow khác?</summary>
+        <div className="settings-panel__hint">
         Thêm tài khoản: mở một <strong>Chrome profile khác</strong> đã đăng nhập Google khác, cài cùng extension
         (Load unpacked → thư mục <code>extension/</code>) và mở flow.google.com — nó tự hiện ở đây. Credit được đọc
         từ bảng tài khoản trên tab Flow (tab sẽ nháy một chút khi đọc). Chuyển tài khoản thì project ghim đổi theo;
         clip tạo bằng tài khoản cũ vẫn mở được, ảnh/video đã có được upload lại khi cần.
-      </div>
+        </div>
+      </details>
     </div>
   );
 }

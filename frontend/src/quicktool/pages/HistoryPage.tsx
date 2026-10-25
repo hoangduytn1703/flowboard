@@ -11,7 +11,9 @@ import {
   formatCredits,
   formatDurationVi,
   getHistoryDetail,
+  clearHistory,
   getHistorySummary,
+  type HistoryClearScope,
   isVideoType,
   listHistory,
   relativeTimeVi,
@@ -196,6 +198,7 @@ export function HistoryPage() {
     <>
       <header className="qt-header">
         <span className="qt-header__crumb">Lịch sử tạo</span>
+        <ClearHistoryButton onCleared={() => { void loadFirst(); loadSummary(); }} />
       </header>
       <div className="qt-home">
         <div className="hist">
@@ -583,6 +586,80 @@ function DetailModal({ id, onClose, onOpenClip, onRetry }: DetailModalProps) {
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+
+const CLEAR_OPTIONS: { key: string; label: string; scope: HistoryClearScope; days?: number }[] = [
+  { key: "errors", label: "Chỉ các việc lỗi / bị huỷ", scope: "errors" },
+  { key: "older7", label: "Việc đã xong cũ hơn 7 ngày", scope: "older", days: 7 },
+  { key: "older30", label: "Việc đã xong cũ hơn 30 ngày", scope: "older", days: 30 },
+  { key: "all", label: "Toàn bộ việc đã xong", scope: "all" },
+];
+
+/** "🧹 Dọn lịch sử": pick what to drop, see how many rows that is, confirm. */
+function ClearHistoryButton({ onCleared }: { onCleared: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [choice, setChoice] = useState("errors");
+  const [count, setCount] = useState<number | null>(null);
+  const [armed, setArmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const opt = CLEAR_OPTIONS.find((o) => o.key === choice) ?? CLEAR_OPTIONS[0];
+
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    setCount(null);
+    setArmed(false);
+    clearHistory(opt.scope, opt.days ?? 30, true)
+      .then((r) => { if (alive) setCount(r.count); })
+      .catch(() => { if (alive) setCount(null); });
+    return () => { alive = false; };
+  }, [open, choice]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function run() {
+    if (!armed) { setArmed(true); return; }
+    setBusy(true);
+    try {
+      const r = await clearHistory(opt.scope, opt.days ?? 30);
+      toast.success(`Đã xoá ${r.deleted} dòng lịch sử.`);
+      setOpen(false);
+      onCleared();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+      setArmed(false);
+    }
+  }
+
+  return (
+    <div className="hist-clear">
+      <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        🧹 Dọn lịch sử
+      </button>
+      {open && (
+        <div className="hist-clear__pop" role="dialog" aria-label="Dọn lịch sử">
+          <label className="qt-field">
+            <span>Xoá những gì</span>
+            <select value={choice} onChange={(e) => setChoice(e.target.value)} disabled={busy}>
+              {CLEAR_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+            </select>
+          </label>
+          <p className="hist-clear__note">
+            {count === null ? "Đang đếm…" : count === 0 ? "Không có dòng nào để xoá." : `Sẽ xoá ${count} dòng.`}{" "}
+            Việc đang chạy / đang chờ không bị đụng. Ảnh, video đã tạo vẫn giữ nguyên; credit Flow thật không đổi —
+            chỉ mất dòng lịch sử và số credit ước tính của chúng.
+          </p>
+          <div className="hist-clear__actions">
+            <button type="button" className={`qt-btn qt-btn--small${armed ? " qt-btn--danger" : ""}`} disabled={busy || !count} onClick={() => void run()}>
+              {busy ? "Đang xoá…" : armed ? `Bấm lần nữa để xoá ${count} dòng` : `Xoá ${count ?? ""} dòng`}
+            </button>
+            <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" disabled={busy} onClick={() => setOpen(false)}>Đóng</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

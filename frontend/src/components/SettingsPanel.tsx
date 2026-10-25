@@ -96,6 +96,29 @@ const VIDEO_QUALITIES: {
   },
 ];
 
+const OMNI_HINT =
+  "Tạo video từ ảnh tham chiếu. Thời lượng 4 / 6 / 8 / 10 s chọn cho mỗi lần tạo. Hỗ trợ cả dọc lẫn ngang. " +
+  "Khuyên dùng: Veo 3.1 Lite hiện bị Flow nhận rồi huỷ trên tài khoản Pro thường.";
+
+type SettingsTab = "gen" | "flow" | "keys" | "data" | "about";
+const TABS: { key: SettingsTab; icon: string; label: string }[] = [
+  { key: "gen", icon: "🎬", label: "Tạo ảnh & video" },
+  { key: "flow", icon: "⚡", label: "Google Flow" },
+  { key: "keys", icon: "🔑", label: "Gemini key" },
+  { key: "data", icon: "☁", label: "Dữ liệu" },
+  { key: "about", icon: "ℹ", label: "Thông tin" },
+];
+const TAB_STORAGE = "flowboard.settings.tab";
+
+function readTab(): SettingsTab {
+  try {
+    const v = window.localStorage.getItem(TAB_STORAGE);
+    return TABS.some((t) => t.key === v) ? (v as SettingsTab) : "gen";
+  } catch {
+    return "gen";
+  }
+}
+
 interface SettingsPanelProps {
   open: boolean;
   onClose(): void;
@@ -129,6 +152,16 @@ export function SettingsPanel({
   const setVideoModel = useSettingsStore((s) => s.setVideoModel);
 
   const panelRef = useRef<HTMLDivElement>(null);
+  // Which group is open; remembered per browser (a convenience, not state).
+  const [tab, setTab] = useState<SettingsTab>(readTab);
+  function chooseTab(next: SettingsTab) {
+    setTab(next);
+    try {
+      window.localStorage.setItem(TAB_STORAGE, next);
+    } catch {
+      /* private window / blocked storage: just don't remember */
+    }
+  }
 
   // Esc closes (click-outside is handled by the backdrop's onClick).
   useEffect(() => {
@@ -266,6 +299,12 @@ export function SettingsPanel({
     : tier === "PAYGATE_TIER_ONE"
       ? "Pro"
       : "Đang nhận diện…";
+  const isUltra = tier === "PAYGATE_TIER_TWO";
+  const videoValue = videoModel === "omni_flash" ? "omni_flash" : `veo:${videoQuality}`;
+  const videoHint = videoModel === "omni_flash"
+    ? OMNI_HINT
+    : VIDEO_QUALITIES.find((q) => q.key === videoQuality)?.hint ?? "";
+  const imageHint = IMAGE_MODELS.find((m) => m.key === imageModel)?.hint ?? "";
 
   return (
     <div
@@ -277,315 +316,286 @@ export function SettingsPanel({
     >
       <div
         ref={panelRef}
-        className="settings-panel"
+        className="settings-panel settings-panel--tabs"
         role="dialog"
         aria-modal="true"
         aria-label="Cài đặt"
       >
         <div className="settings-panel__header">
-        <span className="settings-panel__title">Cài đặt</span>
-        <button
-          type="button"
-          className="settings-panel__close"
-          onClick={onClose}
-          aria-label="Đóng cài đặt"
-        >
-          ×
-        </button>
-      </div>
-
-      {/* Two columns: short sections sit side by side, long ones span both. */}
-      <div className="settings-panel__grid">
-      <div className="settings-panel__section">
-        <div className="settings-panel__label">Gói tài khoản</div>
-        <div className="settings-panel__value settings-panel__value--readonly">
-          {tierLabel}
+          <span className="settings-panel__title">Cài đặt</span>
+          <button
+            type="button"
+            className="settings-panel__close"
+            onClick={onClose}
+            aria-label="Đóng cài đặt"
+          >
+            ×
+          </button>
         </div>
-        <div className="settings-panel__hint">
-          Đặt bằng FLOWBOARD_PAYGATE_TIER trong file .env của agent — Flow
-          không còn báo gói tài khoản nữa nên phải khai báo thủ công.
-        </div>
-      </div>
 
-      {/* The one uuid every board generates into. Flow dropped project
-          creation + listing in the September 2026 migration, so there is no
-          way to pick one from a list — the user pastes it, and until they do
-          nothing can generate. */}
-      <div className="settings-panel__section">
-        <div className="settings-panel__label">Project Google Flow</div>
-        {flowProjectError ? (
-          <>
-            <div className="settings-panel__project-error">{flowProjectError}</div>
-            <div className="settings-panel__hint">
-              Đóng rồi mở lại Cài đặt để thử lại.
-            </div>
-          </>
-        ) : !flowProject ? (
-          <div className="settings-panel__value settings-panel__value--readonly">
-            Đang tải…
-          </div>
-        ) : (
-          <>
-            {flowProject.source === "none" ? (
-              <div className="settings-panel__project-error">
-                Chưa có project Flow nào được cấu hình nên mọi lần tạo đều sẽ lỗi.
-                Hãy mở một project tại{" "}
-                <a
-                  className="settings-panel__about-link"
-                  href="https://flow.google.com/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  flow.google.com
-                </a>
-                , copy uuid trên thanh địa chỉ rồi dán vào ô bên dưới.
-              </div>
-            ) : (
+        <div className="settings-panel__body">
+          <nav className="settings-panel__nav" role="tablist" aria-label="Nhóm cài đặt">
+            {TABS.map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                role="tab"
+                aria-selected={tab === t.key}
+                className={`settings-panel__tab${tab === t.key ? " settings-panel__tab--active" : ""}`}
+                onClick={() => chooseTab(t.key)}
+              >
+                <span className="settings-panel__tab-icon" aria-hidden="true">{t.icon}</span>
+                <span>{t.label}</span>
+                {t.key === "about" && updateAvailable && <span className="settings-panel__tab-dot" title="Có bản mới" />}
+              </button>
+            ))}
+          </nav>
+
+          <div className="settings-panel__content" role="tabpanel">
+            {tab === "gen" && (
               <>
-                <div className="settings-panel__value settings-panel__value--readonly">
-                  <code>{flowProject.flow_project_id}</code>
+                <div className="settings-panel__section">
+                  <label className="settings-field">
+                    <span className="settings-panel__label">Model video</span>
+                    <select
+                      className="settings-panel__select"
+                      value={videoValue}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v === "omni_flash") {
+                          setVideoModel("omni_flash");
+                        } else {
+                          setVideoModel("veo");
+                          setVideoQuality(v.slice(4) as VideoQuality);
+                        }
+                      }}
+                    >
+                      <option value="omni_flash">Omni Flash (r2v) — mặc định</option>
+                      {VIDEO_QUALITIES.map((q) => {
+                        const locked = q.ultraOnly && !isUltra;
+                        return (
+                          <option key={q.key} value={`veo:${q.key}`} disabled={locked}>
+                            {q.label}{q.ultraOnly ? " — chỉ Ultra" : ""}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </label>
+                  <div className="settings-panel__hint">{videoHint}</div>
+                  {!isUltra && (
+                    <div className="settings-panel__hint">
+                      Gói đang dùng: <strong>{tierLabel}</strong> — các model "chỉ Ultra" bị khoá.
+                    </div>
+                  )}
                 </div>
-                <div className="settings-panel__hint">
-                  {flowProject.source === "override"
-                    ? "Đặt tại Cài đặt — ghi đè .env."
-                    : "Ghim bằng FLOWBOARD_FLOW_PROJECT_ID trong file .env của agent."}
+
+                <div className="settings-panel__section">
+                  <label className="settings-field">
+                    <span className="settings-panel__label">Model ảnh</span>
+                    <select
+                      className="settings-panel__select"
+                      value={imageModel}
+                      onChange={(e) => setImageModel(e.target.value as ImageModelKey)}
+                    >
+                      {IMAGE_MODELS.map((m) => (
+                        <option key={m.key} value={m.key}>{m.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="settings-panel__hint">{imageHint}</div>
                 </div>
+
+                <ImageProvidersSection />
               </>
             )}
 
-            <div className="settings-panel__project-row">
-              <input
-                type="text"
-                className="settings-panel__project-input"
-                value={projectDraft}
-                placeholder="1dfd992a-4149-4f97-9d68-a1ede77d3fc3"
-                spellCheck={false}
-                autoComplete="off"
-                disabled={projectSaving}
-                aria-label="uuid project Flow"
-                onChange={(e) => setProjectDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && canSaveProject) {
-                    saveFlowProject(trimmedDraft);
-                  }
-                }}
-              />
-              <button
-                type="button"
-                className="settings-panel__project-btn"
-                disabled={projectSaving || !canSaveProject}
-                onClick={() => saveFlowProject(trimmedDraft)}
-              >
-                {projectSaving ? "Đang lưu…" : "Lưu"}
-              </button>
-            </div>
-
-            {legacyEnvId && (
-              <div className="settings-panel__hint">
-                ID trong <code>.env</code> không phải uuid. Nó vẫn dùng được —
-                những gì đã ghim vẫn chạy bình thường — nhưng muốn ghim lại
-                từ đây thì cần uuid, nên nút Lưu sẽ tắt cho đến khi bạn dán uuid.
-              </div>
-            )}
-
-            {flowProject.source === "override" && (
-              <button
-                type="button"
-                className="settings-panel__project-clear"
-                disabled={projectSaving}
-                onClick={() => saveFlowProject(null)}
-              >
-                Xoá ghi đè —{" "}
-                {flowProject.env_project_id
-                  ? `quay về ${flowProject.env_project_id} trong .env`
-                  : "sẽ không còn project nào, nên không tạo được nữa"}
-              </button>
-            )}
-
-            {projectSaveError && (
-              <div className="settings-panel__project-error">{projectSaveError}</div>
-            )}
-            {projectNotice && !projectSaveError && (
-              <div className="settings-panel__project-ok">{projectNotice}</div>
-            )}
-
-            <div className="settings-panel__hint">
-              Mọi board đều tạo vào project này. Khi lưu, các board đang ở project
-              cũ sẽ được chuyển sang project mới.
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Single unified Video model picker — flat list of every option
-          (Veo tiers + Omni Flash). Selecting a Veo row stamps both
-          videoModel="veo" + the matching quality; selecting Omni Flash
-          stamps videoModel="omni_flash" (duration is picked per dispatch
-          in the GenerationDialog). */}
-      <div className="settings-panel__section settings-panel__section--wide">
-        <div className="settings-panel__label">Model video</div>
-        <div className="settings-panel__radio-group">
-          {VIDEO_QUALITIES.map((q) => {
-            const locked = q.ultraOnly && tier !== "PAYGATE_TIER_TWO";
-            const checked = videoModel === "veo" && videoQuality === q.key;
-            return (
-              <label
-                key={q.key}
-                className={`settings-panel__radio${checked ? " settings-panel__radio--active" : ""}${locked ? " settings-panel__radio--locked" : ""}`}
-              >
-                <input
-                  type="radio"
-                  name="video-model"
-                  value={`veo:${q.key}`}
-                  checked={checked}
-                  disabled={locked}
-                  onChange={() => {
-                    setVideoModel("veo");
-                    setVideoQuality(q.key);
-                  }}
-                />
-                <div>
-                  <div className="settings-panel__radio-label">
-                    {q.label}
-                    {q.ultraOnly && (
-                      <span className="model-badge">Chỉ Ultra</span>
-                    )}
+            {tab === "flow" && (
+              <>
+                {/* The one uuid every board generates into. Flow dropped project
+                    creation + listing in the September 2026 migration, so there is no
+                    way to pick one from a list — the user pastes it, and until they do
+                    nothing can generate. */}
+                <div className="settings-panel__section">
+                  <div className="settings-panel__row-head">
+                    <span className="settings-panel__label">Project Google Flow</span>
+                    <span
+                      className="settings-panel__chip"
+                      title="Đặt bằng FLOWBOARD_PAYGATE_TIER trong file .env của agent — Flow không còn báo gói tài khoản nên phải khai báo thủ công."
+                    >
+                      Gói {tierLabel}
+                    </span>
                   </div>
-                  <div className="settings-panel__radio-hint">{q.hint}</div>
+                  {flowProjectError ? (
+                    <>
+                      <div className="settings-panel__project-error">{flowProjectError}</div>
+                      <div className="settings-panel__hint">Đóng rồi mở lại Cài đặt để thử lại.</div>
+                    </>
+                  ) : !flowProject ? (
+                    <div className="settings-panel__hint">Đang tải…</div>
+                  ) : (
+                    <>
+                      {flowProject.source === "none" && (
+                        <div className="settings-panel__project-error">
+                          Chưa có project Flow nào được cấu hình nên mọi lần tạo đều sẽ lỗi.
+                          Hãy mở một project tại{" "}
+                          <a
+                            className="settings-panel__about-link"
+                            href="https://flow.google.com/"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            flow.google.com
+                          </a>
+                          , copy uuid trên thanh địa chỉ rồi dán vào ô bên dưới.
+                        </div>
+                      )}
+
+                      <div className="settings-panel__project-row">
+                        <input
+                          type="text"
+                          className="settings-panel__project-input"
+                          value={projectDraft}
+                          placeholder="1dfd992a-4149-4f97-9d68-a1ede77d3fc3"
+                          spellCheck={false}
+                          autoComplete="off"
+                          disabled={projectSaving}
+                          aria-label="uuid project Flow"
+                          onChange={(e) => setProjectDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && canSaveProject) {
+                              saveFlowProject(trimmedDraft);
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="settings-panel__project-btn"
+                          disabled={projectSaving || !canSaveProject}
+                          onClick={() => saveFlowProject(trimmedDraft)}
+                        >
+                          {projectSaving ? "Đang lưu…" : "Lưu"}
+                        </button>
+                      </div>
+
+                      <div className="settings-panel__hint">
+                        {flowProject.source === "override"
+                          ? "Đặt tại Cài đặt (ghi đè .env). "
+                          : flowProject.source === "env"
+                            ? "Lấy từ FLOWBOARD_FLOW_PROJECT_ID trong .env. "
+                            : ""}
+                        Mọi board tạo vào project này; lưu project mới thì các board đang ở project cũ chuyển theo.
+                      </div>
+
+                      {legacyEnvId && (
+                        <div className="settings-panel__hint">
+                          ID trong <code>.env</code> không phải uuid. Vẫn dùng được, nhưng muốn ghim lại từ đây thì
+                          cần dán uuid — nút Lưu tắt cho tới lúc đó.
+                        </div>
+                      )}
+
+                      {flowProject.source === "override" && (
+                        <button
+                          type="button"
+                          className="settings-panel__project-clear"
+                          disabled={projectSaving}
+                          onClick={() => saveFlowProject(null)}
+                        >
+                          Xoá ghi đè —{" "}
+                          {flowProject.env_project_id
+                            ? `quay về ${flowProject.env_project_id.slice(0, 8)}… trong .env`
+                            : "sẽ không còn project nào, nên không tạo được nữa"}
+                        </button>
+                      )}
+
+                      {projectSaveError && (
+                        <div className="settings-panel__project-error">{projectSaveError}</div>
+                      )}
+                      {projectNotice && !projectSaveError && (
+                        <div className="settings-panel__project-ok">{projectNotice}</div>
+                      )}
+                    </>
+                  )}
                 </div>
-              </label>
-            );
-          })}
-          <label
-            className={`settings-panel__radio${videoModel === "omni_flash" ? " settings-panel__radio--active" : ""}`}
-          >
-            <input
-              type="radio"
-              name="video-model"
-              value="omni_flash"
-              checked={videoModel === "omni_flash"}
-              onChange={() => setVideoModel("omni_flash")}
-            />
-            <div>
-              <div className="settings-panel__radio-label">
-                Omni Flash (r2v)
-                <span className="model-badge">Mặc định</span>
-              </div>
-              <div className="settings-panel__radio-hint">
-                Tạo video từ ảnh tham chiếu. Thời lượng linh hoạt (4 / 6 / 8 / 10s)
-                chọn cho mỗi lần tạo — 15 / 20 / 25 / 30 credit. Hỗ trợ cả dọc
-                lẫn ngang. Khuyên dùng: Veo 3.1 Lite hiện bị Flow
-                nhận rồi huỷ trên tài khoản Pro thường.
-              </div>
-            </div>
-          </label>
-        </div>
-      </div>
 
-      <div className="settings-panel__section">
-        <div className="settings-panel__label">Model ảnh</div>
-        <div className="settings-panel__radio-group">
-          {IMAGE_MODELS.map((m) => (
-            <label
-              key={m.key}
-              className={`settings-panel__radio${imageModel === m.key ? " settings-panel__radio--active" : ""}`}
-            >
-              <input
-                type="radio"
-                name="image-model"
-                value={m.key}
-                checked={imageModel === m.key}
-                onChange={() => setImageModel(m.key)}
-              />
-              <div>
-                <div className="settings-panel__radio-label">{m.label}</div>
-                <div className="settings-panel__radio-hint">{m.hint}</div>
-              </div>
-            </label>
-          ))}
-        </div>
-      </div>
+                <FlowAccountsSection onProjectChange={onFlowProjectChange} />
 
+                <AccountPoolSection onProjectChange={onFlowProjectChange} />
 
-      <ImageProvidersSection />
-
-      <AccountPoolSection onProjectChange={onFlowProjectChange} />
-
-      <FlowAccountsSection onProjectChange={onFlowProjectChange} />
-
-      <GeminiKeysSection />
-
-
-      <div className="settings-panel__section">
-        <div className="settings-panel__label">Thông tin</div>
-        <div className="settings-panel__about-row">
-          <span className="settings-panel__about-key">Phiên bản</span>
-          <span className="settings-panel__about-value">
-            <code>v{APP_VERSION}</code>
-            {updateAvailable && latestRelease && (
-              <a
-                className="settings-panel__update-badge"
-                href={latestRelease.htmlUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                title={`Mới nhất: ${latestRelease.tagName}`}
-              >
-                Có bản mới {latestRelease.tagName} →
-              </a>
+                {onLogout && (
+                  // Sign out lives here (not in the AccountPanel chip) so the
+                  // chip stays narrow enough for the email + status row to
+                  // render without ellipsizing on default sidebar widths.
+                  <div className="settings-panel__section settings-panel__section--logout">
+                    <button
+                      type="button"
+                      className={`settings-panel__logout-btn${confirmLogout ? " settings-panel__logout-btn--armed" : ""}`}
+                      onClick={() => {
+                        if (!confirmLogout) { setConfirmLogout(true); return; }
+                        setConfirmLogout(false);
+                        void onLogout();
+                      }}
+                      disabled={logoutPending}
+                    >
+                      {logoutPending
+                        ? "Đang đăng xuất…"
+                        : confirmLogout
+                          ? "Bấm lần nữa để đăng xuất (việc tạo ảnh/video sẽ dừng cho tới khi đăng nhập lại)"
+                          : "Đăng xuất khỏi tài khoản Flow"}
+                    </button>
+                    {confirmLogout && (
+                      <button type="button" className="qt-link settings-panel__logout-cancel" onClick={() => setConfirmLogout(false)}>
+                        Huỷ, không đăng xuất
+                      </button>
+                    )}
+                    <div className="settings-panel__hint">
+                      Xoá thông tin tài khoản đã lưu và báo extension bỏ token đang giữ. Kết nối vẫn mở nên đăng
+                      nhập lại không cần khởi động lại Chrome.
+                    </div>
+                  </div>
+                )}
+              </>
             )}
-          </span>
-        </div>
-        <div className="settings-panel__about-row">
-          <span className="settings-panel__about-key">Cộng đồng</span>
-          <a
-            className="settings-panel__about-link"
-            href={COMMUNITY_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            FlowKit & Flowboard trên Facebook →
-          </a>
-        </div>
-      </div>
 
-      <DataFolderSection />
+            {tab === "keys" && <GeminiKeysSection />}
 
-      {onLogout && (
-        // Sign out lives here (not in the AccountPanel chip) so the
-        // chip stays narrow enough for the email + status row to
-        // render without ellipsizing on default sidebar widths.
-        <div className="settings-panel__section settings-panel__section--logout settings-panel__section--wide">
-          <button
-            type="button"
-            className={`settings-panel__logout-btn${confirmLogout ? " settings-panel__logout-btn--armed" : ""}`}
-            onClick={() => {
-              if (!confirmLogout) { setConfirmLogout(true); return; }
-              setConfirmLogout(false);
-              void onLogout();
-            }}
-            disabled={logoutPending}
-          >
-            {logoutPending
-              ? "Đang đăng xuất…"
-              : confirmLogout
-                ? "Bấm lần nữa để đăng xuất (việc tạo ảnh/video sẽ dừng cho tới khi đăng nhập lại)"
-                : "Đăng xuất khỏi tài khoản Flow"}
-          </button>
-          {confirmLogout && (
-            <button type="button" className="qt-link settings-panel__logout-cancel" onClick={() => setConfirmLogout(false)}>
-              Huỷ, không đăng xuất
-            </button>
-          )}
-          <div className="settings-panel__hint">
-            Xoá thông tin tài khoản đã lưu và báo extension bỏ token đang giữ
-            trong bộ nhớ. Kết nối WebSocket vẫn mở nên đăng nhập lại không
-            cần khởi động lại Chrome.
+            {tab === "data" && <DataFolderSection />}
+
+            {tab === "about" && (
+              <div className="settings-panel__section">
+                <div className="settings-panel__label">Thông tin</div>
+                <div className="settings-panel__about-row">
+                  <span className="settings-panel__about-key">Phiên bản</span>
+                  <span className="settings-panel__about-value">
+                    <code>v{APP_VERSION}</code>
+                    {updateAvailable && latestRelease && (
+                      <a
+                        className="settings-panel__update-badge"
+                        href={latestRelease.htmlUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={`Mới nhất: ${latestRelease.tagName}`}
+                      >
+                        Có bản mới {latestRelease.tagName} →
+                      </a>
+                    )}
+                  </span>
+                </div>
+                <div className="settings-panel__about-row">
+                  <span className="settings-panel__about-key">Cộng đồng</span>
+                  <a
+                    className="settings-panel__about-link"
+                    href={COMMUNITY_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    FlowKit & Flowboard trên Facebook →
+                  </a>
+                </div>
+              </div>
+            )}
           </div>
         </div>
-      )}
-      </div>
       </div>
     </div>
   );
 }
-

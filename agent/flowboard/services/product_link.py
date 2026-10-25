@@ -114,6 +114,17 @@ def _looks_blocked(title: str, text: str) -> bool:
 #: is sent to "Cần đăng nhập". They are read by the Chrome extension instead,
 #: in the user's own signed-in browser (``read_page``, extension >= 0.4.0).
 BROWSER_ONLY_HOSTS = ("shopee.vn", "shp.ee")
+#: hosts of tracked affiliate short links (what the seller copies from Shopee /
+#: TikTok affiliate tools) — kept on the product as ``aff_link``
+AFF_LINK_HOSTS = ("s.shopee.vn", "shp.ee", "shope.ee", "vt.tiktok.com", "vn.shp.ee", "s.lazada.vn", "c.lazada.vn")
+
+
+def affiliate_link(url: str) -> str:
+    """``url`` when it is an affiliate short link, else ``""``."""
+    from urllib.parse import urlparse
+
+    host = (urlparse((url or "").strip()).hostname or "").lower()
+    return url.strip() if any(host == h or host.endswith("." + h) for h in AFF_LINK_HOSTS) else ""
 MIN_READ_PAGE_VERSION = (0, 4, 0)
 READ_PAGE_TIMEOUT_S = 45.0
 _LOGIN_WALL = re.compile(r"cần đăng nhập|đăng nhập để tiếp tục|chưa đăng nhập", re.I)
@@ -344,7 +355,10 @@ _PRODUCT_SYSTEM = (
     "empty if absent. selling_points: 3-5 short Vietnamese lines, one per line, the real "
     "benefits and facts from the page, each <= 90 chars. gender: who the product is for — male "
     "(men's / boys'), female (women's / girls'), unisex (both, or the page says nam nữ / unisex), "
-    "unknown when it does not matter or is not said (food, phone stands, kitchen gear…). Output ONLY the JSON object."
+    "unknown when it does not matter or is not said (food, phone stands, kitchen gear…). details: up to 10 short "
+    "Vietnamese lines, one per line starting with '- ', the other concrete facts the page states that the selling points "
+    "do not already cover — ingredients or materials, how it is made, sizes / weights / variants / flavours, how to use, "
+    "storage, origin; each <= 120 chars; empty if the page has nothing more. Output ONLY the JSON object."
 )
 
 _PRODUCT_SCHEMA = {
@@ -356,9 +370,17 @@ _PRODUCT_SCHEMA = {
         "price": {"type": "STRING"},
         "selling_points": {"type": "STRING"},
         "gender": {"type": "STRING", "enum": ["male", "female", "unisex", "unknown"]},
+        "details": {"type": "STRING"},
     },
     "required": ["name", "description", "category", "price", "selling_points", "gender"],
 }
+
+def page_details_note(details: object) -> str:
+    """``details`` from the page as the product's notes block ("" if none)."""
+    lines = [ln.strip() for ln in str(details or "").splitlines() if ln.strip().strip("-• ")]
+    lines = [ln if ln.startswith("- ") else "- " + ln.lstrip("-• ") for ln in lines][:10]
+    return ("Chi tiết từ trang sản phẩm:\n" + "\n".join(lines))[:1800] if lines else ""
+
 
 _PDP_RE = re.compile(r"^(https?://[^/]*tiktok\.com/[a-z]{2}/pdp/\d+)", re.I)
 
@@ -399,7 +421,11 @@ async def extract_product(url: str, *, model: str = EXTRACT_MODEL) -> dict[str, 
     """A product-library draft read from the page at ``url``:
     ``{draft: {name, description, category, price, selling_points, link},
     image_url}``."""
-    return await extract_from_page(await get_page(url), model=model)
+    out = await extract_from_page(await get_page(url), model=model)
+    # a pasted affiliate short link (s.shopee.vn/…) is kept on the product: it
+    # goes in the first comment of the posts written for it
+    out["draft"]["aff_link"] = affiliate_link(url)
+    return out
 
 
 def _gender_guess(*texts: str) -> str:
@@ -433,6 +459,10 @@ async def extract_from_page(page: dict[str, Any], *, model: str = EXTRACT_MODEL)
             "gender": (data.get("gender") if data.get("gender") in ("male", "female", "unisex")
                        else _gender_guess(str(data.get("name") or ""), page.get("title") or "")),
             "link": clean_link(page["url"]),
+            "aff_link": "",
+            # The rest of the page's facts (process, sizes, flavours…): the
+            # script writer reads the product's notes too (script_tailor).
+            "notes": page_details_note(data.get("details")),
         },
         "image_url": _bigger_image(page["image_url"]),
     }

@@ -10,6 +10,8 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
+from sqlmodel import select
+
 from flowboard.db import get_session
 from flowboard.db.models import Product, _utcnow
 from flowboard.services import media as media_service
@@ -29,19 +31,43 @@ class ProductBody(BaseModel):
     selling_points: Optional[str] = Field(default=None, max_length=2000)
     gender: Optional[str] = None  # male / female / unisex / "" (unknown)
     link: Optional[str] = Field(default=None, max_length=500)
+    aff_link: Optional[str] = Field(default=None, max_length=500)
+    shop: Optional[str] = Field(default=None, max_length=120)
     notes: Optional[str] = Field(default=None, max_length=2000)
     media_ids: Optional[list[str]] = Field(default=None, max_length=12)
     aspect_ratio: Optional[str] = None
 
 
-_TEXT_FIELDS = ("name", "description", "price", "selling_points", "link", "notes")
+_TEXT_FIELDS = ("name", "description", "price", "selling_points", "link", "aff_link", "shop", "notes")
+
+
+def _norm_link(value: str) -> str:
+    from flowboard.services.video_fetch import extract_url
+
+    value = (value or "").strip()
+    return (extract_url(value) or value).rstrip("/") if value else ""
+
+
+def _check_duplicate_links(s, row: Product) -> None:
+    """409 when another product already carries this affiliate link — the same
+    product saved twice would get two sets of posts. The page ``link`` is not
+    checked: several products legitimately share a shop/listing page."""
+    value = row.aff_link or ""
+    if not value:
+        return
+    other = s.exec(select(Product).where(Product.aff_link == value)).first()
+    if other is not None and other.id != row.id:
+        raise HTTPException(409, f"Sản phẩm \"{other.name}\" đã dùng link tiếp thị này rồi — không thêm trùng.")
 
 
 def _apply(row: Product, body: ProductBody) -> None:
     fields = body.model_fields_set
     for key in _TEXT_FIELDS:
         if key in fields and getattr(body, key) is not None:
-            setattr(row, key, getattr(body, key).strip())
+            value = getattr(body, key).strip()
+            if key in ("link", "aff_link"):
+                value = _norm_link(value)
+            setattr(row, key, value)
     if "category" in fields and body.category is not None:
         if body.category not in CATEGORIES:
             raise HTTPException(400, f"invalid category {body.category!r}; must be one of {list(CATEGORIES)}")
@@ -75,10 +101,25 @@ def create_product(body: ProductBody) -> dict:
     if "gender" not in body.model_fields_set:
         row.gender = product_gender.guess(row.name, row.description)
     with get_session() as s:
+        _check_duplicate_links(s, row)
         s.add(row)
         s.commit()
         s.refresh(row)
         return product_dict(row)
+
+
+@router.get("/shops")
+def list_shops() -> list[dict]:
+    """Shops the seller works with (from the products), most products first —
+    for the shop field's suggestions. Declared before ``/{product_id}``."""
+    with get_session() as s:
+        rows = s.exec(select(Product.shop, Product.aff_link).where(Product.shop != "")).all()
+    out: dict[str, dict] = {}
+    for shop, aff in rows:
+        row = out.setdefault(shop, {"shop": shop, "products": 0, "with_aff": 0})
+        row["products"] += 1
+        row["with_aff"] += 1 if aff else 0
+    return sorted(out.values(), key=lambda r: (-r["products"], r["shop"]))
 
 
 @router.get("/open-tabs")
@@ -108,6 +149,7 @@ def patch_product(product_id: int, body: ProductBody) -> dict:
         if row is None:
             raise HTTPException(404, "product not found")
         _apply(row, body)
+        _check_duplicate_links(s, row)
         row.updated_at = _utcnow()
         s.add(row)
         s.commit()

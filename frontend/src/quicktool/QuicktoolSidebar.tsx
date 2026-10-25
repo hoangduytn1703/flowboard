@@ -26,6 +26,9 @@ export function QuicktoolSidebar() {
       </div>
 
       <nav className="qt-nav">
+        <button type="button" className={`qt-nav__item${is("/today") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/today")}>
+          <span className="qt-nav__icon">📋</span> Hôm nay
+        </button>
         <button
           type="button"
           className={`qt-nav__item${homeActive ? " qt-nav__item--active" : ""}`}
@@ -34,7 +37,25 @@ export function QuicktoolSidebar() {
           <span className="qt-nav__icon">🎬</span> Clip của tôi
         </button>
 
+        <div className="qt-nav__group">Công cụ</div>
+        <button type="button" className={`qt-nav__item${is("/tools/dub") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/tools/dub")}
+                title="Dán link video nước ngoài → bỏ tiếng gốc, đọc lại bằng giọng Việt, in phụ đề hộp vàng, lưu thành clip">
+          <span className="qt-nav__icon">🎙</span> Lồng tiếng video
+        </button>
+        <button type="button" className={`qt-nav__item${is("/posts") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/posts")}
+                title="Viết bài đăng Facebook kiếm tương tác: điền mẫu hoặc chat với AI, tạo ảnh kèm">
+          <span className="qt-nav__icon">✍️</span> Bài viết Facebook
+        </button>
+        <button type="button" className={`qt-nav__item${is("/tools/clean") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/tools/clean")}
+                title="Xoá logo, watermark, phụ đề cứng khỏi video có sẵn">
+          <span className="qt-nav__icon">🧽</span> Xoá chữ / logo
+        </button>
+
         <div className="qt-nav__group">Thư viện</div>
+        <button type="button" className={`qt-nav__item${is("/channels") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/channels")}
+                title="Các page / tài khoản bạn đăng bài: bán gì, cho ai, giọng nào — AI bám theo khi viết bài, và tự brainstorm định hướng sau vài bài">
+          <span className="qt-nav__icon">📣</span> Kênh của tôi
+        </button>
         <button type="button" className={`qt-nav__item${is("/products") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/products")}>
           <span className="qt-nav__icon">🛍️</span> Sản phẩm đang bán
         </button>
@@ -49,12 +70,6 @@ export function QuicktoolSidebar() {
         <button type="button" className={`qt-nav__item${is("/history") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/history")}
                 title="Mọi lần tạo ảnh/video/ghép: trạng thái, credit, tải lại media, thử lại">
           <span className="qt-nav__icon">🕘</span> Lịch sử & credit
-        </button>
-
-        <div className="qt-nav__group">Công cụ</div>
-        <button type="button" className={`qt-nav__item${is("/tools/clean") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/tools/clean")}
-                title="Xoá logo, watermark, phụ đề cứng khỏi video có sẵn">
-          <span className="qt-nav__icon">🧽</span> Xoá chữ / logo
         </button>
 
         <div className="qt-nav__group">Nâng cao</div>

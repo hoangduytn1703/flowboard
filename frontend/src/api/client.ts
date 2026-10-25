@@ -92,7 +92,7 @@ function humanizeBackendError(token: string): string | null {
   return null;
 }
 
-async function extractErrorMessage(res: Response): Promise<string> {
+export async function extractErrorMessage(res: Response): Promise<string> {
   let detail: unknown;
   try {
     detail = await res.json();
@@ -162,6 +162,8 @@ export interface Board {
 export interface QuicktoolState {
   template_id?: string | null;
   product_id?: number | null;
+  /** The channel (page) the clip is made for. */
+  channel_id?: number | null;
   inputs?: Record<string, string>;
   /** 1 setup · 2 script · 3 images · 4 videos · 5 export */
   step?: number;
@@ -204,9 +206,21 @@ export interface BoardSummary extends Board {
     scenes_done: number;
     clips: number;
     clips_done: number;
+    /** Scenes / clips whose last generation failed. */
+    errors: number;
+    clip_errors: number;
     exported: boolean;
+    /** Media id of the finished clip, if any. */
+    export_media: string | null;
+    /** When the finished clip was downloaded (ms), via the zip or step 5. */
+    downloaded_at: number | null;
     thumbnail: string | null;
   };
+}
+
+/** One .zip with the finished clips of these boards (marks them downloaded). */
+export function exportsZipUrl(boardIds: number[]): string {
+  return `/api/exports/zip?ids=${boardIds.join(",")}`;
 }
 
 export function listBoardSummaries(): Promise<BoardSummary[]> {
@@ -321,16 +335,27 @@ export function createNode(input: {
  */
 export type DataPatch = Record<string, unknown>;
 
+// The agent merges a PATCH into the node's stored data (read → merge →
+// write), so two PATCHes of one node in flight at once lose one of them:
+// quick clicks in step 5 (order, cut, skip) saved stale values (2026-10-24,
+// worse since each call is ~200 ms on Neon). Calls for the same node wait
+// for the previous one; different nodes still go in parallel.
+const nodePatchQueue = new Map<number, Promise<unknown>>();
+
 export function patchNode(
   id: number,
   patch: Partial<
     Pick<Omit<NodeDTO, "data">, "x" | "y" | "w" | "h" | "status">
   > & { data?: DataPatch },
 ): Promise<NodeDTO> {
-  return api<NodeDTO>(`/api/nodes/${id}`, {
+  const prev = nodePatchQueue.get(id) ?? Promise.resolve();
+  const next = prev.catch(() => {}).then(() => api<NodeDTO>(`/api/nodes/${id}`, {
     method: "PATCH",
     body: JSON.stringify(patch),
-  });
+  }));
+  nodePatchQueue.set(id, next);
+  void next.finally(() => { if (nodePatchQueue.get(id) === next) nodePatchQueue.delete(id); }).catch(() => {});
+  return next;
 }
 
 export function deleteNode(id: number): Promise<{ ok: true; deleted_edges: number[] }> {
@@ -1353,6 +1378,10 @@ export interface Product {
    * must match a male / female product. */
   gender: ProductGender;
   link: string;
+  /** tracked affiliate short link (s.shopee.vn/…, vt.tiktok.com/…) → first comment of posts */
+  aff_link: string;
+  /** the shop this affiliate product belongs to */
+  shop: string;
   notes: string;
   /** Flow media ids, first = main photo. */
   media_ids: string[];
@@ -1498,18 +1527,35 @@ export async function createBoardFromTemplate(
   productId?: number | null,
   /** Clip `index` of `of` for the same product: the agent writes each a different angle. */
   variant?: { index: number; of: number },
+  channelId?: number | null,
 ): Promise<Board> {
   const res = await fetch("/api/boards/from-template", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      template_id: templateId, name, inputs, product_id: productId ?? null,
+      template_id: templateId, name, inputs, product_id: productId ?? null, channel_id: channelId ?? null,
       ...(variant ? { variant: variant.index, variant_of: variant.of } : {}),
     }),
   });
   if (!res.ok) throw new Error(await extractErrorMessage(res));
   const body = (await res.json()) as Board & { nodes: Record<string, string> };
   return { id: body.id, name: body.name, created_at: body.created_at, data: body.data };
+}
+
+/** Bước 2 "Viết lại kịch bản theo sản phẩm": rewrite an existing clip's
+ * scenes from its saved product. Returns the data patch applied per node. */
+export async function tailorBoardApi(
+  boardId: number,
+  scenes: { image_id: number; video_id: number | null }[],
+  instructions?: string,
+): Promise<{ updated: number; nodes: Record<string, Record<string, string>> }> {
+  const res = await fetch(`/api/boards/${boardId}/tailor`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ scenes, instructions: instructions?.trim() || null }),
+  });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
 }
 
 /** The user's rough prompt → a polished English one (same rules as auto-prompt). */
@@ -1752,6 +1798,7 @@ export async function buildFromReferenceVideo(input: {
   force?: boolean;
   /** Overrides the analysis' suggested character; omit to keep it. */
   character?: CharacterPick | null;
+  channelId?: number | null;
 }): Promise<Board & { nodes: Record<string, string> }> {
   const res = await fetch("/api/reference-video/build", {
     method: "POST",
@@ -1759,6 +1806,7 @@ export async function buildFromReferenceVideo(input: {
     body: JSON.stringify({
       media_id: input.mediaId, source_url: input.sourceUrl ?? null, product_id: input.productId, analysis: input.analysis,
       name: input.name ?? null, force: input.force ?? false, character: input.character ?? null,
+      channel_id: input.channelId ?? null,
     }),
   });
   if (!res.ok) throw new Error(await extractErrorMessage(res));

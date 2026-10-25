@@ -123,7 +123,9 @@ def _run_concat(
         cmd = [
             ffmpeg, "-y",
             "-f", "concat", "-safe", "0", "-i", str(list_file),
-            "-c", "copy",
+            # faststart: the index goes first so a <video> (preview, History)
+            # can start playing without downloading the whole file.
+            "-c", "copy", "-movflags", "+faststart",
             str(out_path),
         ]
     try:

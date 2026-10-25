@@ -1,0 +1,125 @@
+/* "Lồng tiếng video" page */
+.qt-dub { display: flex; flex-direction: column; gap: 14px; }
+.qt-dub__grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 400px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .qt-dub__grid { grid-template-columns: 1fr; }
+}
+.qt-dub__left, .qt-dub__right { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.qt-dub__or { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+.qt-dub__placeholder { min-height: 180px; display: grid; place-items: center; text-align: center; }
+.qt-dub__progress { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.qt-dub__bar { height: 8px; background: var(--panel-high); border-radius: 999px; overflow: hidden; }
+.qt-dub__bar span { display: block; height: 100%; background: var(--qt-accent); transition: width 0.4s; }
+.qt-dub__bar.is-error span { background: #ef4444; }
+.qt-dub__result { display: flex; flex-direction: column; gap: 10px; }
+.qt-dub__video { max-height: 70vh; max-width: 100%; align-self: center; background: #000; border-radius: 10px; }
+.qt-dub__lines { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.qt-dub__lines li { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px; align-items: start; }
+.qt-dub__time { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); padding-top: 6px; font-variant-numeric: tabular-nums; }
+.qt-dub__texts { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.qt-dub__src { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qt-dub__lines .qt-textarea { min-height: 0; padding: 6px 8px; font-size: 14px; }
+.qt-dub__recent { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.qt-dub__recent li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; }
+.qt-dub__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.qt-dub__dot--done { background: #22c55e; }
+.qt-dub__dot--error { background: #ef4444; }
+.qt-dub__dot--running, .qt-dub__dot--rendering, .qt-dub__dot--queued { background: var(--qt-accent); }
+.qt-dub__dot--review { background: #eab308; }
+.qt-dub .qt-clip-post { grid-column: auto; }
+
+/* Subtitle positioner (CapCut-style) */
+.qt-subpos { display: flex; flex-direction: column; gap: 10px; }
+.qt-subpos__stage {
+  position: relative;
+  width: min(100%, 360px);
+  align-self: center;
+  background: #000;
+  border-radius: 10px;
+  overflow: hidden;
+  user-select: none;
+  touch-action: none;
+}
+.qt-subpos__stage video { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.qt-subpos__box {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  max-width: 88%;
+  font-family: Arial, Helvetica, sans-serif;
+  font-weight: 700;
+  line-height: 1.25;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: grab;
+  outline: 2px dashed rgba(255, 255, 255, 0.55);
+  outline-offset: 2px;
+}
+.qt-subpos__box:focus-visible { outline: 2px solid var(--qt-accent); }
+.qt-subpos__box.is-dragging { cursor: grabbing; outline-color: var(--qt-accent); }
+.qt-subpos__guide { position: absolute; pointer-events: none; background: rgba(255, 106, 43, 0.45); }
+.qt-subpos__guide--v { top: 0; bottom: 0; width: 1px; }
+.qt-subpos__guide--h { left: 0; right: 0; height: 1px; }
+.qt-subpos__scrub { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.qt-subpos__scrub input[type="range"] { flex: 1 1 160px; }
+.qt-subpos__controls { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 14px; align-items: start; }
+.qt-subpos__pad { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.qt-subpos__pad div { display: flex; gap: 4px; }
+.qt-subpos__pad button {
+  width: 36px;
+  height: 36px;
+  font: inherit;
+  font-size: 16px;
+  color: var(--text);
+  background: var(--panel-high);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.qt-subpos__pad button:hover { border-color: var(--qt-accent); }
+.qt-subpos__fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
+.qt-subpos__fields input[type="range"] { width: 100%; }
+@media (max-width: 600px) {
+  .qt-subpos__controls { grid-template-columns: 1fr; }
+  .qt-subpos__fields { grid-template-columns: 1fr; }
+}
+.qt-dub__layout > summary { cursor: pointer; font-weight: 700; font-size: 16px; list-style: none; }
+.qt-dub__layout > summary::-webkit-details-marker { display: none; }
+.qt-dub__layout > summary::before { content: "▸ "; color: var(--muted); }
+.qt-dub__layout[open] > summary::before { content: "▾ "; }
+.qt-dub__layout[open] > summary { margin-bottom: 10px; }
+.qt-subpos__blur {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px dashed rgba(96, 165, 250, 0.9);
+  cursor: move;
+  box-sizing: border-box;
+}
+.qt-subpos__blur.is-dragging { border-style: solid; }
+.qt-subpos__blur:focus-visible { outline: 2px solid #60a5fa; }
+.qt-subpos__blurlabel { position: absolute; left: 4px; top: 2px; font-size: 10px; color: #bfdbfe; text-shadow: 0 0 2px #000; pointer-events: none; }
+.qt-subpos__handle {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 14px;
+  height: 14px;
+  background: #60a5fa;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  cursor: nwse-resize;
+}
+.qt-subpos__blurbox { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+
+/* Remotion engine: the <Player> draws the real subtitles/blur; the drag boxes become outlines */
+.qt-subpos__box--ghost { background: transparent !important; color: transparent !important; text-shadow: none !important;
+  border: 2px dashed rgba(255, 255, 255, 0.75); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5); min-width: 40%; min-height: 1.6em; }
+.qt-subpos__box--ghost.is-dragging { border-color: #ff6a2b; }
+.qt-subpos__blur--ghost { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; background: transparent; }
+.qt-subpos__stage > div[class*="__player"], .qt-subpos__stage > div:first-child { position: absolute; inset: 0; }

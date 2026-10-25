@@ -70,6 +70,16 @@ export function getHistorySummary(): Promise<HistorySummary> {
   return api<HistorySummary>("/api/history/summary");
 }
 
+export type HistoryClearScope = "all" | "errors" | "older";
+
+/** 🧹 Dọn lịch sử — finished rows only; `dryRun` just counts. */
+export function clearHistory(scope: HistoryClearScope, days = 30, dryRun = false): Promise<{ count: number; deleted: number }> {
+  return api<{ count: number; deleted: number }>("/api/history/clear", {
+    method: "POST",
+    body: JSON.stringify({ scope, days, dry_run: dryRun }),
+  });
+}
+
 export function getHistoryDetail(id: number): Promise<HistoryDetail> {
   return api<HistoryDetail>(`/api/history/${id}`);
 }

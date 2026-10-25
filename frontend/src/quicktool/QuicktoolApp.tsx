@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
+  exportsZipUrl,
   getTemplates,
   listBoardSummaries,
   mediaUrl,
@@ -25,8 +26,14 @@ import { StepScript } from "./steps/StepScript";
 import { StepSetup } from "./steps/StepSetup";
 import { CleanToolPage } from "./pages/CleanToolPage";
 import { HistoryPage } from "./pages/HistoryPage";
+import { TodayPage } from "./pages/TodayPage";
 import { ModelsPage } from "./pages/ModelsPage";
 import { PromptsPage } from "./pages/PromptsPage";
+import { PostsPage } from "./pages/PostsPage";
+import { ChannelsPage } from "./pages/ChannelsPage";
+import { DubPage } from "./pages/DubPage";
+import { ClipChannel } from "./steps/ClipChannel";
+import { ClipPost } from "./steps/ClipPost";
 import { useFlowCredits } from "../components/credits";
 import { AccountSwitchBanner } from "../components/AccountSwitchBanner";
 import { useToastOn } from "../store/toast";
@@ -100,9 +107,13 @@ export function QuicktoolApp() {
           <Route path="/clips/from-video" element={<Library templates={templates} />} />
           <Route path="/products" element={<ProductsPage />} />
           <Route path="/history" element={<HistoryPage />} />
+          <Route path="/today" element={<TodayPage />} />
           <Route path="/models" element={<ModelsPage />} />
           <Route path="/prompts" element={<PromptsPage />} />
           <Route path="/tools/clean" element={<CleanToolPage />} />
+          <Route path="/posts" element={<PostsPage />} />
+          <Route path="/channels" element={<ChannelsPage />} />
+          <Route path="/tools/dub" element={<DubPage />} />
           <Route path="/settings" element={<Library templates={templates} />} />
           <Route path="/clips/:id/:step" element={<Wizard templates={templates} />} />
           <Route path="/clips/:id" element={<Wizard templates={templates} />} />
@@ -222,6 +233,12 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
               <button type="button" className="qt-btn qt-btn--danger" onClick={stopQueue}>■ Dừng hàng đợi</button>
             ) : pickedList.length > 0 ? (
               <>
+                {pickedList.some((b) => b.summary.exported) && (
+                  <a className="qt-btn" href={exportsZipUrl(pickedList.filter((b) => b.summary.exported).map((b) => b.id))}
+                     title="Một file .zip chứa các clip đã ghép, tên file theo sản phẩm + ngày">
+                    ⬇ Tải {pickedList.filter((b) => b.summary.exported).length} clip đã ghép
+                  </a>
+                )}
                 <button type="button" className="qt-btn qt-btn--accent" onClick={() => startQueue(pickedList)}>
                   ⚡ Chạy {pickedList.length} clip đã chọn
                 </button>
@@ -362,12 +379,14 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
   // and its industry (step 2 offers the saved prompts of that industry first).
   const [productGender, setProductGender] = useState<ProductGender>("");
   const [productCategory, setProductCategory] = useState<string | null>(null);
+  // Name + price for step 5's text overlays ("+ Tên sản phẩm", "+ Giá").
+  const [productLabel, setProductLabel] = useState<{ name: string; price: string }>({ name: "", price: "" });
   useEffect(() => {
     const pid = qt.product_id;
-    if (!pid) { setProductGender(""); setProductCategory(null); return; }
+    if (!pid) { setProductGender(""); setProductCategory(null); setProductLabel({ name: "", price: "" }); return; }
     let alive = true;
     getProduct(pid)
-      .then((p) => { if (alive) { setProductGender(p.gender ?? ""); setProductCategory(p.category ?? null); } })
+      .then((p) => { if (alive) { setProductGender(p.gender ?? ""); setProductCategory(p.category ?? null); setProductLabel({ name: p.name ?? "", price: p.price ?? "" }); } })
       .catch(() => { if (alive) { setProductGender(""); setProductCategory(null); } });
     return () => { alive = false; };
   }, [qt.product_id]);
@@ -539,10 +558,12 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
               hands={qt.hands ?? null}
             />
           )}
-          {step === 2 && <StepScript roles={roles} category={clipCategory} />}
+          {step === 2 && <StepScript roles={roles} category={clipCategory} productId={qt.product_id ?? null} boardId={routeId} />}
           {step === 3 && <StepMedia roles={roles} kind="image" />}
           {step === 4 && (isDrama ? <StepSequence roles={roles} /> : <StepMedia roles={roles} kind="video" />)}
-          {step === 5 && <StepExport roles={roles} />}
+          {step === 5 && <StepExport roles={roles} productName={productLabel.name} price={productLabel.price} />}
+          {step === 1 && loaded && <ClipChannel boardId={routeId} channelId={qt.channel_id ?? null} />}
+          {step === 5 && loaded && <ClipPost boardId={routeId} productId={qt.product_id ?? null} channelId={qt.channel_id ?? null} />}
           <div className="qt-footer">
             <button type="button" className="qt-btn qt-btn--ghost" disabled={running} onClick={() => (step <= 1 ? navigate("/clips") : go(step - 1))}>
               {step <= 1 ? "← Thư viện" : "← Quay lại"}

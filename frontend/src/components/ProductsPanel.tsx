@@ -72,7 +72,7 @@ function fmtDate(iso: string | null): string {
 const MAX_PHOTOS = 6;
 
 type Draft = Required<Pick<ProductDraft,
-  "name" | "description" | "category" | "price" | "selling_points" | "link" | "notes" | "media_ids" | "gender"
+  "name" | "description" | "category" | "price" | "selling_points" | "link" | "aff_link" | "shop" | "notes" | "media_ids" | "gender"
 >> & { aspect_ratio: string | null };
 
 function emptyDraft(): Draft {
@@ -84,6 +84,8 @@ function emptyDraft(): Draft {
     selling_points: "",
     gender: "",
     link: "",
+    aff_link: "",
+    shop: "",
     notes: "",
     media_ids: [],
     aspect_ratio: null,
@@ -99,6 +101,8 @@ function draftOf(p: Product): Draft {
     selling_points: p.selling_points,
     gender: p.gender ?? "",
     link: p.link,
+    aff_link: p.aff_link ?? "",
+    shop: p.shop ?? "",
     notes: p.notes,
     media_ids: [...p.media_ids],
     aspect_ratio: p.aspect_ratio,
@@ -447,7 +451,7 @@ export function ProductsPanel({
   const needle = q.trim().toLowerCase();
   const filtered = (products ?? []).filter((p) =>
     (!catFilter || p.category === catFilter)
-    && (!needle || [p.name, p.description, p.link, p.price, categoryLabel(p.category)].some((t) => (t || "").toLowerCase().includes(needle))));
+    && (!needle || [p.name, p.description, p.link, p.aff_link, p.shop, p.price, categoryLabel(p.category)].some((t) => (t || "").toLowerCase().includes(needle))));
   const sorted = [...filtered].sort((a, b) => {
     const byDate = (x: Product, y: Product) => (y.created_at ?? "").localeCompare(x.created_at ?? "") || y.id - x.id;
     switch (sort) {
@@ -529,7 +533,7 @@ export function ProductsPanel({
 
             {(products?.length ?? 0) > 0 && (
               <div className="product-controls">
-                <input type="search" className="product-controls__search" placeholder="Tìm theo tên, mô tả, link, giá…"
+                <input type="search" className="product-controls__search" placeholder="Tìm theo tên, mô tả, link, shop, giá…"
                        value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} />
                 <select value={catFilter} onChange={(e) => { setCatFilter(e.target.value as ProductCategory | ""); setPage(1); }} aria-label="Lọc theo ngành hàng">
                   <option value="">Tất cả ngành</option>
@@ -601,6 +605,7 @@ export function ProductsPanel({
                       <span className="product-card__name">{p.name}</span>
                       <span className="product-card__meta">
                         {categoryLabel(p.category)}{p.gender ? ` · ${genderShort(p.gender)}` : ""}{p.price ? ` · ${p.price}` : ""}
+                        {p.shop ? ` · 🏪 ${p.shop}` : ""}{p.aff_link ? " · 🔗 aff" : ""}
                       </span>
                       <span className={`product-card__clips${clipCounts[p.id] ? "" : " product-card__clips--none"}`}>
                         {clipCounts[p.id] ? `🎬 ${clipCounts[p.id]} clip` : "Chưa có clip"}
@@ -749,14 +754,41 @@ export function ProductsPanel({
                   />
                 </label>
                 <label className="tpl-inputs__field">
-                  <span>Link shop</span>
+                  <span>Link trang sản phẩm</span>
                   <input
                     className="project-modal__input"
                     value={draft.link}
                     maxLength={500}
-                    placeholder="https://…"
+                    placeholder="https://shopee.vn/… (trang gốc)"
                     onChange={(e) => set("link", e.target.value)}
                   />
+                </label>
+              </div>
+
+              <div className="tpl-inputs__row">
+                <label className="tpl-inputs__field">
+                  <span>🔗 Link tiếp thị liên kết <small style={{ color: "var(--muted)", fontWeight: 400 }}>(s.shopee.vn/…, vt.tiktok.com/… — vào bình luận đầu của bài)</small></span>
+                  <input
+                    className="project-modal__input"
+                    value={draft.aff_link}
+                    maxLength={500}
+                    placeholder="https://s.shopee.vn/3qNyfcNZlD"
+                    onChange={(e) => set("aff_link", e.target.value)}
+                  />
+                </label>
+                <label className="tpl-inputs__field">
+                  <span>Shop đang hợp tác</span>
+                  <input
+                    className="project-modal__input"
+                    list="product-shops"
+                    value={draft.shop}
+                    maxLength={120}
+                    placeholder="Tên shop (gõ hoặc chọn)"
+                    onChange={(e) => set("shop", e.target.value)}
+                  />
+                  <datalist id="product-shops">
+                    {Array.from(new Set((products ?? []).map((p) => p.shop).filter(Boolean))).map((s) => <option key={s} value={s} />)}
+                  </datalist>
                 </label>
               </div>
 

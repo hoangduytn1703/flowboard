@@ -141,12 +141,15 @@ export function AccountPoolSection({ onProjectChange }: { onProjectChange?: () =
           {busy === "add" ? "Đang thêm…" : "+ Thêm"}
         </button>
       </div>
-      <div className="settings-panel__hint">
+      <details className="settings-panel__more">
+        <summary>Tự chuyển tài khoản hoạt động thế nào?</summary>
+        <div className="settings-panel__hint">
         Mỗi tài khoản Google Pro có 100 credit/tháng (~4 clip Omni 8 s). Khi tài khoản đang dùng không đủ credit cho
         clip kế tiếp, agent ghim project của tài khoản tiếp theo, mở tab Flow cho tài khoản đó và chờ bạn đổi tài khoản
         trên tab Flow (banner màu cam sẽ hiện). Việc đang chạy chờ tối đa 15 phút chứ không hỏng. Ảnh/video đã có được
         upload lại vào project mới khi cần.
-      </div>
+        </div>
+      </details>
     </div>
   );
 }

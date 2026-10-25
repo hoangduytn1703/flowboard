@@ -293,7 +293,7 @@ def board_spec(analysis: dict[str, Any], product: Optional[dict], character_pick
 
 def build_board(analysis: dict[str, Any], product: Optional[dict], *, name: Optional[str],
                 source_media_id: Optional[str], source_url: Optional[str] = None,
-                character_pick: CharacterPick = None) -> dict[str, Any]:
+                character_pick: CharacterPick = None, channel_id: Optional[int] = None) -> dict[str, Any]:
     """Create the board for the plan. Returns ``{id, name, nodes}``."""
     spec = board_spec(analysis, product, character_pick)
     _, hands = _character_for(analysis, product, character_pick)
@@ -306,6 +306,7 @@ def build_board(analysis: dict[str, Any], product: Optional[dict], *, name: Opti
         board = Board(name=board_name, data={"quicktool": {
             "template_id": "product_link" if from_link else "reference_video",
             "product_id": product.get("id") if product else None,
+            "channel_id": channel_id,
             "step": 1,
             "source_media_id": source_media_id,
             "source_url": source_url,

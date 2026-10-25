@@ -151,7 +151,8 @@ def save_draft(draft: dict[str, Any], image_url: str, source_url: str,
             selling_points=str(draft.get("selling_points") or ""),
             gender=str(draft.get("gender") or "") if draft.get("gender") in ("male", "female", "unisex") else "",
             link=link,
-            notes=f"Nhập từ {source} ({source_url[:200]})",
+            notes="\n\n".join(x for x in (str(draft.get("notes") or "").strip(),
+                                            f"Nhập từ {source} ({source_url[:200]})") if x)[:2000],
         )
         s.add(row)
         s.commit()

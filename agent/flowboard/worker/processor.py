@@ -306,6 +306,13 @@ VIDEO_POLL_INTERVAL_S = 10.0
 VIDEO_POLL_MAX_CYCLES = 30
 
 
+def _flow_dropped(err: Optional[str]) -> bool:
+    """Flow took the job and then dropped it (timeout with no media, or the
+    drop detector's FLOW_DROPPED_JOB) — as opposed to a request it refused."""
+    e = str(err or "")
+    return e == "timeout_waiting_video" or e.startswith("FLOW_DROPPED_JOB")
+
+
 def _poll_cycles(params: dict) -> int:
     """Poll budget for one video job. ``params.max_wait_s`` (60–300 s)
     shortens it for probes such as the "does Flow accept this model" check,
@@ -1040,9 +1047,25 @@ async def _handle_export_video(params: dict) -> tuple[dict, Optional[str]]:
     except (TypeError, ValueError):
         bgm_volume = BGM_DEFAULT_VOLUME
 
+    # "Cắt cảnh" (step 5): [start, end|null] per clip, aligned with the clips.
+    trims: list[Optional[tuple[float, Optional[float]]]] = []
+    raw_trims = params.get("trims")
+    for t in (raw_trims if isinstance(raw_trims, list) else [])[:len(asset_ids)]:
+        try:
+            if isinstance(t, (list, tuple)) and len(t) == 2 and (t[0] or t[1] is not None):
+                trims.append((float(t[0] or 0), None if t[1] is None else float(t[1])))
+                continue
+        except (TypeError, ValueError):
+            pass
+        trims.append(None)
+    # "Chữ trên video": burned on the joined clip.
+    from flowboard.services.video_overlays import parse_overlays
+
+    overlays = parse_overlays(params.get("overlays"))
+
     out_media, err, report = await asyncio.to_thread(
         export_video, asset_ids, smooth60=smooth60, narration=narration, items=items,
-        bgm_asset_id=bgm_asset_id, bgm_volume=bgm_volume,
+        bgm_asset_id=bgm_asset_id, bgm_volume=bgm_volume, trims=trims, overlays=overlays,
     )
     if bgm_error and isinstance(report, dict):
         # The clip is still exported; the missing track is only reported.
@@ -1494,9 +1517,22 @@ class WorkerController:
                 # Long-running handlers re-check this rid between polls
                 # to honor user-initiated cancels.
                 params["__request_id"] = rid
+                req_type = req.type
 
             # Release the session during the possibly-long RPC.
             result, err = await handler(params)
+            if err and req_type in PARALLEL_TYPES and _flow_dropped(err) and not params.get("__retried"):
+                # Flow accepts a clip and sometimes drops it without a word
+                # (credits refunded). One more try before the card says so;
+                # a face Flow always refuses fails again and is reported.
+                logger.info("worker: rid=%s dropped by Flow (%s); retrying once", rid, str(err)[:60])
+                try:
+                    account_pool.note_result(params, err)
+                except Exception:  # noqa: BLE001
+                    logger.exception("account_pool.note_result failed")
+                if not _is_request_canceled(rid):
+                    params["__retried"] = 1
+                    result, err = await handler(params)
             try:
                 account_pool.note_result(params, err)
             except Exception:  # noqa: BLE001

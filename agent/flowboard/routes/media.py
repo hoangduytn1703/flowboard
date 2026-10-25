@@ -32,9 +32,15 @@ async def get_media_bytes(media_id: str):
             media_type=media_service._mime_from_ext(cached.suffix),
         )
 
-    # Cache miss — try one fetch through the stored URL.
+    # Cache miss — try one fetch through the stored URL, unless that already
+    # failed a moment ago: a page listing media that never reached this
+    # machine (probe clips, other projects) asked again on every visit and
+    # each miss cost ~0.7 s (History took 6 s, 2026-10-24).
+    if media_service.recently_missed(media_id):
+        return JSONResponse(status_code=404, content={"available": False, "reason": "recent_miss"})
     result = await media_service.fetch_and_cache(media_id)
     if result is None:
+        media_service.remember_miss(media_id)
         status = media_service.status(media_id)
         return JSONResponse(status_code=404, content=status)
     _bytes, mime, path = result

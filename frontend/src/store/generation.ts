@@ -686,6 +686,10 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
       });
     // Dialogue voices: `[A] … [B] …` tag → voice id.
     const speakers = node?.data.speakers && typeof node.data.speakers === "object" ? node.data.speakers : {};
+    // Step 5 cuts: [start, end|null] seconds per clip, aligned like `narrations`.
+    const cuts = node?.data.clipTrims ?? {};
+    const trims = items ? [] : sources.filter((s) => s.mediaId).map((s) => cuts[s.rfId] ?? null);
+    const overlays = Array.isArray(node?.data.overlays) ? node!.data.overlays.filter((o) => o.text.trim()) : [];
     const nodeDbId = parseInt(rfId, 10);
     useBoardStore.getState().updateNodeData(rfId, { status: "queued", error: undefined });
     let reqDto;
@@ -695,6 +699,8 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
         node_id: isNaN(nodeDbId) ? undefined : nodeDbId,
         params: {
           source_media_ids: mediaIds,
+          trims: trims.some((t) => t) ? trims : undefined,
+          overlays: overlays.length ? overlays : undefined,
           // Explicit order with stills and clips mixed (drama clips).
           items,
           smooth60,

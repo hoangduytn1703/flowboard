@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { VOICE_GROUPS, patchNode, refinePromptApi } from "../../api/client";
+import { VOICE_GROUPS, patchNode, refinePromptApi, tailorBoardApi } from "../../api/client";
+import { toast } from "../../store/toast";
 import { PromptLibraryButtons } from "../PromptLibraryButtons";
 import { sceneTagOf } from "../promptTags";
 import { useBoardStore, type FlowNode } from "../../store/board";
@@ -52,9 +53,17 @@ function VoicePick({ node }: { node: FlowNode }) {
 /** Step 2 — the script: one row per scene with its image prompt, motion
  * prompt and Vietnamese voice line, all editable in place. `category` (the
  * product's industry) picks which saved prompts "📚 Chọn prompt" offers first. */
-export function StepScript({ roles, category }: { roles: ClipRoles; category: string | null }) {
+export function StepScript({ roles, category, productId = null, boardId = null }: {
+  roles: ClipRoles; category: string | null; productId?: number | null; boardId?: number | null;
+}) {
   const writeNarrations = useQuicktoolStore((s) => s.writeNarrations);
   const [writing, setWriting] = useState(false);
+  // "Viết lại kịch bản theo sản phẩm": the box is open / the wish typed / busy.
+  const [tailorOpen, setTailorOpen] = useState(false);
+  const [tailorWish, setTailorWish] = useState("");
+  const [tailoring, setTailoring] = useState(false);
+  // Bumped after a rewrite so the uncontrolled fields remount with the new text.
+  const [rev, setRev] = useState(0);
   const [refining, setRefining] = useState<string | null>(null);
   // Live word count per voice line (keyed by node id) while the user types;
   // the textarea itself is uncontrolled.
@@ -73,6 +82,30 @@ export function StepScript({ roles, category }: { roles: ClipRoles; category: st
     await writeNarrations();
     setVoiceWords({});
     setWriting(false);
+  }
+
+  async function tailorAll() {
+    if (boardId === null || tailoring) return;
+    const made = roles.scenes.filter((s) => s.image.data.mediaId || s.video?.data.mediaId).length;
+    if (!window.confirm(`AI viết lại mô tả ảnh, chuyển động và lời thoại của ${roles.scenes.length} cảnh theo mô tả + điểm bán của sản phẩm.`
+      + (made ? ` ${made} cảnh đã có ảnh/video sẽ cần "Tạo lại" để theo kịch bản mới.` : "")
+      + " Mỗi cảnh có \"↺ Về prompt trước đó\" ở nút Tạo lại… nếu không ưng. Tiếp tục?")) return;
+    setTailoring(true);
+    try {
+      const res = await tailorBoardApi(boardId, roles.scenes.map((s) => ({
+        image_id: parseInt(s.image.id, 10), video_id: s.video ? parseInt(s.video.id, 10) : null,
+      })), tailorWish);
+      const board = useBoardStore.getState();
+      for (const [id, patch] of Object.entries(res.nodes)) board.updateNodeData(id, patch);
+      setVoiceWords({});
+      setRev((r) => r + 1);
+      setTailorOpen(false);
+      toast.success(`Đã viết lại kịch bản ${roles.scenes.length} cảnh theo sản phẩm.` + (made ? " Ảnh/video cũ vẫn giữ — bấm \"Tạo lại\" ở bước 3/4 để làm theo kịch bản mới." : ""));
+    } catch (err) {
+      toast.error(`Viết lại kịch bản thất bại: ${err instanceof Error ? err.message : "lỗi"}`);
+    } finally {
+      setTailoring(false);
+    }
   }
 
   async function refine(n: FlowNode, camera?: string) {
@@ -111,6 +144,14 @@ export function StepScript({ roles, category }: { roles: ClipRoles; category: st
             <div className="qt-card__eyebrow">Bước 2</div>
             <h3 className="qt-card__title">Từng cảnh — mô tả ảnh, chuyển động, lời thoại</h3>
           </div>
+          <div className="qt-row">
+          {productId !== null && (
+            <button type="button" className={`qt-btn${tailorOpen ? " qt-btn--on" : ""}`} disabled={tailoring || roles.scenes.length === 0}
+                    onClick={() => setTailorOpen((o) => !o)}
+                    title="AI viết lại mô tả ảnh, chuyển động và lời thoại của mọi cảnh theo mô tả + điểm bán của sản phẩm">
+              {tailoring ? "AI đang viết…" : "✨ Viết lại kịch bản theo sản phẩm"}
+            </button>
+          )}
           <button
             type="button"
             className="qt-btn"
@@ -120,7 +161,23 @@ export function StepScript({ roles, category }: { roles: ClipRoles; category: st
           >
             {writing ? "Đang viết…" : "✨ AI viết lời thoại cho cả clip"}
           </button>
+          </div>
         </div>
+        {tailorOpen && productId !== null && (
+          <div className="qt-regen qt-tailor">
+            <label className="qt-regen__label" htmlFor="tailor-wish">Muốn nhấn mạnh gì? (không bắt buộc)</label>
+            <input id="tailor-wish" className="qt-textarea" value={tailorWish} maxLength={300} autoFocus
+                   placeholder="VD: nhấn mạnh giòn rụm và giá, giọng trẻ trung, cảnh cuối có túi zip"
+                   onChange={(e) => setTailorWish(e.target.value)}
+                   onKeyDown={(e) => { if (e.key === "Enter") void tailorAll(); if (e.key === "Escape") setTailorOpen(false); }} />
+            <div className="qt-regen__actions">
+              <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={tailoring} onClick={() => void tailorAll()}>
+                {tailoring ? "AI đang viết… (~15 giây)" : "✨ Viết lại cả clip"}
+              </button>
+              <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" disabled={tailoring} onClick={() => setTailorOpen(false)}>Huỷ</button>
+            </div>
+          </div>
+        )}
         <p className="qt-card__hint">
           Mô tả ảnh và chuyển động viết bằng tiếng Anh (Flow hiểu tiếng Anh tốt hơn) — gõ tiếng Việt rồi bấm
           "Viết lại" cũng được. Lời thoại tiếng Việt, ≤ 24 từ để vừa 8 giây.
@@ -129,7 +186,7 @@ export function StepScript({ roles, category }: { roles: ClipRoles; category: st
           {roles.scenes.map((s) => {
             const ctx = { category, scene: sceneTagOf(s.image.data.title as string | undefined, s.index, roles.scenes.length) };
             return (
-            <div key={s.image.id} className="qt-scene-row">
+            <div key={`${s.image.id}:${rev}`} className="qt-scene-row">
               <div className="qt-scene-row__num">{s.index}</div>
               <div className="qt-scene-row__fields">
                 <div className="qt-scene-row__title">{s.image.data.title}</div>

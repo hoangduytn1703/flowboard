@@ -9,8 +9,14 @@ const TIMEOUT_MS = 4 * 60_000;
  * One image from a prompt, outside any clip (e.g. a new model made on the
  * /models page): a `gen_image` request with no node, polled until done.
  * Same parameters a board node would send. Returns the media id.
+ * ``refMediaIds`` (e.g. the product photo) are sent as references so the
+ * image shows the real product.
  */
-export async function generateStandaloneImage(prompt: string, aspectRatio = "IMAGE_ASPECT_RATIO_PORTRAIT"): Promise<string> {
+export async function generateStandaloneImage(
+  prompt: string,
+  aspectRatio = "IMAGE_ASPECT_RATIO_PORTRAIT",
+  refMediaIds: string[] = [],
+): Promise<string> {
   const projectId = await useGenerationStore.getState().ensureProjectId();
   if (!projectId) throw new Error("Chưa có Flow project — ghim một project trong Cài đặt.");
   const settings = useSettingsStore.getState();
@@ -25,6 +31,7 @@ export async function generateStandaloneImage(prompt: string, aspectRatio = "IMA
       variant_count: 1,
       image_model: settings.imageModel,
       image_provider: settings.imageProvider,
+      ...(refMediaIds.length ? { ref_media_ids: refMediaIds } : {}),
       ...(tier ? { paygate_tier: tier } : {}),
     },
   });

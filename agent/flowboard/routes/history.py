@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Optional
 
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlmodel import select
 
 from flowboard.db import get_session
@@ -372,3 +373,43 @@ def get_history_detail(request_id: int) -> dict:
         node = s.get(Node, req.node_id) if req.node_id is not None else None
         board = s.get(Board, node.board_id) if node is not None else None
         return _project(req, node, board, full=True)
+
+
+# ── POST /api/history/clear ────────────────────────────────────────────
+# "🧹 Dọn lịch sử": drop finished rows. Queued / running jobs are never
+# touched (the worker owns them). Media files and Flow's real credit balance
+# are untouched too — only the history rows and the credit estimates they
+# carry go. ``dry_run`` answers "how many would go" for the confirm button.
+
+FINISHED_STATUSES: tuple[str, ...] = ("done", "failed", "timeout", "error", "canceled")
+CLEAR_SCOPES = {"all", "errors", "older"}
+
+
+class ClearBody(BaseModel):
+    scope: str = "all"  # all finished | errors only | older than ``days``
+    days: int = Field(default=30, ge=1, le=3650)
+    dry_run: bool = False
+
+
+def _clear_stmt(body: ClearBody):
+    statuses = ("failed", "timeout", "error", "canceled") if body.scope == "errors" else FINISHED_STATUSES
+    stmt = select(Request).where(Request.status.in_(statuses))
+    if body.scope == "older":
+        # Aware: the column type (UTCDateTime) refuses naive datetimes as bind values.
+        cutoff = datetime.now(timezone.utc) - timedelta(days=body.days)
+        stmt = stmt.where(Request.created_at < cutoff)
+    return stmt
+
+
+@router.post("/clear")
+def clear_history(body: ClearBody) -> dict:
+    if body.scope not in CLEAR_SCOPES:
+        raise HTTPException(400, f"scope phải là một trong {sorted(CLEAR_SCOPES)}")
+    with get_session() as s:
+        rows = s.exec(_clear_stmt(body)).all()
+        count = len(rows)
+        if not body.dry_run and rows:
+            for r in rows:
+                s.delete(r)
+            s.commit()
+    return {"count": count, "deleted": 0 if body.dry_run else count, "dry_run": body.dry_run}

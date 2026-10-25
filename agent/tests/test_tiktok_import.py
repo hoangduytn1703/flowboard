@@ -88,3 +88,23 @@ def test_scrape_timeout_message_tells_how_to_recover(monkeypatch):
 ])
 def test_guess_category_knows_grocery_and_home(title, category):
     assert tiktok_import.guess_category(title) == category
+
+
+def test_page_details_become_the_product_notes(client):
+    """The page's extra facts (process, flavours…) are kept for the script
+    writer, above the import source line."""
+    from flowboard.db import get_session
+    from flowboard.db.models import Product
+    from flowboard.services import tiktok_import
+    from flowboard.services.product_link import page_details_note
+
+    note = page_details_note("Ép dưới đáy nồi gang\n• Phơi 36 tiếng\n- Hai vị: cay / không cay\n")
+    assert note.splitlines() == ["Chi tiết từ trang sản phẩm:", "- Ép dưới đáy nồi gang",
+                                 "- Phơi 36 tiếng", "- Hai vị: cay / không cay"]
+    assert page_details_note("") == ""
+    created, _ = tiktok_import.save_draft(
+        {"name": "Cơm cháy", "category": "food", "link": "https://shop.tiktok.com/vn/pdp/1", "notes": note},
+        "", "https://shop.tiktok.com/vn/pdp/1", "TikTok")
+    with get_session() as s:
+        saved = s.get(Product, created[0]["id"])
+    assert saved.notes.startswith("Chi tiết từ trang sản phẩm:") and saved.notes.rstrip().endswith("Nhập từ TikTok (https://shop.tiktok.com/vn/pdp/1)")

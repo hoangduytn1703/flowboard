@@ -1081,3 +1081,37 @@ def test_video_poll_budget_can_be_shortened_for_probes():
     assert proc._poll_cycles({"max_wait_s": 5}) == 6      # clamped to 60 s
     assert proc._poll_cycles({"max_wait_s": 9999}) == 30  # clamped to 300 s
     assert proc._poll_cycles({"max_wait_s": "x"}) == full
+
+
+@pytest.mark.asyncio
+async def test_a_video_flow_dropped_is_retried_once():
+    from flowboard.db import get_session
+    from flowboard.db.models import Request
+    from flowboard.worker import processor as proc
+
+    calls = []
+
+    async def flaky(params):
+        calls.append(params.get("__retried"))
+        if len(calls) == 1:
+            return {}, "timeout_waiting_video"
+        return {"media_ids": ["m"], "media_entries": [{"media_id": "m"}]}, None
+
+    async def always_drop(params):
+        calls.append(params.get("__retried"))
+        return {}, "FLOW_DROPPED_JOB: Flow accepted the video, then cancelled it"
+
+    async def refused(params):
+        calls.append(params.get("__retried"))
+        return {}, "RpcError: eb1hJf failed: [3]"
+
+    for handler, want_calls, want_status in ((flaky, 2, "done"), (always_drop, 2, "failed"), (refused, 1, "failed")):
+        calls.clear()
+        w = proc.WorkerController(handlers={"gen_video_omni": handler})
+        with get_session() as s:
+            r = Request(type="gen_video_omni", params={}, status="queued")
+            s.add(r); s.commit(); s.refresh(r); rid = r.id
+        await w._process_one(rid)
+        with get_session() as s:
+            assert s.get(Request, rid).status == want_status
+        assert len(calls) == want_calls and calls[0] is None

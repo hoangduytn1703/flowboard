@@ -27,6 +27,8 @@ def product_dict(row: Product) -> dict[str, Any]:
         "selling_points": row.selling_points,
         "gender": row.gender or "",
         "link": row.link,
+        "aff_link": row.aff_link or "",
+        "shop": row.shop or "",
         "notes": row.notes,
         "media_ids": list(row.media_ids or []),
         "aspect_ratio": row.aspect_ratio,

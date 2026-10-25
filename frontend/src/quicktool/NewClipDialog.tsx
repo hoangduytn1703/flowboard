@@ -27,6 +27,7 @@ import { SuggestField } from "./SuggestField";
 import { BACKDROPS, backdropGroups } from "./suggestions";
 import { useGenerationStore } from "../store/generation";
 import { toast, useToastOn } from "../store/toast";
+import { ChannelPicker } from "./channels/ChannelPicker";
 import "./newclip.css";
 
 /** The "kind of clip" card that is not a template: an uploaded ad video. */
@@ -148,6 +149,11 @@ export function NewClipDialog({
   const createNewBoardFromTemplate = useBoardStore((s) => s.createNewBoardFromTemplate);
   const [products, setProducts] = useState<Product[]>([]);
   const [productId, setProductId] = useState<number | null>(initialProductId);
+  // The channel (page) the clip is for — `?channel=` from "Tạo clip cho kênh".
+  const [channelId, setChannelId] = useState<number | null>(() => {
+    const q = Number(new URLSearchParams(window.location.search).get("channel"));
+    return q > 0 ? q : null;
+  });
   const [kind, setKind] = useState<string>(initialTemplateId ?? templates[0]?.id ?? "");
   const [inputs, setInputs] = useState<Record<string, string>>({});
   const [name, setName] = useState("");
@@ -355,6 +361,7 @@ export function NewClipDialog({
     try {
       const board = await buildFromReferenceVideo({
         mediaId: null, sourceUrl: analyzedUrl, productId, analysis: linkAnalysis, name: name.trim() || undefined, force, character: characterPick,
+        channelId,
       });
       useBoardStore.setState((s) => ({
         boards: [{ id: board.id, name: board.name, created_at: board.created_at, data: board.data }, ...s.boards],
@@ -428,7 +435,7 @@ export function NewClipDialog({
       if (!sent.product_name?.trim()) delete sent.product_name;
     }
     if (clipCount <= 1) {
-      const id = await createNewBoardFromTemplate(kind, baseName, sent, productId);
+      const id = await createNewBoardFromTemplate(kind, baseName, sent, productId, channelId);
       setBusy(false);
       if (id === null) {
         setError(useBoardStore.getState().error ?? "Không tạo được clip");
@@ -444,7 +451,7 @@ export function NewClipDialog({
       const setting = n === 0 ? sent.setting : settingFor(n);
       return createBoardFromTemplate(
         kind, `${baseName} #${n + 1}`, { ...sent, ...(setting ? { setting } : {}) }, productId,
-        productId ? { index: n, of: clipCount } : undefined,
+        productId ? { index: n, of: clipCount } : undefined, channelId,
       );
     }));
     for (const r of results) if (r.status === "fulfilled") ids.push(r.value.id);
@@ -515,6 +522,7 @@ export function NewClipDialog({
     try {
       const board = await buildFromReferenceVideo({
         mediaId: upload.media_id, productId, analysis, name: name.trim() || undefined, force, character: characterPick,
+        channelId,
       });
       useBoardStore.setState((s) => ({
         boards: [{ id: board.id, name: board.name, created_at: board.created_at, data: board.data }, ...s.boards],
@@ -688,6 +696,11 @@ export function NewClipDialog({
               </button>
             </div>
           )}
+        </div>
+
+        <div className="qt-new__section qt-new__channel">
+          <ChannelPicker value={channelId} onChange={setChannelId} disabled={locked} label="Kênh đăng clip"
+                         hint={<small className="qt-card__hint">Clip gắn kênh thì bài đăng ở Bước 5 viết theo định hướng kênh; đổi được ở Bước 1.</small>} />
         </div>
 
         <div className="qt-new__section">

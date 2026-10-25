@@ -177,7 +177,7 @@ def test_worker_passes_bgm_to_the_export(tmp_path):
     bgm_id, bgm_media = _register(music, "audio", "audio/mpeg")
     seen = {}
 
-    def fake_export(asset_ids, *, smooth60, narration=None, items=None, bgm_asset_id=None, bgm_volume=None):
+    def fake_export(asset_ids, *, smooth60, narration=None, items=None, bgm_asset_id=None, bgm_volume=None, **_):
         seen["bgm"] = (bgm_asset_id, bgm_volume)
         return "joined-media-id", None, {"voiced": False, "bgm": bgm_asset_id is not None}
 

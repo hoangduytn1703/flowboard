@@ -120,6 +120,8 @@ class ExportReport:
     smooth60_error: Optional[str] = None
     bgm: bool = False
     bgm_error: Optional[str] = None
+    overlays: int = 0
+    overlays_error: Optional[str] = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -128,6 +130,8 @@ class ExportReport:
             "smooth60_error": self.smooth60_error,
             "bgm": self.bgm,
             "bgm_error": self.bgm_error,
+            "overlays": self.overlays,
+            "overlays_error": self.overlays_error,
             "clips": [c.__dict__ for c in self.clips],
         }
 
@@ -308,9 +312,23 @@ def _image_clip(ffmpeg: str, src: Path, text: str, opts: NarrationOptions,
     return report
 
 
+#: A trimmed clip keeps at least this much.
+MIN_CLIP_S = 0.5
+
+
+def clip_window(full: float, trim: Optional[tuple[float, Optional[float]]]) -> tuple[float, float]:
+    """``(seek, duration)`` for a clip of ``full`` seconds cut to ``trim``
+    (start, end or None = to the end); out-of-range values are clamped."""
+    if not trim:
+        return 0.0, full
+    start = min(max(0.0, float(trim[0] or 0)), max(0.0, full - MIN_CLIP_S))
+    end = full if trim[1] is None else min(max(float(trim[1]), start + MIN_CLIP_S), full)
+    return start, max(MIN_CLIP_S, end - start)
+
+
 def _voice_clip(ffmpeg: str, src: Path, text: str, opts: NarrationOptions,
                 dst: Path, work: Path, caption: str = "", original_audio: Optional[str] = None,
-                voice: Optional[str] = None) -> ClipReport:
+                voice: Optional[str] = None, trim: Optional[tuple[float, Optional[float]]] = None) -> ClipReport:
     """``src`` re-encoded into ``dst`` with the voice line, ducked original
     sound and burned subtitles. The clip is held on its last frame when the
     speech outlasts it. ``voice`` overrides the export's voice for this
@@ -318,24 +336,26 @@ def _voice_clip(ffmpeg: str, src: Path, text: str, opts: NarrationOptions,
     info = probe_clip(src)
     if info is None:
         return ClipReport(0.0, error="unreadable clip")
-    report = ClipReport(info.duration)
+    # ``trim`` = (start, end) in seconds of this clip ("Cắt cảnh" in step 5).
+    seek, duration = clip_window(info.duration, trim)
+    report = ClipReport(duration)
     text = text.strip()
     audio_mode = original_audio or opts.original_audio
 
     narration: Optional[tts.Narration] = None
     if text:
         try:
-            narration, report.rate = _synth_to_fit(text, opts, info.duration, voice)
+            narration, report.rate = _synth_to_fit(text, opts, duration, voice)
         except tts.TTSError as exc:
             report.error = str(exc)
             logger.warning("video_export: narration skipped for %s: %s", src.name, exc)
-    length = info.duration
+    length = duration
     if narration is not None:
         report.narration_s = narration.duration
-        length = max(info.duration, narration.duration + _TAIL_S)
-        report.extended_s = round(length - info.duration, 2)
+        length = max(duration, narration.duration + _TAIL_S)
+        report.extended_s = round(length - duration, 2)
 
-    inputs = ["-i", str(src)]
+    inputs = ["-ss", f"{seek:.3f}", "-t", f"{duration:.3f}", "-i", str(src)] if trim else ["-i", str(src)]
     vf = ["[0:v]"]
     if report.extended_s > 0:
         vf.append(f"tpad=stop_mode=clone:stop_duration={report.extended_s:.3f}")
@@ -496,6 +516,8 @@ def export_video(
     items: Optional[list[ExportItem]] = None,
     bgm_asset_id: Optional[int] = None,
     bgm_volume: float = BGM_DEFAULT_VOLUME,
+    trims: Optional[list[Optional[tuple[float, Optional[float]]]]] = None,
+    overlays: Optional[list[Any]] = None,
 ) -> tuple[Optional[str], Optional[str], dict[str, Any]]:
     """Join ``asset_ids`` in order, with voice-over when ``narration`` has
     any line, then background music (``bgm_asset_id``: an audio Asset
@@ -505,7 +527,11 @@ def export_video(
 
     ``items`` (drama clips) is the explicit order with stills and clips
     mixed; it replaces ``asset_ids`` + ``narration.lines`` and always goes
-    through the per-item renderer, since stills have to become clips."""
+    through the per-item renderer, since stills have to become clips.
+
+    ``trims`` (aligned with the clips) cuts each clip to (start, end) and
+    forces the per-clip renderer; ``overlays`` (video_overlays.Overlay) are
+    burned onto the joined clip before the music."""
     report = ExportReport(smooth60=smooth60)
     out_dir = config.STORAGE_DIR / "media"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -515,7 +541,10 @@ def export_video(
         narration = narration or NarrationOptions(lines=[])
         narration.lines = [it.narration for it in items]
 
-    if items or (narration is not None and narration.any_line()):
+    trims = list(trims or [])
+    if any(trims) and narration is None:
+        narration = NarrationOptions(lines=[])
+    if items or any(trims) or (narration is not None and narration.any_line()):
         ffmpeg = shutil.which("ffmpeg")
         if ffmpeg is None:
             return None, "ffmpeg_not_found", report.as_dict()
@@ -537,7 +566,7 @@ def export_video(
                 clip = _voice_clip(ffmpeg, src, line, narration, dst, work,
                                    caption=item.caption if item else "",
                                    original_audio=item.original_audio if item else None,
-                                   voice=line_voice)
+                                   voice=line_voice, trim=trims[i] if i < len(trims) else None)
             report.clips.append(clip)
             # ffmpeg leaves a 0-byte file behind when an encode fails, so
             # "exists" is not "worked".
@@ -557,6 +586,19 @@ def export_video(
         with get_session() as s:
             joined = s.get(Asset, joined_id)
             joined_media, joined_path = joined.uuid_media_id, Path(joined.local_path)
+
+    if overlays:
+        from flowboard.services.video_overlays import burn_overlays
+
+        text_path = out_dir / f"text_{uuid.uuid4().hex}.mp4"
+        err = burn_overlays(joined_path, text_path, overlays)
+        if err:
+            logger.warning("video_export: text overlays failed (%s); keeping the join", err[:160])
+            report.overlays_error = err[:200]
+        else:
+            report.overlays = len(overlays)
+            joined_path = text_path
+            joined_media = _register(text_path)
 
     if bgm_asset_id is not None:
         music, err = _asset_paths([bgm_asset_id])

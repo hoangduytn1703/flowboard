@@ -72,15 +72,16 @@ class BoardUpdate(BaseModel):
     data: Optional[dict] = None
 
 
-def _board_summary(s, board: Board) -> dict:
-    """The board row plus what the Quicktool home needs to draw its card:
-    scene / clip progress and a thumbnail, without loading every node."""
-    nodes = s.exec(select(Node.type, Node.data).where(Node.board_id == board.id)).all()
-    scenes = [d for t, d in nodes if t == "image"]
-    clips = [d for t, d in nodes if t == "video"]
-    exports = [d for t, d in nodes if t in ("export", "merge") and (d or {}).get("mediaId")]
-    thumb = next((d.get("mediaId") for t, d in nodes
+def _board_summary(board: Board, nodes: list[tuple]) -> dict:
+    """The board row plus what the Quicktool home and "Hôm nay" need to draw
+    its card: scene / clip progress, a thumbnail, failed nodes and the
+    finished clip. ``nodes`` are this board's ``(type, status, data)``."""
+    scenes = [(st, d) for t, st, d in nodes if t == "image"]
+    clips = [(st, d) for t, st, d in nodes if t == "video"]
+    exports = [d for t, _st, d in nodes if t in ("export", "merge") and (d or {}).get("mediaId")]
+    thumb = next((d.get("mediaId") for t, _st, d in nodes
                   if t in ("image", "visual_asset", "Storyboard") and (d or {}).get("mediaId")), None)
+    qt = (board.data or {}).get("quicktool") or {}
     return {
         "id": board.id,
         "name": board.name,
@@ -88,10 +89,15 @@ def _board_summary(s, board: Board) -> dict:
         "created_at": board.created_at,
         "summary": {
             "scenes": len(scenes),
-            "scenes_done": sum(1 for d in scenes if (d or {}).get("mediaId")),
+            "scenes_done": sum(1 for _st, d in scenes if (d or {}).get("mediaId")),
             "clips": len(clips),
-            "clips_done": sum(1 for d in clips if (d or {}).get("mediaId")),
+            "clips_done": sum(1 for _st, d in clips if (d or {}).get("mediaId")),
+            # Scenes / clips whose last generation failed (Flow dropped it…).
+            "errors": sum(1 for st, _d in scenes + clips if st == "error"),
+            "clip_errors": sum(1 for st, _d in clips if st == "error"),
             "exported": bool(exports),
+            "export_media": exports[-1].get("mediaId") if exports else None,
+            "downloaded_at": qt.get("downloaded_at"),
             "thumbnail": thumb,
         },
     }
@@ -102,7 +108,12 @@ def list_boards(summary: bool = Query(False)):
     with get_session() as s:
         boards = s.exec(select(Board)).all()
         if summary:
-            return [_board_summary(s, b) for b in boards]
+            # One query for every board's nodes: per-board queries cost a
+            # round trip each (~44 ms on Neon) and the library lists them all.
+            by_board: dict[int, list[tuple]] = {}
+            for bid, t, st, d in s.exec(select(Node.board_id, Node.type, Node.status, Node.data)).all():
+                by_board.setdefault(bid, []).append((t, st, d))
+            return [_board_summary(b, by_board.get(b.id, [])) for b in boards]
         return boards
 
 

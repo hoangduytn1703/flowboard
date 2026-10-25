@@ -165,6 +165,10 @@ export function StepMedia({ roles, kind }: { roles: ClipRoles; kind: "image" | "
   }
 
   function startAll() {
+    if (kind === "video" && roles.model && modelCheck?.status === "blocked") {
+      toast.warning("Flow chặn video có gương mặt người mẫu của clip này — đổi người mẫu ở Bước 1 trước khi tạo video.");
+      return;
+    }
     if (kind === "video") {
       const cost = missing * creditsPerClip(videoModel, videoQuality);
       const balance = flowCredits === null ? "" : ` Tài khoản còn ${flowCredits.toLocaleString("vi-VN")} credit${cost > flowCredits ? " — KHÔNG ĐỦ" : ""}.`;

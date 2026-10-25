@@ -17,6 +17,36 @@ from sqlmodel import Session, SQLModel, create_engine
 from flowboard.config import DB_PATH
 
 
+#: A pooled Postgres connection idle longer than this is pinged before use.
+IDLE_PING_S = 60.0
+
+
+def _ping_when_idle(eng: Engine) -> None:
+    """Pessimistic disconnect handling, but only for connections that sat
+    idle: raising DisconnectionError on checkout makes the pool throw the
+    dead connection away and hand out a fresh one (up to 3 tries)."""
+    import time
+
+    from sqlalchemy import exc
+
+    @event.listens_for(eng, "checkin")
+    def _mark(dbapi_conn, rec) -> None:  # noqa: ARG001
+        rec.info["fb_last_used"] = time.monotonic()
+
+    @event.listens_for(eng, "checkout")
+    def _check(dbapi_conn, rec, proxy) -> None:  # noqa: ARG001
+        last = rec.info.get("fb_last_used")
+        if last is None or time.monotonic() - last < IDLE_PING_S:
+            return  # brand new (just connected) or used a moment ago
+        try:
+            cur = dbapi_conn.cursor()
+            cur.execute("SELECT 1")
+            cur.close()
+            dbapi_conn.rollback()  # don't hand out a connection mid-transaction
+        except Exception as err:  # noqa: BLE001 - any failure means "dead"
+            raise exc.DisconnectionError() from err
+
+
 def make_engine(url_or_path: Union[str, Path], schema: Optional[str] = None) -> Engine:
     """An engine for a SQLite file path or any SQLAlchemy URL. ``schema``
     (Postgres) pins every connection's ``search_path`` to that schema — how
@@ -32,7 +62,11 @@ def make_engine(url_or_path: Union[str, Path], schema: Optional[str] = None) -> 
             # are rejected, so a per-schema engine talks to the compute
             # directly (same host without ``-pooler``; our own pool is small).
             url = url.replace("-pooler.", ".", 1)
-        eng = create_engine(url, echo=False, pool_pre_ping=True, pool_size=5, max_overflow=5)
+        # No pool_pre_ping: on Neon every ping is a full round trip (~44 ms
+        # from Vietnam), paid on each request. A connection is checked only
+        # after sitting idle (Neon drops them when the compute suspends).
+        eng = create_engine(url, echo=False, pool_size=5, max_overflow=5)
+        _ping_when_idle(eng)
         eng._fb_schema = schema  # type: ignore[attr-defined]
         if schema:
             # Raw ``text()`` SQL relies on the search_path (direct host, so it

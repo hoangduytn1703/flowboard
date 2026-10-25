@@ -689,7 +689,18 @@ class FlowSDK:
             )
             images = fb.read_images(payload)
             if not images:
-                raise fb.FlowBatchError("image generation returned no media url")
+                # Flow answered 200 but without a picture: in practice its
+                # content filter dropped the prompt (seen 25/10 with a
+                # "pregnancy pillow" prompt while a plain apple rendered fine).
+                # Keep the payload in the log so the next such case is readable.
+                logger.warning(
+                    "gen_image: no image in Flow payload for prompt %r: %s",
+                    texts[index][:120], repr(payload)[:600],
+                )
+                raise fb.FlowBatchError(
+                    "image generation returned no media url — Flow không trả ảnh cho prompt này "
+                    "(thường do bộ lọc nội dung); sửa lại prompt (bớt từ nhạy cảm, mô tả trung tính) rồi thử lại"
+                )
             return images[0]
 
         settled = await asyncio.gather(

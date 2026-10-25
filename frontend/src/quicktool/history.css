@@ -238,3 +238,23 @@
   .hist-row__actions { grid-column: 1 / -1; justify-content: flex-start; }
   .hist-modal__grid { grid-template-columns: 1fr; }
 }
+
+/* 🧹 Dọn lịch sử */
+.hist-clear { position: relative; margin-left: auto; }
+.hist-clear__pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 30;
+  width: 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.45);
+}
+.hist-clear__note { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
+.hist-clear__actions { display: flex; gap: 8px; justify-content: flex-end; }

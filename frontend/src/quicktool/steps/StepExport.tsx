@@ -2,13 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import {
   BGM_DEFAULT_VOLUME, BGM_VOLUMES, COVER_STYLES, DEFAULT_VOICE, MAX_MUSIC_BYTES, MAX_SPEAKERS, VOICES, VOICE_GROUPS,
   createCover, isGeminiVoice, mediaUrl, parseSpeakers, patchNode, previewVoice, speakerTags, uploadMusic,
-  type CoverStyle,
-} from "../../api/client";
+  type CoverStyle, patchBoardData } from "../../api/client";
 import { useBoardStore, type FlowboardNodeData } from "../../store/board";
 import { useQuicktoolStore } from "../../store/quicktool";
 import { hasMedia, isBusy, type ClipRoles } from "../roles";
 import "../voices.css";
 import { useToastOn } from "../../store/toast";
+import { ClipArranger, OverlayEditor } from "./ExportEditor";
 
 // ── voice preview ───────────────────────────────────────────────────────────
 // Only one sample plays at a time, whichever button started it.
@@ -103,7 +103,7 @@ function DialogueLine({ text, tags }: { text: string; tags: string[] }) {
 }
 
 /** Step 5 — voice options, the clip list, the final file. */
-export function StepExport({ roles }: { roles: ClipRoles }) {
+export function StepExport({ roles, productName = "", price = "" }: { roles: ClipRoles; productName?: string; price?: string }) {
   const ensureExportNode = useQuicktoolStore((s) => s.ensureExportNode);
   const exportClip = useQuicktoolStore((s) => s.exportClip);
   const writeNarrations = useQuicktoolStore((s) => s.writeNarrations);
@@ -135,7 +135,12 @@ export function StepExport({ roles }: { roles: ClipRoles }) {
         const words = String(s.video!.data.narration ?? "").split(/\s+/).filter(Boolean).length;
         return t + (s.video!.data.type === "video" ? 8 : Math.max(4, words / 2.8 + 1));
       }, 0))
-    : clips.length * 8;
+    : Math.round(clips.reduce((t, s) => {
+        // Step 5 picks: a left-out scene adds nothing, a cut one its window (clips are 8 s).
+        if (exp?.data.clipSkip?.includes(s.video!.id)) return t;
+        const cut = exp?.data.clipTrims?.[s.video!.id];
+        return t + (cut ? Math.max(0.5, Math.min(cut[1] ?? 8, 8) - cut[0]) : 8);
+      }, 0));
   const voice = exp && typeof exp.data.voice === "string" && exp.data.voice in VOICES ? exp.data.voice : DEFAULT_VOICE;
   const voiceStyle = typeof exp?.data.voiceStyle === "string" ? exp.data.voiceStyle : "";
   const subtitles = exp ? exp.data.subtitles !== false : true;
@@ -245,6 +250,18 @@ export function StepExport({ roles }: { roles: ClipRoles }) {
           <div className="qt-stat"><strong>{voiced}</strong><span>có lời thoại</span></div>
           <div className="qt-stat"><strong>~{estimate}s</strong><span>thời lượng</span></div>
         </div>
+        {!isDrama && clips.length > 0 ? (
+          <ClipArranger clips={clips} exp={exp} busy={busy} setOption={setOption} renderLine={(s) => (
+            <>
+              {typeof s.video!.data.narration === "string" && s.video!.data.narration
+                ? <DialogueLine text={s.video!.data.narration} tags={allTags} />
+                : <em>chưa có lời thoại</em>}
+              {typeof s.video!.data.voice === "string" && s.video!.data.voice in VOICES && (
+                <small className="qt-speakers__unused"> · giọng riêng: {VOICES[s.video!.data.voice]}</small>
+              )}
+            </>
+          )} />
+        ) : (
         <ol className="qt-cliplist">
           {clips.map((s) => (
             <li key={s.video!.id}>
@@ -262,6 +279,7 @@ export function StepExport({ roles }: { roles: ClipRoles }) {
           ))}
           {clips.length === 0 && <li className="qt-empty">{isDrama ? "Chưa có ảnh nào — quay lại bước 3." : "Chưa có video nào — quay lại bước 4."}</li>}
         </ol>
+        )}
         {clips.length > 0 && voiced < clips.length && !isDrama && (
           <button type="button" className="qt-btn qt-btn--ghost" onClick={() => void writeNarrations()}>
             ✨ AI viết lời thoại còn thiếu
@@ -388,6 +406,8 @@ export function StepExport({ roles }: { roles: ClipRoles }) {
           </label>
         </div>
 
+        <OverlayEditor exp={exp} busy={busy} setOption={setOption} productName={productName} price={price} />
+
         <button
           type="button"
           className="qt-btn qt-btn--accent qt-btn--big"
@@ -406,7 +426,8 @@ export function StepExport({ roles }: { roles: ClipRoles }) {
           <>
             <video className="qt-result" src={mediaUrl(exp.data.mediaId as string)} controls playsInline />
             <a className="qt-btn qt-btn--accent" href={mediaUrl(exp.data.mediaId as string)}
-               download={`${boardName || "clip"}.mp4`}>
+               download={`${boardName || "clip"}.mp4`}
+               onClick={() => { if (boardId !== null) patchBoardData(boardId, { quicktool: { downloaded_at: Date.now() } }).catch(() => {}); }}>
               ⬇ Tải về đăng TikTok
             </a>
           </>

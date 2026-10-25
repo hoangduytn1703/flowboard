@@ -9,6 +9,8 @@ GCS signed URLs are self-contained (signature + expiry in the query string)
 """
 from __future__ import annotations
 
+import time
+
 import logging
 import re
 from pathlib import Path
@@ -78,6 +80,28 @@ def _cache_glob(media_id: str) -> Optional[Path]:
     return None
 
 
+#: media id → monotonic time until which a failed remote fetch is not
+#: retried by GET /media (the local cache / Asset row is still checked first).
+MISS_TTL_S = 300.0
+_recent_misses: dict[str, float] = {}
+
+
+def recently_missed(media_id: str) -> bool:
+    return _recent_misses.get(media_id, 0.0) > time.monotonic()
+
+
+def remember_miss(media_id: str) -> None:
+    now = time.monotonic()
+    _recent_misses[media_id] = now + MISS_TTL_S
+    if len(_recent_misses) > 2000:  # keep it bounded
+        for k in [k for k, t in _recent_misses.items() if t <= now]:
+            _recent_misses.pop(k, None)
+
+
+def forget_miss(media_id: str) -> None:
+    _recent_misses.pop(media_id, None)
+
+
 def cached_path(media_id: str) -> Optional[Path]:
     found = _cache_glob(media_id)
     if found is not None:
@@ -103,6 +127,8 @@ def ingest_urls(urls: list[dict[str, Any]]) -> int:
     touched = 0
     with get_session() as s:
         for entry in urls or []:
+            if isinstance(entry, dict) and entry.get("media_id"):
+                forget_miss(str(entry["media_id"]))  # a fresh URL: worth fetching again
             if not isinstance(entry, dict):
                 continue
             media_id = entry.get("media_id") or entry.get("mediaId")

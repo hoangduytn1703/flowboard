@@ -10,7 +10,7 @@ import { useSettingsStore, type ImageProviderKey } from "../../store/settings";
 import { toast } from "../../store/toast";
 
 /**
- * Settings → "Nguồn tạo ảnh". Radio: Flow (default, spends Flow credits) /
+ * Settings → "Nguồn tạo ảnh". Select: Flow (default, spends Flow credits) /
  * OpenAI GPT Image / xAI Grok Image, each API row with its own key input,
  * "Kiểm tra" (free models-endpoint probe) and "Lưu". A provider without a
  * saved key cannot be selected — the dispatch would only fail later in the
@@ -23,6 +23,10 @@ export function ImageProvidersSection() {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string>("");
   const [blocked, setBlocked] = useState<string | null>(null);
+  // What the select shows. An API source without a key can be *viewed* (to paste
+  // its key) but is only *applied* once the key is saved.
+  const [viewing, setViewing] = useState<string>(imageProvider);
+  useEffect(() => { setViewing(imageProvider); }, [imageProvider]);
 
   async function refresh() {
     try {
@@ -63,7 +67,13 @@ export function ImageProvidersSection() {
       const row = await setImageProviderKey(id, (drafts[id] ?? "").trim());
       setProviders((list) => (list ?? []).map((p) => (p.id === id ? row : p)));
       setDrafts((d) => ({ ...d, [id]: "" }));
-      toast.success(row.configured ? "Đã lưu key." : "Đã xoá key.");
+      if (row.configured && viewing === id) {
+        setImageProvider(id as ImageProviderKey);
+        setBlocked(null);
+        toast.success(`Đã lưu key — giờ tạo ảnh bằng ${row.label}.`);
+      } else {
+        toast.success(row.configured ? "Đã lưu key." : "Đã xoá key.");
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Lưu key thất bại.");
     } finally {
@@ -84,95 +94,76 @@ export function ImageProvidersSection() {
     }
   }
 
+  const shown = providers?.find((p) => p.id === viewing) ?? null;
+  const shownIsApi = !!shown && shown.id !== "flow";
+  const hasDraft = shown ? (drafts[shown.id] ?? "").trim().length > 0 : false;
+
   return (
     <div className="settings-panel__section">
-      <div className="settings-panel__label">Nguồn tạo ảnh</div>
-      <div className="settings-panel__hint">
-        Bước tạo ảnh có thể dùng tài khoản API khác thay vì credit Flow. Ảnh từ API vẫn được
-        đưa vào Flow project để làm nguyên liệu cho bước tạo video.
-      </div>
-      {providers === null ? (
-        <div className="settings-panel__hint">Đang tải…</div>
-      ) : (
-        <div className="settings-panel__radio-group">
-          {providers.map((p) => {
-            const active = imageProvider === p.id;
-            const isApi = p.id !== "flow";
-            const hasDraft = (drafts[p.id] ?? "").trim().length > 0;
-            return (
-              <label
-                key={p.id}
-                className={`settings-panel__radio${active ? " settings-panel__radio--active" : ""}${
-                  !p.configured ? " settings-panel__radio--locked" : ""
-                }`}
-                title={p.configured ? undefined : "Chưa có API key"}
-              >
-                <input
-                  type="radio"
-                  name="image-provider"
-                  value={p.id}
-                  checked={active}
-                  onChange={() => pick(p)}
-                />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="settings-panel__radio-label">
-                    <span
-                      aria-label={p.configured ? "đã cấu hình" : "chưa có key"}
-                      style={{
-                        display: "inline-block",
-                        width: 8,
-                        height: 8,
-                        borderRadius: 999,
-                        background: p.configured ? "#2ecc71" : "#888",
-                        flex: "0 0 auto",
-                      }}
-                    />
-                    {p.label}
-                    {p.id === "flow" && <span className="model-badge">Mặc định</span>}
-                    {p.model && <code style={{ fontSize: 12, opacity: 0.7 }}>{p.model}</code>}
-                  </div>
-                  <div className="settings-panel__radio-hint">{p.notes_vi}</div>
-                  {isApi && (
-                    <div
-                      // Stop the label from toggling the radio when the user
-                      // clicks into the key field / buttons.
-                      onClick={(e) => e.preventDefault()}
-                      style={{ marginTop: 6 }}
-                    >
-                      <input
-                        type="password"
-                        className="gemini-keys__textarea"
-                        style={{ width: "100%", boxSizing: "border-box" }}
-                        autoComplete="off"
-                        placeholder={p.configured ? "Đã có key — dán key mới để thay, để trống rồi Lưu để xoá" : "Dán API key"}
-                        value={drafts[p.id] ?? ""}
-                        onChange={(e) => setDrafts((d) => ({ ...d, [p.id]: e.target.value }))}
-                        disabled={busy !== ""}
-                      />
-                      <div className="gemini-keys__actions">
-                        <button
-                          type="button"
-                          className="gemini-keys__btn"
-                          onClick={() => void test(p.id)}
-                          disabled={busy !== "" || (!hasDraft && !p.configured)}
-                        >
-                          {busy === `test:${p.id}` ? "Đang kiểm tra…" : "Kiểm tra"}
-                        </button>
-                        <button
-                          type="button"
-                          className="gemini-keys__btn gemini-keys__btn--primary"
-                          onClick={() => void save(p.id)}
-                          disabled={busy !== "" || (!hasDraft && !p.configured)}
-                        >
-                          {busy === `save:${p.id}` ? "Đang lưu…" : hasDraft ? "Lưu" : "Xoá key"}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </label>
-            );
-          })}
+      <label className="settings-field">
+        <span className="settings-panel__label">Nguồn tạo ảnh</span>
+        {providers === null ? (
+          <div className="settings-panel__hint">Đang tải…</div>
+        ) : (
+          <select
+            className="settings-panel__select"
+            value={viewing}
+            onChange={(e) => {
+              const p = providers.find((x) => x.id === e.target.value);
+              if (!p) return;
+              setViewing(p.id);
+              if (p.configured) pick(p);
+              else setBlocked(null);
+            }}
+          >
+            {providers.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}{p.id === "flow" ? " — mặc định" : p.configured ? "" : " — chưa có key"}
+              </option>
+            ))}
+          </select>
+        )}
+      </label>
+      {shown && (
+        <div className="settings-panel__hint">
+          {shown.notes_vi}
+          {shown.model && <> · <code>{shown.model}</code></>}
+        </div>
+      )}
+      {shownIsApi && shown && (
+        <div className="settings-panel__keybox">
+          <div className="settings-panel__hint">
+            {shown.configured
+              ? imageProvider === shown.id ? "Đang dùng nguồn này. Dán key mới để thay, để trống rồi bấm Xoá key để bỏ." : "Đã có key."
+              : `Chưa có key — dán key của ${shown.label} rồi Lưu để chuyển sang nguồn này.`}
+          </div>
+          <input
+            type="password"
+            className="settings-panel__project-input"
+            autoComplete="off"
+            placeholder={shown.configured ? "Đã có key — dán key mới để thay" : "Dán API key"}
+            value={drafts[shown.id] ?? ""}
+            onChange={(e) => setDrafts((d) => ({ ...d, [shown.id]: e.target.value }))}
+            disabled={busy !== ""}
+          />
+          <div className="gemini-keys__actions">
+            <button
+              type="button"
+              className="gemini-keys__btn"
+              onClick={() => void test(shown.id)}
+              disabled={busy !== "" || (!hasDraft && !shown.configured)}
+            >
+              {busy === `test:${shown.id}` ? "Đang kiểm tra…" : "Kiểm tra"}
+            </button>
+            <button
+              type="button"
+              className="gemini-keys__btn gemini-keys__btn--primary"
+              onClick={() => void save(shown.id)}
+              disabled={busy !== "" || (!hasDraft && !shown.configured)}
+            >
+              {busy === `save:${shown.id}` ? "Đang lưu…" : hasDraft || !shown.configured ? "Lưu" : "Xoá key"}
+            </button>
+          </div>
         </div>
       )}
       {blocked && <div className="settings-panel__hint">{blocked}</div>}

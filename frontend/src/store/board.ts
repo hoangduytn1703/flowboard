@@ -117,6 +117,20 @@ export interface FlowboardNodeData extends Record<string, unknown> {
   lastRequest?: string;
   /** Character node: verdict of "Kiểm tra với Flow" (flowModelCheck.ts). */
   flowCheck?: { status: "ok" | "blocked" | "running"; at: number; requestId?: number; mediaId?: string };
+  /** Export node (step 5): clip order / clips left out (video node ids), cuts (seconds) and text overlays. */
+  clipOrder?: string[];
+  clipSkip?: string[];
+  clipTrims?: Record<string, [number, number | null]>;
+  overlays?: OverlaySpec[];
+}
+
+/** One text overlay burned on the finished clip (agent video_overlays.py). */
+export interface OverlaySpec {
+  text: string;
+  preset: "title" | "price" | "badge" | "cta";
+  position: "top" | "middle" | "bottom";
+  start: number;
+  end: number | null;
 }
 
 export type FlowNode = Node<FlowboardNodeData>;
@@ -244,6 +258,7 @@ interface BoardState {
     name: string,
     inputs: Record<string, string>,
     productId?: number | null,
+    channelId?: number | null,
   ): Promise<number | null>;
   // Delete a board. If it's the active one, switch to first remaining
   // board (or create a fresh "Untitled" if list ends up empty).
@@ -366,6 +381,10 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           prevPrompt: n.data["prevPrompt"] as string | undefined,
           lastRequest: n.data["lastRequest"] as string | undefined,
           flowCheck: n.data["flowCheck"] as FlowboardNodeData["flowCheck"],
+          clipOrder: n.data["clipOrder"] as string[] | undefined,
+          clipSkip: n.data["clipSkip"] as string[] | undefined,
+          clipTrims: n.data["clipTrims"] as FlowboardNodeData["clipTrims"],
+          overlays: n.data["overlays"] as OverlaySpec[] | undefined,
           // The worker persists the partial-failure summary onto the
           // node now, so a cold load has to read it back — otherwise a
           // batch where some variants were blocked reloads looking
@@ -451,6 +470,10 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           prevPrompt: n.data["prevPrompt"] as string | undefined,
           lastRequest: n.data["lastRequest"] as string | undefined,
           flowCheck: n.data["flowCheck"] as FlowboardNodeData["flowCheck"],
+          clipOrder: n.data["clipOrder"] as string[] | undefined,
+          clipSkip: n.data["clipSkip"] as string[] | undefined,
+          clipTrims: n.data["clipTrims"] as FlowboardNodeData["clipTrims"],
+          overlays: n.data["overlays"] as OverlaySpec[] | undefined,
           // The worker persists the partial-failure summary onto the
           // node now, so a cold load has to read it back — otherwise a
           // batch where some variants were blocked reloads looking
@@ -495,9 +518,9 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     }
   },
 
-  async createNewBoardFromTemplate(templateId, name, inputs, productId) {
+  async createNewBoardFromTemplate(templateId, name, inputs, productId, channelId) {
     try {
-      const board = await createBoardFromTemplate(templateId, name, inputs, productId);
+      const board = await createBoardFromTemplate(templateId, name, inputs, productId, undefined, channelId);
       set((s) => ({ boards: [board, ...s.boards] }));
       // switchBoard loads the nodes the template already put on it.
       await get().switchBoard(board.id);
@@ -578,6 +601,10 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           prevPrompt: n.data["prevPrompt"] as string | undefined,
           lastRequest: n.data["lastRequest"] as string | undefined,
           flowCheck: n.data["flowCheck"] as FlowboardNodeData["flowCheck"],
+          clipOrder: n.data["clipOrder"] as string[] | undefined,
+          clipSkip: n.data["clipSkip"] as string[] | undefined,
+          clipTrims: n.data["clipTrims"] as FlowboardNodeData["clipTrims"],
+          overlays: n.data["overlays"] as OverlaySpec[] | undefined,
           error: n.data["error"] as string | undefined,
         },
       }));

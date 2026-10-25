@@ -17,6 +17,7 @@ import { useBoardStore, type FlowNode } from "./board";
 import { useGenerationStore } from "./generation";
 import type { CountryKey, GenderKey, VibeKey } from "../constants/character";
 import { toast } from "./toast";
+import { checkModelNode, knownFlowCheck } from "../quicktool/flowModelCheck";
 
 /**
  * The Quicktool wizard's driver. It owns no media state of its own: every
@@ -567,6 +568,21 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
         await waitForNode(r0.model.id, hasMedia);
       }
       if (!stillRunning(get)) return;
+
+      // Flow drops every clip of a face it reads as a real / famous person
+      // (6 minutes each, for nothing). Check the model once, before spending
+      // the run on scenes and clips.
+      if (!get().isDrama()) {
+        const model = get().roles().model;
+        if (model && hasMedia(model) && knownFlowCheck(model)?.status !== "ok") {
+          set({ autoMessage: "Kiểm tra người mẫu với Flow (1–3 phút, ~12 credit nếu qua)…" });
+          const verdict = await checkModelNode(model);
+          if (verdict.status === "blocked") {
+            throw new Error("Flow chặn video có gương mặt người mẫu này — ở Bước 1 bấm \"Tạo lại người mẫu\" hoặc chọn mẫu khác rồi chạy lại.");
+          }
+          if (!stillRunning(get)) return;
+        }
+      }
 
       set({ auto: "scenes", autoMessage: "Tạo ảnh các cảnh…" });
       await get().generateAllScenes();

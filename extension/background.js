@@ -242,6 +242,8 @@ function connectToAgent() {
         await handleReadTab(msg);
       } else if (msg.method === 'read_page') {
         await handleReadPage(msg);
+      } else if (msg.method === 'read_channel') {
+        await handleReadChannel(msg);
       } else if (msg.method === 'scrape_page') {
         await handleScrapePage(msg);
       } else if (msg.method === 'read_account') {
@@ -621,6 +623,66 @@ async function handleReadPage(msg) {
   } finally {
     if (tab?.id) chrome.tabs.remove(tab.id).catch(() => {});
   }
+}
+
+// "Kênh của tôi" → "Xem & đánh giá kênh": open the seller's page (Facebook,
+// TikTok, Instagram, YouTube, Threads, Zalo) in a background tab of THEIR
+// Chrome (logged in, so Facebook shows the posts), scroll a few screens so
+// recent posts load, read the text, close the tab.
+const READ_CHANNEL_HOSTS = /^https:\/\/([a-z0-9-]+\.)*(facebook\.com|fb\.com|instagram\.com|tiktok\.com|youtube\.com|threads\.net|threads\.com|zalo\.me)\//i;
+
+async function handleReadChannel(msg) {
+  const { id, params } = msg;
+  const { url, timeoutMs = 30000, scrolls = 5 } = params || {};
+  if (!READ_CHANNEL_HOSTS.test(url || '')) {
+    sendToAgent({ id, status: 400, error: 'URL_NOT_ALLOWED' });
+    return;
+  }
+  let tab = null;
+  try {
+    tab = await chrome.tabs.create({ url, active: false });
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await sleep(1000);
+      let t;
+      try { t = await chrome.tabs.get(tab.id); } catch { break; }
+      if (t.status === 'complete') break;
+    }
+    await sleep(2500);
+    for (let i = 0; i < scrolls; i++) {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id }, func: () => window.scrollBy(0, Math.round(window.innerHeight * 1.8)),
+      });
+      await sleep(1600);
+    }
+    const [r] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: readChannelPageInPage });
+    sendToAgent({ id, status: 200, data: JSON.stringify(r?.result || { empty: true }) });
+  } catch (e) {
+    sendToAgent({ id, status: 500, error: e?.message || 'READ_CHANNEL_FAILED' });
+  } finally {
+    if (tab?.id) chrome.tabs.remove(tab.id).catch(() => {});
+  }
+}
+
+// Runs inside the page: must be self-contained.
+function readChannelPageInPage() {
+  const meta = (n) => document.querySelector(`meta[property="${n}"], meta[name="${n}"]`)?.content || '';
+  // Facebook renders hundreds of hidden "Facebook" spans; drop them and
+  // repeated lines so the 40k budget goes to the posts.
+  const lines = [];
+  for (const raw of (document.body?.innerText || '').split('\n')) {
+    const line = raw.trim();
+    if (!line || /^(facebook|instagram|tiktok|·)$/i.test(line) || lines[lines.length - 1] === line) continue;
+    lines.push(line);
+  }
+  const text = lines.join('\n').slice(0, 40000);
+  return {
+    url: location.href,
+    title: document.title || '',
+    description: meta('og:description') || meta('description'),
+    image: meta('og:image'),
+    text,
+  };
 }
 
 // "Nhập từ tab đang mở": every TikTok / Shopee tab, so the agent can tell

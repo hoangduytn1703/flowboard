@@ -208,7 +208,19 @@ def test_board_data_merges_and_summary_counts_progress(client):
     rows = client.get("/api/boards", params={"summary": "true"}).json()
     row = next(b for b in rows if b["id"] == bid)
     assert row["summary"] == {"scenes": 2, "scenes_done": 1, "clips": 1, "clips_done": 0,
-                              "exported": False, "thumbnail": "m1"}
+                              "errors": 0, "clip_errors": 0, "exported": False, "export_media": None,
+                              "downloaded_at": None, "thumbnail": "m1"}
+    # A failed clip and a finished export show up for "Hôm nay".
+    nodes = client.get(f"/api/boards/{bid}").json()["nodes"]
+    vid = next(n for n in nodes if n["type"] == "video")
+    exp = next(n for n in nodes if n["type"] == "export")
+    client.patch(f"/api/nodes/{vid['id']}", json={"status": "error"})
+    client.patch(f"/api/nodes/{exp['id']}", json={"data": {"mediaId": "e1"}})
+    client.patch(f"/api/boards/{bid}", json={"data": {"quicktool": {"downloaded_at": 123}}})
+    row = next(b for b in client.get("/api/boards", params={"summary": "true"}).json() if b["id"] == bid)
+    assert row["summary"]["clip_errors"] == 1 and row["summary"]["errors"] == 1
+    assert row["summary"]["export_media"] == "e1" and row["summary"]["exported"] is True
+    assert row["summary"]["downloaded_at"] == 123
     assert "summary" not in client.get("/api/boards").json()[0]
 
 

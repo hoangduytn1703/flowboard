@@ -119,25 +119,23 @@ def _hands_tail(prompt: str) -> str:
     return "" if i < 0 else " " + prompt[i:].strip()
 
 
-async def tailor_spec(spec: dict, product: dict, *, variant: int = 0, of: int = 1,
-                      template_title: str = "", shown_as: Optional[str] = None,
-                      timeout: float = 120.0) -> dict:
-    """``spec`` with every scene rewritten for ``product`` (see module doc).
-    Raises :class:`TailorError` on any failure; the caller keeps ``spec``."""
-    nodes = [dict(n) for n in spec["nodes"]]
-    pairs = _scene_keys(nodes)
-    if not pairs:
-        raise TailorError("template has no scenes")
-    scenes = []
-    for i, (img, vid) in enumerate(pairs, start=1):
-        idata, vdata = img.get("data") or {}, (vid or {}).get("data") or {}
-        scenes.append({
-            "scene": i,
-            "title": idata.get("title") or f"Cảnh {i}",
-            "image_prompt": strip_hands(str(idata.get("prompt") or "")),
-            "video_prompt": strip_hands(str(vdata.get("prompt") or "")),
-            "voice": str(vdata.get("narration") or ""),
-        })
+async def tailor_scenes(scenes: list[dict[str, str]], product: dict, *, variant: int = 0, of: int = 1,
+                        template_title: str = "", shown_as: Optional[str] = None,
+                        instructions: Optional[str] = None, timeout: float = 120.0) -> list[dict[str, str]]:
+    """Rewrite ``scenes`` (each ``{title, image_prompt, video_prompt, voice}``,
+    in order) for ``product``. Returns, per scene, the final
+    ``{image_prompt, video_prompt, voice}`` with the product guard and any
+    hands-mode sentence of the old prompts put back; an empty string means
+    "keep the old text". Raises :class:`TailorError`."""
+    if not scenes:
+        raise TailorError("no scenes")
+    brief = [{
+        "scene": i,
+        "title": sc.get("title") or f"Cảnh {i}",
+        "image_prompt": strip_hands(sc.get("image_prompt") or ""),
+        "video_prompt": strip_hands(sc.get("video_prompt") or ""),
+        "voice": sc.get("voice") or "",
+    } for i, sc in enumerate(scenes, start=1)]
     variation = ""
     if of > 1:
         variation = (f"\n\nThis is clip {variant + 1} of {of} for the same product: pick a different hook, "
@@ -148,27 +146,115 @@ async def tailor_spec(spec: dict, product: dict, *, variant: int = 0, of: int = 
         # The user typed how the product should look in this clip: it wins.
         shown = (f"\nShow the product in the images exactly as: {shown_as.strip()} "
                  "(copy these words verbatim into every image_prompt).")
+    wish = ""
+    if instructions and instructions.strip():
+        wish = f"\n\nTHE SELLER ALSO ASKS (Vietnamese, follow it within the rules): {instructions.strip()}"
     user = (f"PRODUCT\n{_product_facts(product)}{shown}\n\nTEMPLATE: {template_title}\n"
-            f"SCENES (template version, adapt each):\n{json.dumps(scenes, ensure_ascii=False, indent=1)}{variation}")
+            f"SCENES (current version, adapt each):\n{json.dumps(brief, ensure_ascii=False, indent=1)}{variation}{wish}")
     try:
         text = await run_llm("auto_prompt", user, system_prompt=_SYSTEM, timeout=timeout)
     except LLMError as exc:
         raise TailorError(f"LLM failed: {exc}") from exc
-    rewritten = _parse(text, len(pairs))
-
-    for (img, vid), new in zip(pairs, rewritten):
-        idata = dict(img.get("data") or {})
-        old_img = str(idata.get("prompt") or "")
+    rewritten = _parse(text, len(scenes))
+    out = []
+    for sc, new in zip(scenes, rewritten):
+        old_img, old_vid = sc.get("image_prompt") or "", sc.get("video_prompt") or ""
+        img = ""
         if new["image_prompt"]:
-            prompt = restore_product_guard(new["image_prompt"], old_img, image_with_product=True)
-            idata["prompt"] = prompt.rstrip() + _hands_tail(old_img)
-            img["data"] = idata
+            img = restore_product_guard(new["image_prompt"], old_img, image_with_product=True).rstrip()
+            img += _hands_tail(old_img)
+        vid = ""
+        if new["video_prompt"] and old_vid:
+            vid = new["video_prompt"].rstrip() + _hands_tail(old_vid)
+        out.append({"image_prompt": img, "video_prompt": vid,
+                    "voice": _clip_words(new["voice"]) if new["voice"] else ""})
+    return out
+
+
+async def tailor_spec(spec: dict, product: dict, *, variant: int = 0, of: int = 1,
+                      template_title: str = "", shown_as: Optional[str] = None,
+                      timeout: float = 120.0) -> dict:
+    """``spec`` with every scene rewritten for ``product`` (see module doc).
+    Raises :class:`TailorError` on any failure; the caller keeps ``spec``."""
+    nodes = [dict(n) for n in spec["nodes"]]
+    pairs = _scene_keys(nodes)
+    if not pairs:
+        raise TailorError("template has no scenes")
+    scenes = []
+    for img, vid in pairs:
+        idata, vdata = img.get("data") or {}, (vid or {}).get("data") or {}
+        scenes.append({"title": str(idata.get("title") or ""), "image_prompt": str(idata.get("prompt") or ""),
+                       "video_prompt": str(vdata.get("prompt") or ""), "voice": str(vdata.get("narration") or "")})
+    rewritten = await tailor_scenes(scenes, product, variant=variant, of=of, template_title=template_title,
+                                    shown_as=shown_as, timeout=timeout)
+    for (img, vid), new in zip(pairs, rewritten):
+        if new["image_prompt"]:
+            img["data"] = {**(img.get("data") or {}), "prompt": new["image_prompt"]}
         if vid is not None:
             vdata = dict(vid.get("data") or {})
-            old_vid = str(vdata.get("prompt") or "")
             if new["video_prompt"]:
-                vdata["prompt"] = new["video_prompt"].rstrip() + _hands_tail(old_vid)
+                vdata["prompt"] = new["video_prompt"]
             if new["voice"]:
-                vdata["narration"] = _clip_words(new["voice"])
+                vdata["narration"] = new["voice"]
             vid["data"] = vdata
     return {**spec, "nodes": nodes}
+
+
+#: Shown as "Lần trước đã yêu cầu …" in the scene's "Tạo lại…" box, whose
+#: "↺ Về prompt trước đó" then undoes the rewrite scene by scene.
+TAILOR_REQUEST_LABEL = "Viết lại kịch bản theo sản phẩm"
+
+
+async def tailor_board(board_id: int, scene_ids: list[tuple[int, Optional[int]]], *,
+                       instructions: Optional[str] = None) -> dict[str, Any]:
+    """Rewrite an existing clip's scenes for its product, in place.
+
+    ``scene_ids`` are ``(image node id, video node id or None)`` in scene
+    order (the wizard knows the order). The old prompts are kept as
+    ``prevPrompt`` on each node. Returns ``{"updated": n, "nodes": {...}}``."""
+    from sqlmodel import select
+
+    from flowboard.db import get_session
+    from flowboard.db.models import Board, Node
+    from flowboard.node_mirror import apply_node_patch
+    from flowboard.services.products import get_product
+    from flowboard.services.templates import get_template
+
+    with get_session() as s:
+        board = s.get(Board, board_id)
+        if board is None:
+            raise TailorError("clip not found")
+        qt = dict((board.data or {}).get("quicktool") or {})
+        rows = {n.id: dict(n.data or {}) for n in s.exec(select(Node).where(Node.board_id == board_id)).all()}
+    product = get_product(int(qt["product_id"])) if qt.get("product_id") else None
+    if product is None:
+        raise TailorError("Clip này không gắn với sản phẩm đã lưu, AI không có mô tả để viết.")
+    template = get_template(qt.get("template_id") or "") or {}
+    scenes = []
+    for img_id, vid_id in scene_ids:
+        if img_id not in rows or (vid_id is not None and vid_id not in rows):
+            raise TailorError(f"node {img_id}/{vid_id} is not on this clip")
+        idata = rows[img_id]
+        vdata = rows[vid_id] if vid_id is not None else {}
+        scenes.append({"title": str(idata.get("title") or ""), "image_prompt": str(idata.get("prompt") or ""),
+                       "video_prompt": str(vdata.get("prompt") or ""), "voice": str(vdata.get("narration") or "")})
+    rewritten = await tailor_scenes(scenes, product, template_title=template.get("title") or "",
+                                    shown_as=(qt.get("inputs") or {}).get("product"), instructions=instructions)
+    updated: dict[str, dict] = {}
+    for (img_id, vid_id), sc, new in zip(scene_ids, scenes, rewritten):
+        if new["image_prompt"]:
+            patch = {"prompt": new["image_prompt"], "prevPrompt": sc["image_prompt"],
+                     "lastRequest": TAILOR_REQUEST_LABEL}
+            apply_node_patch(img_id, data_patch=patch)
+            updated[str(img_id)] = patch
+        if vid_id is not None:
+            vpatch: dict[str, Any] = {}
+            if new["video_prompt"]:
+                vpatch.update(prompt=new["video_prompt"], prevPrompt=sc["video_prompt"],
+                              lastRequest=TAILOR_REQUEST_LABEL)
+            if new["voice"]:
+                vpatch["narration"] = new["voice"]
+            if vpatch:
+                apply_node_patch(vid_id, data_patch=vpatch)
+                updated[str(vid_id)] = vpatch
+    return {"updated": len(updated), "nodes": updated}

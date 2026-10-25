@@ -81,7 +81,7 @@ function AppInner() {
   return (
     <>
       <Routes>
-        <Route path="/" element={<Navigate to={uiMode === "canvas" ? "/canvas" : "/clips"} replace />} />
+        <Route path="/" element={<Navigate to={uiMode === "canvas" ? "/canvas" : "/today"} replace />} />
         <Route path="/canvas/:id?" element={<CanvasApp />} />
         <Route path="/*" element={<QuicktoolApp />} />
       </Routes>

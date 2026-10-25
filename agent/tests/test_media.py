@@ -254,3 +254,28 @@ def test_cached_path_falls_back_to_the_asset_row_for_locally_made_media(tmp_path
         s.commit()
     assert media_service.cached_path("15b9304932634c7aa06cb9f75375f554") == f
     assert media_service.cached_path("15b9304932634c7aa06cb9f75375f555") is None
+
+
+def test_a_failed_remote_fetch_is_not_retried_for_a_while_but_local_files_still_win(client, monkeypatch):
+    """A page listing media that never reached this machine used to pay a
+    ~0.7 s remote lookup per item on every visit."""
+    from flowboard.services import media as media_service
+
+    media_service._recent_misses.clear()
+    calls = []
+
+    async def fake_fetch(mid):
+        calls.append(mid)
+        return None
+
+    monkeypatch.setattr(media_service, "fetch_and_cache", fake_fetch)
+    mid = "0" * 8 + "-1111-4111-8111-" + "2" * 12
+    assert client.get(f"/media/{mid}").status_code == 404
+    assert client.get(f"/media/{mid}").status_code == 404
+    assert calls == [mid]  # second miss answered from memory
+
+    # The file shows up locally (another job, an upload): served right away.
+    media_service.MEDIA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    (media_service.MEDIA_CACHE_DIR / f"{mid}.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    assert client.get(f"/media/{mid}").status_code == 200
+    media_service._recent_misses.clear()

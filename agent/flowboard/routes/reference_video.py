@@ -153,6 +153,7 @@ class BuildBody(BaseModel):
     force: bool = False
     # The model the user picked on the review screen; None keeps the AI's suggestion.
     character: Optional[dict] = None
+    channel_id: Optional[int] = None
 
 
 @router.post("/build")
@@ -172,7 +173,7 @@ def build_from_reference(body: BuildBody) -> dict[str, Any]:
         return reference_video.build_board(
             analysis, product, name=body.name,
             source_media_id=media_service.normalize_media_id(body.media_id) if body.media_id else None,
-            source_url=body.source_url, character_pick=body.character,
+            source_url=body.source_url, character_pick=body.character, channel_id=body.channel_id,
         )
     except (PersonRequiredError, GenderMismatchError) as exc:
         raise HTTPException(400, str(exc))
@@ -182,7 +183,7 @@ def build_from_reference(body: BuildBody) -> dict[str, Any]:
 
 _ALLOWED_HOSTS = (
     "tiktok.com", "youtube.com", "youtu.be", "instagram.com", "facebook.com", "fb.watch",
-    "douyin.com", "x.com", "twitter.com",
+    "douyin.com", "iesdouyin.com", "x.com", "twitter.com",
 )
 FETCH_TIMEOUT_S = 240
 
@@ -244,13 +245,17 @@ async def fetch_reference_video(body: FetchBody) -> dict[str, Any]:
     an upload, so the link can be analysed without a manual download."""
     import asyncio
 
-    url = body.url.strip()
-    if not url.lower().startswith(("http://", "https://")) or not _host_allowed(url):
+    from flowboard.services.video_fetch import FetchError, extract_url, fetch_video
+
+    # A whole Douyin / TikTok "share" blurb may be pasted; the link is dug out of it.
+    url = extract_url(body.url) or body.url.strip()
+    if not _host_allowed(url):
         raise HTTPException(400, "Link phải là TikTok, YouTube, Instagram, Facebook, Douyin hoặc X")
     media_id = uuid.uuid4().hex
-    path, title, err = await asyncio.to_thread(_run_ytdlp, url, media_id)
-    if path is None:
-        raise HTTPException(502, f"Không tải được video: {err}")
+    try:
+        path, title = await asyncio.to_thread(fetch_video, url, media_id, media_service.MEDIA_CACHE_DIR)
+    except FetchError as exc:
+        raise HTTPException(502, f"Không tải được video: {exc}")
     mime = {".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime", ".mkv": "video/x-matroska"}[path.suffix.lower()]
     with get_session() as s:
         s.add(Asset(kind="video", uuid_media_id=media_id, local_path=str(path), mime=mime))

@@ -183,6 +183,60 @@ class SavedPrompt(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_utcnow)
 
 
+class Post(SQLModel, table=True):
+    """A Facebook post written in "Bài viết" (or step 5 of a clip): text,
+    hashtags, the image prompts the writer suggested and the images made
+    from them (media ids). ``brief`` keeps the form the user filled in so
+    the post can be rewritten later. ``create_all`` adds the table."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    kind: str = ""  # post type key (services/post_writer.POST_TYPES)
+    title: str = ""
+    body: str = ""
+    hashtags: str = ""
+    # "Bình luận đầu tiên": the affiliate link with one friendly line, pasted
+    # as the first comment under the post (links in the body hurt reach).
+    first_comment: str = ""
+    product_id: Optional[int] = Field(default=None, index=True)
+    board_id: Optional[int] = Field(default=None, index=True)
+    # The channel (page) the post is for; its brainstorm steers the writer.
+    channel_id: Optional[int] = Field(default=None, index=True)
+    # A multi-part story ("Câu chuyện nhiều kỳ"): posts sharing ``series`` are
+    # its episodes; the writer reads the earlier ones to continue.
+    series: str = Field(default="", index=True)
+    episode: int = 0
+    images: list = Field(default_factory=list, sa_column=Column(JSON))
+    image_prompts: list = Field(default_factory=list, sa_column=Column(JSON))
+    brief: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class Channel(SQLModel, table=True):
+    """A page / account the seller posts to ("Kênh"): where (platforms),
+    what business, who for and what the page is meant to do. After the
+    first few posts a brainstorm (``services/channels.brainstorm``) turns
+    those posts into a direction — positioning, voice, content pillars,
+    do / don't — that later posts follow. Posts link by ``Post.channel_id``,
+    clips by ``board.data.quicktool.channel_id``. ``create_all`` adds the
+    table."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    platforms: list = Field(default_factory=list, sa_column=Column(JSON))  # services/channels.PLATFORMS keys
+    category: str = ""  # first of ``categories`` (kept for older readers)
+    categories: list = Field(default_factory=list, sa_column=Column(JSON))  # up to 3 services/channels.CATEGORIES keys
+    description: str = ""  # what the page sells / talks about, in the seller's words
+    audience: str = ""
+    goal: str = ""  # what posts should achieve: engagement, orders, followers…
+    # The page itself (optional): read through the extension and reviewed by
+    # the LLM (``services/channel_page``) — score, strengths, what to fix and
+    # the style its real posts use, which the writer and brainstorm follow.
+    link: str = ""
+    page_review: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+    brainstorm: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
 class Product(SQLModel, table=True):
     """A product the user sells, saved once and reused across ad boards.
 
@@ -208,6 +262,11 @@ class Product(SQLModel, table=True):
     # must match a male / female product (services/product_gender.py).
     gender: str = ""
     link: str = ""
+    # Affiliate: the tracked short link (s.shopee.vn/…, vt.tiktok.com/…) that
+    # goes in a post's first comment, and the shop it belongs to. Unique per
+    # link so the same product is not saved twice (routes/products).
+    aff_link: str = ""
+    shop: str = ""
     notes: str = ""
     media_ids: list = Field(default_factory=list, sa_column=Column(JSON))
     aspect_ratio: Optional[str] = None

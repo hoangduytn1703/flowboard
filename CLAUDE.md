@@ -27,6 +27,10 @@ Tạo ảnh/video đi qua Google Flow (cần gói Pro/Ultra) bằng extension Ch
   (~3 phút). Typecheck frontend: `cd frontend && npx tsc -b --noEmit`.
 - Bí mật **ngoài git**: `~/.flowboard/secrets.json` (Gemini API keys `geminiApiKeys`, `apiKeys.openai|xai`), nhập qua Cài đặt.
   Máy mới phải nhập lại key.
+- **Remotion** (phụ đề lồng tiếng kiểu mới, 25/10): gói npm nằm trong `frontend/package.json` (`remotion`, `@remotion/player|bundler|renderer|google-fonts`
+  4.0.538, ~130 MB) — `npm install` trong `frontend/` là đủ; lần render đầu Remotion tự tải Chrome Headless Shell (~150 MB, vào cache của Remotion)
+  và đóng gói webpack vào `frontend/node_modules/.cache/flowboard-remotion/` (~10 s, làm lại khi file trong `src/remotion/` đổi). Cần `node` trên PATH
+  (`FLOWBOARD_NODE` để chỉ đường dẫn khác). Không có thì trang lồng tiếng chỉ hiện engine ffmpeg.
 - Tuỳ chọn: công cụ AI xoá phụ đề cần repo `pyvideotrans` có `.venv` (torch CUDA) + `models/lama/big-lama.pt`
   (`FLOWBOARD_ERASE_PYTHON`, `FLOWBOARD_ERASE_ROOT`); thiếu thì chỉ có chế độ khoanh vùng.
 
@@ -104,6 +108,39 @@ của người dùng (console.neon.tech, secure.backblaze.com).
 
 ## Bẫy đã gặp (đừng lặp lại)
 - **Sửa file lớn bằng script: tính điểm cuối bằng `index()` của chính đoạn cần xoá, đừng trỏ tới marker ở xa** — 21/10 một lệnh xoá nhầm ~11 nghìn ký tự CSS của `quicktool.css` (phục hồi từ git HEAD + dựng lại phần chưa commit; luôn `git diff --stat` ngay sau khi sửa file lớn).
+- **Viết bài: prompt đừng mời AI nêu "nhược điểm"** — kiểu Review từng ghi "một nhược điểm nhỏ hoặc mẹo" → AI bịa "sốt hơi
+  mặn" (không có trong dữ liệu sản phẩm). Giờ chỉ xin "mẹo lấy từ dữ kiện đã cho", cấm bịa lỗi / nhận xét vị. Lệnh sửa bài kiểu
+  "ngắn hơn" hay làm rơi `image_prompts` → `write_post` giữ lại prompt cũ. Gọi `curl -d '<json tiếng Việt>'` trong Git Bash bị
+  lỗi mã hoá ("error parsing the body") — ghi JSON ra file rồi `--data-binary @file`.
+- **Playwright: toast ở góc phải trên che đúng các nút đầu thẻ bên phải** ("Lưu bài", "+ Bài mới"): bấm ngay sau một toast thì
+  click chờ/trượt. Script e2e đóng toast (`.toast__close`) trước khi bấm. Tên clip-creation `nodes` trả về là **short id**, còn
+  `PATCH /api/nodes/{id}` cần id số → lấy từ `GET /api/boards/{id}`.
+- **`video_export.probe_clip` chỉ trả kết quả cho file có luồng video** — dùng cho WAV thì ra None (24/10: track giọng lồng tiếng
+  dài 24 s cho video 12,6 s vì mọi khoảng lặng đều bị cộng thêm). Đo audio bằng `tts._probe_duration`. ASS `WrapStyle: 2` = không
+  xuống dòng → chữ tràn khung; dùng `WrapStyle: 0` + cắt câu theo số ký tự vừa chiều rộng. Vá frontend bằng heredoc Python có
+  `||` fallback → script không chạy mà vẫn in "patched" (route `/tools/dub` thiếu tới khi Playwright báo) — ghi script bằng Write
+  rồi chạy, kiểm `grep` sau khi vá. `curl -F file=@/c/…` trong Git Bash upload rỗng → dùng httpx trong Python.
+- **Douyin không tải được bằng yt-dlp** (25/10: `[Douyin] …: Fresh cookies (not necessarily logged in) are needed`) — đi đường trang
+  chia sẻ mobile (xem `video_fetch`). Nút Share của Douyin chép cả câu kèm link → mọi ô nhập link phải `extract_url` trước. Link
+  dạng "合集" (tuyển tập) là video dài hàng giờ, không phải clip lẻ.
+- **Pydantic `dict[str, float]` từ chối dict lồng** (25/10: body `layout.blur` bị 422 "Input should be a valid number") — dùng
+  `dict[str, Any]` cho JSON tự do. Agent **không auto-reload**: sửa route/service xong phải khởi động lại (kiểm `/api/history` +
+  `/api/dub/jobs` không có gì chạy; job dub đã lưu `job.json` nên không mất).
+- **spleeter trong sherpa-onnx: `stems[0]` là GIỌNG, `stems[1]` là nhạc nền** — VieDub (`_audio_separate.py`) gán ngược, mình chép
+  theo nên "nhạc nền" giữ lại nguyên giọng Trung ở −12 dB đè lên giọng Việt −19 dB (người dùng nghe như chưa lồng tiếng, 25/10).
+  Đã đảo trong `dub_runner.separate` (kiểm bằng Whisper: stem giọng ra 20 câu tiếng Trung, stem nền 0 câu). bgm.wav cũ trong
+  `media/dub/*/` đã xoá để render lại tách lại. Lưu ý VieDub bên pyvideotrans vẫn còn lỗi này.
+- **`innerText` của trang Facebook đầy dòng "Facebook" ẩn** (hàng trăm dòng, 25/10) — chiếm hết giới hạn ký tự trước khi tới bài
+  viết. Lọc ở cả extension (`readChannelPageInPage`) lẫn backend (`channel_page.clean_text`). Script vá có `assert` giữa chừng:
+  assert lỗi thì các thay đổi trước đó trong cùng script cũng không được ghi — chạy lại kiểm `grep`.
+- **`cd frontend && npm install …` trong Bash có lúc chạy ở thư mục gốc repo** (25/10: shell bị đặt lại cwd giữa chừng → npm tạo `package.json` +
+  `node_modules` ở `D:\codeslow-AIlowboard\` thay vì `frontend/`, Remotion resolve từ gốc). Dùng `npm install --prefix <đường dẫn tuyệt đối frontend>`;
+  kiểm `git status` không thấy `package.json` lạ ở gốc. Đã xoá bản cài nhầm.
+- **Flow trả 200 nhưng không có ảnh ("image generation returned no media url") = bộ lọc nội dung, không phải lỗi hệ thống** (25/10:
+  prompt "pregnancy pillow" bị bỏ 2/2, "red apple" ra sau 29 s cùng lúc). `flow_sdk` giờ ghi WARNING kèm payload và báo lỗi tiếng Việt
+  gợi ý sửa prompt. Thấy lỗi này: đổi từ nhạy cảm trong prompt trước khi nghi extension/project.
+- **Component mount cùng lúc với "token" đã bump thì effect `useRef(token)` không chạy** (25/10, `PostEditor` chỉ xuất hiện sau lần viết
+  đầu nên `seenToken` khởi tạo = token mới → bỏ qua): khởi tạo ref = 0, coi 0 là "không làm gì", chỗ mở dữ liệu cũ đặt token về 0.
 - **TikTok lúc có lúc không trả trang "Security Check"** thay cho trang sản phẩm (thấy thật 21/10): `product_link.fetch_page` nhận diện trang chặn (`_looks_blocked`), thử lại 1 lần sau 3 s rồi báo lỗi — trước đó đã lưu một sản phẩm tên "Security Check".
 - **Vite có lúc giữ bản biên dịch RỖNG của một file vừa sửa** (21/10: `AccountPanel.tsx` trả 0 byte → cả app trắng, lỗi "does not provide an export named …" dù `tsc` sạch). Kiểm tra `curl -s -o /dev/null -w '%{size_download}' localhost:5174/src/<file>`; sửa bằng `touch <file>`.
 - **Gemini chậm/treo không hẳn do key rẻ, mà do model**: đo cùng một câu hỏi, `gemini-3.1-flash-lite` ~4 s, `3.5-flash` ~21 s (nhiều thinking token), `3.7`/`3.8-flash` quá 40 s. Việc đọc sản phẩm từ link dùng `product_link.EXTRACT_MODEL` (lite, ~13 s cả quy trình). Kịch bản clip (`analyze`) vẫn dùng model mặc định, có thể chậm; chưa đổi vì chưa so chất lượng. Fallback chỉ xử lý 503, không xử lý treo/timeout.
@@ -124,6 +161,15 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   chạy 97 s, kết quả lệ thuộc AI). `conftest.py` giờ đặt `FLOWBOARD_SECRETS_PATH` vào thư mục tạm; test cần cấu hình thì tự ghi file.
 - **Mẫu clip viết cứng chi tiết của một món điển hình** (fast_food_ad: "melted cheese", "lifts the top bun") → áp cho cơm cháy ra
   prompt burger. Đừng sửa từng JSON: `script_tailor` viết lại theo sản phẩm (xem Chỗ cần biết).
+- **Gọi agent qua `localhost` trên Windows mất ~200 ms mỗi lần** (agent chỉ nghe IPv4 `127.0.0.1`, Node/curl thử `::1` trước):
+  proxy Vite trỏ `localhost:8434` làm mọi API chậm thêm ~200 ms (24/10: `/api/health` 209 ms → 4 ms). `vite.config.ts` giờ dùng
+  `127.0.0.1`; script/curl thử nghiệm cũng nên dùng `127.0.0.1` (lưu ý cookie đăng nhập gắn theo host). Ngược lại Vite chỉ nghe
+  `localhost`: mở `127.0.0.1:5174` thì chờ ~2 s.
+- **Neon: mỗi câu truy vấn ~44 ms từ máy nhà**; mỗi request còn tốn lượt mở/đóng transaction. `pool_pre_ping` (thêm 1 lượt mỗi
+  request) đã thay bằng `_ping_when_idle` (`db/session.py`): chỉ ping kết nối ngồi yên > `IDLE_PING_S` (60 s), ping lỗi →
+  `DisconnectionError` → pool lấy kết nối mới. Test `test_db_idle_ping.py`.
+- **Hai PATCH cùng một node chạy song song thì mất một cái** (agent đọc → gộp → ghi cả `data`): bấm nhanh nhiều tuỳ chọn Bước 5
+  lưu sai (24/10). `api/client.ts patchNode` giờ xếp hàng theo node (cùng node chạy lần lượt, node khác vẫn song song).
 - `PATCH /api/boards/{id}` gộp `data` một cấp (để lưu `step` không xoá `template_id`/`product_id`).
 - **Frontend bỏ mọi trường `node.data` không có trong danh sách** khi tải board (`store/board.ts`, 3 chỗ map `n.data[...]`
   + kiểu `FlowboardNodeData`): thêm trường mới lưu trên node thì phải thêm vào cả 3 chỗ, không thì F5 là mất (dính 22/10 với `lastRequest`).
@@ -354,9 +400,14 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   "Dành cho"; hộp Clip mới lọc ô Giới tính mẫu (+ tự chuyển Nữ→Nam khi chọn đồ nam) và màn review link/video; Bước 1 lọc ô giới
   tính / bàn tay, cảnh báo + nút "Đổi sang người mẫu nam" nếu clip cũ đang sai, thư viện khoá mẫu khác giới ("Không hợp đồ nam").
   Unisex / không rõ: không chặn. Bước 1 sửa `charGender` thẳng lên node (không qua backend) nên chỉ UI chặn ở đó.
-- **Hộp Cài đặt rộng 880 px, hai cột** (`.settings-panel__grid`; mục dài thêm `settings-panel__section--wide`): Gói | Project,
-  Model video (rộng, 2 cột lựa chọn), Model ảnh | Nguồn tạo ảnh, Danh sách tài khoản | Tài khoản Flow, Gemini key | Thông tin,
-  Đăng xuất (rộng). ≤ 760 px về 1 cột.
+- **Hộp Cài đặt = tab bên trái** (25/10, thay bố cục 2 cột dài ~2.700 px): `SettingsPanel.tsx` `TABS` — 🎬 Tạo ảnh & video (Model
+  video, Model ảnh, Nguồn tạo ảnh — **đều là `<select>`**, chỉ hiện mô tả của mục đang chọn; model "chỉ Ultra" là option disabled khi
+  gói Pro), ⚡ Google Flow (Project + chip "Gói Pro/Ultra", Tài khoản Flow, Danh sách tài khoản tự chuyển, Đăng xuất Flow), 🔑 Gemini
+  key, ☁ Dữ liệu, ℹ Thông tin (chấm xanh khi có bản mới). Tab nhớ trong localStorage `flowboard.settings.tab`; hộp cao cố định
+  `min(680px, 100vh-64px)`, chỉ phần nội dung cuộn (`.settings-panel--tabs`, `__body`, `__nav`, `__tab`, `__content`, `__select`,
+  `settings-field`). `ImageProvidersSection`: select + ô key **chỉ cho nguồn đang chọn** — chọn nguồn chưa có key thì chỉ hiện ô dán key,
+  lưu key xong mới chuyển sang nguồn đó. Đoạn hướng dẫn dài của 2 mục tài khoản Flow gập trong `<details class=settings-panel__more>`.
+  ≤ 760 px: tab thành hàng ngang trên đầu.
 
 - **Trạng thái đang tải / trống của trang** (23/10): `quicktool/PageState.tsx` — `PageLoading` (vòng xoay cam + chấm sáng, chữ ở giữa,
   hiện sau 150 ms để tải nhanh không bị nháy) và `PageEmpty` (icon tròn, tiêu đề, gợi ý, nút hành động), căn giữa trang
@@ -400,6 +451,200 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   kịch bản theo sản phẩm…". Thử thật với Cơm cháy (fast_food_ad, tay nữ): 15 s, hết burger, lời thoại có giòn rụm / sốt mắm / chà bông.
   Chưa áp cho chat agent (`chat_agent.py` vẫn dùng chữ mẫu).
 
+- **Tối ưu tốc độ 24/10**: (1) proxy Vite `127.0.0.1` (xem Bẫy); (2) ping Neon chỉ khi kết nối ngồi yên; (3) `GET /media/<id>` nhớ
+  lần tải từ xa thất bại 5 phút (`media_service.recently_missed/remember_miss/forget_miss`; vẫn xem file/Asset trên máy trước,
+  `ingest_urls` xoá mục nhớ khi có URL mới) — trang Lịch sử từng tốn ~0,7 s cho mỗi media không có trên máy; (4) ghép nối
+  stream-copy (`video_concat._run_concat`) thêm `-movflags +faststart` (clip ghép phát được ngay, không phải tải hết). Đo qua Vite:
+  `/api/boards` 356 → 121 ms, `/api/boards/2` 481 → 237 ms, Lịch sử 6,2 → 3,2 s (lần 2). StrictMode bật ở dev nên số lần gọi API
+  trùng trên màn đo là gấp đôi thực tế. Bản build production chỉ nhanh hơn dev ~0,3 s/lần mở trang.
+
+- **Nhóm "đỡ hỏng" 24/10**:
+  - **Tự thử lại video bị Flow bỏ**: `worker/processor.py` — job `PARALLEL_TYPES` trả `timeout_waiting_video` hoặc `FLOW_DROPPED_JOB…`
+    (`_flow_dropped`) thì gọi handler thêm 1 lần (`params["__retried"]`), lỗi khác không thử lại. Test `test_requests.py`.
+  - **Tự kiểm tra người mẫu trước khi tạo video tự động**: `store/quicktool.ts runAuto` — có người mẫu mà `knownFlowCheck` chưa "ok"
+    thì chạy `checkModelNode` trước khi vẽ cảnh; bị chặn → dừng, báo đổi mẫu. Nút "Tạo N video còn thiếu" (bước 4) từ chối khi mẫu đã
+    biết là bị chặn. **Chưa chạy thật cả lượt tự động** (tốn credit).
+  - **Viết lại kịch bản cho clip đã có**: `script_tailor.tailor_scenes` (lõi dùng chung) + `tailor_board` → `POST /api/boards/{id}/tailor
+    {scenes:[{image_id, video_id}], instructions?}` (cần clip gắn sản phẩm). Lưu prompt cũ vào `prevPrompt` + `lastRequest =
+    "Viết lại kịch bản theo sản phẩm"` → nút "↺ Về prompt trước đó" trong ô "Tạo lại…" hoàn tác từng cảnh (lời thoại cũ không giữ).
+    Bước 2: nút "✨ Viết lại kịch bản theo sản phẩm" + ô "Muốn nhấn mạnh gì?" (`StepScript.tsx`, `tailorBoardApi`; ô nhập không điều
+    khiển → `rev` đổi `key` để hiện chữ mới). Thử thật trên clip tạm: 16 s, lời thoại dùng "phơi 36 tiếng", "vị cay", "hạn dùng 6 tháng".
+  - **Lưu đủ chi tiết trang sản phẩm**: `product_link._PRODUCT_SCHEMA.details` (≤ 10 dòng tiếng Việt: nguyên liệu, quy trình, size/vị,
+    cách dùng, bảo quản, xuất xứ) → `page_details_note()` → `draft.notes` ("Chi tiết từ trang sản phẩm: …"); nhập từ tab giữ thêm dòng
+    "Nhập từ …". `script_tailor` đọc notes. Thử thật với link Shopee Cơm cháy (17 s qua extension); sản phẩm Cơm cháy đã được thêm
+    phần chi tiết vào ghi chú. Sản phẩm cũ khác chưa có (thêm từ link lại hoặc gõ tay).
+
+- **Bước 5: thứ tự & cắt cảnh + chữ trên video** (24/10):
+  - Dữ liệu trên node xuất video: `clipOrder` (id node video), `clipSkip`, `clipTrims {id: [start, end|null]}`, `overlays`
+    (whitelist `store/board.ts`, kiểu `OverlaySpec`). `lib/exportOrder.exportSources` áp thứ tự/bỏ cảnh (thắng vị trí trên canvas);
+    `dispatchExport` gửi `trims` (theo thứ tự clip) + `overlays`. UI `quicktool/steps/ExportEditor.tsx`: `ClipArranger` (↑ ↓, Bỏ cảnh /
+    Dùng lại, "Cắt từ … đến … s"), `OverlayEditor` (mẫu: Tên sản phẩm 0–3 s trên, Giá & "👇 Bấm giỏ hàng" 4 s cuối dưới, Freeship, chữ
+    tự gõ; kiểu title/price/badge/cta, vị trí trên/giữa/dưới, `start` âm = tính từ cuối).
+  - Backend: worker đọc `params.trims` / `params.overlays`; `video_export.export_video(trims=, overlays=)` — có trim thì buộc đi đường
+    làm từng clip (`_voice_clip(trim=)`, `-ss/-t`, `clip_window()` kẹp, tối thiểu 0,5 s); chữ in sau khi ghép, trước nhạc nền
+    (`services/video_overlays.py`: `parse_overlays`, `write_overlay_ass` — ASS + `\pos`, cùng vị trí xếp chồng có tính số dòng khi
+    xuống dòng, `burn_overlays`; lỗi thì giữ bản ghép, báo `overlays_error`). Test `test_export_trim_overlays.py` (có ffmpeg thật).
+    Đã xem ảnh render chữ tiếng Việt trên clip thật; thử UI trên clip Cơm cháy (chặn lệnh ghép, kiểm tham số, trả tuỳ chọn về cũ).
+    **Chưa ghép thật một clip có cắt + chữ qua giao diện.** Emoji (👇) libass vẽ dạng nét viền.
+
+- **Trang "Hôm nay" + tải hàng loạt** (24/10): `/today` là **trang mở đầu** (`App.tsx` `/` → `/today`; sidebar mục đầu "📋 Hôm nay").
+  `quicktool/pages/TodayPage.tsx` (+ `today.css`): ô credit Flow / việc đang chạy / xong / lỗi / credit hôm nay; mục Đang chạy
+  (`listHistory status=queued,running`), Cần xử lý (clip có cảnh/video lỗi → nút Sửa sang đúng bước), Đã ghép xong chưa tải về (Tải
+  từng clip / "Tải cả N clip (.zip)"), Clip đang làm dở; tự tải lại 10 s khi có việc chạy, 60 s khi không.
+  `GET /api/boards?summary=true` thêm `errors`, `clip_errors`, `export_media`, `downloaded_at` và **gộp 1 truy vấn cho mọi board**
+  (trước mỗi board 1 truy vấn). `GET /api/exports/zip?ids=…` (`routes/exports.py`): zip không nén các clip đã ghép, tên
+  `<slug sản phẩm>_<ngày>_<id>.mp4`, header `X-Skipped-Clips`, đánh dấu `quicktool.downloaded_at`; nút "⬇ Tải về đăng TikTok" ở
+  Bước 5 cũng đánh dấu. Thư viện: chọn clip → "⬇ Tải N clip đã ghép". Test `test_exports_zip.py`, `test_boards.py`. Thử thật: zip clip
+  Cơm cháy (21 MB, tên đúng), trang Hôm nay hiện đúng 4 mục.
+
+- **Bài viết Facebook** (24/10): trang `/posts` (sidebar Công cụ → "✍️ Bài viết Facebook", `quicktool/pages/PostsPage.tsx`) — tab
+  "📝 Điền mẫu" (kiểu bài 7 loại, ý chính, viết cho ai, giọng, độ dài, kêu gọi, số ảnh 0–4, mô tả ảnh) và "💬 Chat với AI" (tin nhắn
+  tự do + nút sửa nhanh; chat vẫn dùng các tuỳ chọn của tab mẫu), gắn sản phẩm tuỳ chọn; khung xem trước kiểu Facebook sửa trực tiếp
+  (`quicktool/posts/PostEditor.tsx`: nội dung, hashtag, ảnh, "📋 Copy bài" = nội dung + hashtag, "+ Ảnh sản phẩm", prompt ảnh AI
+  gợi ý + "🎨 Tạo ảnh" = `generateStandaloneImage(prompt, aspect, refs)` — gửi ảnh sản phẩm làm `ref_media_ids`, khung Vuông/Dọc/Ngang);
+  "Bài đã lưu" (mở / copy / xoá 2 bước). `/posts?post=<id>` mở thẳng một bài. Bước 5 có mục thu gọn **"📝 Bài đăng Facebook cho
+  clip (không bắt buộc)"** (`steps/ClipPost.tsx`, chỉ tải khi mở): kiểu bài + yêu cầu thêm + số ảnh → viết theo lời thoại clip +
+  sản phẩm, ô "Sửa", Lưu (gắn `board_id`), "Mở ở trang Bài viết →"; mở lại thì hiện bài đã lưu gần nhất của clip.
+  Backend: bảng `Post` (`db/models.py`, `create_all` tự tạo), `services/post_writer.py` (`POST_TYPES`, `TONES`, `LENGTHS`, `CTAS`,
+  `write_post` qua `run_llm("auto_prompt")` → JSON `{reply, title, body, hashtags, image_prompts}`; sửa bài mà AI trả prompt ảnh
+  rỗng thì giữ prompt cũ trừ khi tin nhắn nói về ảnh), `routes/posts.py` (`GET /options`, `POST /write`, CRUD `/api/posts`,
+  `?board_id=`; `_clip_context` đọc `narration` các node video + `quicktool.product_id`). Frontend API `api/posts.ts`. Test `test_posts.py`.
+
+- **Ảnh của bài viết: tự tạo + sửa theo yêu cầu** (25/10, `posts/PostEditor.tsx`): chọn "Ảnh kèm" N ảnh rồi "Viết bài" → viết xong **tự tạo
+  cả N ảnh ngay** (prop `autoMakeToken`: trang bump sau mỗi lần viết MỚI — không bump khi sửa qua chat, mở bài đã lưu / "+ Bài mới" đặt về 0;
+  editor bỏ qua token 0 và nhớ token đã xử lý), ô ảnh có thẻ chờ "🎨 Đang tạo ảnh…". **Viết lại bài mới = bỏ ảnh bài cũ** (`setImages([])`
+  trong `run()` / `write()` khi không có message). Mỗi prompt nhớ ảnh nó tạo (`made[i]`): hiện thumbnail, nút thành "↻ Tạo lại ảnh" (thay
+  đúng ảnh đó, không chồng thêm), "✨ Sửa theo yêu cầu" mở ô tiếng Việt + 5 gợi ý → `POST /api/posts/revise-image {prompt, request}`
+  (`post_writer.revise_image_prompt`, `_REVISE_IMAGE_SYSTEM`, ≤ 600 ký tự, giữ phần không được yêu cầu đổi) → "Sửa prompt & tạo lại ảnh"
+  (Ctrl+Enter) hoặc "Chỉ sửa prompt". Prompt tiếng Anh vẫn sửa tay được. Bước 5 (`ClipPost`) dùng chung. Thử thật: viết 11 s → ảnh tự ra
+  31 s; sửa prompt 9 s đúng ý ("book and a cup of tea… warm"); viết lại → ảnh cũ mất, ảnh mới chạy.
+
+- **Kênh ("Kênh của tôi", 24/10)**: một kênh = một page / tài khoản đăng bài. Bảng `Channel` (`db/models.py`: `name`, `platforms`
+  JSON — khoá của `services/channels.PLATFORMS` facebook/instagram/tiktok/threads/youtube/zalo, **`categories` JSON ≤ `MAX_CATEGORIES` 3** khoá
+  của `CATEGORIES` (22 mục kiểu Facebook: bán gì + nói về gì; migration `db.ensure_channel_categories_column` seed từ `category` cũ; `category`
+  = mục đầu, giữ cho code cũ; `category_keys()` đọc cả hai dạng),
+  `description`, `audience`, `goal`, `brainstorm` JSON), `Post.channel_id` (migration `db.ensure_post_channel_column`, đã chạy trên Neon),
+  clip gắn kênh qua **`board.data.quicktool.channel_id`** (nhận ở `POST /api/boards/from-template` + `/api/reference-video/build`
+  `channel_id`, đổi sau bằng PATCH board). Routes `routes/channels.py`: `GET /options`, CRUD `/api/channels` (row kèm `posts`,
+  `clips`, `brainstorm_due`; xoá kênh thì bài **và clip** chỉ mất liên kết), `POST /{id}/brainstorm`. `GET /api/posts?channel_id=`.
+  **Brainstorm** (`services/channels.brainstorm`): đọc tối đa 12 bài + 8 clip (lời thoại) + mô tả kênh → JSON `positioning, audience,
+  voice, pillars[{name,note}], post_mix, do[], dont[], hashtags[], ideas[], summary` + `at/post_count/clip_count`; `brainstorm_due`
+  = đủ `BRAINSTORM_MIN_POSTS` (3) bài mà chưa có, hoặc đã thêm ≥ `BRAINSTORM_STALE_POSTS` (5) bài từ lần trước. Frontend
+  `api/channels.brainstormIfDue(channelId)` gọi sau khi **lưu bài mới** (PostsPage + ClipPost): due → toast + chạy nền → toast kết quả.
+  Trang `/channels` (`quicktool/pages/ChannelsPage.tsx`, `channels.css`): danh sách trái, chi tiết phải (form tạo/sửa, ô thống kê,
+  nút "Viết bài cho kênh" → `/posts?channel=`, "Tạo clip cho kênh" → `/clips/new?channel=`), khối "🧠 Định hướng kênh" (brainstorm
+  ngay / lại), bài viết + clip của kênh. `quicktool/channels/ChannelPicker.tsx` (select dùng chung, cache 30 s, `invalidateChannels()`
+  sau khi sửa kênh) đặt ở: hộp Clip mới (mục "Kênh đăng clip", đọc `?channel=`), Bước 1 (`steps/ClipChannel.tsx`, PATCH
+  `quicktool.channel_id`), trang Bài viết (trên ô Sản phẩm), Bước 5 (`ClipPost` mặc định kênh của clip, đổi được).
+  **Bài viết bám kênh**: `post_writer.write_post(channel=)` → `channels.channel_block` (mô tả + PAGE DIRECTION: vị thế, giọng, trụ cột,
+  nên/không, hashtag nhà) + **định dạng theo nền tảng** (`platform_style`: nền tảng đầu của kênh, hoặc `brief.platform`; thắng độ dài
+  khi mâu thuẫn). `POST /api/posts/write` lấy `channel_id` từ body hoặc từ clip (`_clip_context`). Test `test_channels.py` (6).
+
+- **Lồng tiếng video ("🎙 Lồng tiếng video", `/tools/dub`, 24/10)** — bản rút gọn của VieDub/pyvideotrans trong Flowboard: dán link
+  (TikTok / Douyin / YouTube / IG / FB / X, qua `_run_ytdlp` của reference-video) hoặc chọn file → Whisper nghe tiếng gốc → LLM dịch sang
+  tiếng Việt nói (giữ số câu, ngắn hơn hoặc bằng câu gốc) → TTS từng câu (Edge / Gemini, `tts.synthesize`) ép vừa khung thời gian
+  (`atempo` tối đa `MAX_SPEEDUP` 1,45) → xếp lên một track theo mốc câu → **bỏ tiếng gốc**, tuỳ chọn giữ nhạc nền (spleeter tách
+  giọng, trộn `BGM_VOLUME` 0,6) → in phụ đề ASS **hộp vàng chữ đen** (`BorderStyle 3`; kiểu `box_yellow` / `box_white` / `outline`;
+  cỡ chữ 3,6 % chiều cao, mỗi hộp ≤ `sub_max_chars(w,h)` ký tự — 720×1280 ≈ 24, 1080×1920 ≈ 24) → mp4 faststart → **thành một clip**
+  (board `quicktool.template_id = "dub"`, `step 5`, node video có `narration` = lời Việt + node export có `mediaId`) nên vào thư
+  viện / Hôm nay / kênh / bài đăng Bước 5 như clip thường. Whisper + spleeter chạy trong **venv pyvideotrans** qua
+  `services/dub_runner.py` (`transcribe` → faster-whisper large-v3-turbo tại `models/models--mobiuslabsgmbh--…`, CUDA float16 → CPU
+  int8; `separate` → sherpa-onnx spleeter `models/onnx/{vocals,accompaniment}.fp16.onnx`; đọc `FLOWBOARD_ERASE_ROOT` /
+  `FLOWBOARD_ERASE_PYTHON` như công cụ xoá chữ). `services/dub.py`: `status()`, `Job` (RAM, mất khi restart; trạng thái queued →
+  running → [review] → rendering → done/error), `start_job` (một việc một lúc), `render_job` (sửa câu / giọng / kiểu rồi render lại —
+  cập nhật cùng board), `_timeline_wav`, `write_sub_ass`, `split_cue`, `_save_board`. Routes `routes/dub.py`: `GET /api/dub/status`,
+  `POST /api/dub/jobs`, `GET /api/dub/jobs[/{id}]`, `POST …/render`, `POST …/stop`. Frontend `api/dub.ts`, `pages/DubPage.tsx` (+
+  `dub.css`): link/file, giọng (`VoiceField`), kiểu phụ đề, giữ nhạc nền (ẩn nếu máy thiếu spleeter), "Xem lại bản dịch trước khi
+  render", chọn kênh, tiến độ từng bước, bảng câu sửa được + "Render lại", video xem trước, tải về, "Mở clip", `ClipPost` ngay dưới.
+  Test `test_dub.py` (8, có ffmpeg thật). Đo thật máy nhà (RTX 3060): video 12,6 s → 39 s; YouTube 69 s tiếng Trung 26 câu → 128 s
+  (Whisper ~10 s, dịch ~6 s, TTS ~3 s/câu nối tiếp, spleeter ~4 s). Máy không có pyvideotrans: trang báo "chưa dùng được".
+
+- **Tải video từ link — `services/video_fetch.py`** (25/10): `extract_url(text)` lấy link từ cả đoạn "chia sẻ" dán nguyên (Douyin / TikTok
+  kèm tiêu đề, hashtag); `fetch_video(text, media_id, out_dir, max_duration_s=)` → link **Douyin** đi đường trang chia sẻ mobile như
+  VieDub (`douyin_info`: theo redirect `v.douyin.com` → `iesdouyin.com/share/video/<id>` → `window._ROUTER_DATA` → tiêu đề, thời
+  lượng, `play_addr` bản không watermark; gọi lại tối đa 4 lần vì lượt đầu chỉ cấp cookie; `download_direct` httpx, cap 300 MB; biết
+  thời lượng trước nên video dài quá bị từ chối trước khi tải), còn lại / Douyin lỗi → `routes.reference_video._run_ytdlp`. Dùng ở
+  lồng tiếng (`dub._download`, tối đa 10 phút) và `POST /api/reference-video/fetch` (clip theo video mẫu). Host cho phép thêm
+  `iesdouyin.com`. Test `test_video_fetch.py` (5, MockTransport).
+
+- **Lồng tiếng: vị trí phụ đề + vùng mờ chữ gốc + job sống qua restart** (25/10): `Job.layout = {x, y, scale, blur}` (x/y = đáy-giữa
+  hộp phụ đề theo tỉ lệ khung, scale = hệ số cỡ chữ, `blur = {x, y, w, h, amount}` góc trên-trái + kích thước theo tỉ lệ, amount 1–10 — vùng
+  làm mờ nhẹ đè lên chữ Trung in sẵn, kiểu page "Bầu bì không khó" làm bằng CapCut). `normalize_layout`, `write_sub_ass(layout=)` ghim
+  mỗi dòng bằng `{\an2\pos(x,y)}`, `sub_max_chars(w,h,layout)` hẹp lại khi hộp lệch tâm / chữ to, `blur_filter` (split → crop → boxblur
+  bán kính `h*amount/60` → overlay) + `video_filter` gộp với `ass` thành một `-filter_complex`. `POST /api/dub/jobs/{id}/render {layout}`;
+  `render_job` **dùng lại voice.wav + bgm.wav** khi `voice_key` (giọng + các câu) không đổi → in lại chỉ mất ~27 s cho video 6 phút
+  (phase "Đang in lại phụ đề"). Job ghi `<media>/dub/<id>/job.json` sau mỗi bước (`persist`), `load_jobs()` đọc lại khi gọi
+  `GET /api/dub/jobs[/{id}]` (job đang chạy lúc tắt → error "Agent khởi động lại giữa chừng"; work dir, src_path, voice_key suy lại).
+  Frontend `quicktool/dub/SubPositioner.tsx`: video xem trước (câm, thanh kéo thời điểm ±1 s) + hộp phụ đề kéo được (pointer capture),
+  mũi tên 1 % / Shift 5 %, phím +/− cỡ chữ, slider ngang/dọc/cỡ, preset dưới/sát đáy/giữa/trên, kiểu; vùng mờ kéo được + tay nắm góc đổi cỡ
+  + slider cao/rộng/vị trí/độ mờ, "🔍 Tự tìm chữ gốc (OCR)" gọi `POST /api/clean/{source_media_id}/detect` (RapidOCR của công cụ xoá
+  chữ) → đặt vùng mờ theo dải chữ, "Đặt ngay trên phụ đề"; "✓ Áp dụng" → render với layout. Mục `<details>` "🎯 Vị trí phụ đề &
+  làm mờ chữ gốc" dưới video kết quả trong `DubPage`. Test `test_dub.py` 12.
+
+- **Lồng tiếng: engine phụ đề thứ hai = Remotion** (25/10, lựa chọn riêng, đường ffmpeg/ASS giữ nguyên): `Job.engine` `"ass"` (mặc định) |
+  `"remotion"`; ô "Công nghệ phụ đề" ở `/tools/dub` (+ kiểu riêng `rm_box` hộp vàng bo góc / `rm_karaoke` bật sáng từng từ / `rm_outline` chữ viền,
+  `dub_remotion.STYLES`). Luồng: `dub._render` → cues như cũ → `_render_remotion`: ffmpeg chỉ **mux tiếng** (`-c:v copy`, lỗi thì re-encode) ra
+  `<work>/nosub.mp4` → `services/dub_remotion.render(spec)` chạy `node frontend/remotion/render.mjs spec.json` (giao thức stdout `PHASE` /
+  `PROGRESS 0.42` / `DONE` / `ERROR …`; script tự `ensureBrowser`, bundle cache, phục vụ video qua http cục bộ có Range vì Remotion cần URL) →
+  mp4 h264+aac → Asset + board như engine cũ. Composition `frontend/src/remotion/DubSubtitles.tsx` (props `src, width, height, fps=30, durationS,
+  cues, layout, style, muted`; font Be Vietnam Pro qua `@remotion/google-fonts`, vùng mờ = `backdrop-filter: blur`, karaoke chia mốc từ theo số ký tự
+  vì TTS không có mốc từng từ), `Root.tsx` (`calculateMetadata` lấy kích thước/thời lượng từ props), `index.ts` (entry bundle). **Cùng component
+  đó** hiển thị trong `SubPositioner` bằng `<Player>` khi `player` prop có (`DubPage` truyền `nosub_url` + cues + kích thước): hộp kéo thành khung
+  ghost `.qt-subpos__box--ghost`, thanh tua dùng `playerRef.seekTo`, vùng mờ ghost kéo được — xem trước đúng y bản render. `GET /api/dub/jobs/{id}/nosub`
+  stream `nosub.mp4` (FileResponse có Range). `status()` trả `remotion` / `remotion_reason` / `remotion_styles`; `start_job`/`render_job` nhận `engine`,
+  `_style_for` đổi kiểu về mặc định của engine khi không hợp. Đo thật (video 12,6 s 720×1280, RTX 3060 nhưng Remotion dùng CPU): cả job 101 s
+  (Whisper → TTS → spleeter → Remotion ~20 s), in lại (đổi layout/kiểu, giữ giọng) 18 s; render lẻ bằng script 19 s. Test `test_dub_remotion.py` (5,
+  script Node giả). Cảnh báo console "`ref` is not a prop … AbsoluteFillWithTiming" là của Remotion 4.0.538 với React 18, vô hại. Chưa: chọn font khác,
+  hiệu ứng vào/ra, chữ bật từng từ chính xác theo mốc từ của Edge TTS (có thể lấy từ word boundary sau này).
+
+- **Lồng tiếng: hàng đợi + nhiều link** (25/10): `POST /api/dub/jobs` không từ chối khi đang có việc chạy nữa — job vào `queued`
+  (`MAX_QUEUE` 5 đang chờ), `_pump()` chạy lần lượt một video (Whisper/spleeter dùng chung GPU), gọi từ start / render / cuối
+  `_run_job`; phase "Chờ đến lượt (n video trước)"; render lại cũng xếp hàng (`_render_only`). Ô link của DubPage là textarea, mỗi dòng
+  một link (≤ 5), "Gần đây" tự tải lại 4 s khi còn việc. Test `test_jobs_queue_one_at_a_time`.
+- **Bài viết: câu chuyện nhiều kỳ** (25/10): `Post.series` (tên chuỗi) + `Post.episode` (migration `ensure_post_series_columns`,
+  đã chạy trên Neon). `POST /api/posts/write {series}` → `_series_context` gom các tập trước (cùng kênh hoặc không kênh, theo
+  episode) → `post_writer._series_block`: tập 1 thì dựng bối cảnh + móc tập sau, tập n thì đọc ≤ `SERIES_CONTEXT_EPISODES` (3) tập
+  gần nhất (≤ 900 ký tự/tập), mở bằng câu tóm "Tiếp tục câu chuyện lần trước…", thêm một diễn biến mới, kết móc tập n+1, ghi
+  "Tập n"; kiểu bài mới `serial` ("Câu chuyện nhiều kỳ (tập tiếp theo)", tự chọn khi có series). Trả về `series`, `episode` để
+  lưu. `GET /api/posts/series[?channel_id=]` liệt kê chuỗi (số tập, tập mới nhất). UI: ô "Câu chuyện nhiều kỳ" (datalist các chuỗi
+  đã có) ở trang Bài viết và Bước 5; "Bài đã lưu" hiện "<chuỗi> · Tập n". Test `test_series_episodes_feed_the_next_one`.
+
+- **Kênh: link page + "🔎 Xem & đánh giá kênh"** (25/10): `Channel.link` + `Channel.page_review` (JSON; migration
+  `db.ensure_channel_link_columns`, Postgres dùng JSONB). Form kênh có ô "Link kênh / page" (không bắt buộc; chỉ Facebook / TikTok /
+  Instagram / YouTube / Threads / Zalo, `extract_url` lọc từ cả đoạn dán; đổi link → xoá đánh giá cũ). `POST /api/channels/{id}/review`
+  (`routes/channels.py`) → `services/channel_page.read_page`: lệnh extension **`read_channel`** (bản **0.6.0** — manifest thêm quyền
+  facebook/instagram/youtube/threads/zalo, **phải Reload extension**): mở link ở tab nền Chrome của người dùng (đã đăng nhập FB), chờ
+  tải, cuộn 5 màn để bài gần nhất hiện, đọc `innerText` (bỏ dòng rác "Facebook" lặp + dòng trùng, ≤ 40k ký tự), đóng tab; không có
+  extension mới thì thử `product_link.fetch_page` cho trang công khai, trang đòi đăng nhập → lỗi rõ. `channel_page.review` (LLM
+  `auto_prompt`, `clean_text` trước) → `page_name, followers, summary, score 1–10, criteria[{name,score,note}], strengths, weaknesses,
+  suggestions, house_style, sample_hooks, posts_seen` + `at/url/via`. `channels.channel_block` thêm link + "WHAT THE LIVE PAGE LOOKS
+  LIKE" (tóm tắt, house_style "match this", câu mở đầu thật, 4 gợi ý) → bài viết + brainstorm bám phong cách page thật; kênh chỉ có
+  page_review cũng brainstorm được. UI `ChannelsPage`: thẻ `PageReviewCard` (điểm lớn, thanh điểm từng tiêu chí, điểm mạnh / cần cải
+  thiện, gợi ý, "✍️ Phong cách page đang dùng" + câu mở đầu), tạo kênh có link hoặc đổi link → tự đánh giá nền (`autoReview`, toast).
+  Test `test_channel_page.py` (6).
+
+- **🧹 Dọn lịch sử** (25/10, trang `/history`): `POST /api/history/clear {scope: all|errors|older, days, dry_run}` (`routes/history.py`)
+  xoá dòng `Request` đã xong (`FINISHED_STATUSES`; `errors` = failed/timeout/error/canceled; `older` = tạo trước `days` ngày) — **không bao
+  giờ đụng queued/running** (worker giữ), không xoá Asset/file media, không đổi credit Flow thật (chỉ mất dòng + credit ước tính). Không
+  bảng nào có FK tới `request` nên xoá an toàn. `dry_run` trả số dòng để nút xác nhận ghi "Xoá N dòng". Mốc thời gian phải **aware**
+  (cột `UTCDateTime` từ chối datetime naive làm tham số). UI `ClearHistoryButton` (popover: select phạm vi → đếm → bấm 2 lần mới xoá).
+  Test `test_history_clear.py`.
+
+- **Link tiếp thị liên kết trên sản phẩm + bình luận đầu tiên của bài** (25/10): `Product.aff_link` (link rút gọn Shopee/TikTok
+  affiliate: `s.shopee.vn`, `shp.ee`, `vt.tiktok.com`… — `product_link.AFF_LINK_HOSTS` / `affiliate_link(url)`), `Product.shop` (shop
+  đang hợp tác), `Post.first_comment`; migration `ensure_product_aff_columns` (đã chạy trên Neon). `routes/products.py`: `_norm_link`
+  (nhận cả đoạn share dán nguyên, bỏ `/` cuối), **`_check_duplicate_links` → 409 "Sản phẩm X đã dùng link tiếp thị này rồi"** khi tạo /
+  sửa (chỉ `aff_link` là duy nhất; `link` trang gốc không bắt trùng vì nhiều SP chung trang shop); `GET /api/products/shops` (shop +
+  số SP, gợi ý datalist). "Thêm từ link" dán link aff → `extract_product` lưu luôn `aff_link`. Bài viết: `post_writer._product_block`
+  thêm `Shop:` + dòng `AFFILIATE LINK (goes ONLY in first_comment…)`, system prompt có luật `first_comment` (1 câu thân thiện + link
+  nguyên văn, kiểu "Dạ em gửi các mom tham khảo gối bầu ở đây nha 🥰"), `write_post` **tự nối link nếu AI quên**, không có link aff →
+  bỏ bình luận AI bịa (giữ cái người dùng gõ trong `current`). `POST /api/posts/write` / CRUD trả `first_comment`. UI: form sản phẩm có
+  "🔗 Link tiếp thị liên kết" + "Shop đang hợp tác" (datalist shop đã có), thẻ SP hiện "🏪 shop · 🔗 aff", tìm kiếm theo shop/aff;
+  `PostEditor` hộp "💬 Bình luận đầu tiên" (sửa được, nút Copy riêng — chỉ hiện khi có), lưu ở trang Bài viết + Bước 5; ô chọn sản phẩm
+  trang Bài viết ghi "🔗 có link aff". Test `test_affiliate.py` (5). Thử thật UI: thêm SP có aff + shop, thêm trùng → toast 409, viết bài
+  13 s → bình luận đầu đúng mẫu + link, bài không chứa link và có câu "link ở bình luận". Chưa có: trang riêng "Shop hợp tác" (mới là
+  gợi ý + lọc), chưa đếm bài đã đăng theo shop.
+
 - **Đăng xuất Flow phải bấm 2 lần** (21/10, `SettingsPanel.tsx`): lần đầu nút đổi thành "Bấm lần nữa để đăng xuất…" + "Huỷ",
   tự quay lại sau 5 s / khi đóng hộp; xong có toast (`AccountPanel.handleLogout`). Nút chỉ có ở hộp Cài đặt mở từ ⚙ cạnh tài khoản.
 
@@ -416,6 +661,23 @@ của người dùng (console.neon.tech, secure.backblaze.com).
 - **Máy Linux (23/10) chạy đăng nhập cục bộ, chưa nối Neon** (người dùng chọn): `.env` chưa có `FLOWBOARD_CENTRAL_DB_URL` →
   `storage/accounts.db` cục bộ, dữ liệu cũ (2 sản phẩm, 1 người mẫu) đã dời vào `storage/accounts/akiragosho/`, không đồng bộ với
   máy nhà. Thêm chuỗi Neon sau này thì máy này dùng dữ liệu cloud; dữ liệu cục bộ vẫn nằm ở thư mục đó.
+- **Bài viết Facebook** (24/10): chưa đăng thẳng lên Facebook (chỉ Copy + tải ảnh), chưa có lịch đăng; 2 bài thử (#1 có ảnh AI,
+  #2 gắn clip Cơm cháy) để lại trong "Bài đã lưu" làm mẫu — xoá được. Prompt ảnh chưa lưu vào thư viện prompt.
+- **Kênh** (24/10): kênh thử "Bếp Ăn Vặt Test" đã bị xoá trên UI ngay sau khi làm xong (bài #3–#5 còn, không gắn kênh); chưa có kênh
+  thật nào. Xoá kênh giờ gỡ luôn `quicktool.channel_id` của clip (trước chỉ gỡ bài). Chưa có: brainstorm tự chạy khi gắn clip (chỉ chạy sau khi lưu bài), kịch bản clip chưa đọc định
+  hướng kênh (mới có bài viết), chưa đăng thẳng lên nền tảng.
+- **Lồng tiếng** (24/10): mới thử link YouTube + file upload; **chưa thử link Douyin / TikTok thật** (yt-dlp chung với reference-video
+  đã chạy TikTok trước đây); chưa xoá chữ Trung in sẵn trên video (dùng "Xoá chữ / logo" trước rồi upload file); chế độ "xem lại
+  bản dịch" mới test qua API; chưa chọn được font khác Arial; job đã sống qua restart (job.json) nhưng job đang chạy lúc tắt thì
+  phải làm lại; vùng mờ chỉ là một hình chữ nhật cố định cả clip (chữ gốc đổi chỗ thì phải chọn vùng rộng hơn). Clip thử #7 "Dùng dầu massage
+  đúng cách để ngừa rạn da" (từ YouTube) để lại làm mẫu — xoá được.
+  Bài #7 #8 "Chuyện mình đi bán cơm cháy" (Tập 1–2, test chuỗi bài thật) để lại làm mẫu — xoá được. Clip hàng đợi thử #9 #10 đã xoá.
+- **Dữ liệu trên Neon bị xoá gần hết tối 25/10 (20:41–20:43)**: log `storage/logs/start64.log` ghi các lệnh từ giao diện trên máy nhà:
+  DELETE bài #8→#1, DELETE clip (board) 2, 7, 8, `POST /api/products/bulk-delete`, DELETE người mẫu #6 — không phải do code/test
+  (agent không tự xoá; bộ test chạy trên SQLite tạm; e2e dọn lịch sử chỉ gửi `dry_run`). Hiện board/node/product/post/request = 0 dòng,
+  còn 3 kênh, 43 prompt mẫu, 252 asset, 1 người mẫu. Nếu KHÔNG phải người dùng tự dọn: Neon có khôi phục theo thời điểm (branch restore,
+  console.neon.tech → Restore, chọn trước 25/10 20:41 giờ VN = 13:41 UTC) — cửa sổ lưu lịch sử của gói free ngắn, làm sớm.
+  Bản SQLite sao lưu trước khi lên cloud: `storage/accounts/akiragosho/flowboard.db` (22/10 12:58).
 - Chọn gói Pro/Ultra ngay trong Cài đặt (hiện sửa `.env`).
 - Triển khai cho người khác: **để sau**. Hướng đã bàn: bạn cài local (đóng gói script + agent phục vụ giao diện build sẵn) là rẻ nhất; chạy trên server cần sửa extension (địa chỉ server, `wss`), đăng nhập, và vì hệ thống là một người dùng nên mỗi người một bản. Vercel đơn thuần không chạy được agent.
 - Test trên Windows (20/10): 743 pass khi bỏ 5 file lỗi do môi trường — `test_llm_gemini.py` (CLI `agy`), `test_llm_secrets.py::…0600`
@@ -461,3 +723,23 @@ của người dùng (console.neon.tech, secure.backblaze.com).
 - **23/10** — Người mẫu: nút **⧉ Nhân bản** (bản sao giống 100%, không bắt trùng, mở form sửa bản sao để đổi tên). `POST /api/references/{id}/clone`, `media_id` của `Reference` bỏ unique + migration. Test references/characters 20 pass (thêm test clone + migration), các test liên quan 177 pass (+1 lỗi có sẵn). Thử thật trên UI bằng mẫu tạm (đã xoá). Migration chạy thật trên SQLite máy Linux; **chưa chạy trên Postgres Neon** (máy nhà sẽ chạy khi khởi động).
 - **23/10** — Màn hình đang tải và màn hình trống ở các trang (Sản phẩm, Người mẫu, Prompt, Lịch sử, Clip của tôi) chuyển ra giữa trang, có vòng xoay mới và nút hành động (`quicktool/PageState.tsx`); bỏ CSS `qt-empty-state` cũ. Đã chụp UI thật (trang Sản phẩm tải chậm giả lập, trống; Người mẫu, Clip trống).
 - **23/10** — Prompt đã lưu theo ngành + loại cảnh: Bước 2 "📚 Chọn prompt" lọc/xếp theo ngành của sản phẩm và loại cảnh (hook, chi tiết, demo, chốt đơn…), ngành khác ẩn; "★ Lưu" tự gắn nhãn; trang `/prompts` lọc theo ngành / loại cảnh và sửa nhãn trên thẻ; lưu trùng text thì gộp nhãn. `quicktool/promptTags.ts`. Test prompt library 4 pass; thử thật trên UI với clip + sản phẩm thời trang tạm (đã xoá, đã đặt lại lượt dùng của mẫu). Commit + push gộp nhân bản người mẫu + màn tải/trống + prompt theo ngành.
+- **24/10** — Kéo commit máy cty (`755e864`). Rà tốc độ Quicktool bằng Playwright + đo API: sửa proxy Vite sang `127.0.0.1` (bớt ~200 ms mỗi API), bỏ `pool_pre_ping` (ping khi kết nối ngồi yên), nhớ media thiếu 5 phút ở `/media`, ghép stream-copy có faststart. Test mới `test_db_idle_ping.py`, test media thêm 1; thử thật ghép 2 clip → faststart. Chưa commit.
+- **24/10** — Nhóm "đỡ hỏng" (người dùng chọn): tự thử lại video bị Flow bỏ 1 lần, tự kiểm tra người mẫu đầu lượt tạo tự động, nút "Viết lại kịch bản theo sản phẩm" ở Bước 2 (`POST /api/boards/{id}/tailor`), đọc link lưu thêm chi tiết trang vào ghi chú sản phẩm. Thử thật: viết lại clip tạm (đã xoá), đọc link Shopee Cơm cháy. Test thêm cho cả 4 việc pass. Chưa commit.
+- **24/10** — Bước 5: sắp xếp / bỏ / cắt từng cảnh và "Chữ trên video" (tên sản phẩm, giá, Freeship, bấm giỏ hàng, chữ tự gõ) — `ExportEditor.tsx`, `video_overlays.py`, `video_export(trims, overlays)`. Sửa luôn lỗi mất thay đổi khi PATCH cùng node chồng nhau (`patchNode` xếp hàng). Test ffmpeg thật pass; thử UI trên clip Cơm cháy (không ghép đè). Chưa commit.
+- **24/10** — Trang "Hôm nay" (trang mở đầu: credit, đang chạy, cần xử lý, chưa tải, đang dở) + tải hàng loạt (.zip, tên theo sản phẩm + ngày, đánh dấu đã tải). `TodayPage.tsx`, `routes/exports.py`, summary board gộp 1 truy vấn. Thử thật trên UI + zip clip Cơm cháy. Chưa commit.
+- **24/10** — **Bài viết Facebook**: trang `/posts` (điền mẫu hoặc chat với AI → bài kiếm tương tác, xem trước kiểu Facebook sửa trực tiếp, Copy, tạo ảnh Flow theo ảnh sản phẩm, lưu thư viện) + mục tuỳ chọn ở Bước 5 viết bài kèm clip theo lời thoại. `post_writer.py`, `routes/posts.py`, bảng `Post`, `PostsPage.tsx`, `PostEditor.tsx`, `ClipPost.tsx`. Test `test_posts.py` 5 pass, cả bộ 862 pass (+1 lỗi 0600 có sẵn), `tsc` sạch. Thử thật bằng Playwright: viết bài mẫu + sửa qua chat + lưu, viết bài ở Bước 5 clip Cơm cháy → mở ở /posts, tạo 1 ảnh Flow vuông có ảnh sản phẩm làm mẫu (27 s, đúng sản phẩm). Chưa commit.
+- **24/10** — **Kênh của tôi**: bảng `Channel` + `Post.channel_id` + `quicktool.channel_id`; trang `/channels` (tạo/sửa kênh: nền tảng, ngành, mô tả, khán giả, mục tiêu; thống kê; bài + clip của kênh); **brainstorm** định hướng kênh (tự chạy sau khi lưu bài thứ 3, làm mới sau 5 bài, hoặc bấm tay) → bài viết sau bám PAGE DIRECTION + định dạng theo nền tảng; chọn kênh ở hộp Clip mới, Bước 1, trang Bài viết, Bước 5. `services/channels.py`, `routes/channels.py`, `ChannelsPage.tsx`, `ChannelPicker.tsx`, `ClipChannel.tsx`. Test `test_channels.py` 6 pass, cả bộ 869 pass (+1 lỗi 0600 có sẵn), `tsc` sạch. Thử thật bằng Playwright: tạo kênh → 3 bài → brainstorm (~20 s, định hướng đọc được, còn tự nhận xét "ba bài đầu khá giống nhau") → hộp Clip mới / Bước 1 / Bước 5 nhận kênh; viết thật 1 bài sau brainstorm. Chưa commit.
+- **24/10** — **Lồng tiếng video** (`/tools/dub`): link/file → Whisper (venv pyvideotrans) → dịch LLM → TTS Việt vừa mốc câu → bỏ tiếng gốc (tuỳ chọn giữ nhạc nền bằng spleeter) → phụ đề hộp vàng → clip (board `dub`) có kênh + bài đăng Bước 5. `services/dub.py`, `dub_runner.py`, `routes/dub.py`, `DubPage.tsx`. Test `test_dub.py` 8 pass, cả bộ 877 pass (+1 lỗi 0600), `tsc` sạch. Thử thật: video giả 12,6 s (39 s, Whisper nghe lại đúng 4 câu đúng mốc) và YouTube tiếng Trung 69 s → 26 câu, 128 s; UI Playwright (trang, bảng câu, Bước 5, thư viện). Sửa lỗi track giọng dài gấp đôi (probe_clip với WAV) và chữ tràn khung (WrapStyle). Clip thử giả đã xoá, clip #7 từ YouTube giữ làm mẫu. Chưa commit.
+- **25/10** — Sửa lồng tiếng với link Douyin: dán nguyên đoạn share vẫn nhận (`extract_url`), Douyin tải qua trang chia sẻ mobile thay vì yt-dlp (đòi cookie), báo rõ khi link là tuyển tập dài quá 10 phút; `/api/reference-video/fetch` dùng chung. `services/video_fetch.py`, test 5 pass (+ dub 8). Thử thật: link 合集 của người dùng → đọc được tiêu đề/thời lượng 55 phút trong 2,5 s → từ chối đúng; **chưa thử tải trọn một video Douyin lẻ** (cần link video đơn). Chưa commit.
+- **25/10** — Lồng tiếng: **chỉnh vị trí phụ đề sau khi render** kiểu CapCut (kéo thả / mũi tên / slider / preset, cỡ chữ, kiểu) + **vùng làm mờ nhẹ chữ gốc** (kéo, đổi cỡ, độ mờ, tự tìm bằng OCR) → "Áp dụng" in lại ~27 s nhờ dùng lại giọng; job dub lưu `job.json` sống qua restart. `SubPositioner.tsx`, `dub.py` (`normalize_layout`, `blur_filter`, `video_filter`, `persist`/`load_jobs`). Test dub 12 pass, cả bộ pass, `tsc` sạch. Thử thật trên video Douyin 6:20 của người dùng (clip #8): job tải lại sau restart, in lại với phụ đề ở 72 % + dải mờ 60–67 % → đúng khung hình, rồi trả về bố cục mặc định; Playwright kéo hộp + bấm mũi tên đổi đúng %. Chưa commit.
+- **25/10** — Lồng tiếng: sửa lỗi **nhạc nền còn nguyên giọng gốc** (đảo stem spleeter) và render lại clip #8 của người dùng; **hàng đợi** tối đa 5 video (dán nhiều link một lần, chạy lần lượt, "Gần đây" tự cập nhật); job đã lưu đĩa nên "lưu tạm" bản dịch (chế độ xem lại) cũng giữ. Bài viết: **câu chuyện nhiều kỳ** (`series`/`episode`, kiểu `serial`, AI đọc 3 tập trước, "Tiếp tục câu chuyện lần trước…", `GET /api/posts/series`) ở trang Bài viết + Bước 5. Test dub 14 + posts 7 pass, `tsc` sạch. Chưa commit.
+- **25/10** — Đã làm rồi **bỏ theo yêu cầu**: provider "Claude (API key)" / "Gemini (API key)" cho `run_llm` (SDK anthropic, ô dán key, nút chọn một provider cho tất cả, mục AI provider trong Cài đặt Quicktool). Lý do: Claude CLI đã dùng gói Max của người dùng (không tốn tiền), API key không còn dùng được. Code đã revert hết (`git checkout` các file, xoá `claude_api.py` / `gemini_key.py`, gỡ `anthropic` khỏi venv). Nếu cần lại: mẫu còn trong lịch sử phiên 25/10, làm lại ~1 giờ.
+- **25/10** — Bố trí lại hộp **Cài đặt**: tab bên trái (Tạo ảnh & video / Google Flow / Gemini key / Dữ liệu / Thông tin), các lựa chọn một-trong-nhiều thành select (Model video, Model ảnh, Nguồn tạo ảnh), hướng dẫn dài gập lại, nút tài khoản xếp ngang. `SettingsPanel.tsx`, `ImageProvidersSection.tsx`, `FlowAccountsSection.tsx`, `AccountPoolSection.tsx`, `styles.css`. `tsc` sạch; chụp Playwright cả 5 tab, chọn nguồn ảnh chưa có key → hiện ô key, không tự chuyển. Chưa commit.
+- **25/10** — Kênh có **link page** + **"🔎 Xem & đánh giá kênh"**: extension 0.6.0 `read_channel` đọc trang qua Chrome của người dùng, AI chấm điểm / điểm mạnh / cần sửa / gợi ý / phong cách page thật, bài viết + brainstorm bám theo; tự đánh giá khi tạo kênh có link. `channel_page.py`, `routes/channels.py`, `extension/background.js` + `manifest.json`, `ChannelsPage.tsx`, `channels.css`. Test 18 pass (kênh + bài viết), `tsc` sạch. Thử thật: chữ trang "Bầu bì không khó" (lấy qua Chrome) → AI đánh giá 19 s, đúng ý (danh mục page sai ngành, nội dung lặp, ít CTA; phong cách câu ngắn gọi các ông chồng + 🥰); UI hiện thẻ đánh giá; với extension 0.5.0 báo đúng "cần Reload 0.6.0". **Chưa chạy `read_channel` thật** (người dùng cần Reload extension). Kênh thử #4 đã xoá. Sửa thêm nhãn nút "Xoá key" → "Lưu" khi nguồn ảnh chưa có key. Chưa commit.
+- **25/10** — Trang Lịch sử có **🧹 Dọn lịch sử** (chỉ việc lỗi / cũ hơn 7 / 30 ngày / toàn bộ việc đã xong; đếm trước, bấm 2 lần mới xoá; không đụng việc đang chạy, ảnh/video, credit thật). `routes/history.py` `/clear`, `HistoryPage.tsx`, `history.css`. Test 9 pass, `tsc` sạch; Playwright mở popover đếm đúng (30 lỗi / 43 cũ hơn 7 ngày / 78 tất cả) và **không xoá dòng nào** của người dùng. Chưa commit.
+- **25/10** — Sidebar làm lại cho bắt mắt: nhóm **Công cụ lên trên Thư viện** (`QuicktoolSidebar.tsx`); tên nhóm chữ trắng đậm 14px có gạch cam + đường kẻ; mục 15px, icon nằm trong ô vuông mờ, mục đang chọn nền gradient cam + icon cam + vạch cam bên trái, hover trượt nhẹ (`.qt-nav__*` trong `quicktool.css`). Chưa commit.
+- **25/10** — Link kênh: tự chuẩn hoá (`channel_page.normalize_link`: thêm `https://` khi thiếu, `http` → `https`, lọc URL khỏi đoạn dán, bỏ `/` cuối) ở cả backend lẫn form — người dùng dán `http://tiktok.com/goodbOi95` từng bị từ chối. Test 13 pass. Chưa commit.
+- **25/10** — Kênh: danh mục thành **chọn nhiều, tối đa 3** như tạo Trang Facebook (22 danh mục: bán gì + nói về gì), chip trong form, `channel_block` liệt kê cả 3 cho AI. `Channel.categories` + migration, `routes/channels.py`, `ChannelsPage.tsx`. Test 21 pass, `tsc` sạch. Chưa commit.
+- **25/10** — Tiếp thị liên kết: sản phẩm có "Link tiếp thị liên kết" + "Shop đang hợp tác" (link aff trùng → 409, `GET /api/products/shops`), bài viết cho sản phẩm có aff sinh thêm **bình luận đầu tiên** (câu mời + link, link không vào bài) ở trang Bài viết + Bước 5, hộp sửa/Copy riêng. `test_affiliate.py` 5 pass, cả bộ 904 pass (+1 lỗi 0600 có sẵn), `tsc` sạch; thử thật UI (form, trùng, viết bài 13 s). Phát hiện dữ liệu Neon đã bị xoá qua UI lúc 20:41–20:43 (xem Việc đang dở). Chưa commit.
+- **25/10** — Bài viết: chọn N ảnh → viết xong **tự tạo ảnh luôn** (không cần bấm "Tạo ảnh"), **viết lại bài mới thì bỏ ảnh cũ**, mỗi prompt có thumbnail + "↻ Tạo lại ảnh" (thay ảnh cũ) + "✨ Sửa theo yêu cầu" (AI sửa prompt từ câu tiếng Việt, `POST /api/posts/revise-image`). Áp cả Bước 5. Lỗi Flow không trả ảnh nay báo rõ là bộ lọc nội dung. Test posts 15 + flow_sdk 68 pass, `tsc` sạch; thử thật Playwright (ảnh tự ra 31 s, sửa prompt 9 s, viết lại bỏ ảnh cũ; ~4 ảnh Flow). Agent `start70`. Chưa commit.
+- **25/10** — **Lồng tiếng: engine phụ đề Remotion** (lựa chọn riêng "Công nghệ phụ đề", ffmpeg/ASS giữ nguyên): 3 kiểu (hộp bo góc font Việt + emoji màu, bật sáng từng từ kiểu TikTok, chữ viền), xem trước bằng `<Player>` đúng y bản render trong khung chỉnh vị trí (kéo khung ghost, tua, vùng mờ). `frontend/src/remotion/*`, `frontend/remotion/render.mjs`, `services/dub_remotion.py`, nhánh `_render_remotion` + `engine` trong `dub.py`, route `/nosub`. Test `test_dub_remotion.py` 5 + dub 13 pass, `tsc` sạch; thử thật: job 12,6 s xong 101 s, in lại 18 s, khung hình đúng (karaoke, emoji, hộp vàng + dải mờ); Playwright kéo khung ghost → 65 %. Clip thử #11 "Remotion test" để lại làm mẫu — xoá được. Chưa commit.

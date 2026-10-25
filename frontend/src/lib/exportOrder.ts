@@ -17,6 +17,12 @@ export interface ExportSource {
 const CLIP_TYPES = new Set(["video", "export", "merge"]);
 
 export function exportSources(rfId: string, nodes: FlowNode[], edges: Edge[]): ExportSource[] {
+  // Step 5 can reorder clips and leave some out; those picks live on the
+  // export node and win over the canvas position.
+  const exportNode = nodes.find((n) => n.id === rfId);
+  const order = Array.isArray(exportNode?.data.clipOrder) ? exportNode!.data.clipOrder : [];
+  const skip = new Set(Array.isArray(exportNode?.data.clipSkip) ? exportNode!.data.clipSkip : []);
+  const rank = (id: string) => { const i = order.indexOf(id); return i < 0 ? Number.MAX_SAFE_INTEGER : i; };
   const upstream = edges
     .filter((e) => e.target === rfId)
     .map((e) => nodes.find((n) => n.id === e.source))
@@ -25,7 +31,8 @@ export function exportSources(rfId: string, nodes: FlowNode[], edges: Edge[]): E
   const seen = new Set<string>();
   return upstream
     .filter((n) => (seen.has(n.id) ? false : (seen.add(n.id), true)))
-    .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x)
+    .filter((n) => !skip.has(n.id))
+    .sort((a, b) => rank(a.id) - rank(b.id) || a.position.y - b.position.y || a.position.x - b.position.x)
     .map((n) => ({
       rfId: n.id,
       shortId: n.data.shortId,
