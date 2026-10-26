@@ -21,6 +21,9 @@ from flowboard import accounts
 from flowboard.routes import exports as exports_route
 from flowboard.routes import posts as posts_route
 from flowboard.routes import channels as channels_route
+from flowboard.routes import schedule as schedule_route
+from flowboard.routes import bundles as bundles_route
+from flowboard.routes import swipes as swipes_route
 from flowboard.routes import dub as dub_route
 from flowboard.services.account_pool import account_pool
 from flowboard.routes import history as history_route
@@ -142,6 +145,9 @@ async def lifespan(app: FastAPI):
     worker = get_worker()
     ws_task = asyncio.create_task(run_ws_server(), name="ext-ws-server")
     worker_task = asyncio.create_task(worker.start(), name="request-worker")
+    # Posting calendar: publishes due "auto" slots to the channel's Facebook Page.
+    from flowboard.services import scheduler
+    schedule_task = asyncio.create_task(scheduler.run_loop(), name="schedule-loop")
     logger.info("flowboard agent started (ws:%d + worker)", EXTENSION_WS_PORT)
     try:
         yield
@@ -151,9 +157,9 @@ async def lifespan(app: FastAPI):
             await asyncio.wait_for(worker.drain(), timeout=5.0)
         except asyncio.TimeoutError:
             logger.warning("worker drain timed out")
-        for t in (ws_task, worker_task):
+        for t in (ws_task, worker_task, schedule_task):
             t.cancel()
-        await asyncio.gather(ws_task, worker_task, return_exceptions=True)
+        await asyncio.gather(ws_task, worker_task, schedule_task, return_exceptions=True)
         logger.info("flowboard agent stopped")
 
 
@@ -218,6 +224,9 @@ app.include_router(history_route.router)
 app.include_router(exports_route.router)
 app.include_router(posts_route.router)
 app.include_router(channels_route.router)
+app.include_router(schedule_route.router)
+app.include_router(bundles_route.router)
+app.include_router(swipes_route.router)
 app.include_router(dub_route.router)
 app.include_router(prompt_library_route.router)
 app.include_router(video_clean_route.router)

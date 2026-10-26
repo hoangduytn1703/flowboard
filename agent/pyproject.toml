@@ -13,6 +13,9 @@ dependencies = [
     "httpx>=0.27",
     "edge-tts>=7.0",
     "pillow>=10.0",
+    # Gemini sparkle removal on generated images (services/watermark.py).
+    "numpy>=1.26",
+    "opencv-python-headless>=4.9",
     # Account data in the cloud (phase 1.5 B): Postgres (Neon) + S3 bucket (B2).
     "psycopg[binary]>=3.2",
     "boto3>=1.35",

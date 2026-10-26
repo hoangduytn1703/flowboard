@@ -3,6 +3,7 @@ import { VOICE_GROUPS, patchNode, refinePromptApi, tailorBoardApi } from "../../
 import { toast } from "../../store/toast";
 import { PromptLibraryButtons } from "../PromptLibraryButtons";
 import { sceneTagOf } from "../promptTags";
+import { clipHooks, type HookVariant } from "../../api/posts";
 import { useBoardStore, type FlowNode } from "../../store/board";
 import { useQuicktoolStore } from "../../store/quicktool";
 import type { ClipRoles } from "../roles";
@@ -68,6 +69,20 @@ export function StepScript({ roles, category, productId = null, boardId = null }
   // Live word count per voice line (keyed by node id) while the user types;
   // the textarea itself is uncontrolled.
   const [voiceWords, setVoiceWords] = useState<Record<string, number>>({});
+  // "✨ Câu mở đầu khác" for scene 1's voice line (A/B the hook).
+  const [hooks, setHooks] = useState<HookVariant[] | null>(null);
+  const [hooksBusy, setHooksBusy] = useState(false);
+  async function loadHooks() {
+    if (boardId === null) return;
+    setHooksBusy(true);
+    try {
+      setHooks((await clipHooks(boardId, 5)).variants);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setHooksBusy(false);
+    }
+  }
 
   function voiceCount(n: FlowNode): number {
     return voiceWords[n.id] ?? wordCount(typeof n.data.narration === "string" ? n.data.narration : "");
@@ -237,11 +252,36 @@ export function StepScript({ roles, category, productId = null, boardId = null }
                       <span>
                         🎙 Lời thoại
                         <small className="qt-voice-count">{voiceCount(s.video)}/{MAX_VOICE_WORDS} từ</small>
+                        {s.index === 1 && (
+                          <button type="button" className="qt-link" disabled={hooksBusy} onClick={() => void loadHooks()}
+                                  title="AI viết 5 câu mở đầu khác nhau cho cảnh 1 — câu đầu quyết định người xem có ở lại không">
+                            {hooksBusy ? "đang nghĩ…" : "✨ 5 câu mở đầu khác"}
+                          </button>
+                        )}
                         <VoicePick node={s.video} />
                         <PromptLibraryButtons kind="narration" context={ctx}
                           getText={() => (useBoardStore.getState().nodes.find((n) => n.id === s.video!.id)?.data.narration as string) ?? ""}
                           onApply={(t) => { saveField(s.video!, "narration", t); setVoiceWords((p) => ({ ...p, [s.video!.id]: wordCount(t) })); }} />
                       </span>
+                      {s.index === 1 && hooks && (
+                        <div className="qt-hooks qt-hooks--scene">
+                          <div className="qt-hooks__head">
+                            <strong>✨ Câu mở đầu cho cảnh 1</strong>
+                            <small>Chọn một để thay lời thoại cảnh 1 (lời cũ ghi đè — sửa tay lại được).</small>
+                            <button type="button" className="qt-link" onClick={() => setHooks(null)}>đóng</button>
+                          </div>
+                          <ul>
+                            {hooks.map((v, i) => (
+                              <li key={i}>
+                                <span className="qt-hooks__label">{v.label}</span>
+                                <span className="qt-hooks__line">{v.line}</span>
+                                <button type="button" className="qt-btn qt-btn--small qt-btn--accent"
+                                        onClick={() => { saveField(s.video!, "narration", v.line); setVoiceWords((p) => ({ ...p, [s.video!.id]: wordCount(v.line) })); setHooks(null); toast.success("Đã thay lời thoại cảnh 1."); }}>Dùng</button>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
                       <textarea
                         id={`qt-nar-${s.video.id}`}
                         className="qt-textarea"

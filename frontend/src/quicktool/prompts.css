@@ -93,7 +93,7 @@
 .qt-plib-card__kind--image { color: #60a5fa; }
 .qt-plib-card__kind--video { color: #fbbf24; }
 .qt-plib-card__kind--narration { color: #4ade80; }
-.qt-plib-card .qt-link--danger { margin-left: auto; }
+
 
 /* Group filter + "sample" badge on the /prompts page. */
 .qt-plib-tags { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -166,3 +166,4 @@
   background: transparent; border: 1px dashed var(--border); border-radius: 999px; cursor: pointer;
 }
 .qt-plib-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.qt-plib-card__del { margin-left: auto; padding: 4px 10px; font-size: 13px; }

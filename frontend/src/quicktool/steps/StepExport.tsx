@@ -9,6 +9,7 @@ import { hasMedia, isBusy, type ClipRoles } from "../roles";
 import "../voices.css";
 import { useToastOn } from "../../store/toast";
 import { ClipArranger, OverlayEditor } from "./ExportEditor";
+import { ScheduleDialog } from "../schedule/ScheduleDialog";
 
 // ── voice preview ───────────────────────────────────────────────────────────
 // Only one sample plays at a time, whichever button started it.
@@ -103,7 +104,8 @@ function DialogueLine({ text, tags }: { text: string; tags: string[] }) {
 }
 
 /** Step 5 — voice options, the clip list, the final file. */
-export function StepExport({ roles, productName = "", price = "" }: { roles: ClipRoles; productName?: string; price?: string }) {
+export function StepExport({ roles, productName = "", price = "", channelId = null }: { roles: ClipRoles; productName?: string; price?: string; channelId?: number | null }) {
+  const [scheduling, setScheduling] = useState(false);
   const ensureExportNode = useQuicktoolStore((s) => s.ensureExportNode);
   const exportClip = useQuicktoolStore((s) => s.exportClip);
   const writeNarrations = useQuicktoolStore((s) => s.writeNarrations);
@@ -430,6 +432,12 @@ export function StepExport({ roles, productName = "", price = "" }: { roles: Cli
                onClick={() => { if (boardId !== null) patchBoardData(boardId, { quicktool: { downloaded_at: Date.now() } }).catch(() => {}); }}>
               ⬇ Tải về đăng TikTok
             </a>
+            <button type="button" className="qt-btn" style={{ marginLeft: 8 }} onClick={() => setScheduling(true)}
+                    title="Chọn giờ đăng lên kênh; kênh có Facebook Page kết nối thì tự đăng">📅 Lên lịch đăng</button>
+            {scheduling && boardId !== null && (
+              <ScheduleDialog target={{ kind: "clip", boardId, channelId, title: boardName || `Clip #${boardId}` }}
+                              onClose={() => setScheduling(false)} onSaved={() => setScheduling(false)} />
+            )}
           </>
         ) : (
           <div className="qt-result qt-result--empty">

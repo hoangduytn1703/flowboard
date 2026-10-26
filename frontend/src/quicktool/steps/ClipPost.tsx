@@ -9,6 +9,7 @@ import { brainstormIfDue } from "../../api/channels";
 import { toast } from "../../store/toast";
 import { ChannelPicker } from "../channels/ChannelPicker";
 import { PostEditor } from "../posts/PostEditor";
+import { ScheduleDialog } from "../schedule/ScheduleDialog";
 import "../posts.css";
 
 /**
@@ -36,6 +37,7 @@ export function ClipPost({ boardId, productId, channelId: clipChannel = null }: 
   const [busy, setBusy] = useState(false);
   const [change, setChange] = useState("");
   const [productMedia, setProductMedia] = useState<string[]>([]);
+  const [scheduling, setScheduling] = useState(false);
 
   // Only when opened: nothing to load for sellers who never use it.
   useEffect(() => {
@@ -118,7 +120,7 @@ export function ClipPost({ boardId, productId, channelId: clipChannel = null }: 
         <div className="qt-clip-post__body">
           <div className="qt-clip-post__ask">
             <p className="qt-card__hint">AI đọc lời thoại của clip và thông tin sản phẩm để viết caption / bài đăng kèm video — link shop để ở bình luận đầu.</p>
-            <ChannelPicker value={channelId} onChange={setChannelId} label="Đăng lên kênh" />
+            <ChannelPicker value={channelId} onChange={setChannelId} label="Đăng lên kênh" required />
             <label className="qt-field">
               <span>Kiểu bài</span>
               <select value={kind} onChange={(e) => setKind(e.target.value)}>
@@ -141,13 +143,15 @@ export function ClipPost({ boardId, productId, channelId: clipChannel = null }: 
                 {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n} ảnh</option>)}
               </select>
             </label>
-            <button type="button" className="qt-btn qt-btn--accent" disabled={busy} onClick={() => void write()}>
+            <button type="button" className="qt-btn qt-btn--accent" disabled={busy || !channelId} onClick={() => void write()}
+                    title={channelId ? undefined : "Chọn kênh / page trước"}>
               {busy ? "AI đang viết…" : draft ? "✍️ Viết lại" : "✍️ Viết bài cho clip"}
             </button>
+            {!channelId && <small className="qt-posts__need">Chọn kênh / page trước — AI viết theo giọng và định hướng của page đó.</small>}
             {draft && (
               <form className="qt-posts__send" onSubmit={(e) => { e.preventDefault(); if (change.trim()) void write(change.trim()); }}>
                 <textarea className="qt-textarea" value={change} onChange={(e) => setChange(e.target.value)} placeholder="Sửa bài: VD ngắn hơn, thêm câu hỏi cuối" />
-                <button type="submit" className="qt-btn" disabled={busy || !change.trim()}>Sửa</button>
+                <button type="submit" className="qt-btn" disabled={busy || !channelId || !change.trim()}>Sửa</button>
               </form>
             )}
           </div>
@@ -156,11 +160,16 @@ export function ClipPost({ boardId, productId, channelId: clipChannel = null }: 
               <>
                 <PostEditor draft={draft} onChange={(d) => { setDraft(d); setDirty(true); }}
                             images={images} onImages={(ids) => { setImages(ids); setDirty(true); }} productMedia={productMedia}
-                            autoMakeToken={autoMake} />
+                            autoMakeToken={autoMake} hookContext={{ channelId, productId }} />
                 <div className="qt-post__actions" style={{ marginTop: 10 }}>
                   <button type="button" className="qt-btn qt-btn--small" disabled={!dirty && postId !== null} onClick={() => void save()}>💾 {postId ? "Lưu thay đổi" : "Lưu bài"}</button>
                   <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={() => void openInPosts()}>Mở ở trang Bài viết →</button>
+                  <button type="button" className="qt-btn qt-btn--small" onClick={() => setScheduling(true)} title="Lên lịch đăng clip (kèm caption này) lên kênh">📅 Lên lịch đăng clip</button>
                 </div>
+                {scheduling && (
+                  <ScheduleDialog target={{ kind: "clip", boardId, channelId, title: draft.title || draft.body.split("\n")[0] || `Clip #${boardId}` }}
+                                  onClose={() => setScheduling(false)} onSaved={() => setScheduling(false)} />
+                )}
               </>
             ) : (
               <div className="qt-empty">Bấm “Viết bài cho clip” — bài viết hiện ở đây, sửa trực tiếp được, rồi Copy để đăng cùng video.</div>

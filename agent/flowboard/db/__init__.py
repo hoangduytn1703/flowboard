@@ -9,7 +9,7 @@ from .session import init_db as _init_db_tables
 __all__ = ["engine", "get_session", "init_db", "current_engine", "set_engine", "make_engine", "has_engine", "NoActiveAccount",
            "ensure_reference_meta_column", "ensure_product_gender_column", "ensure_reference_media_id_not_unique",
            "ensure_post_channel_column", "ensure_post_series_columns", "ensure_channel_link_columns",
-           "ensure_channel_categories_column", "ensure_product_aff_columns"]
+           "ensure_channel_categories_column", "ensure_product_aff_columns", "ensure_channel_facebook_columns", "ensure_post_video_column"]
 
 
 def ensure_reference_meta_column(db_engine: Engine | None = None) -> bool:
@@ -152,6 +152,37 @@ def ensure_channel_categories_column(db_engine: Engine | None = None) -> bool:
         return True
 
 
+def ensure_post_video_column(db_engine: Engine | None = None) -> bool:
+    """Add ``post.video`` (a Flow video's media id posted instead of the images)."""
+    db_engine = db_engine or current_engine()
+    with db_engine.connect() as conn:
+        insp = inspect(conn)
+        if not insp.has_table("post"):
+            return False
+        if "video" in {c["name"] for c in insp.get_columns("post")}:
+            return False
+        conn.exec_driver_sql("ALTER TABLE post ADD COLUMN video VARCHAR DEFAULT ''")
+        conn.commit()
+        return True
+
+
+def ensure_channel_facebook_columns(db_engine: Engine | None = None) -> bool:
+    """Add ``channel.fb_page_id`` / ``channel.fb_page_name`` (connected Facebook Page)."""
+    db_engine = db_engine or current_engine()
+    with db_engine.connect() as conn:
+        insp = inspect(conn)
+        if not insp.has_table("channel"):
+            return False
+        cols = {c["name"] for c in insp.get_columns("channel")}
+        added = False
+        for col in ("fb_page_id", "fb_page_name"):
+            if col not in cols:
+                conn.exec_driver_sql(f"ALTER TABLE channel ADD COLUMN {col} VARCHAR DEFAULT ''")
+                added = True
+        conn.commit()
+        return added
+
+
 def ensure_product_aff_columns(db_engine: Engine | None = None) -> bool:
     """Add ``product.aff_link`` / ``product.shop`` and ``post.first_comment``
     to a DB from before affiliate links."""
@@ -186,3 +217,5 @@ def init_db(target: Engine | None = None) -> None:
     ensure_channel_link_columns(target)
     ensure_channel_categories_column(target)
     ensure_product_aff_columns(target)
+    ensure_channel_facebook_columns(target)
+    ensure_post_video_column(target)

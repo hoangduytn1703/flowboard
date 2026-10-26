@@ -10,6 +10,9 @@ import { useSettingsStore } from "../store/settings";
  * brand block, "Clip của tôi" (its page has the "+ Clip mới" button that opens the dialog that picks
  * the clip kind), the libraries, and the switch to the node canvas underneath.
  */
+/** Canvas is hidden from the menu for now (the route /canvas still works); set true to show it again. */
+const CANVAS_IN_MENU = false;
+
 export function QuicktoolSidebar() {
   const setUiMode = useSettingsStore((s) => s.setUiMode);
   const boardId = useBoardStore((s) => s.boardId);
@@ -42,9 +45,17 @@ export function QuicktoolSidebar() {
                 title="Dán link video nước ngoài → bỏ tiếng gốc, đọc lại bằng giọng Việt, in phụ đề hộp vàng, lưu thành clip">
           <span className="qt-nav__icon">🎙</span> Lồng tiếng video
         </button>
+        <button type="button" className={`qt-nav__item${is("/schedule") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/schedule")}
+                title="Lịch tuần: bài viết và clip đăng lúc nào, giờ vàng theo nền tảng, nhắc đến giờ, tự đăng lên Facebook Page">
+          <span className="qt-nav__icon">📅</span> Lịch đăng
+        </button>
         <button type="button" className={`qt-nav__item${is("/posts") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/posts")}
                 title="Viết bài đăng Facebook kiếm tương tác: điền mẫu hoặc chat với AI, tạo ảnh kèm">
           <span className="qt-nav__icon">✍️</span> Bài viết Facebook
+        </button>
+        <button type="button" className={`qt-nav__item${is("/swipes") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/swipes")}
+                title="Dán link bài / video đang hot → AI chỉ ra vì sao nó chạy, rồi viết bài / clip của bạn theo cấu trúc đó">
+          <span className="qt-nav__icon">🔥</span> Mẫu đang hot
         </button>
         <button type="button" className={`qt-nav__item${is("/tools/clean") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/tools/clean")}
                 title="Xoá logo, watermark, phụ đề cứng khỏi video có sẵn">
@@ -73,10 +84,12 @@ export function QuicktoolSidebar() {
         </button>
 
         <div className="qt-nav__group">Nâng cao</div>
-        <button type="button" className="qt-nav__item" onClick={() => { setUiMode("canvas"); navigate(boardId !== null ? `/canvas/${boardId}` : "/canvas"); }}
-                title="Bảng node kéo thả — chỉnh từng node, nối dây, chat AI">
-          <span className="qt-nav__icon">🧩</span> Canvas (kéo thả node)
-        </button>
+        {CANVAS_IN_MENU && (
+          <button type="button" className="qt-nav__item" onClick={() => { setUiMode("canvas"); navigate(boardId !== null ? `/canvas/${boardId}` : "/canvas"); }}
+                  title="Bảng node kéo thả — chỉnh từng node, nối dây, chat AI">
+            <span className="qt-nav__icon">🧩</span> Canvas (kéo thả node)
+          </button>
+        )}
         <button type="button" className={`qt-nav__item${is("/settings") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/settings")}
                 title="Model ảnh/video, AI provider, Flow project">
           <span className="qt-nav__icon">⚙</span> Cài đặt

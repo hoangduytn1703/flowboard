@@ -211,7 +211,7 @@ export function PromptsPage() {
               <div className="qt-plib-card__head">
                 <span className={`qt-plib-card__kind qt-plib-card__kind--${p.kind}`}>{PROMPT_KIND_LABEL[p.kind]}</span>
                 {p.tags.includes(SAMPLE_TAG) && <span className="qt-plib-card__sample" title="Prompt mẫu có sẵn — sửa hay xoá tuỳ ý">Mẫu</span>}
-                <button type="button" className="qt-link qt-link--danger" onClick={() => void remove(p)}>Xoá</button>
+                <button type="button" className="qt-btn qt-btn--small qt-btn--danger qt-plib-card__del" onClick={() => void remove(p)}>🗑 Xoá</button>
               </div>
               <button type="button" className="qt-plib-card__title" onClick={() => void rename(p)} title={`${p.title} — bấm để đổi tên`}>{p.title} ✎</button>
               <Labels tags={p.tags} onChange={(t) => void setTags(p, t)} />

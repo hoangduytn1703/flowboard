@@ -10,6 +10,7 @@ import { GeminiKeysSection } from "./GeminiKeysSection";
 import { FlowAccountsSection } from "./settings/FlowAccountsSection";
 import { AccountPoolSection } from "./settings/AccountPoolSection";
 import { ImageProvidersSection } from "./settings/ImageProvidersSection";
+import { GeminiMarkSection } from "./settings/GeminiMarkSection";
 import { DataFolderSection } from "./settings/DataFolderSection";
 import {
   getPinnedFlowProject,
@@ -406,6 +407,7 @@ export function SettingsPanel({
                 </div>
 
                 <ImageProvidersSection />
+                <GeminiMarkSection />
               </>
             )}
 

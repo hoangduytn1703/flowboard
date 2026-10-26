@@ -238,6 +238,8 @@ interface BoardState {
   boards: Board[];
   /** True once the board list has been read at least once (even if empty). */
   boardsLoaded: boolean;
+  /** Re-read the board list (a clip made on the agent side — content pack, swipe, dub — is not in it yet). */
+  refreshBoards(): Promise<Board[]>;
   nodes: FlowNode[];
   edges: Edge[];
   loading: boolean;
@@ -318,6 +320,12 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   edges: [],
   loading: false,
   error: null,
+
+  async refreshBoards() {
+    const boards = await listBoards();
+    set({ boards, boardsLoaded: true });
+    return boards;
+  },
 
   async loadInitialBoard() {
     set({ loading: true, error: null });

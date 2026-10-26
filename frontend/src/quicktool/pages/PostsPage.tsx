@@ -1,19 +1,40 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { listProducts, mediaUrl, type Product } from "../../api/client";
 import {
-  deletePost, getPostOptions, listPosts, listSeries, savePost, splitTags, updatePost, writePost,
+  deletePost, getPostOptions, listPosts, listSeries, savePost, splitTags, updatePost, writePost, writePostBatch,
   type ChatTurn, type PostBrief, type PostDraft, type PostOptions, type PostSeries, type SavedPost,
 } from "../../api/posts";
 import { brainstormIfDue } from "../../api/channels";
 import { toast } from "../../store/toast";
-import { ChannelPicker } from "../channels/ChannelPicker";
+import { ChannelPicker, useChannels } from "../channels/ChannelPicker";
 import { PageLoading } from "../PageState";
 import { copyPost, PostEditor } from "../posts/PostEditor";
+import { ScheduleDialog, type ScheduleTarget } from "../schedule/ScheduleDialog";
+import { createSlot, publishSlot, slotLabel, suggestSlots } from "../../api/schedule";
 import "../posts.css";
 
 const EMPTY: PostDraft = { title: "", body: "", hashtags: [], image_prompts: [], first_comment: "" };
 const QUICK_ASKS = ["Ngắn gọn hơn", "Hài hước hơn", "Câu mở đầu giật hơn", "Thêm câu hỏi cuối bài", "Viết lại kiểu khác", "Thêm 1 ảnh minh hoạ"];
+/** One line under "Kiểu bài": what the AI will write. */
+const KIND_HINT: Record<string, string> = {
+  discussion: "Đặt một câu hỏi / tình huống quen để mọi người vào bình luận.",
+  review: "Kể thật về sản phẩm: điểm nổi bật, mẹo dùng, hợp với ai.",
+  story: "Một khoảnh khắc đời thường, sản phẩm xuất hiện tự nhiên trong đó.",
+  tips: "3–5 mẹo / bước dễ làm theo — người đọc hay lưu và chia sẻ.",
+  compare: "So các lựa chọn (size, vị, phiên bản…) rồi hỏi người đọc chọn gì.",
+  sale: "Nêu lợi ích rồi ưu đãi (chỉ khi có), cách đặt hàng.",
+  minigame: "Trò chơi nhỏ (đoán, bình chọn bằng emoji) kéo bình luận.",
+  serial: "Viết tiếp tập sau của một câu chuyện nhiều kỳ — AI đọc các tập trước.",
+};
+
+/** Saved posts per page: four cards a row × 3 in the grid, ten rows in the list. */
+const GRID_PER_PAGE = 12;
+const LIST_PER_PAGE = 10;
+const VIEW_KEY = "flowboard.posts.view";
+function loadView(): "grid" | "list" {
+  try { return window.localStorage.getItem(VIEW_KEY) === "list" ? "list" : "grid"; } catch { return "grid"; }
+}
 
 function draftOf(p: SavedPost): PostDraft {
   return { title: p.title ?? "", body: p.body, hashtags: splitTags(p.hashtags), image_prompts: p.image_prompts, first_comment: p.first_comment ?? "" };
@@ -36,7 +57,10 @@ export function PostsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [saved, setSaved] = useState<SavedPost[]>([]);
   const [tab, setTab] = useState<"form" | "chat">("form");
-  const [brief, setBrief] = useState<PostBrief>({ kind: "discussion", tone: "friendly", length: "medium", cta: "comment", images: 0 });
+  // No call to action by default: a post simply to be read.
+  const [brief, setBrief] = useState<PostBrief>({
+    kind: "discussion", tone: "friendly", length: "medium", cta: "none", hook: "auto", format: "auto", emoji: "some", boosts: [], images: 0,
+  });
   const [productId, setProductId] = useState<number | null>(null);
   const [channelId, setChannelId] = useState<number | null>(() => Number(params.get("channel")) || null);
   // Story series: pick an existing one (datalist) or type a new name; the next episode number comes from the server.
@@ -46,6 +70,9 @@ export function PostsPage() {
   const [boardId, setBoardId] = useState<number | null>(null);
   const [draft, setDraft] = useState<PostDraft>(EMPTY);
   const [images, setImages] = useState<string[]>([]);
+  // "🎬 Video kèm": posted instead of the images; bumped token = make it after a fresh write.
+  const [video, setVideo] = useState("");
+  const [autoVideo, setAutoVideo] = useState(0);
   // bumped after a fresh write that asked for images → PostEditor renders them at once
   const [autoMake, setAutoMake] = useState(0);
   const [postId, setPostId] = useState<number | null>(null);
@@ -54,6 +81,25 @@ export function PostsPage() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const [view, setView] = useState<"grid" | "list">(loadView);
+  const [schedule, setSchedule] = useState<ScheduleTarget | null>(null);
+  const [publishing, setPublishing] = useState(false);
+  // Images still rendering: publishing now would go out without them.
+  const [imagesBusy, setImagesBusy] = useState(false);
+  // "Số bài": write 1–5 posts at once. The batch just written stays listed on the right,
+  // each with its own schedule button; `slots` remembers what got scheduled here.
+  const [count, setCount] = useState(1);
+  // "＋ Loạt truyện mới…" picked in the series select → type a name.
+  const [newSeries, setNewSeries] = useState(false);
+  const [nextBusy, setNextBusy] = useState<string | null>(null);
+  const [batch, setBatch] = useState<number[]>([]);
+  const [slots, setSlots] = useState<Record<number, string>>({});
+  const [batchBusy, setBatchBusy] = useState(false);
+  // Published from this page in this session (link to the live post).
+  const [published, setPublished] = useState<{ at: string; link: string } | null>(null);
+  const navigate = useNavigate();
+  const [page, setPage] = useState(1);
+  const [channels] = useChannels();
   const chatEnd = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -79,9 +125,13 @@ export function PostsPage() {
   const product = useMemo(() => products.find((p) => p.id === productId) ?? null, [products, productId]);
   const hasDraft = draft.body.trim().length > 0;
 
-  function open(p: SavedPost) {
+  /** Open a saved post in the editor; `keepForm` leaves the form on the left as it is (browsing a batch). */
+  function open(p: SavedPost, keepForm = false) {
+    setPublished(null);
     setDraft(draftOf(p));
     setImages(p.images);
+    setVideo(p.video ?? "");
+    setAutoVideo(0);
     setAutoMake(0); // a saved post: never auto-render its prompts
     setPostId(p.id);
     setProductId(p.product_id);
@@ -89,15 +139,18 @@ export function PostsPage() {
     setSeries(p.series || "");
     setEpisode(p.episode || 0);
     setBoardId(p.board_id);
-    if (p.brief && Object.keys(p.brief).length) setBrief((b) => ({ ...b, ...p.brief }));
+    if (!keepForm && p.brief && Object.keys(p.brief).length) setBrief((b) => ({ ...b, ...p.brief }));
     setChat([]);
     setDirty(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function startNew() {
+    setPublished(null);
     setDraft(EMPTY);
     setImages([]);
+    setVideo("");
+    setAutoVideo(0);
     setAutoMake(0);
     setPostId(null);
     setBoardId(null);
@@ -108,13 +161,15 @@ export function PostsPage() {
 
   async function run(msg?: string) {
     const text = msg?.trim();
-    if (busy) return;
+    // A post is always for a page: without one the AI writes off-topic and spends tokens for nothing.
+    if (busy || !channelId) return;
+    if (!text && count > 1) { await runBatch(); return; }
     setBusy(true);
     const history = chat;
     if (text) setChat((c) => [...c, { role: "user", text }]);
     try {
       const res = await writePost({
-        brief, product_id: productId, board_id: boardId, channel_id: channelId, series: series.trim() || null,
+        brief, product_id: productId, board_id: boardId, channel_id: channelId, series: brief.kind === "serial" ? series.trim() || null : null,
         current: text && hasDraft ? draft : null,
         message: text || undefined,
         history: text ? history : [],
@@ -123,7 +178,9 @@ export function PostsPage() {
       if (!text) {
         // a new post: the previous post's pictures do not belong to it
         setImages([]);
+        setVideo("");
         if ((brief.images ?? 0) > 0 && res.post.image_prompts.length) setAutoMake((n) => n + 1);
+        if (brief.with_video) setAutoVideo((n) => n + 1);
       }
       if (res.product_id && !productId) setProductId(res.product_id);
       if (res.channel_id && !channelId) setChannelId(res.channel_id);
@@ -141,13 +198,98 @@ export function PostsPage() {
     }
   }
 
-  async function save() {
-    if (!hasDraft) return;
+  /** Write `count` posts at once (episodes when it is a story), all saved, the first one opened. */
+  async function runBatch() {
+    setBusy(true);
+    try {
+      const res = await writePostBatch({
+        brief, n: count, product_id: productId, board_id: boardId, channel_id: channelId,
+        series: brief.kind === "serial" ? series.trim() || null : null,
+      });
+      setSaved((list) => [...res.posts, ...list.filter((p) => !res.posts.some((x) => x.id === p.id))]);
+      setBatch(res.posts.map((p) => p.id));
+      setSlots({});
+      if (res.posts[0]) open(res.posts[0], true);
+      if (res.series) void listSeries().then(setAllSeries).catch(() => undefined);
+      const what = res.series ? `${res.posts.length} tập liên tiếp của "${res.series}"` : `${res.posts.length} bài, mỗi bài một kiểu mở đầu`;
+      if (res.errors.length) toast.warning(`Đã viết ${what}. Lỗi: ${res.errors.join("; ")}`);
+      else toast.success(`Đã viết và lưu ${what}. Bấm 📅 dưới từng bài để lên lịch, hoặc "Xếp lịch cả loạt".`, { duration: 8000 });
+      void brainstormIfDue(channelId);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** "✍️ Viết tập tiếp theo" of a saved series, in one click: same channel, product and settings as
+   * its last episode; the AI reads the episodes before. Saved at once (then it can be scheduled). */
+  async function writeNext(name: string) {
+    const group = seriesGroups.find((g) => g.name === name);
+    const last = group?.last;
+    const ch = group?.channelId ?? channelId;
+    if (!ch) { toast.warning("Loạt truyện này chưa gắn kênh — chọn kênh ở bước 1 rồi bấm lại."); return; }
+    const nextBrief: PostBrief = { ...brief, ...(last?.brief ?? {}), kind: "serial" };
+    setNextBusy(name);
+    try {
+      const res = await writePostBatch({ brief: nextBrief, n: 1, channel_id: ch, product_id: last?.product_id ?? productId, series: name });
+      const post = res.posts[0];
+      if (!post) throw new Error("AI chưa viết được tập mới.");
+      setSaved((list) => [post, ...list]);
+      setChannelId(ch);
+      setBrief(nextBrief);
+      setSeries(name);
+      setNewSeries(false);
+      setBatch([]);
+      open(post, true);
+      if ((nextBrief.images ?? 0) > 0 && post.image_prompts.length) setAutoMake((n) => n + 1);
+      if (nextBrief.with_video) setAutoVideo((n) => n + 1);
+      void listSeries().then(setAllSeries).catch(() => undefined);
+      toast.success(`Đã viết và lưu Tập ${post.episode} của "${name}". Sửa nếu cần rồi Đăng ngay / Lên lịch.`, { duration: 8000 });
+      void brainstormIfDue(ch);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setNextBusy(null);
+    }
+  }
+
+  /** One slot per day for the whole batch, at each day's first free golden hour (episodes stay in order). */
+  async function scheduleBatch() {
+    if (!channelId || !batch.length) return;
+    setBatchBusy(true);
+    try {
+      const sug = await suggestSlots(channelId, 30);
+      const days: string[] = [];
+      const seen = new Set<string>();
+      for (const s of sug) {
+        const day = new Date(s.at).toDateString();
+        if (!seen.has(day)) { seen.add(day); days.push(s.at); }
+      }
+      const todo = batch.filter((id) => !slots[id]);
+      if (days.length < todo.length) { toast.warning("Không đủ giờ trống trong 7 ngày tới — lên lịch từng bài bằng nút 📅."); return; }
+      const auto = !!channels.find((c) => c.id === channelId)?.fb_connected;
+      const done: Record<number, string> = {};
+      for (let i = 0; i < todo.length; i++) {
+        const slot = await createSlot({ kind: "post", post_id: todo[i], channel_id: channelId, at: days[i], auto });
+        done[todo[i]] = slotLabel(slot.scheduled_at);
+      }
+      setSlots((m) => ({ ...m, ...done }));
+      toast.success(`Đã xếp lịch ${todo.length} bài, mỗi ngày một bài${auto ? " — tự đăng lên Page đúng giờ" : " — tool nhắc ở Hôm nay"}.`, { duration: 8000 });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBatchBusy(false);
+    }
+  }
+
+  async function save(quiet = false): Promise<number | null> {
+    if (!hasDraft) return null;
     const input = {
       kind: brief.kind ?? null, title: draft.title || draft.body.split("\n")[0].slice(0, 60),
       body: draft.body, hashtags: draft.hashtags.join(" "), first_comment: draft.first_comment ?? "", product_id: productId, board_id: boardId,
-      channel_id: channelId, series: series.trim(), episode: series.trim() ? episode : 0,
-      images, image_prompts: draft.image_prompts, brief,
+      channel_id: channelId, series: brief.kind === "serial" ? series.trim() : "", episode: brief.kind === "serial" && series.trim() ? episode : 0,
+      images, video, image_prompts: draft.image_prompts, brief,
     };
     try {
       const isNew = postId === null;
@@ -156,9 +298,81 @@ export function PostsPage() {
       setSaved((list) => [row, ...list.filter((p) => p.id !== row.id)]);
       setDirty(false);
       if (row.series) void listSeries().then(setAllSeries).catch(() => undefined);
-      toast.success(isNew ? "Đã lưu vào Bài đã lưu." : "Đã lưu thay đổi.");
+      if (!quiet) toast.success(isNew ? "Đã lưu vào Bài đã lưu." : "Đã lưu thay đổi.");
       // A new post on a channel may be the one that makes its brainstorm due.
       if (isNew) void brainstormIfDue(channelId);
+      return row.id;
+    } catch (e) {
+      toast.error(`Lưu không được: ${e instanceof Error ? e.message : e}`);
+      return null;
+    }
+  }
+
+  /** A picture made / removed on a post that is already saved is saved at once (images only;
+   * text edits stay unsaved) — a scheduled slot reads the post's images when it publishes. */
+  async function changeImages(ids: string[]) {
+    setImages(ids);
+    if (postId === null) { setDirty(true); return; }
+    try {
+      const row = await updatePost(postId, { images: ids });
+      setSaved((list) => list.map((p) => (p.id === row.id ? { ...p, images: row.images } : p)));
+    } catch {
+      setDirty(true);
+    }
+  }
+
+  /** Same as `changeImages` for the post's video ("" = back to the images). */
+  async function changeVideo(id: string) {
+    setVideo(id);
+    if (postId === null) { setDirty(true); return; }
+    try {
+      await updatePost(postId, { video: id });
+      setSaved((list) => list.map((p) => (p.id === postId ? { ...p, video: id } : p)));
+    } catch {
+      setDirty(true);
+    }
+  }
+
+  /** "🚀 Đăng ngay": save, then publish through the channel's Facebook Page (a slot
+   * at "now" on the calendar, so it shows in Lịch đăng too). */
+  async function publishNow() {
+    const ch = channels.find((c) => c.id === channelId);
+    if (!ch?.fb_connected) return;
+    if (!window.confirm(`Đăng bài này lên Page "${ch.fb_page_name || ch.name}" ngay bây giờ?${images.length ? ` (kèm ${images.length} ảnh)` : ""}${draft.first_comment ? " Bình luận đầu sẽ được thêm sau khi đăng." : ""}`)) return;
+    setPublishing(true);
+    try {
+      const id = dirty || postId === null ? await save(true) : postId;
+      if (!id) return;
+      const slot = await createSlot({ kind: "post", post_id: id, channel_id: ch.id, at: new Date().toISOString(), note: "Đăng ngay từ trang Bài viết" });
+      const out = await publishSlot(slot.id);
+      if (out.status === "posted") {
+        setPublished({ at: out.posted_at ?? new Date().toISOString(), link: out.result?.permalink ?? "" });
+        toast.success(`Đã đăng lên Page "${ch.fb_page_name || ch.name}".`, { duration: 9000 });
+      } else {
+        toast.error(out.result?.error ?? "Đăng không được.");
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPublishing(false);
+    }
+  }
+
+  /** The draft as shown becomes a new post (an A/B variant); the open post keeps what was saved. */
+  async function saveAsCopy() {
+    if (!hasDraft) return;
+    try {
+      const row = await savePost({
+        kind: brief.kind ?? null, title: `${draft.title || draft.body.split("\n")[0].slice(0, 50)} (bản B)`,
+        body: draft.body, hashtags: draft.hashtags.join(" "), first_comment: draft.first_comment ?? "", product_id: productId, board_id: boardId,
+        channel_id: channelId, series: "", episode: 0, images, video, image_prompts: draft.image_prompts, brief,
+      });
+      setSaved((list) => [row, ...list]);
+      setPostId(row.id);
+      setSeries("");
+      setEpisode(0);
+      setDirty(false);
+      toast.success(`Đã lưu thành bài mới #${row.id} ("bản B"). Bài gốc vẫn còn — đăng thử cả hai rồi so lượt xem.`);
     } catch (e) {
       toast.error(`Lưu không được: ${e instanceof Error ? e.message : e}`);
     }
@@ -177,8 +391,88 @@ export function PostsPage() {
     }
   }
 
+  function chooseView(v: "grid" | "list") {
+    setView(v);
+    setPage(1);
+    try { window.localStorage.setItem(VIEW_KEY, v); } catch { /* private mode */ }
+  }
+
+  // "Bài đã lưu": each story series is its own group (episodes in order), the other posts below, paged.
+  const seriesGroups = useMemo(() => {
+    const by = new Map<string, SavedPost[]>();
+    for (const p of saved) if (p.series) by.set(p.series, [...(by.get(p.series) ?? []), p]);
+    return [...by.entries()].map(([name, list]) => {
+      const eps = [...list].sort((a, b) => (a.episode || 0) - (b.episode || 0));
+      const last = eps[eps.length - 1];
+      const latest = [...list].sort((a, b) => (b.updated_at ?? b.created_at ?? "").localeCompare(a.updated_at ?? a.created_at ?? ""))[0];
+      return { name, eps, last, latestAt: latest.updated_at ?? latest.created_at ?? "", channelId: last.channel_id, nextEpisode: Math.max(...eps.map((e) => e.episode || 0)) + 1 };
+    }).sort((a, b) => b.latestAt.localeCompare(a.latestAt));
+  }, [saved]);
   if (!options) return <PageLoading text="Đang mở trang bài viết…" />;
   const set = (patch: PostBrief) => setBrief((b) => ({ ...b, ...patch }));
+  const toggleBoost = (key: string) => set({ boosts: (brief.boosts ?? []).includes(key) ? (brief.boosts ?? []).filter((b) => b !== key) : [...(brief.boosts ?? []), key] });
+  const noChannel = !channelId;
+  const optLabel = (list: { key: string; label: string }[], key: string | undefined, fallback: string) => list.find((o) => o.key === key)?.label ?? fallback;
+  const moreSummary = [
+    optLabel(options.tones, brief.tone, "Thân thiện").split(",")[0],
+    optLabel(options.lengths, brief.length, "Vừa"),
+    brief.hook && brief.hook !== "auto" ? optLabel(options.hooks, brief.hook, "") : null,
+    brief.format && brief.format !== "auto" ? optLabel(options.formats, brief.format, "") : null,
+    (brief.boosts ?? []).length ? `+${(brief.boosts ?? []).length} cách kéo tương tác` : null,
+    brief.audience?.trim() ? `cho ${brief.audience.trim()}` : null,
+  ].filter(Boolean).join(" · ");
+  const channel = channels.find((c) => c.id === channelId) ?? null;
+  const loose = saved.filter((p) => !p.series);
+  const perPage = view === "grid" ? GRID_PER_PAGE : LIST_PER_PAGE;
+  const pages = Math.max(1, Math.ceil(loose.length / perPage));
+  const current = Math.min(page, pages);
+  const shownSaved = loose.slice((current - 1) * perPage, current * perPage);
+  const metaOf = (p: SavedPost) => [
+    p.series ? `${p.series} · Tập ${p.episode}` : options.kinds.find((k) => k.key === p.kind)?.label ?? "Bài viết",
+    channels.find((c) => c.id === p.channel_id)?.name,
+    p.board_id ? `clip #${p.board_id}` : null,
+    when(p.updated_at ?? p.created_at),
+  ].filter(Boolean).join(" · ");
+
+  const titleOf = (p: SavedPost) => p.title || p.body.split("\n")[0];
+  const delBtn = (p: SavedPost, cls = "") => (confirmDelete === p.id ? (
+    <button type="button" className={`qt-btn qt-btn--small qt-btn--danger ${cls}`} onClick={() => void remove(p.id)} onBlur={() => setConfirmDelete(null)}>Xoá thật?</button>
+  ) : (
+    <button type="button" className={`qt-btn qt-btn--small qt-btn--danger ${cls}`} onClick={() => setConfirmDelete(p.id)}>🗑 Xoá</button>
+  ));
+  const savedCard = (p: SavedPost) => (
+    <article key={p.id} className={`qt-posts__card${p.id === postId ? " is-open" : ""}`}>
+      <button type="button" className="qt-posts__cardthumb" onClick={() => open(p)} title="Mở bài này">
+        {p.images[0] ? <img src={mediaUrl(p.images[0])} alt="" loading="lazy" /> : <span>{p.video ? "🎬" : "📝"}</span>}
+        {p.series && <em className="qt-posts__ep">Tập {p.episode}</em>}
+        {p.video ? <em>🎬 video</em> : p.images.length > 1 && <em>+{p.images.length - 1} ảnh</em>}
+      </button>
+      <div className="qt-posts__cardbody">
+        <strong title={titleOf(p)}>{titleOf(p)}</strong>
+        <small>{metaOf(p)}</small>
+        <p>{p.body}</p>
+      </div>
+      <div className="qt-posts__cardactions">
+        <button type="button" className="qt-btn qt-btn--small qt-btn--accent" onClick={() => open(p)}>Mở</button>
+        <button type="button" className="qt-btn qt-btn--small" onClick={() => void copyPost(draftOf(p))}>📋 Copy</button>
+        <button type="button" className="qt-btn qt-btn--small" title="Lên lịch đăng" onClick={() => setSchedule({ kind: "post", postId: p.id, channelId: p.channel_id, title: titleOf(p) })}>📅</button>
+        {delBtn(p, "qt-posts__del")}
+      </div>
+    </article>
+  );
+  const savedRow = (p: SavedPost) => (
+    <li key={p.id} className={p.id === postId ? "is-open" : ""}>
+      {p.images[0] ? <img src={mediaUrl(p.images[0])} alt="" loading="lazy" /> : <span className="qt-posts__noimg">{p.video ? "🎬" : "📝"}</span>}
+      <div className="qt-posts__savedtext">
+        <strong>{titleOf(p)}</strong>
+        <small>{metaOf(p)}</small>
+      </div>
+      <button type="button" className="qt-btn qt-btn--small" onClick={() => void copyPost(draftOf(p))}>📋 Copy</button>
+      <button type="button" className="qt-btn qt-btn--small" title="Lên lịch đăng" onClick={() => setSchedule({ kind: "post", postId: p.id, channelId: p.channel_id, title: titleOf(p) })}>📅</button>
+      <button type="button" className="qt-btn qt-btn--small qt-btn--accent" onClick={() => open(p)}>Mở</button>
+      {delBtn(p)}
+    </li>
+  );
 
   return (
     <>
@@ -193,95 +487,184 @@ export function PostsPage() {
               <button type="button" role="tab" aria-selected={tab === "chat"} className={tab === "chat" ? "is-on" : ""} onClick={() => setTab("chat")}>💬 Chat với AI</button>
             </div>
 
-            <ChannelPicker value={channelId} onChange={setChannelId} />
-            <label className="qt-field">
-              <span>Sản phẩm <small>(không bắt buộc)</small></span>
-              <select value={productId ?? ""} onChange={(e) => setProductId(e.target.value ? Number(e.target.value) : null)}>
-                <option value="">— Không gắn sản phẩm —</option>
-                {products.map((p) => <option key={p.id} value={p.id}>{p.name}{p.price ? ` · ${p.price}` : ""}{p.aff_link ? " · 🔗 có link aff" : ""}</option>)}
-              </select>
-            </label>
-            {product?.media_ids[0] && (
-              <div className="qt-posts__product">
-                <img src={mediaUrl(product.media_ids[0])} alt="" />
-                <span>AI chỉ dùng thông tin đã lưu của sản phẩm này (giá, điểm nổi bật, mô tả trang) — không bịa thêm.</span>
-              </div>
-            )}
-            {boardId && <p className="qt-card__hint">Bài này đi kèm clip #{boardId} — AI đọc lời thoại của clip. <button type="button" className="qt-link" onClick={() => setBoardId(null)}>Bỏ gắn clip</button></p>}
+            <div className="qt-posts__block">
+              <div className="qt-posts__blockhead"><span className="qt-posts__num">1</span> Đăng ở đâu</div>
+              <ChannelPicker value={channelId} onChange={setChannelId} required label="Kênh / page" />
+              <label className="qt-field">
+                <span>Sản phẩm <small>(không bắt buộc)</small></span>
+                <select value={productId ?? ""} onChange={(e) => setProductId(e.target.value ? Number(e.target.value) : null)}>
+                  <option value="">— Không gắn sản phẩm —</option>
+                  {products.map((p) => <option key={p.id} value={p.id}>{p.name}{p.price ? ` · ${p.price}` : ""}{p.aff_link ? " · 🔗 có link aff" : ""}</option>)}
+                </select>
+              </label>
+              {product?.media_ids[0] && (
+                <div className="qt-posts__product">
+                  <img src={mediaUrl(product.media_ids[0])} alt="" />
+                  <span>AI chỉ dùng thông tin đã lưu của sản phẩm (giá, điểm nổi bật, mô tả){product.aff_link ? " — link aff vào bình luận đầu" : ""}.</span>
+                </div>
+              )}
+              {boardId && <p className="qt-card__hint">Bài này đi kèm clip #{boardId} — AI đọc lời thoại của clip. <button type="button" className="qt-link" onClick={() => setBoardId(null)}>Bỏ gắn clip</button></p>}
+            </div>
 
             {tab === "form" ? (
               <div className="qt-posts__form">
-                <div className="qt-field">
-                  <span>Kiểu bài</span>
-                  <div className="qt-posts__chips">
-                    {options.kinds.map((k) => (
-                      <button key={k.key} type="button" className={`qt-chip${brief.kind === k.key ? " qt-chip--on" : ""}`} onClick={() => set({ kind: k.key })}>{k.label}</button>
-                    ))}
+                <div className="qt-posts__block">
+                  <div className="qt-posts__blockhead"><span className="qt-posts__num">2</span> Viết gì</div>
+                  <label className="qt-field">
+                    <span>Kiểu bài</span>
+                    <select value={brief.kind} onChange={(e) => set({ kind: e.target.value })}>
+                      {options.kinds.map((k) => <option key={k.key} value={k.key}>{k.label}</option>)}
+                    </select>
+                    {brief.kind && KIND_HINT[brief.kind] && <small className="qt-card__hint">{KIND_HINT[brief.kind]}</small>}
+                  </label>
+                  {brief.kind === "serial" && (() => {
+                    const known = allSeries.find((x) => x.name === series.trim());
+                    return (
+                      <div className="qt-field">
+                        <span>Loạt truyện</span>
+                        <select value={newSeries ? "__new" : known ? known.name : ""}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  if (v === "__new") { setNewSeries(true); setSeries(""); return; }
+                                  setNewSeries(false);
+                                  setSeries(v);
+                                  const row = allSeries.find((x) => x.name === v);
+                                  if (row?.channel_id && !channelId) setChannelId(row.channel_id);
+                                }}>
+                          <option value="">— Chọn loạt truyện —</option>
+                          {allSeries.map((x) => <option key={x.name} value={x.name}>{x.name} · {x.episodes} tập</option>)}
+                          <option value="__new">＋ Loạt truyện mới…</option>
+                        </select>
+                        {newSeries && (
+                          <input value={series} onChange={(e) => setSeries(e.target.value)} autoFocus placeholder="Tên loạt mới, VD: Những ngày đầu có thai" />
+                        )}
+                        {known ? (
+                          <div className="qt-posts__seriesnext">
+                            <small className="qt-card__hint">Đã có {known.episodes} tập (mới nhất: Tập {known.last_episode}). AI đọc các tập trước rồi viết tiếp.</small>
+                            <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={!!nextBusy || busy} onClick={() => void writeNext(known.name)}>
+                              {nextBusy === known.name ? "AI đang viết…" : `⚡ Viết nhanh Tập ${known.last_episode + 1}`}
+                            </button>
+                          </div>
+                        ) : series.trim() ? (
+                          <small className="qt-card__hint">Loạt mới — AI viết Tập 1 và kết bằng câu gợi tập sau.</small>
+                        ) : null}
+                        {episode > 0 && postId !== null && series.trim() && <small className="qt-card__hint">Bài đang mở là Tập {episode}.</small>}
+                      </div>
+                    );
+                  })()}
+                  <label className="qt-field">
+                    <span>Ý chính / yêu cầu <small>(không bắt buộc)</small></span>
+                    <textarea className="qt-textarea" rows={3} value={brief.topic ?? ""} onChange={(e) => set({ topic: e.target.value })}
+                              placeholder="VD: hỏi mọi người thích cơm cháy cay hay không cay; nhắc đang freeship" />
+                  </label>
+                  <div className="qt-posts__row">
+                    <label className="qt-field">
+                      <span>Số bài</span>
+                      <select value={count} onChange={(e) => setCount(Number(e.target.value))}>
+                        {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n === 1 ? "1 bài" : brief.kind === "serial" ? `${n} tập nối tiếp` : `${n} bài khác nhau`}</option>)}
+                      </select>
+                    </label>
+                    <label className="qt-field">
+                      <span>Kèm theo</span>
+                      <select value={brief.with_video ? "video" : String(brief.images ?? 0)}
+                              onChange={(e) => (e.target.value === "video" ? set({ with_video: true, images: 1 }) : set({ with_video: false, images: Number(e.target.value) }))}>
+                        <option value="0">Không cần ảnh</option>
+                        {Array.from({ length: options.max_images }, (_, i) => i + 1).map((n) => <option key={n} value={String(n)}>{n} ảnh (AI tạo)</option>)}
+                        <option value="video">🎬 1 video 8 giây (~12 credit)</option>
+                      </select>
+                    </label>
                   </div>
-                </div>
-                <label className="qt-field">
-                  <span>Câu chuyện nhiều kỳ <small>(không bắt buộc — AI nhớ các tập trước)</small></span>
-                  <input list="qt-series-list" value={series} onChange={(e) => { setSeries(e.target.value); if (e.target.value.trim() && !brief.kind?.startsWith("serial")) set({ kind: "serial" }); }}
-                         placeholder="Đặt tên chuỗi, VD: Chuyện nhà chuối — lần sau chọn lại để viết tập tiếp" />
-                  <datalist id="qt-series-list">
-                    {allSeries.map((s) => <option key={s.name} value={s.name}>{`${s.episodes} tập · mới nhất: Tập ${s.last_episode}`}</option>)}
-                  </datalist>
-                  {series.trim() && (
+                  {count > 1 && (
                     <small className="qt-card__hint">
-                      {(() => { const s = allSeries.find((x) => x.name === series.trim()); return s
-                        ? `Đã có ${s.episodes} tập — AI sẽ đọc các tập trước và viết Tập ${s.last_episode + 1}, mở đầu kiểu "Tiếp tục câu chuyện lần trước…".`
-                        : "Chuỗi mới — AI viết Tập 1 và kết bằng câu gợi tập sau."; })()}
-                      {episode > 0 && postId !== null ? ` Bài này là Tập ${episode}.` : ""}
+                      {brief.kind === "serial"
+                        ? `AI viết ${count} tập liền nhau (tập sau đọc tập trước), lưu hết — rồi lên lịch mỗi ngày một tập.`
+                        : `AI viết ${count} bài cùng lúc, mỗi bài một kiểu mở đầu / góc khác, lưu hết — rồi lên lịch từng bài.`}
+                      {(brief.images ?? 0) > 0 ? " Ảnh của từng bài tạo sau, khi mở bài đó." : ""}
                     </small>
                   )}
-                </label>
-                <label className="qt-field">
-                  <span>Ý chính / yêu cầu <small>(không bắt buộc)</small></span>
-                  <textarea className="qt-textarea" value={brief.topic ?? ""} onChange={(e) => set({ topic: e.target.value })}
-                            placeholder="VD: hỏi mọi người thích cơm cháy cay hay không cay; nhắc đang freeship" />
-                </label>
-                <label className="qt-field">
-                  <span>Viết cho ai <small>(không bắt buộc)</small></span>
-                  <input value={brief.audience ?? ""} onChange={(e) => set({ audience: e.target.value })} placeholder="VD: mẹ bỉm, dân văn phòng, sinh viên" />
-                </label>
-                <div className="qt-posts__row">
-                  <label className="qt-field">
-                    <span>Giọng</span>
-                    <select value={brief.tone} onChange={(e) => set({ tone: e.target.value })}>
-                      {options.tones.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
-                    </select>
-                  </label>
-                  <label className="qt-field">
-                    <span>Độ dài</span>
-                    <select value={brief.length} onChange={(e) => set({ length: e.target.value })}>
-                      {options.lengths.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
-                    </select>
-                  </label>
-                </div>
-                <div className="qt-posts__row">
                   <label className="qt-field">
                     <span>Kêu gọi</span>
                     <select value={brief.cta} onChange={(e) => set({ cta: e.target.value })}>
                       {options.ctas.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
                     </select>
                   </label>
-                  <label className="qt-field">
-                    <span>Ảnh kèm</span>
-                    <select value={brief.images ?? 0} onChange={(e) => set({ images: Number(e.target.value) })}>
-                      <option value={0}>Không cần ảnh</option>
-                      {Array.from({ length: options.max_images }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n} ảnh</option>)}
-                    </select>
-                  </label>
+                  {brief.with_video && count === 1 && (
+                    <small className="qt-card__hint">AI vẽ 1 ảnh theo bài rồi cho chuyển động thành video 8 giây (Flow Omni, ~12 credit + 1 ảnh) — bài đăng dạng video.</small>
+                  )}
+                  {(brief.images ?? 0) > 0 && (
+                    <label className="qt-field">
+                      <span>{brief.with_video ? "Muốn video thế nào" : "Muốn ảnh thế nào"} <small>(không bắt buộc)</small></span>
+                      <input value={brief.image_wish ?? ""} onChange={(e) => set({ image_wish: e.target.value })} placeholder="VD: đĩa cơm cháy trên bàn gỗ, ánh nắng sáng" />
+                    </label>
+                  )}
                 </div>
-                {(brief.images ?? 0) > 0 && (
+
+                <details className="qt-posts__block qt-posts__more">
+                  <summary>
+                    <span className="qt-posts__blockhead"><span className="qt-posts__num">3</span> Tuỳ chỉnh thêm <small>(không bắt buộc)</small></span>
+                    <span className="qt-posts__moresum">{moreSummary}</span>
+                  </summary>
                   <label className="qt-field">
-                    <span>Muốn ảnh thế nào <small>(không bắt buộc)</small></span>
-                    <input value={brief.image_wish ?? ""} onChange={(e) => set({ image_wish: e.target.value })} placeholder="VD: đĩa cơm cháy trên bàn gỗ, ánh nắng sáng" />
+                    <span>Viết cho ai</span>
+                    <input value={brief.audience ?? ""} onChange={(e) => set({ audience: e.target.value })} placeholder="VD: mẹ bỉm, dân văn phòng, sinh viên" />
                   </label>
-                )}
-                <button type="button" className="qt-btn qt-btn--accent qt-btn--big" disabled={busy} onClick={() => void run()}>
-                  {busy ? "AI đang viết…" : hasDraft ? "✍️ Viết lại bài mới" : "✍️ Viết bài"}
-                </button>
+                  <div className="qt-posts__row">
+                    <label className="qt-field">
+                      <span>Giọng</span>
+                      <select value={brief.tone} onChange={(e) => set({ tone: e.target.value })}>
+                        {options.tones.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+                      </select>
+                    </label>
+                    <label className="qt-field">
+                      <span>Độ dài</span>
+                      <select value={brief.length} onChange={(e) => set({ length: e.target.value })}>
+                        {options.lengths.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="qt-posts__row qt-posts__row--3">
+                    <label className="qt-field">
+                      <span>Câu mở đầu</span>
+                      <select value={brief.hook ?? "auto"} onChange={(e) => set({ hook: e.target.value })}>
+                        {options.hooks.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+                      </select>
+                    </label>
+                    <label className="qt-field">
+                      <span>Trình bày</span>
+                      <select value={brief.format ?? "auto"} onChange={(e) => set({ format: e.target.value })}>
+                        {options.formats.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+                      </select>
+                    </label>
+                    <label className="qt-field">
+                      <span>Emoji</span>
+                      <select value={brief.emoji ?? "some"} onChange={(e) => set({ emoji: e.target.value })}>
+                        {options.emojis.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="qt-field">
+                    <span>🚀 Kéo thêm tương tác <small>(chọn nhiều)</small></span>
+                    <div className="qt-posts__chips" role="group" aria-label="Thêm cách kéo tương tác">
+                      {options.boosts.map((b) => {
+                        const on = (brief.boosts ?? []).includes(b.key);
+                        return (
+                          <button key={b.key} type="button" className={`qt-chip qt-chip--sm${on ? " qt-chip--on" : ""}`} aria-pressed={on} onClick={() => toggleBoost(b.key)}>
+                            {on ? "✓ " : "+ "}{b.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <small className="qt-card__hint">AI không dùng câu kiểu “comment CÓ”, “tag 3 người” — Facebook giảm tiếp cận các bài đó.</small>
+                  </div>
+                </details>
+
+                <div className="qt-posts__go">
+                  <button type="button" className="qt-btn qt-btn--accent qt-btn--big" disabled={busy || noChannel} onClick={() => void run()}
+                          title={noChannel ? "Chọn kênh / page trước" : undefined}>
+                    {busy ? (count > 1 ? `AI đang viết ${count} bài…` : "AI đang viết…") : count > 1 ? `✍️ Viết ${count} ${brief.kind === "serial" ? "tập" : "bài"}` : hasDraft ? "✍️ Viết lại bài mới" : "✍️ Viết bài"}
+                  </button>
+                  {noChannel && <small className="qt-posts__need">Chọn <strong>Kênh / page</strong> ở bước 1 trước — AI viết theo giọng của page đó.</small>}
+                </div>
               </div>
             ) : (
               <div className="qt-posts__chat">
@@ -300,62 +683,181 @@ export function PostsPage() {
                 </div>
                 {hasDraft && (
                   <div className="qt-posts__chips">
-                    {QUICK_ASKS.map((q) => <button key={q} type="button" className="qt-chip" disabled={busy} onClick={() => void run(q)}>{q}</button>)}
+                    {QUICK_ASKS.map((q) => <button key={q} type="button" className="qt-chip" disabled={busy || noChannel} onClick={() => void run(q)}>{q}</button>)}
                   </div>
                 )}
                 <form className="qt-posts__send" onSubmit={(e) => { e.preventDefault(); if (message.trim()) void run(message); }}>
                   <textarea className="qt-textarea" value={message} onChange={(e) => setMessage(e.target.value)} placeholder={hasDraft ? "Muốn sửa gì? VD: thêm ý freeship, bỏ emoji" : "Cần bài viết gì?"}
                             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (message.trim()) void run(message); } }} />
-                  <button type="submit" className="qt-btn qt-btn--accent" disabled={busy || !message.trim()}>Gửi</button>
+                  <button type="submit" className="qt-btn qt-btn--accent" disabled={busy || noChannel || !message.trim()}
+                          title={noChannel ? "Chọn kênh / page trước" : undefined}>Gửi</button>
                 </form>
+                {noChannel && <small className="qt-posts__need">Chọn <strong>Kênh / page</strong> ở trên trước khi chat với AI.</small>}
               </div>
             )}
           </section>
 
           <section className="qt-card qt-posts__right">
-            <div className="qt-card__head">
-              <h3 className="qt-card__title">{postId ? `Bài #${postId}` : "Bài viết"}{dirty && hasDraft ? " ·  chưa lưu" : ""}</h3>
-              <div className="qt-posts__headbtns">
-                {hasDraft && <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={startNew}>+ Bài mới</button>}
-                <button type="button" className="qt-btn qt-btn--small" disabled={!hasDraft || (!dirty && postId !== null)} onClick={() => void save()}>💾 {postId ? "Lưu thay đổi" : "Lưu bài"}</button>
+            <div className="qt-card__head qt-posts__righthead">
+              <div className="qt-posts__titlebox">
+                <h3 className="qt-card__title">{postId ? `Bài #${postId}` : "Bài viết mới"}</h3>
+                {hasDraft && (
+                  published ? <span className="qt-posts__status qt-posts__status--live">● Đã đăng</span>
+                    : dirty || postId === null ? <span className="qt-posts__status qt-posts__status--dirty">● Chưa lưu</span>
+                      : <span className="qt-posts__status qt-posts__status--saved">✓ Đã lưu</span>
+                )}
               </div>
+              {hasDraft && (
+                <div className="qt-posts__headbtns">
+                  <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={startNew}>＋ Bài mới</button>
+                  {postId !== null && (
+                    <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" title="Lưu nội dung đang hiện thành một bài mới (bản A/B), bài gốc giữ nguyên" onClick={() => void saveAsCopy()}>⧉ Bản sao</button>
+                  )}
+                  <button type="button" className="qt-btn qt-btn--small" disabled={!dirty && postId !== null} onClick={() => void save()}>💾 Lưu</button>
+                </div>
+              )}
             </div>
+            {batch.length > 1 && (
+              <div className="qt-batch">
+                <div className="qt-batch__head">
+                  <strong>📚 Loạt {batch.length} bài vừa viết</strong>
+                  <span className="qt-card__hint">Bấm một bài để mở / sửa bên dưới.</span>
+                  <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={batchBusy || batch.every((id) => slots[id])} onClick={() => void scheduleBatch()}>
+                    {batchBusy ? "Đang xếp lịch…" : "📅 Xếp lịch cả loạt (mỗi ngày 1 bài)"}
+                  </button>
+                  <button type="button" className="qt-link" onClick={() => setBatch([])}>ẩn</button>
+                </div>
+                <ol className="qt-batch__list">
+                  {batch.map((id, i) => {
+                    const p = saved.find((x) => x.id === id);
+                    if (!p) return null;
+                    return (
+                      <li key={id} className={id === postId ? "is-open" : ""}>
+                        <button type="button" className="qt-batch__open" onClick={() => open(p, true)}>
+                          <span className="qt-batch__no">{p.series ? `Tập ${p.episode}` : `Bài ${i + 1}`}</span>
+                          <strong>{p.title || p.body.split("\n")[0]}</strong>
+                          <small>{p.body.replace(/\s+/g, " ").slice(0, 110)}…</small>
+                        </button>
+                        <div className="qt-batch__actions">
+                          {slots[id]
+                            ? <span className="qt-batch__slot">📅 {slots[id]}</span>
+                            : <button type="button" className="qt-btn qt-btn--small" onClick={() => setSchedule({ kind: "post", postId: id, channelId: p.channel_id, title: p.title || p.body.split("\n")[0] })}>📅 Lên lịch</button>}
+                          <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={() => void copyPost(draftOf(p))}>📋</button>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </div>
+            )}
             {hasDraft ? (
-              <PostEditor draft={draft} onChange={(d) => { setDraft(d); setDirty(true); }}
-                          images={images} onImages={(ids) => { setImages(ids); setDirty(true); }}
-                          productMedia={product?.media_ids ?? []} autoMakeToken={autoMake} />
+              <>
+                <PostEditor draft={draft} onChange={(d) => { setDraft(d); setDirty(true); }}
+                            images={images} onImages={(ids) => void changeImages(ids)}
+                            productMedia={product?.media_ids ?? []} autoMakeToken={autoMake}
+                            hookContext={{ channelId, productId }} hideCopy onBusyChange={setImagesBusy}
+                            video={video} onVideo={(id) => void changeVideo(id)} autoVideoToken={autoVideo} />
+                <div className="qt-posts__publish">
+                  <div className="qt-posts__publishwhere">
+                    {channel ? (
+                      channel.fb_connected
+                        ? <>Đăng lên <strong>{channel.fb_page_name || channel.name}</strong> <span className="qt-posts__fbok">⚡ tự đăng được</span></>
+                        : <>Kênh <strong>{channel.name}</strong> chưa kết nối Page — copy rồi đăng tay, hoặc <button type="button" className="qt-link" onClick={() => navigate(`/channels?id=${channel.id}`)}>kết nối Page</button></>
+                    ) : <>Chọn kênh ở bước 1 để đăng.</>}
+                    {video ? <> · kèm <strong>video</strong></> : images.length > 0 && <> · kèm <strong>{images.length} ảnh</strong></>}
+                    {imagesBusy && <span className="qt-posts__wait"> · 🎨 đang tạo ảnh — đợi xong rồi đăng</span>}
+                    {published && <> · đã đăng {new Date(published.at).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}{published.link && <> — <a href={published.link} target="_blank" rel="noreferrer">xem bài ↗</a></>}</>}
+                  </div>
+                  <div className="qt-posts__publishbtns">
+                    <button type="button" className="qt-btn" disabled={!draft.body.trim()} onClick={() => void copyPost(draft)}>📋 Copy</button>
+                    <button type="button" className="qt-btn" disabled={!channel || publishing || imagesBusy}
+                            title={imagesBusy ? "Đợi ảnh tạo xong rồi lên lịch" : undefined}
+                            onClick={async () => { const id = dirty || postId === null ? await save(true) : postId; if (id) setSchedule({ kind: "post", postId: id, channelId, title: draft.title || draft.body.split("\n")[0] }); }}>📅 Lên lịch</button>
+                    {channel?.fb_connected && (
+                      <button type="button" className="qt-btn qt-btn--accent" disabled={publishing || imagesBusy || !draft.body.trim()} onClick={() => void publishNow()}
+                              title={imagesBusy ? "Đợi ảnh tạo xong rồi đăng" : undefined}>
+                        {publishing ? "Đang đăng…" : imagesBusy ? "⏳ Đợi ảnh…" : published ? "🚀 Đăng lại" : "🚀 Đăng ngay"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </>
             ) : (
-              <div className="qt-empty">Điền mẫu hoặc chat với AI bên trái — bài viết sẽ hiện ở đây, sửa trực tiếp được, rồi bấm Copy để đăng Facebook.</div>
+              <PageEmptyHint />
             )}
           </section>
         </div>
 
         <section className="qt-card">
           <div className="qt-card__head">
-            <h3 className="qt-card__title">📚 Bài đã lưu</h3>
+            <h3 className="qt-card__title">📚 Bài đã lưu{saved.length > 0 && <span className="qt-models-page__count"> · {saved.length}</span>}</h3>
+            {saved.length > 0 && (
+              <div className="product-controls__view" role="group" aria-label="Kiểu hiển thị">
+                <button type="button" className={view === "grid" ? "is-active" : ""} aria-pressed={view === "grid"} onClick={() => chooseView("grid")}>▦ Lưới</button>
+                <button type="button" className={view === "list" ? "is-active" : ""} aria-pressed={view === "list"} onClick={() => chooseView("list")}>☰ Danh sách</button>
+              </div>
+            )}
           </div>
-          {saved.length === 0 ? <p className="qt-card__hint">Chưa có bài nào.</p> : (
-            <ul className="qt-posts__saved">
-              {saved.map((p) => (
-                <li key={p.id} className={p.id === postId ? "is-open" : ""}>
-                  {p.images[0] ? <img src={mediaUrl(p.images[0])} alt="" loading="lazy" /> : <span className="qt-posts__noimg">📝</span>}
-                  <div className="qt-posts__savedtext">
-                    <strong>{p.title || p.body.split("\n")[0]}</strong>
-                    <small>{p.series ? `${p.series} · Tập ${p.episode}` : options.kinds.find((k) => k.key === p.kind)?.label ?? "Bài viết"}{p.board_id ? ` · clip #${p.board_id}` : ""} · {when(p.updated_at ?? p.created_at)}</small>
-                  </div>
-                  <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={() => void copyPost(draftOf(p))}>📋 Copy</button>
-                  <button type="button" className="qt-btn qt-btn--small" onClick={() => open(p)}>Mở</button>
-                  {confirmDelete === p.id ? (
-                    <button type="button" className="qt-btn qt-btn--small qt-btn--danger" onClick={() => void remove(p.id)}>Xoá thật?</button>
-                  ) : (
-                    <button type="button" className="qt-link qt-link--danger" onClick={() => setConfirmDelete(p.id)}>Xoá</button>
-                  )}
-                </li>
+          {saved.length === 0 && <p className="qt-card__hint">Chưa có bài nào.</p>}
+
+          {seriesGroups.map((g) => (
+            <details key={g.name} className="qt-series" open>
+              <summary className="qt-series__head">
+                <span className="qt-series__title">📖 {g.name}</span>
+                <span className="qt-series__meta">{g.eps.length} tập · {channels.find((c) => c.id === g.channelId)?.name ?? "chưa gắn kênh"}</span>
+                <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={!!nextBusy || busy}
+                        onClick={(e) => { e.preventDefault(); void writeNext(g.name); }}>
+                  {nextBusy === g.name ? "AI đang viết…" : `✍️ Viết Tập ${g.nextEpisode}`}
+                </button>
+              </summary>
+              {view === "grid" ? (
+                <div className="qt-posts__savedgrid">{g.eps.map(savedCard)}</div>
+              ) : (
+                <ul className="qt-posts__saved">{g.eps.map(savedRow)}</ul>
+              )}
+            </details>
+          ))}
+
+          {loose.length > 0 && (
+            <>
+              {seriesGroups.length > 0 && <h4 className="qt-series__loose">📝 Bài lẻ <small>· {loose.length}</small></h4>}
+              {view === "grid" ? (
+                <div className="qt-posts__savedgrid">{shownSaved.map(savedCard)}</div>
+              ) : (
+                <ul className="qt-posts__saved">{shownSaved.map(savedRow)}</ul>
+              )}
+            </>
+          )}
+          {pages > 1 && (
+            <nav className="qt-pager" aria-label="Phân trang bài đã lưu">
+              <button type="button" className="qt-btn qt-btn--ghost qt-btn--small" disabled={current <= 1} onClick={() => setPage(current - 1)}>← Trước</button>
+              {Array.from({ length: pages }, (_, i) => i + 1).map((n) => (
+                <button key={n} type="button" aria-current={n === current ? "page" : undefined}
+                        className={`qt-pager__num${n === current ? " qt-pager__num--active" : ""}`} onClick={() => setPage(n)}>{n}</button>
               ))}
-            </ul>
+              <button type="button" className="qt-btn qt-btn--ghost qt-btn--small" disabled={current >= pages} onClick={() => setPage(current + 1)}>Sau →</button>
+              <span className="qt-pager__info">{(current - 1) * perPage + 1}–{Math.min(current * perPage, loose.length)} / {loose.length}</span>
+            </nav>
           )}
         </section>
       </div>
+      {schedule && <ScheduleDialog target={schedule} onClose={() => setSchedule(null)}
+                                   onSaved={(slot) => { if (slot.post_id) setSlots((m) => ({ ...m, [slot.post_id!]: slotLabel(slot.scheduled_at) })); setSchedule(null); }} />}
     </>
+  );
+}
+
+/** The right column before the first post: what to do, in three steps. */
+function PageEmptyHint() {
+  return (
+    <div className="qt-posts__emptyhint">
+      <div className="qt-posts__emptyicon">✍️</div>
+      <strong>Bài viết sẽ hiện ở đây</strong>
+      <ol>
+        <li>Chọn <b>kênh / page</b> (và sản phẩm nếu có)</li>
+        <li>Chọn <b>kiểu bài</b>, gõ ý chính → <b>Viết bài</b></li>
+        <li>Sửa trực tiếp, rồi <b>Đăng ngay</b> lên Page / <b>Lên lịch</b> / Copy</li>
+      </ol>
+    </div>
   );
 }

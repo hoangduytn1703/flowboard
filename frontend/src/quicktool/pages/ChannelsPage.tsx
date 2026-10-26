@@ -8,6 +8,7 @@ import { listBoardSummaries, mediaUrl, type BoardSummary } from "../../api/clien
 import { listPosts, type SavedPost } from "../../api/posts";
 import { toast } from "../../store/toast";
 import { invalidateChannels } from "../channels/ChannelPicker";
+import { FacebookConnect } from "../channels/FacebookConnect";
 import { PageEmpty, PageLoading } from "../PageState";
 import "../channels.css";
 
@@ -402,6 +403,8 @@ export function ChannelsPage() {
                     <button type="button" className="qt-btn" onClick={() => navigate(`/clips/new?channel=${open.id}`)}>🎬 Tạo clip cho kênh</button>
                   </div>
                 </section>
+
+                <FacebookConnect channel={open} onUpdated={replace} />
 
                 <PageReviewCard channel={open} onUpdated={replace} onEdit={() => setEditing(open)} />
 

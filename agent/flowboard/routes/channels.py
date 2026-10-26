@@ -20,7 +20,7 @@ from sqlmodel import select
 
 from flowboard.db import get_session
 from flowboard.db.models import Board, Channel, Node, Post
-from flowboard.services import channel_page
+from flowboard.services import channel_page, facebook_publish
 from flowboard.services import channels as svc
 
 router = APIRouter(prefix="/api/channels", tags=["channels"])
@@ -86,6 +86,8 @@ def _row(c: Channel, posts: int = 0, clips: int = 0) -> dict[str, Any]:
         "categories": svc.category_keys({"categories": c.categories, "category": c.category}),
         "description": c.description, "audience": c.audience, "goal": c.goal,
         "link": c.link or "", "page_review": dict(c.page_review) if c.page_review else None,
+        "fb_page_id": c.fb_page_id or "", "fb_page_name": c.fb_page_name or "",
+        "fb_connected": bool(c.fb_page_id and facebook_publish.get_token(c.id)),
         "brainstorm": dict(c.brainstorm) if c.brainstorm else None,
         "posts": posts, "clips": clips,
         "created_at": c.created_at.isoformat() if c.created_at else None,
@@ -188,6 +190,7 @@ def delete_channel(channel_id: int) -> dict:
         if c is None:
             raise HTTPException(404, "channel not found")
         s.delete(c)
+        facebook_publish.set_token(channel_id, None)
         for p in s.exec(select(Post).where(Post.channel_id == channel_id)).all():
             p.channel_id = None
             s.add(p)
@@ -249,3 +252,66 @@ async def review_channel_page(channel_id: int) -> dict:
         s.refresh(c)
     posts, clips = _counts([channel_id])
     return _row(c, posts.get(channel_id, 0), clips.get(channel_id, 0))
+
+
+# ── Facebook Page connection (auto-posting) ────────────────────────────────
+
+class FacebookTokenBody(BaseModel):
+    token: str = Field(min_length=20, max_length=1000)
+    page_id: Optional[str] = Field(default=None, max_length=64)
+
+
+@router.post("/facebook/inspect")
+async def inspect_facebook_token(body: FacebookTokenBody) -> dict:
+    """What a pasted token can post to: the pages it manages (a user token)
+    or its own page (a page token). Nothing is stored."""
+    try:
+        info = await facebook_publish.inspect_token(body.token)
+    except facebook_publish.FacebookError as exc:
+        raise HTTPException(400, str(exc))
+    # Page tokens are secrets: the browser only needs to know which pages exist.
+    return {**info, "pages": [{"id": p["id"], "name": p["name"]} for p in info["pages"]]}
+
+
+@router.post("/{channel_id}/facebook")
+async def connect_facebook_page(channel_id: int, body: FacebookTokenBody) -> dict:
+    """Connect the channel to a Facebook Page: with a user token ``page_id``
+    picks one of its pages (that page's own token is kept); with a page
+    token the page is the token's. The token goes to the central store."""
+    with get_session() as s:
+        if s.get(Channel, channel_id) is None:
+            raise HTTPException(404, "channel not found")
+    try:
+        info = await facebook_publish.inspect_token(body.token)
+    except facebook_publish.FacebookError as exc:
+        raise HTTPException(400, str(exc))
+    pages = info["pages"]
+    page = next((p for p in pages if body.page_id and p["id"] == body.page_id), None) if body.page_id else (pages[0] if len(pages) == 1 else None)
+    if page is None:
+        if len(pages) > 1 and not body.page_id:
+            raise HTTPException(400, "Token quản lý nhiều Page — chọn Page muốn kết nối.")
+        raise HTTPException(400, "Không thấy Page này trong token.")
+    facebook_publish.set_token(channel_id, page["access_token"])
+    with get_session() as s:
+        c = s.get(Channel, channel_id)
+        if c is None:
+            raise HTTPException(404, "channel not found")
+        c.fb_page_id, c.fb_page_name = page["id"], page["name"]
+        c.updated_at = datetime.now(timezone.utc)
+        s.add(c)
+        s.commit()
+    return get_channel(channel_id) or {}
+
+
+@router.delete("/{channel_id}/facebook")
+def disconnect_facebook_page(channel_id: int) -> dict:
+    facebook_publish.set_token(channel_id, None)
+    with get_session() as s:
+        c = s.get(Channel, channel_id)
+        if c is None:
+            raise HTTPException(404, "channel not found")
+        c.fb_page_id, c.fb_page_name = "", ""
+        c.updated_at = datetime.now(timezone.utc)
+        s.add(c)
+        s.commit()
+    return get_channel(channel_id) or {}

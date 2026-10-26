@@ -369,19 +369,20 @@ button:disabled {
   margin-top: 4px;
 }
 .project-modal__btn {
-  padding: 7px 16px;
+  padding: 8px 16px;
   font-size: 14px;
-  font-weight: 500;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--panel-high);
-  color: var(--text);
+  font-weight: 600;
+  border-radius: 8px;
+  border: 1px solid #3a4050;
+  background: linear-gradient(180deg, #2c313d, #252a35);
+  color: #f3f4f6;
   cursor: pointer;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 1px 2px rgba(0, 0, 0, 0.35);
   transition: border-color 80ms ease, background 80ms ease;
 }
 .project-modal__btn:hover:not(:disabled) {
-  border-color: var(--muted);
-  background: var(--panel);
+  border-color: rgba(255, 106, 43, 0.65);
+  background: linear-gradient(180deg, #343a48, #2b303c);
 }
 .project-modal__btn:disabled {
   opacity: 0.55;
@@ -6915,3 +6916,7 @@ button.chat-dock__presence[aria-expanded="true"] {
 .settings-panel__content .pool__row { align-items: center; }
 .settings-panel__content .pool__actions { flex-direction: row; flex-wrap: wrap; justify-content: flex-end; }
 .settings-panel__content .pool__actions .flow-accounts__btn { padding: 5px 10px; font-size: 13px; }
+
+/* Settings: a checkbox field (label text beside the box) */
+.settings-field--check { flex-direction: row; align-items: center; gap: 10px; cursor: pointer; }
+.settings-field--check input { width: 16px; height: 16px; accent-color: #ff6a2b; }

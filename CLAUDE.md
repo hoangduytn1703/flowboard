@@ -139,6 +139,20 @@ của người dùng (console.neon.tech, secure.backblaze.com).
 - **Flow trả 200 nhưng không có ảnh ("image generation returned no media url") = bộ lọc nội dung, không phải lỗi hệ thống** (25/10:
   prompt "pregnancy pillow" bị bỏ 2/2, "red apple" ra sau 29 s cùng lúc). `flow_sdk` giờ ghi WARNING kèm payload và báo lỗi tiếng Việt
   gợi ý sửa prompt. Thấy lỗi này: đổi từ nhạy cảm trong prompt trước khi nghi extension/project.
+- **Lấy token Facebook Page qua Graph API Explorer** (26/10, app kiểu "trường hợp sử dụng" mới):
+  - Token từ Explorer sống ~1 giờ → phải gia hạn: trang Gỡ lỗi mã truy cập → "Mã truy cập mở rộng" (Extend) → token dài hạn ~60 ngày hiện dưới dòng
+    "sẽ hết hạn vào…" (khác chuỗi ở ô trên cùng). Dán **token người dùng đã gia hạn** vào Flowboard, không dán token Page lấy thẳng từ Explorer:
+    `facebook_publish.inspect_token` gọi `/me/accounts` rồi lưu token của Page; từ token người dùng dài hạn thì token Page nhận về không hết hạn.
+  - Quyền chữ **xanh** trong Explorer = đã thêm vào danh sách nhưng token hiện tại chưa có → phải Generate Access Token lại (lần đầu chỉ được
+    `pages_show_list` + `pages_read_engagement`). Luôn kiểm bằng trang Gỡ lỗi, mục "Phạm vi", đừng tin màu. Cần đủ `pages_show_list`,
+    `pages_manage_posts`, `pages_read_engagement`, `pages_manage_engagement`; trong hộp thoại Facebook phải tick **đúng Page**.
+  - Hộp thoại đăng nhập báo "Invalid Scopes: pages_read_user_content" dù danh sách quyền của Explorer không có quyền đó (Explorer giữ yêu cầu cũ).
+    Qua được sau khi thêm luôn `pages_read_user_content` vào danh sách quyền của Explorer rồi Generate lại (app đã có quyền này, "Sẵn sàng thử
+    nghiệm"). Flowboard không cần quyền này. Nếu vẫn lỗi: xoá app khỏi facebook.com/settings?tab=business_tools, hoặc mở Explorer ở cửa sổ ẩn danh.
+  - Tạo app: trường hợp sử dụng **"Quản lý mọi thứ trên Trang"**; màn "Hồ sơ doanh nghiệp" chọn "Tôi chưa muốn kết nối". Admin Page + app ở chế độ
+    Development vẫn đăng được lên Page của mình, không cần gửi duyệt. Dropdown "Người dùng hoặc Trang" chọn **Lấy mã truy cập người dùng**
+    (tooltip "Không có cấu hình nào" là của tab Configurations, bỏ qua). Phương thức GET/POST ở Explorer không liên quan, chỉ để thử gọi API.
+  - Shopee không liên quan tới app Facebook: link aff chỉ là text trong bình luận đầu. Token hết hạn thì lặp lại Generate → Extend → dán lại ở Kênh.
 - **Component mount cùng lúc với "token" đã bump thì effect `useRef(token)` không chạy** (25/10, `PostEditor` chỉ xuất hiện sau lần viết
   đầu nên `seenToken` khởi tạo = token mới → bỏ qua): khởi tạo ref = 0, coi 0 là "không làm gì", chỗ mở dữ liệu cũ đặt token về 0.
 - **TikTok lúc có lúc không trả trang "Security Check"** thay cho trang sản phẩm (thấy thật 21/10): `product_link.fetch_page` nhận diện trang chặn (`_looks_blocked`), thử lại 1 lần sau 3 s rồi báo lỗi — trước đó đã lưu một sản phẩm tên "Security Check".
@@ -150,6 +164,10 @@ của người dùng (console.neon.tech, secure.backblaze.com).
 - `video_export`: bản ffmpeg static có NVENC nhưng máy không có GPU → đã có kiểm tra mã hoá thử. File clip 0 byte = lỗi.
 - **Kill uvicorn thì worker con có thể mồ côi và giữ cổng 8355** → extension nối vào tiến trình cũ (`extension_disconnected`). Kill theo PID cả cây, **không dùng `pkill -f`** (giết luôn shell). `--reload` từng treo ở "Waiting for connections to close": Makefile đã có `--timeout-graceful-shutdown 3`.
 - Wizard (`QuicktoolApp.tsx`) chỉ `switchBoard(id)` khi board có trong `boards` **và** `boardsLoaded` (store) đã true; không thì xoá clip sẽ gọi lại board vừa xoá → toast 404, còn mở thẳng link khi danh sách chưa tải thì bị đẩy về `/clips`.
+- **Clip tạo phía agent (🎁 Gói, 🔥 Mẫu hot, lồng tiếng) bấm vào "giật một cái" rồi về `/clips`** (26/10): danh sách `boards` của store
+  đọc lúc mở app nên thiếu clip mới → wizard coi link là cũ. Giờ effect trong `QuicktoolApp.tsx` gọi `refreshBoards()` (store/board.ts)
+  một lần trước khi bỏ cuộc, và **chờ refresh xong** (state `refreshing`) — `navigate` của react-router đổi identity mỗi lần URL đổi
+  (`/clips/17` → `/clips/17/setup`) nên effect chạy lại giữa chừng và đẩy về `/clips` nếu không chờ.
 - **Sau "⚡ Tạo video tự động", bấm bước 1–4 bị kéo về bước 5** (bug 22/10): effect trong `QuicktoolApp.tsx` điều hướng sang
   `/export` mỗi khi `auto === "done"` mà đang ở bước khác — `auto` giữ "done" mãi nên mọi lần bấm bước đều bị kéo lại. Giờ chỉ
   điều hướng một lần lúc `auto` vừa chuyển sang "done" (`prevAuto` ref). Effect dựa trên trạng thái kéo dài: luôn so với giá trị trước.
@@ -414,6 +432,12 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   (`.qt-pagestate`, min-height 58vh; `compact` cho modal/lọc rỗng). Đã dùng ở Sản phẩm (tải / chưa có / lọc rỗng), Người mẫu (chưa có),
   Prompt (tải / chưa có), Lịch sử (chưa có / lọc rỗng), Clip của tôi (chưa có, "Đang mở clip…"). Lưới clip / người mẫu / lịch sử vẫn
   dùng skeleton khi tải. **Trang mới: dùng hai component này, đừng viết dòng "Đang tải…" nhỏ.**
+- **Hệ nút Quicktool** (26/10, `quicktool.css` `.qt-btn*`): nút thường = nền gradient sáng `#2c313d→#252a35` + viền `#3a4050` + chữ trắng
+  15px (trước là nền đen mờ hoà vào panel), hover viền cam; `--accent` cam gradient + bóng cam; `--ghost` viền rõ, nền trong; `--danger`
+  nền đỏ nhạt viền đỏ, hover đỏ đặc; `--small` 14px (7×12), `--big` 16px. `.qt-link` 13px đậm, gạch chân khi hover. `.project-modal__btn`
+  (styles.css, dùng chung Canvas) cùng kiểu nút thường; trong `.qt-app` nút `--primary` thành cam (trước tím `--accent` của Canvas).
+  `.qt-chip` sáng hơn, chip đang chọn chữ trắng đậm. Nút Xoá dạng chữ (`qt-link--danger`) ở Bài đã lưu, thẻ prompt, "Bỏ" prompt ảnh →
+  `qt-btn--small qt-btn--danger` ("🗑 Xoá"). **Nút mới: dùng `.qt-btn` + biến thể, đừng tự đặt nền tối.**
 - **Khung focus** (21/10, cuối `styles.css`): bấm chuột không còn viền trắng của trình duyệt (`:focus { outline: none }`);
   bàn phím (Tab) có quầng cam mờ `:focus-visible { box-shadow: 0 0 0 2px rgba(255,106,43,.45) }`. Ô nhập giữ kiểu viền riêng.
 
@@ -510,6 +534,132 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   rỗng thì giữ prompt cũ trừ khi tin nhắn nói về ảnh), `routes/posts.py` (`GET /options`, `POST /write`, CRUD `/api/posts`,
   `?board_id=`; `_clip_context` đọc `narration` các node video + `quicktool.product_id`). Frontend API `api/posts.ts`. Test `test_posts.py`.
 
+- **Xoá logo Gemini ✦ trên ảnh Flow** (26/10): Flow trộn một ngôi sao 4 cánh trắng vào góc dưới phải mọi ảnh tạo ra (rộng ~48 px, cách
+  mép phải/dưới ~74–124 px). **Vị trí lệch theo cỡ ảnh** (1024² xa góc hơn 768×1376 / 1376×768 khoảng 5 px) và **độ đậm khác nhau**
+  (đo 70 ảnh: ~0,20–0,27 ở 1024², ~0,30–0,35 ở 768×1376). Hình ngôi sao (độ phủ từng điểm 0–1) dựng từ 71 ảnh góc phẳng **sau khi căn
+  chỉnh từng ảnh** (dựng không căn → sao "béo", lõi nhạt → xoá còn vết) → `agent/flowboard/assets/gemini_star_alpha.png` (160×160 góc
+  dưới phải). `services/watermark.py`: `_background` (inpaint vùng sao → nền ước lượng), `locate` (matchTemplate ±10 px → độ lệch + điểm
+  khớp), `estimate_alpha` (trung vị `(ảnh − nền)/(255 − nền)` trên lõi), `has_mark` (điểm khớp ≥ 0,35 và lõi sáng hơn nền ≥ 3 mức; nền
+  trắng > 248 bỏ qua), `unblend` **hoàn nguyên** `orig = (shown − a·255)/(1 − a)` với `a = k·shape` đã dịch, rồi inpaint viền mỏng 2 px;
+  `remove_from_file` (JPEG q95 4:4:4, PNG/WEBP giữ; giữ icc/exif). Hook `clean_if_generated(path, kind, mime)` trong `media.fetch_and_cache`
+  (trả bytes đã sạch) và `ingest_inline_bytes` — chỉ `Asset.kind == "image"` + mime image (upload đi `_ingest_image_bytes`, không đụng),
+  công tắc AppSetting `clean_gemini_mark` (mặc định bật). Routes `GET/PUT /api/media/clean-marks {enabled}`, `POST /api/media/clean-marks/run`.
+  UI: Cài đặt → Tạo ảnh & video → `settings/GeminiMarkSection.tsx`. Cần `numpy` + `opencv-python-headless` (pyproject; máy khác `make
+  install`). Test `test_watermark.py` (5). Kết quả thật: nền phẳng sạch (sai ~1–2 mức), nền vân đậm còn vệt rất mờ ở mép khi phóng to.
+  Lưu ý: file trên B2 vẫn có logo (file_store chỉ đẩy khi tạo Asset) → máy kia mở ảnh thì hook xoá lại; **video Veo chưa xử lý**.
+- **Lịch đăng + tự đăng Facebook Page** (26/10, máy cty): bảng `Schedule` (`kind` post|clip, `post_id`/`board_id`, `channel_id`,
+  `scheduled_at` UTC, `status` planned|posted|failed|skipped, `auto`, `note`, `result` JSON {by, post_id, permalink, comment_id | error},
+  `posted_at`; `create_all` tự tạo). `services/scheduler.py`: `parse_when` (chuỗi naive = giờ VN), `list_slots`, `due_slots` (planned đã
+  quá giờ → Hôm nay nhắc), `create`/`update`/`delete` (đổi giờ slot failed/skipped → planned lại), `suggest_slots` (**giờ vàng** theo
+  nền tảng của kênh, `GOLDEN_HOURS`, giờ VN, bỏ giờ đã có slot), `publish` (bài: body+hashtag, ≤ 4 ảnh từ `media.cached_path`, bình
+  luận đầu; clip: video `_final_media` của board + caption = bài mới nhất của clip), `tick`/`run_loop` (task `schedule-loop` trong
+  `main.lifespan`, mỗi 60 s đăng slot `auto` đến giờ; quá giờ > `AUTO_GRACE` 2 h → failed "Quá giờ"). `services/facebook_publish.py`:
+  Graph API v21 (`/me`, `/me/accounts` → token Page; `/{page}/photos published=false` + `attached_media` → `/feed`; video →
+  `graph-video…/{page}/videos` multipart; `/{post}/comments`; `permalink_url`), lỗi 190/200 → câu tiếng Việt. **Token Page lưu ở kho
+  trung tâm** `account_setting` khoá `fb_token:<user>:<channel_id>` (`accounts.get/set_setting`), không nằm trong row kênh;
+  `Channel.fb_page_id/fb_page_name` (migration `ensure_channel_facebook_columns`), row kênh trả `fb_connected`. Routes:
+  `routes/schedule.py` (`GET /api/schedule?from&to`, `/due`, `/hours`, `/suggest?channel_id`, `POST`, `PATCH`, `DELETE`,
+  `POST /{id}/publish`), `routes/channels.py` `POST /api/channels/facebook/inspect {token}` (chỉ trả id/tên page), `POST /{id}/facebook
+  {token, page_id?}`, `DELETE /{id}/facebook`. Chỉ Page: profile/nhóm/TikTok không có API → slot chỉ nhắc. Frontend: `api/schedule.ts`,
+  `quicktool/schedule/ScheduleDialog.tsx` (chọn kênh bắt buộc, chip giờ vàng, datetime-local, "Tự đăng" chỉ bật khi kênh kết nối, ghi
+  chú), `pages/SchedulePage.tsx` `/schedule` (tuần 7 cột, ⚡ = auto, màu theo bài/clip/đến giờ/đã đăng/lỗi, khung chi tiết: Đăng ngay /
+  Copy / Tải clip / Mở FB / Đã đăng tay / Đổi giờ / Xoá; mục "Chưa lên lịch" = bài đã lưu + clip đã ghép chưa có slot; `DueList` dùng
+  chung), Hôm nay mục "⏰ Đến giờ đăng", nút 📅 ở trang Bài viết (đầu khung khi đã lưu + thẻ Bài đã lưu), Bước 5 (cạnh Tải về, và
+  trong mục bài đăng), `channels/FacebookConnect.tsx` ở trang Kênh (dán token → Kiểm tra → chọn Page → Kết nối; hướng dẫn lấy token
+  5 bước). Menu "📅 Lịch đăng" trong Công cụ. Test `test_schedule.py` (9, Graph API giả bằng `httpx.MockTransport`). **Chưa đăng thật
+  lên Facebook** (người dùng chưa dán token).
+- **Câu mở đầu A/B ("✨ 5 câu mở đầu khác")** (26/10): `services/hooks.py` — `post_hooks(body, channel, product, n)` và
+  `clip_hooks(lines, …)` (≤ 14 từ, cắt khi dài), mỗi biến thể một kiểu của `post_writer.HOOKS` (câu hỏi / sự thật / nỗi khổ / con số /
+  kể chuyện / ngược số đông), `replace_opening(body, line)` thay đoạn trước dòng trống đầu tiên. Routes `POST /api/posts/hooks {body,
+  channel_id?, product_id?, n?}`, `POST /api/posts/clip-hooks {board_id}` (đọc `_clip_context`). UI: `PostEditor` nút "✨ 5 câu mở đầu
+  khác" (prop `hookContext` {channelId, productId}; bảng `.qt-hooks`, "Dùng" thay mở đầu, "↺ Về câu mở đầu cũ"), trang Bài viết thêm
+  **"⧉ Lưu thành bản sao"** (bài mới "(bản B)" cùng nội dung đang hiện — để đăng thử 2 bản); Bước 2 cảnh 1 có nút cùng tên thay lời
+  thoại cảnh 1. Test `test_hooks.py` (4). Thử thật: 5 câu/8 s cho bài và cho clip (bám kênh "Mẹ bầu").
+- **🎁 Gói nội dung một chạm** (26/10): `services/bundle.py` `make(product_id, channel_id, template_id?, post_kind, with_clip/post/tiktok)`
+  → (1) clip: `routes.templates.create_board_from_template(tailor=True)` (kịch bản viết theo sản phẩm, chưa render), (2) song song:
+  bài Facebook (`write_post` brief {kind, cta link, boosts question_end} + clip lines + sản phẩm + kênh → lưu `Post` gắn board) và
+  caption TikTok (`brief.platform = "tiktok"`, lưu `Post.kind = "tiktok_caption"`). Lỗi từng phần vào `errors[part]`, không chặn phần khác.
+  Route `POST /api/bundles` (+ `GET /options`), `routes/bundles.py`. UI `quicktool/bundle/BundleDialog.tsx` mở từ nút **"🎁 Gói"** trên
+  thẻ / dòng sản phẩm (`ProductsPanel`, `.product-card__btns`): chọn kênh (bắt buộc), kiểu clip (hợp ngành xếp trước), kiểu bài, 3 ô tick;
+  kết quả có "Mở kịch bản →", "Mở bài" / "📅 Lên lịch", "Copy" caption. Test `test_bundle.py` (2, `tailor_spec` giả). Thử thật: 27 s cho
+  sản phẩm Đầm bầu + kênh Mẹ bầu (clip tailored, bài có bình luận đầu kèm link, caption đúng kiểu); dữ liệu thử đã xoá.
+- **🔥 Mẫu đang hot (swipe file)** (26/10): bảng `Swipe` (kind post|video, url, platform, title, text, analysis JSON, tags, uses).
+  `services/swipes.py`: `read_source(url, text)` — link video (TikTok/Douyin/YouTube/Reels/FB reel, `is_video_link`) → `video_fetch.fetch_video`
+  (≤ 10 phút, Asset đăng ký) → `reference_video.analyze(path, None)` lấy hook/transcript/shots (cần Gemini key); link bài (FB/Threads/IG/X/Zalo)
+  → `channel_page.read_page` (extension 0.6.0) + `clean_text`; hoặc dán thẳng nội dung. `analyze()` → LLM `_SYSTEM` → JSON {title, summary,
+  hook_type, hook, structure[], why_it_works[], triggers[], format, cta, skeleton (khung mẫu tiếng Việt có [chỗ trống]), tags} → lưu.
+  `adapt_post` → `post_writer.write_post(extra=adapt_block(analysis))` (khối "FOLLOW THE STRUCTURE… do not copy sentences"), lưu Post
+  (`brief.swipe_id`); `adapt_clip` → board từ template (tailor=False) rồi `script_tailor.tailor_board(instructions=khung mẫu)`
+  (`_scene_pairs` ghép image→video qua Edge). `write_post` thêm tham số `extra`. Routes `routes/swipes.py` (`GET /api/swipes`, `POST
+  /analyze {url?|text?}`, `GET/DELETE /{id}`, `POST /{id}/adapt {as: post|clip, channel_id, product_id?, kind?, template_id?, wish?}`).
+  UI `pages/SwipesPage.tsx` `/swipes` (+ `swipes.css`): ô dán link/bài → phân tích; danh sách trái (tìm theo tên/nhãn), chi tiết phải
+  (câu mở đầu + loại, các bước, vì sao chạy, chạm vào, định dạng/kêu gọi, khung mẫu, nội dung gốc), khối "Viết bản của mình": kênh
+  (bắt buộc), sản phẩm, kiểu bài, kiểu clip, mong muốn → "✍️ Viết bài theo mẫu" (mở bài) / "🎬 Tạo clip theo mẫu" (mở Bước 2). Menu
+  "🔥 Mẫu đang hot". Test `test_swipes.py` (5). Thử thật: bài chữ 20 s phân tích đúng (ngược số đông, 6 bước), viết bài theo mẫu 15 s
+  cho Đầm bầu + bình luận đầu kèm link; **chưa thử link video thật và link Facebook thật** (cần Chrome đăng nhập FB).
+- **Loạt truyện (series) dễ dùng hơn** (26/10 tối): kiểu bài "nhiều kỳ" có ô **chọn loạt** (các loạt đã có · số tập, hoặc "＋ Loạt
+  truyện mới…" → ô tên); chọn loạt có sẵn hiện "Đã có N tập" + nút **"⚡ Viết nhanh Tập N+1"**. `writeNext(name)` (PostsPage): lấy kênh,
+  sản phẩm và `brief` của **tập cuối** (kind serial) → `POST /api/posts/write-batch` với `n: 1` (giờ `ge=1`) → AI đọc các tập trước, tập
+  mới **được lưu ngay** rồi mở; nếu brief có ảnh/video thì tự tạo luôn (ảnh tự lưu vào bài qua `changeImages`). **"Bài đã lưu" gom theo
+  loạt**: mỗi loạt một khung `<details class=qt-series>` (📖 tên · N tập · kênh + nút "✍️ Viết Tập N+1"), các tập xếp theo số tập, thẻ có
+  nhãn "Tập n"; bài không thuộc loạt nằm dưới "📝 Bài lẻ" (phân trang chỉ áp cho bài lẻ). Thẻ/dòng là hàm `savedCard` / `savedRow` (không
+  khai báo component trong render). **Bẫy dính lúc làm**: `useMemo` đặt sau `if (!options) return <PageLoading/>` → "Rendered more hooks
+  than during the previous render", trang trắng — mọi hook phải đứng trước lệnh return sớm.
+- **Bài viết kèm video + kéo thả lịch đăng** (26/10 tối, máy cty):
+  - **Video thay ảnh**: `Post.video` (media id; migration `ensure_post_video_column`, PATCH/POST `video`). `standaloneImage.generateStandaloneVideo`
+    = request `gen_video_omni` 8 s (Omni Flash ~12 credit) với **ảnh làm nguyên liệu bắt buộc** (Flow không làm video từ chữ không):
+    ảnh đầu của bài → không có thì ảnh sản phẩm → không có thì vẽ ảnh từ prompt ảnh đầu rồi mới làm video. Lỗi `timeout`/`FLOW_DROPPED_JOB`
+    → "Flow bỏ lượt (gương mặt bị chặn)". `PostEditor`: hộp `<details>` "🎬 Video kèm thay ảnh" (ô chuyển động tiếng Anh `DEFAULT_MOTION`
+    sửa được, hỏi xác nhận credit, ↻ Tạo lại, Bỏ video, Tải), xem trước `<video>` thay lưới ảnh; props `video`, `onVideo`,
+    `autoVideoToken` (ô "Kèm theo" = "🎬 1 video" → `brief.with_video` + `images: 1` → viết xong vẽ ảnh rồi tự làm video). Trang lưu
+    video ngay vào bài đã lưu (`changeVideo`), `onBusyChange` tính cả lúc làm video. **Đăng**: `scheduler._payload` — bài có `video`
+    → đăng dạng video (`graph-video …/videos`), ảnh bỏ qua (Facebook nhận ảnh hoặc một video). ClipPost (Bước 5) không có nút video.
+  - **Lịch đăng kéo thả** (`SchedulePage.tsx`, `schedule/DropTimeDialog.tsx`): "Chưa lên lịch" thành **lưới thẻ** kéo được (bài + clip
+    đã ghép, bỏ `tiktok_caption`), lịch `planned` kéo được sang ngày khác; ngày đã hết thì mờ + không nhận thả (`dayOpen`), ngày nhận thả có
+    viền đứt, đang rê thì sáng cam. Thả → hộp **chỉ hỏi giờ** (chip giờ vàng của kênh trong ngày đó, giờ đã qua bị khoá; ô `type=time`;
+    dời lịch giữ giờ cũ; lịch mới có "Tự đăng" bật sẵn nếu kênh nối Page; bài chưa gắn kênh thì hỏi kênh). Nút "📅 Lên lịch" vẫn mở
+    hộp đủ ngày + giờ (`ScheduleDialog`, `min` + chặn giờ đã qua). **Backend chặn giờ quá khứ** (`scheduler.check_future`, cho lùi
+    `PAST_GRACE` 2 phút vì "Đăng ngay" tạo slot lúc này) ở tạo + PATCH `at`; slot đã đăng không đổi giờ được. Sửa bug: bài **đã đăng**
+    vẫn hiện trong "Chưa lên lịch" (trước chỉ loại slot `planned`, và chỉ trong cửa sổ tuần đang xem) → giờ đọc mọi slot planned/posted.
+  - Trang Bài viết: cột form `minmax(340px, 520px)`, khung bài / thanh đăng / loạt bài `max-width` 780 px (trước 860).
+  - Test: `test_schedule.py` (giờ quá khứ bị từ chối, `_backdate` để giả lập "đến giờ", bài có video đăng dạng video) — 20 pass cùng posts.
+- **Bài viết: bố cục mới + viết nhiều bài một lúc + Đăng ngay** (26/10 chiều, máy cty, `PostsPage.tsx` + `posts.css`):
+  - Trái: khối đánh số **① Đăng ở đâu** (kênh bắt buộc + sản phẩm) / **② Viết gì** (Kiểu bài = `<select>` + một dòng mô tả `KIND_HINT`,
+    "Tên câu chuyện" chỉ hiện khi kiểu `serial` — chỉ gửi/lưu `series` khi `serial`; ý chính; **Số bài** 1–5; Ảnh kèm; Kêu gọi) /
+    **③ Tuỳ chỉnh thêm** (`<details>` gập, dòng tóm tắt lựa chọn khi gập: viết cho ai, giọng, độ dài, câu mở đầu, trình bày, emoji, kéo
+    tương tác). Nút "✍️ Viết bài / Viết N bài / Viết N tập" dính đáy cột (`.qt-posts__go`).
+  - Phải: đầu khung = tên bài + nhãn trạng thái (Chưa lưu / ✓ Đã lưu / ● Đã đăng) + "＋ Bài mới", "⧉ Bản sao", "💾 Lưu" (nhỏ);
+    dưới bài là **thanh Đăng bài** dính đáy (`.qt-posts__publish`): "Đăng lên <Page> ⚡ tự đăng được" (hoặc "chưa kết nối Page → kết
+    nối") + 📋 Copy / 📅 Lên lịch (tự lưu trước) / **🚀 Đăng ngay** (chỉ khi kênh `fb_connected`; hỏi xác nhận → lưu → `createSlot(now)`
+    → `publishSlot` → "đã đăng hh:mm — xem bài ↗"). `PostEditor` có prop `hideCopy`. **Ảnh**: đăng / lên lịch gửi `Post.images` (≤ 4,
+    file từ `media.cached_path`, đã xoá logo Gemini) — slot đọc ảnh của bài **lúc đến giờ đăng**. Đang tạo ảnh (`PostEditor onBusyChange`)
+    thì "Đăng ngay" / "Lên lịch" khoá ("⏳ Đợi ảnh…"); bài đã lưu mà thêm / bỏ ảnh → `changeImages` PATCH riêng `images` ngay
+    (chữ chưa lưu vẫn chưa lưu), để bài đã lên lịch không đăng thiếu ảnh. Thanh đăng ghi "kèm N ảnh". Chưa có bài → `PageEmptyHint` 3 bước.
+  - **Viết 2–5 bài một lúc**: `POST /api/posts/write-batch {…WriteBody, n}` (`routes/posts.py`, `_write_context` dùng chung với `/write`,
+    `_save_written` lưu luôn từng bài). Có `series` → **viết lần lượt**, tập sau nhận các tập vừa viết trong `previous` (tập n đọc tập
+    n−1), episode nối tiếp chuỗi cũ; lỗi giữa chừng thì dừng (tập sau không biết chuyện tập trước). Không có series → **song song**,
+    mỗi bài một câu mở đầu (`BATCH_HOOKS` xoay vòng khi để "AI tự chọn") + khối `extra` "BATCH: post i of n… clearly different angle".
+    UI: khung **"📚 Loạt N bài vừa viết"** trên đầu cột phải — mỗi dòng (Tập n / Bài i, tiêu đề, trích) bấm để mở (`open(p, keepForm)`
+    không đổi form), nút **📅 Lên lịch** riêng (sau khi đặt hiện "📅 T3 28/10 · 20:00"), 📋; nút **"📅 Xếp lịch cả loạt (mỗi ngày 1 bài)"**
+    = giờ vàng đầu tiên còn trống của mỗi ngày (`suggestSlots`), `auto` = bật nếu kênh đã kết nối Page. Ảnh của từng bài tạo sau khi mở.
+    Test `test_write_batch_side_by_side_and_as_a_story`. Thử thật: 3 tập nối tiếp 31 s, tập 2/3 mở bằng "Tiếp tục câu chuyện lần trước…".
+    Lưu ý: lưu loạt bài cũng gọi `brainstormIfDue` → kênh đủ 3+ bài là tự brainstorm.
+- **Bài viết: kênh bắt buộc + "Tăng view & tương tác" + Bài đã lưu lưới/danh sách** (26/10, máy cty):
+  - **Kênh / page bắt buộc** ở trang Bài viết và Bước 5 (`ChannelPicker required`: nhãn "(bắt buộc)", option "— Chọn kênh / page —");
+    chưa chọn thì "✍️ Viết bài", "Gửi" (chat), nút sửa nhanh, "Viết bài cho clip" bị khoá + dòng nhắc cam (`.qt-posts__need`).
+    Backend `POST /api/posts/write` trả **400** khi không có kênh (body hoặc kênh của clip) hoặc kênh đã xoá — không tốn token.
+  - **Kêu gọi** có `none` = "Không kêu gọi — bài để đọc" (**mặc định**; brief thiếu `cta` cũng hiểu là none). System prompt: kết theo dòng
+    CALL TO ACTION (có thể là không có), luật tiếp cận Facebook (2 dòng đầu khiến bấm "Xem thêm", **cấm engagement bait** "comment CÓ",
+    "tag 3 người"… vì FB giảm reach).
+  - Khối riêng **"🚀 Tăng view & tương tác"** (`post_writer.HOOKS` câu mở đầu: AI chọn / câu hỏi / sự thật bất ngờ / nỗi khổ / con số "3
+    điều…" / kể chuyện / ngược số đông; `FORMATS` trình bày: đoạn ngắn / danh sách / hỏi–đáp / trước–sau; `EMOJIS` ít / vừa / nhiều;
+    `BOOSTS` chọn nhiều: kết bằng câu hỏi dễ trả lời, chọn A hay B, đáng lưu lại, giữ người đọc tới cuối, chạm nỗi niềm chung, đáng chia
+    sẻ) → brief `hook`, `format`, `emoji`, `boosts[]` → dòng "Opening line / Layout / Emoji / REACH (do all of these)" trong prompt.
+    `GET /api/posts/options` trả thêm `hooks`, `formats`, `boosts`, `emojis`. Bước 5 vẫn `cta: "link"` (caption kèm video).
+  - Khung xem trước bài rộng tới 860 px (trước 560), chữ 16px; đầu khung: "＋ Bài mới" (nút thường) + "💾 Lưu bài / Lưu thay đổi"
+    (cam) hoặc "✓ Đã lưu" (xanh, khoá) khi không có thay đổi.
+  - **Bài đã lưu**: nút ▦ Lưới / ☰ Danh sách (localStorage `flowboard.posts.view`), lưới 4 cột × 3 = 12 bài/trang (thẻ ảnh 16:10, tiêu
+    đề, kiểu bài · kênh · clip · giờ, 3 dòng nội dung, Mở / Copy / Xoá), danh sách 10 dòng/trang, `.qt-pager`.
 - **Ảnh của bài viết: tự tạo + sửa theo yêu cầu** (25/10, `posts/PostEditor.tsx`): chọn "Ảnh kèm" N ảnh rồi "Viết bài" → viết xong **tự tạo
   cả N ảnh ngay** (prop `autoMakeToken`: trang bump sau mỗi lần viết MỚI — không bump khi sửa qua chat, mở bài đã lưu / "+ Bài mới" đặt về 0;
   editor bỏ qua token 0 và nhớ token đã xử lý), ô ảnh có thẻ chờ "🎨 Đang tạo ảnh…". **Viết lại bài mới = bỏ ảnh bài cũ** (`setImages([])`
@@ -658,9 +808,13 @@ của người dùng (console.neon.tech, secure.backblaze.com).
 - Test `test_chat_agent.py::test_gen_video_renders_on_veo_only_when_asked` lỗi sẵn trên Linux (22/10, lỗi cả khi chưa có thay đổi mới), chưa xem nguyên nhân.
 - **Người mẫu bị Flow chặn**: đã có nút kiểm tra; chưa tự kiểm tra khi tạo người mẫu mới (tốn ~12 credit/lần nên để người dùng bấm).
   Omni 4/6/10 s chưa thử lại (4 s bị bỏ 1 lần — có thể cũng do lỗi ghim nhầm project lúc đó).
-- **Máy Linux (23/10) chạy đăng nhập cục bộ, chưa nối Neon** (người dùng chọn): `.env` chưa có `FLOWBOARD_CENTRAL_DB_URL` →
-  `storage/accounts.db` cục bộ, dữ liệu cũ (2 sản phẩm, 1 người mẫu) đã dời vào `storage/accounts/akiragosho/`, không đồng bộ với
-  máy nhà. Thêm chuỗi Neon sau này thì máy này dùng dữ liệu cloud; dữ liệu cục bộ vẫn nằm ở thư mục đó.
+- **Nhóm A (26/10) chưa thử thật**: đã kết nối Facebook Page (26/10, token người dùng dài hạn dán ở Kênh → Tự đăng lên Facebook Page, hết hạn
+  ~25/12/2026 — nhớ gia hạn lại, xem Bẫy "Lấy token Facebook Page") nhưng **chưa đăng thử bài thật** (lên lịch một bài ngắn có ảnh + bình luận đầu, rồi một
+  clip có video, để kiểm tra Graph API); Mẫu đang hot với link video / link Facebook thật; clip theo mẫu chưa render. TikTok / Instagram không tự đăng được (không có API công khai).
+- **Máy Linux (cty) từ 26/10 nối Neon** (`FLOWBOARD_CENTRAL_DB_URL` trong `.env`, tài khoản akiragosho backend postgres — cùng dữ liệu
+  máy nhà). Bản SQLite cục bộ 23/10 (gần như trống) còn ở `storage/accounts/akiragosho/` + `storage/accounts.db`, không dùng nữa.
+  `.env` máy này `FLOWBOARD_PAYGATE_TIER=PAYGATE_TIER_TWO` (tài khoản Flow Ultra), máy nhà ghi `TIER_ONE` — mỗi máy theo tài khoản Flow của Chrome máy đó.
+  **Lồng tiếng chưa dùng được trên máy Linux** (chưa có venv pyvideotrans: Whisper + spleeter; `FLOWBOARD_ERASE_PYTHON/ROOT` đang trỏ `D:\codes\…`); Remotion đã cài.
 - **Bài viết Facebook** (24/10): chưa đăng thẳng lên Facebook (chỉ Copy + tải ảnh), chưa có lịch đăng; 2 bài thử (#1 có ảnh AI,
   #2 gắn clip Cơm cháy) để lại trong "Bài đã lưu" làm mẫu — xoá được. Prompt ảnh chưa lưu vào thư viện prompt.
 - **Kênh** (24/10): kênh thử "Bếp Ăn Vặt Test" đã bị xoá trên UI ngay sau khi làm xong (bài #3–#5 còn, không gắn kênh); chưa có kênh
@@ -743,3 +897,20 @@ của người dùng (console.neon.tech, secure.backblaze.com).
 - **25/10** — Tiếp thị liên kết: sản phẩm có "Link tiếp thị liên kết" + "Shop đang hợp tác" (link aff trùng → 409, `GET /api/products/shops`), bài viết cho sản phẩm có aff sinh thêm **bình luận đầu tiên** (câu mời + link, link không vào bài) ở trang Bài viết + Bước 5, hộp sửa/Copy riêng. `test_affiliate.py` 5 pass, cả bộ 904 pass (+1 lỗi 0600 có sẵn), `tsc` sạch; thử thật UI (form, trùng, viết bài 13 s). Phát hiện dữ liệu Neon đã bị xoá qua UI lúc 20:41–20:43 (xem Việc đang dở). Chưa commit.
 - **25/10** — Bài viết: chọn N ảnh → viết xong **tự tạo ảnh luôn** (không cần bấm "Tạo ảnh"), **viết lại bài mới thì bỏ ảnh cũ**, mỗi prompt có thumbnail + "↻ Tạo lại ảnh" (thay ảnh cũ) + "✨ Sửa theo yêu cầu" (AI sửa prompt từ câu tiếng Việt, `POST /api/posts/revise-image`). Áp cả Bước 5. Lỗi Flow không trả ảnh nay báo rõ là bộ lọc nội dung. Test posts 15 + flow_sdk 68 pass, `tsc` sạch; thử thật Playwright (ảnh tự ra 31 s, sửa prompt 9 s, viết lại bỏ ảnh cũ; ~4 ảnh Flow). Agent `start70`. Chưa commit.
 - **25/10** — **Lồng tiếng: engine phụ đề Remotion** (lựa chọn riêng "Công nghệ phụ đề", ffmpeg/ASS giữ nguyên): 3 kiểu (hộp bo góc font Việt + emoji màu, bật sáng từng từ kiểu TikTok, chữ viền), xem trước bằng `<Player>` đúng y bản render trong khung chỉnh vị trí (kéo khung ghost, tua, vùng mờ). `frontend/src/remotion/*`, `frontend/remotion/render.mjs`, `services/dub_remotion.py`, nhánh `_render_remotion` + `engine` trong `dub.py`, route `/nosub`. Test `test_dub_remotion.py` 5 + dub 13 pass, `tsc` sạch; thử thật: job 12,6 s xong 101 s, in lại 18 s, khung hình đúng (karaoke, emoji, hộp vàng + dải mờ); Playwright kéo khung ghost → 65 %. Clip thử #11 "Remotion test" để lại làm mẫu — xoá được. Chưa commit.
+- **26/10** — Máy Linux: pull `fff72da` (bài viết, kênh, lồng tiếng, Hôm nay…), `npm install --prefix frontend` (Remotion), thêm `FLOWBOARD_CENTRAL_DB_URL` vào `.env` → chạy trên Neon (đăng nhập akiragosho: 1 sản phẩm, 3 kênh, 2 bài, 43 prompt). Playwright mở 7 trang không lỗi. Lồng tiếng báo "chưa dùng được" (thiếu pyvideotrans). AI trên máy này: Claude CLI (`~/.nvm/.../bin/claude`, gói Max) + 7 key Gemini theo tài khoản; thử `POST /api/posts/write` 11 s ra bài (không lưu). Người dùng không cần lồng tiếng trên máy Linux. Bẫy: npm máy Linux viết lại `package-lock.json` (bỏ trường `libc`) → `git checkout frontend/package-lock.json` để khỏi commit nhiễu.
+- **26/10** — Bài viết Facebook: kênh / page bắt buộc (nút viết khoá + backend 400, cả Bước 5), "Kêu gọi" thêm "Không kêu gọi — bài để đọc" làm mặc định, khối "🚀 Tăng view & tương tác" (câu mở đầu, trình bày, emoji, 6 cách kéo tương tác; cấm engagement bait), Bài đã lưu xem lưới / danh sách + phân trang. `post_writer.py`, `routes/posts.py`, `PostsPage.tsx`, `ClipPost.tsx`, `ChannelPicker.tsx`, `posts.css`. Test posts/channels/affiliate 30 pass; Playwright (khoá khi chưa chọn kênh, chip, lưới 12 + trang 3, danh sách 10 với 30 bài giả); viết thật 1 bài kênh "Mẹ bầu." 11 s đúng kiểu "5 điều…" + danh sách + không kêu gọi (không lưu).
+- **26/10** — Rà lại toàn bộ nút Quicktool: nút thường sáng + viền rõ (hết đen mờ), cam có bóng, ghost/danger rõ ràng, cỡ chữ lớn hơn; nút chính trang Sản phẩm thành cam; Xoá dạng chữ → nút đỏ (Bài đã lưu, Prompt, prompt ảnh). Trang Bài viết: khung bài rộng 860 px chữ 16px, "＋ Bài mới" / "💾 Lưu" to và nổi, "✓ Đã lưu" khi đã lưu; ảnh thẻ Bài đã lưu cao 170 px. `quicktool.css`, `styles.css`, `posts.css`, `prompts.css`, `PostsPage.tsx`, `PostEditor.tsx`, `PromptsPage.tsx`. Chụp Playwright: Bài viết, Sản phẩm, Clip, Prompt. `tsc` sạch.
+- **26/10** — Ẩn mục "Canvas (kéo thả node)" khỏi menu (`QuicktoolSidebar.tsx` cờ `CANVAS_IN_MENU = false`; route `/canvas` vẫn còn, đặt `true` để hiện lại). Trang Bài viết: cột form bên trái `position: sticky` theo khi cuộn bài dài bên phải (`posts.css`). `tsc` sạch.
+- **26/10** — **Lịch đăng** (`/schedule`): tuần 7 cột, giờ vàng theo nền tảng, nhắc "Đến giờ đăng" ở Hôm nay, đánh dấu đã đăng / copy / tải clip; **tự đăng lên Facebook Page** qua Graph API khi kênh dán token (ảnh, video, bình luận đầu), vòng lặp 60 s. `services/scheduler.py`, `facebook_publish.py`, `routes/schedule.py`, `ScheduleDialog.tsx`, `SchedulePage.tsx`, `FacebookConnect.tsx`. Test 9 pass (+ channels/posts 17); Playwright: lên lịch → tuần → đổi về quá khứ → Hôm nay nhắc → Đã đăng; slot thử đã xoá. Chưa thử token Facebook thật.
+- **26/10** — Câu mở đầu A/B: "✨ 5 câu mở đầu khác" ở khung bài viết (+ "⧉ Lưu thành bản sao") và cảnh 1 Bước 2. `services/hooks.py`, `routes/posts.py` (`/hooks`, `/clip-hooks`), `PostEditor.tsx`, `StepScript.tsx`. Test 4 pass; Playwright với AI thật (8 s, thay/hoàn tác đúng, board thử đã xoá).
+- **26/10** — 🎁 Gói nội dung một chạm từ thẻ sản phẩm: clip (kịch bản riêng) + bài Facebook (link aff ở bình luận đầu) + caption TikTok, cùng kênh. `services/bundle.py`, `routes/bundles.py`, `BundleDialog.tsx`. Test 2 pass; thử thật 27 s (board + 2 bài thử đã xoá).
+- **26/10** — 🔥 Mẫu đang hot (`/swipes`): dán link bài / video hoặc nội dung → AI phân tích vì sao chạy (câu mở đầu, các bước, cảm xúc, khung mẫu) → viết bài / tạo clip theo cấu trúc cho sản phẩm của mình. `services/swipes.py`, `routes/swipes.py`, `SwipesPage.tsx`; `write_post(extra=)`. Test 5 pass; thử thật với AI (phân tích 20 s, viết bài 15 s; bài + mẫu thử đã xoá). Nhóm A xong cả 4 mục, 97 test liên quan pass; chưa commit.
+- **26/10** — Xoá logo Gemini ✦ góc ảnh: dựng hình sao có căn chỉnh từ 71 ảnh thật, dò vị trí + độ đậm từng ảnh, hoàn nguyên điểm ảnh gốc (không mờ), tự chạy khi ảnh về máy + nút quét ảnh cũ trong Cài đặt. `services/watermark.py`, `assets/gemini_star_alpha.png`, hook `media.py`, routes `media.py`, `GeminiMarkSection.tsx`; thêm numpy + opencv-headless. Test 5 pass; thử trên bản sao ảnh thật.
+- **26/10** — Kết nối Facebook Page thật lần đầu (máy cty): tạo app Meta "Mẹ bầu hạnh phúc" (trường hợp sử dụng "Quản lý mọi thứ trên Trang", chưa nối hồ sơ doanh nghiệp), lấy token người dùng có đủ 4 quyền Page (`pages_show_list`, `pages_manage_posts`, `pages_read_engagement`, `pages_manage_engagement`), gia hạn thành token dài hạn (~60 ngày, hết ~25/12/2026), dán ở Kênh → Tự đăng lên Facebook Page → Kiểm tra token → Kết nối. Không đổi code. **Chưa lên lịch / đăng thử bài thật** (ảnh, video, bình luận đầu chưa kiểm chứng). Chưa commit — CLAUDE.md cần push để máy nhà thấy.
+- **26/10 chiều** — Trang Bài viết gọn lại: trái 3 khối đánh số (tuỳ chỉnh ít dùng gập lại, kiểu bài thành ô chọn có mô tả, nút viết dính đáy), phải tách nút của bài (Lưu/Bản sao/Bài mới) và **thanh Đăng bài** (Copy / Lên lịch / 🚀 Đăng ngay lên Page đã kết nối). **Viết 1–5 bài một lúc** (`POST /api/posts/write-batch`): câu chuyện → các tập nối tiếp (tập sau đọc tập trước), không thì mỗi bài một kiểu mở đầu; khung "Loạt bài vừa viết" có 📅 từng bài + "Xếp lịch cả loạt". Test posts 11 pass; Playwright với AI thật (3 tập 31 s, mở từng tập, hộp lên lịch). **Chưa bấm Đăng ngay / Xếp lịch cả loạt thật** (sẽ đăng thật lên Page). 3 bài thử đã xoá; brainstorm tự chạy của kênh "Mẹ bầu." lúc thử đã lấy theo bài thử (chưa đặt lại được — người dùng bấm "Brainstorm lại" ở trang Kênh).
+- **26/10 chiều** — Đăng / lên lịch bài có ảnh: khoá nút khi ảnh đang tạo (trước đó bấm lúc đang tạo là bài lên không ảnh), ảnh vừa tạo / bỏ trên bài đã lưu được lưu ngay (PATCH `images`), thanh đăng ghi số ảnh kèm. `PostsPage.tsx`, `PostEditor.tsx`. `tsc` sạch; chưa đăng thật.
+- **26/10 tối** — Bài viết **kèm video 8 s thay ảnh** (Flow Omni ~12 credit, ảnh của bài làm nguyên liệu; ô "Kèm theo" → "🎬 1 video" tự làm sau khi viết; đăng lên Page dạng video), **Lịch đăng kéo thả** (lưới thẻ "Chưa lên lịch", kéo vào ngày → chỉ hỏi giờ, kéo lịch sang ngày khác để dời, chặn ngày/giờ đã qua cả UI lẫn backend), sửa bài đã đăng vẫn hiện "Chưa lên lịch", cột form Bài viết rộng hơn / khung bài hẹp ~10%. `Post.video` + migration, `generateStandaloneVideo`, `PostEditor` (hộp video), `DropTimeDialog.tsx`, `scheduler.check_future`. Test schedule + posts 20 pass, `tsc` sạch. Thử thật: video từ ảnh bài #10 ra trong 56 s (8 s, 720×1280, có tiếng nền — không gắn vào bài, tốn ~12 credit); Playwright kéo thả (ngày qua không nhận, thả thứ Năm → hỏi giờ, kéo sang thứ Sáu giữ 20:00; lịch thử đã xoá). **Chưa đăng thật một bài video lên Page.**
+- **26/10 tối** — Loạt truyện: chọn loạt có sẵn / tạo loạt mới, nút "⚡ Viết nhanh Tập N+1" (ở form) và "✍️ Viết Tập N+1" (trên đầu mỗi loạt trong Bài đã lưu), Bài đã lưu gom theo loạt (tập theo thứ tự) + "Bài lẻ". `PostsPage.tsx`, `posts.css`, `write-batch` nhận `n = 1`. Theo yêu cầu đã **viết thật Tập 4 của "Những ngày đầu có thai"** bằng nút mới: 13 s, bài #18 (kênh Mẹ bầu., kèm 1 ảnh Flow tự tạo, nối mạch "ông xã" từ cuối Tập 3, kết móc Tập 5) — **chưa đăng / chưa lên lịch**. Test posts 11 pass, `tsc` sạch.
+- **26/10 tối** — Sidebar hết thanh cuộn: mục menu thấp hơn (padding 5px, icon 26px), nhóm sát hơn, logo / credit / tài khoản gọn lại; màn thấp ≤ 900 px và ≤ 760 px thu nhỏ thêm; `.qt-nav` ẩn thanh cuộn (`scrollbar-width: none`, vẫn cuộn được bằng chuột nếu cửa sổ quá thấp). Khối CSS cuối `quicktool.css`. Đo Playwright: vừa khít ở cao 1000 / 900 / 800 / 720 px.
+- **26/10** — Sửa bug clip tạo từ 🎁 Gói (hoặc phía agent) không mở được từ "Clip của tôi" (giật rồi về thư viện): tải lại danh sách clip một lần và chờ xong mới kết luận link cũ. `QuicktoolApp.tsx`, `store/board.ts refreshBoards`. Playwright: tạo clip qua API → sang Bài viết → về Clip của tôi → bấm → vào Bước 1. Board thử #16–18 đã xoá. `tsc` sạch.
+- **26/10 tối** — Tìm hiểu nguồn video thay Flow (không code): Seedance 1.5 Pro 480p ~$0,012/s (rẻ nhất, mờ), Hailuo 02 6 s 768p ~$0,28, Kling 2.5 Turbo ~$0,07/s (qua fal.ai, một key), Seedance 2.0 chặn hẳn mặt người thật, bản free (Kling/Dreamina/PixVerse) không có API + watermark, muse2api (đã có `services/muse2api.py`) là v0.1 chưa thử với tài khoản thật + lái web bằng cookie. Flow Omni 8 s ≈ $0,24 vẫn rẻ. **Người dùng chọn giữ Flow** (chưa muốn tốn tiền) → làm prompt Flow thông minh + nhanh hơn. Nếu sau này cần: thêm "Nguồn tạo video" fal.ai làm dự phòng khi Flow bỏ lượt.

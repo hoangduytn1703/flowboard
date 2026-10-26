@@ -57,7 +57,8 @@ def test_post_routes_carry_first_comment(client, monkeypatch):
 
     monkeypatch.setattr(post_writer, "run_llm", fake_llm)
     p = client.post("/api/products", json={"name": "Gối bầu", "category": "home", "aff_link": "https://s.shopee.vn/abc"}).json()
-    r = client.post("/api/posts/write", json={"brief": {"kind": "review"}, "product_id": p["id"]}).json()
+    ch = client.post("/api/channels", json={"name": "Page test", "platforms": ["facebook"]}).json()
+    r = client.post("/api/posts/write", json={"brief": {"kind": "review"}, "product_id": p["id"], "channel_id": ch["id"]}).json()
     assert r["post"]["first_comment"].endswith("https://s.shopee.vn/abc")
     saved = client.post("/api/posts", json={"body": "Bài", "first_comment": "Link đây nha\nhttps://s.shopee.vn/abc", "product_id": p["id"]}).json()
     assert saved["first_comment"].startswith("Link đây nha")

@@ -34,6 +34,8 @@ import { ChannelsPage } from "./pages/ChannelsPage";
 import { DubPage } from "./pages/DubPage";
 import { ClipChannel } from "./steps/ClipChannel";
 import { ClipPost } from "./steps/ClipPost";
+import { SchedulePage } from "./pages/SchedulePage";
+import { SwipesPage } from "./pages/SwipesPage";
 import { useFlowCredits } from "../components/credits";
 import { AccountSwitchBanner } from "../components/AccountSwitchBanner";
 import { useToastOn } from "../store/toast";
@@ -113,6 +115,8 @@ export function QuicktoolApp() {
           <Route path="/tools/clean" element={<CleanToolPage />} />
           <Route path="/posts" element={<PostsPage />} />
           <Route path="/channels" element={<ChannelsPage />} />
+          <Route path="/schedule" element={<SchedulePage />} />
+          <Route path="/swipes" element={<SwipesPage />} />
           <Route path="/tools/dub" element={<DubPage />} />
           <Route path="/settings" element={<Library templates={templates} />} />
           <Route path="/clips/:id/:step" element={<Wizard templates={templates} />} />
@@ -413,11 +417,27 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
   // fetched: that answered 404 and put an error toast on a clean delete.
   const loadingBoard = useBoardStore((s) => s.loading);
   const boardsLoaded = useBoardStore((s) => s.boardsLoaded);
+  const refreshBoards = useBoardStore((s) => s.refreshBoards);
+  // A clip made on the agent side after the list was read (🎁 content pack, 🔥 swipe, dubbing…)
+  // is missing from it: read the list again once before calling the link stale.
+  // `navigate` changes on every URL change (/clips/17 → /clips/17/script), so the
+  // effect re-runs before the fresh list is back: wait for it, don't bounce.
+  const refreshedFor = useRef<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   useEffect(() => {
-    if (isNaN(routeId) || routeId === boardId || !boardsLoaded) return;
-    if (boards.some((b) => b.id === routeId)) void switchBoard(routeId);
-    else if (!loadingBoard) navigate("/clips", { replace: true });
-  }, [routeId, boardId, boards, boardsLoaded, loadingBoard, switchBoard, navigate]);
+    if (isNaN(routeId) || routeId === boardId || !boardsLoaded || refreshing) return;
+    if (boards.some((b) => b.id === routeId)) { void switchBoard(routeId); return; }
+    if (loadingBoard) return;
+    if (refreshedFor.current !== routeId) {
+      refreshedFor.current = routeId;
+      setRefreshing(true);
+      void refreshBoards()
+        .catch(() => navigate("/clips", { replace: true }))
+        .finally(() => setRefreshing(false));
+      return;
+    }
+    navigate("/clips", { replace: true });
+  }, [routeId, boardId, boards, boardsLoaded, loadingBoard, refreshing, switchBoard, refreshBoards, navigate]);
 
   // No step in the URL: continue where this clip was left.
   useEffect(() => {
@@ -561,7 +581,7 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
           {step === 2 && <StepScript roles={roles} category={clipCategory} productId={qt.product_id ?? null} boardId={routeId} />}
           {step === 3 && <StepMedia roles={roles} kind="image" />}
           {step === 4 && (isDrama ? <StepSequence roles={roles} /> : <StepMedia roles={roles} kind="video" />)}
-          {step === 5 && <StepExport roles={roles} productName={productLabel.name} price={productLabel.price} />}
+          {step === 5 && <StepExport roles={roles} productName={productLabel.name} price={productLabel.price} channelId={qt.channel_id ?? null} />}
           {step === 1 && loaded && <ClipChannel boardId={routeId} channelId={qt.channel_id ?? null} />}
           {step === 5 && loaded && <ClipPost boardId={routeId} productId={qt.product_id ?? null} channelId={qt.channel_id ?? null} />}
           <div className="qt-footer">

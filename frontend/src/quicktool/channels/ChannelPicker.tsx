@@ -30,26 +30,29 @@ export function invalidateChannels() {
 /**
  * "Kênh (không bắt buộc)" — one select used by the new-clip dialog, step 1,
  * the post writer and step 5. Shows a link to make the first channel.
+ * `required` (the post writers): the label says so and there is no
+ * "no channel" choice, only a prompt to pick one.
  */
 export function ChannelPicker({
-  value, onChange, label = "Kênh / page", disabled = false, hint,
+  value, onChange, label = "Kênh / page", disabled = false, hint, required = false,
 }: {
   value: number | null;
   onChange: (id: number | null) => void;
   label?: string;
   disabled?: boolean;
   hint?: ReactNode;
+  required?: boolean;
 }) {
   const [channels] = useChannels();
   const picked = channels.find((c) => c.id === value) ?? null;
   return (
     <label className="qt-field">
-      <span>{label} <small>(không bắt buộc)</small></span>
+      <span>{label} {required ? <small className="qt-field__required">(bắt buộc)</small> : <small>(không bắt buộc)</small>}</span>
       {channels.length === 0 ? (
         <small className="qt-card__hint">Chưa có kênh nào — <Link to="/channels">tạo kênh</Link> để AI nhớ page của bạn bán gì, nói giọng gì.</small>
       ) : (
         <select value={value ?? ""} disabled={disabled} onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}>
-          <option value="">— Không gắn kênh —</option>
+          <option value="">{required ? "— Chọn kênh / page —" : "— Không gắn kênh —"}</option>
           {channels.map((c) => <option key={c.id} value={c.id}>{c.name}{c.brainstorm ? " · có định hướng" : ""}</option>)}
         </select>
       )}

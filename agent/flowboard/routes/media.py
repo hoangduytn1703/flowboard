@@ -8,10 +8,14 @@ from __future__ import annotations
 
 import logging
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel
 
 from flowboard.services import media as media_service
+from flowboard.services import watermark
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +49,28 @@ async def get_media_bytes(media_id: str):
         return JSONResponse(status_code=404, content=status)
     _bytes, mime, path = result
     return FileResponse(path=str(path), media_type=mime)
+
+
+class CleanMarksBody(BaseModel):
+    enabled: bool
+
+
+@api_router.get("/clean-marks")
+def clean_marks_status() -> dict:
+    """The Gemini-sparkle switch and how many cached generated images are on this machine."""
+    return {"enabled": watermark.enabled(), "candidates": len(watermark.cached_image_files())}
+
+
+@api_router.put("/clean-marks")
+def set_clean_marks(body: CleanMarksBody) -> dict:
+    watermark.set_enabled(body.enabled)
+    return {"enabled": watermark.enabled(), "candidates": len(watermark.cached_image_files())}
+
+
+@api_router.post("/clean-marks/run")
+async def run_clean_marks() -> dict:
+    """Strip the sparkle from every cached generated image that still carries it."""
+    return await asyncio.to_thread(watermark.clean_cached_images)
 
 
 @api_router.get("/{media_id}/status")

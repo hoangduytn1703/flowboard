@@ -190,6 +190,8 @@ def ingest_inline_bytes(
         s.add(row)
         s.commit()
     logger.info("media: ingested %d inline bytes for %s", len(data), media_id)
+    from flowboard.services import watermark
+    watermark.clean_if_generated(path, kind, mime)
     return True
 
 
@@ -243,13 +245,20 @@ async def fetch_and_cache(media_id: str) -> Optional[tuple[bytes, str, Path]]:
         row = s.exec(
             select(Asset).where(Asset.uuid_media_id == media_id)
         ).first()
+        kind = row.kind if row is not None else None
         if row is not None:
             row.local_path = str(path)
             row.mime = mime
             s.add(row)
             s.commit()
 
-    return resp.content, mime, path
+    # A freshly generated image: take Flow's sparkle off before anyone sees it.
+    content = resp.content
+    from flowboard.services import watermark
+    if watermark.clean_if_generated(path, kind, mime):
+        content = path.read_bytes()
+
+    return content, mime, path
 
 
 def status(media_id: str) -> dict:

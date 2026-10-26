@@ -67,6 +67,10 @@ export interface Channel {
   link: string;
   page_review: PageReview | null;
   brainstorm: Brainstorm | null;
+  /** connected Facebook Page (auto-posting); the token stays on the agent */
+  fb_page_id: string;
+  fb_page_name: string;
+  fb_connected: boolean;
   posts: number;
   clips: number;
   /** Enough posts for a first brainstorm, or the profile is 5+ posts old. */
@@ -158,4 +162,17 @@ export async function brainstormIfDue(channelId: number | null | undefined): Pro
 
 export function platformLabel(key: string, options?: ChannelOptions | null): string {
   return options?.platforms.find((p) => p.key === key)?.label ?? key;
+}
+
+/** What a pasted Facebook token can post to (nothing is stored). */
+export function inspectFacebookToken(token: string): Promise<{ kind: "page" | "user"; id: string; name: string; pages: { id: string; name: string }[] }> {
+  return api("/api/channels/facebook/inspect", { method: "POST", body: JSON.stringify({ token }) });
+}
+
+export function connectFacebookPage(channelId: number, token: string, pageId?: string): Promise<Channel> {
+  return api<Channel>(`/api/channels/${channelId}/facebook`, { method: "POST", body: JSON.stringify({ token, page_id: pageId ?? null }) });
+}
+
+export function disconnectFacebookPage(channelId: number): Promise<Channel> {
+  return api<Channel>(`/api/channels/${channelId}/facebook`, { method: "DELETE" });
 }

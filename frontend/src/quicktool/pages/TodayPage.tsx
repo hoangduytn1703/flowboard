@@ -4,7 +4,14 @@ import { exportsZipUrl, listBoardSummaries, mediaUrl, type BoardSummary } from "
 import { getHistorySummary, listHistory, type HistoryRow, type HistorySummary } from "../../api/history";
 import { useFlowCredits } from "../../components/credits";
 import { PageLoading } from "../PageState";
+import { listDue, publishSlot, updateSlot, type Slot } from "../../api/schedule";
+import { listPosts, splitTags, type SavedPost } from "../../api/posts";
+import { toast } from "../../store/toast";
+import { useChannels } from "../channels/ChannelPicker";
+import { copyPost, copyText } from "../posts/PostEditor";
+import { DueList } from "./SchedulePage";
 import "../today.css";
+import "../schedule.css";
 
 /** Where to send someone who opens a clip from "Hôm nay". */
 function stepFor(b: BoardSummary): string {
@@ -35,15 +42,41 @@ export function TodayPage() {
   const [boards, setBoards] = useState<BoardSummary[] | null>(null);
   const [running, setRunning] = useState<HistoryRow[]>([]);
   const [summary, setSummary] = useState<HistorySummary | null>(null);
+  const [due, setDue] = useState<Slot[]>([]);
+  const [posts, setPosts] = useState<SavedPost[]>([]);
+  const [slotBusy, setSlotBusy] = useState(false);
+  const [channels] = useChannels();
 
   const load = useCallback(async () => {
-    const [b, r, s] = await Promise.allSettled([
-      listBoardSummaries(), listHistory({ status: "queued,running", limit: 20 }), getHistorySummary(),
+    const [b, r, s, d, p] = await Promise.allSettled([
+      listBoardSummaries(), listHistory({ status: "queued,running", limit: 20 }), getHistorySummary(), listDue(), listPosts(),
     ]);
     if (b.status === "fulfilled") setBoards(b.value);
     if (r.status === "fulfilled") setRunning(r.value.items);
     if (s.status === "fulfilled") setSummary(s.value);
+    if (d.status === "fulfilled") setDue(d.value);
+    if (p.status === "fulfilled") setPosts(p.value);
   }, []);
+
+  async function slotAction(fn: () => Promise<Slot>, done: string) {
+    setSlotBusy(true);
+    try {
+      const out = await fn();
+      setDue((list) => list.filter((x) => x.id !== out.id || out.due));
+      if (out.status === "failed") toast.error(out.result?.error ?? "Đăng không được.");
+      else if (done) toast.success(done);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSlotBusy(false);
+    }
+  }
+  async function copySlot(s: Slot) {
+    const p = posts.find((x) => x.id === s.post_id) ?? posts.find((x) => s.kind === "clip" && x.board_id === s.board_id);
+    if (!p) { toast.info("Chưa có bài / caption cho mục này."); return; }
+    if (s.kind === "post") await copyPost({ title: p.title ?? "", body: p.body, hashtags: splitTags(p.hashtags), image_prompts: p.image_prompts, first_comment: p.first_comment ?? "" });
+    else await copyText(`${p.body}\n\n${p.hashtags}`.trim(), "Đã copy caption của clip.");
+  }
 
   useEffect(() => {
     document.title = "Hôm nay · Flowboard";
@@ -90,6 +123,20 @@ export function TodayPage() {
           <div className="qt-stat"><strong>{summary?.today.error ?? 0}</strong><span>lỗi hôm nay</span></div>
           <div className="qt-stat"><strong>~{summary?.today.credits_estimate ?? 0}</strong><span>credit đã dùng hôm nay</span></div>
         </div>
+
+        <section className={`qt-card${due.length ? " qt-sched__due" : ""}`}>
+          <div className="qt-card__head">
+            <h3 className="qt-card__title">⏰ Đến giờ đăng{due.length ? ` (${due.length})` : ""}</h3>
+            <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={() => navigate("/schedule")}>Lịch đăng →</button>
+          </div>
+          {due.length === 0 ? <p className="qt-card__hint">Không có bài / clip nào đến giờ. Lên lịch ở trang <button type="button" className="qt-link" onClick={() => navigate("/schedule")}>Lịch đăng</button>.</p> : (
+            <DueList items={due} busy={slotBusy} onCopy={copySlot}
+                     onPublish={(s) => { if (window.confirm(`Đăng ngay lên Facebook Page của kênh "${s.channel}"?`)) void slotAction(() => publishSlot(s.id), "Đã đăng lên Facebook."); }}
+                     onPosted={(s) => void slotAction(() => updateSlot(s.id, { status: "posted" }), "Đã đánh dấu đã đăng.")}
+                     onSkip={(s) => void slotAction(() => updateSlot(s.id, { status: "skipped" }), "")}
+                     openLink={(s) => channels.find((c) => c.id === s.channel_id)?.link || "https://www.facebook.com/"} />
+          )}
+        </section>
 
         <section className="qt-card">
           <div className="qt-card__head">

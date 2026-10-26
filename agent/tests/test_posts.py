@@ -73,7 +73,13 @@ def test_write_route_and_library(client, monkeypatch):
     assert {k["key"] for k in opts["kinds"]} >= {"discussion", "review", "minigame"}
     board = client.post("/api/boards", json={"name": "Clip test"}).json()
     client.post("/api/nodes", json={"board_id": board["id"], "type": "video", "data": {"narration": "Câu thoại 1"}})
-    r = client.post("/api/posts/write", json={"brief": {"kind": "review", "images": 1}, "board_id": board["id"]})
+    ch = client.post("/api/channels", json={"name": "Page test", "platforms": ["facebook"]}).json()
+    # no channel / page picked: refused before any token is spent
+    r = client.post("/api/posts/write", json={"brief": {"kind": "review"}, "board_id": board["id"]})
+    assert r.status_code == 400 and "kênh" in r.json()["detail"]
+    r = client.post("/api/posts/write", json={"brief": {"kind": "review"}, "channel_id": 999})
+    assert r.status_code == 400
+    r = client.post("/api/posts/write", json={"brief": {"kind": "review", "images": 1}, "board_id": board["id"], "channel_id": ch["id"]})
     assert r.status_code == 200 and r.json()["post"]["image_prompts"] == ["A plate of crispy scorched rice"]
 
     saved = client.post("/api/posts", json={"kind": "review", "title": "T", "body": "Nội dung", "hashtags": "#a #b",
@@ -108,12 +114,13 @@ def test_series_episodes_feed_the_next_one(client, monkeypatch):
 
     monkeypatch.setattr(post_writer, "run_llm", fake_llm)
     assert client.get("/api/posts/series").json() == []
-    r = client.post("/api/posts/write", json={"brief": {}, "series": "Chuyện nhà chuối"}).json()
+    ch = client.post("/api/channels", json={"name": "Page test", "platforms": ["facebook"]}).json()["id"]
+    r = client.post("/api/posts/write", json={"brief": {}, "series": "Chuyện nhà chuối", "channel_id": ch}).json()
     assert r["series"] == "Chuyện nhà chuối" and r["episode"] == 1
     assert "EPISODE 1" in seen["prompt"] and "first episode" in seen["prompt"] and "Câu chuyện nhiều kỳ" in seen["prompt"]
     client.post("/api/posts", json={"body": "Tập 1: mình mua chuối", "series": "Chuyện nhà chuối", "episode": 1, "kind": "serial"})
     client.post("/api/posts", json={"body": "Tập 2: chuối chín hết", "series": "Chuyện nhà chuối", "episode": 2, "kind": "serial"})
-    r = client.post("/api/posts/write", json={"brief": {"kind": "serial"}, "series": "Chuyện nhà chuối"}).json()
+    r = client.post("/api/posts/write", json={"brief": {"kind": "serial"}, "series": "Chuyện nhà chuối", "channel_id": ch}).json()
     assert r["episode"] == 3
     p = seen["prompt"]
     assert "EPISODE 3" in p and "Tập 1: Tập 1: mình mua chuối" in p and "Tập 2: Tập 2: chuối chín hết" in p and "hook for episode 4" in p
@@ -146,3 +153,63 @@ def test_revise_image_route(client, monkeypatch):
     r = client.post("/api/posts/revise-image", json={"prompt": "A scene", "request": "sáng hơn"})
     assert r.status_code == 200 and r.json()["prompt"].startswith("A brighter")
     assert client.post("/api/posts/revise-image", json={"prompt": "A scene", "request": ""}).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_no_call_to_action_by_default_and_reach_options_reach_the_prompt(monkeypatch):
+    seen = {}
+
+    async def fake_llm(feature, prompt, *, system_prompt=None, timeout=0):
+        seen["prompt"], seen["system"] = prompt, system_prompt
+        return _answer()
+
+    monkeypatch.setattr(post_writer, "run_llm", fake_llm)
+    await post_writer.write_post({"kind": "tips"})
+    p = seen["prompt"]
+    assert "CALL TO ACTION: no call to action" in p and "REACH" not in p and "Opening line" not in p
+    assert "engagement bait" in seen["system"]
+    await post_writer.write_post({"kind": "tips", "cta": "comment", "hook": "number", "format": "list", "emoji": "few",
+                                  "boosts": ["save", "open_loop", "bogus"]})
+    p = seen["prompt"]
+    assert "CALL TO ACTION: invite readers to comment" in p
+    assert "Opening line: open with a number promise" in p and "Layout: the core as a scannable list" in p
+    assert "Emoji: at most 2 emoji" in p
+    assert "REACH (do all of these): make part of it a mini checklist" in p and "tease something early" in p
+
+
+def test_options_list_the_reach_choices(client):
+    o = client.get("/api/posts/options").json()
+    assert o["ctas"][0]["key"] == "none"
+    assert {"hooks", "formats", "boosts", "emojis"} <= set(o)
+    assert o["hooks"][0]["key"] == "auto" and any(b["key"] == "save" for b in o["boosts"])
+
+
+def test_write_batch_side_by_side_and_as_a_story(client, monkeypatch):
+    seen = []
+
+    async def fake_llm(feature, prompt, *, system_prompt=None, timeout=0):
+        seen.append(prompt)
+        n = len(seen)
+        return _answer(title=f"Bài {n}", body=f"Nội dung {n}")
+
+    monkeypatch.setattr(post_writer, "run_llm", fake_llm)
+    ch = client.post("/api/channels", json={"name": "Page", "platforms": ["facebook"]}).json()["id"]
+    assert client.post("/api/posts/write-batch", json={"brief": {}, "n": 3}).status_code == 400  # no channel
+    r = client.post("/api/posts/write-batch", json={"brief": {"kind": "tips"}, "n": 3, "channel_id": ch})
+    assert r.status_code == 200, r.text
+    posts = r.json()["posts"]
+    assert len(posts) == 3 and all(p["id"] and p["channel_id"] == ch for p in posts)
+    assert all("BATCH: this is post" in p for p in seen)
+    hooks = {p["brief"]["hook"] for p in posts}
+    assert len(hooks) == 3  # each opens differently
+    assert len(client.get("/api/posts").json()) == 3
+    # a story: consecutive episodes, each reading the one before
+    seen.clear()
+    r = client.post("/api/posts/write-batch", json={"brief": {}, "n": 3, "channel_id": ch, "series": "Chuyện bầu"}).json()
+    eps = [(p["series"], p["episode"]) for p in r["posts"]]
+    assert eps == [("Chuyện bầu", 1), ("Chuyện bầu", 2), ("Chuyện bầu", 3)]
+    assert "EPISODE 1" in seen[0] and "EPISODE 2" in seen[1] and "Nội dung 1" in seen[1] and "Nội dung 2" in seen[2]
+    # continuing the same series later starts at episode 4
+    r = client.post("/api/posts/write-batch", json={"brief": {}, "n": 2, "channel_id": ch, "series": "Chuyện bầu"}).json()
+    assert [p["episode"] for p in r["posts"]] == [4, 5]
+    assert client.post("/api/posts/write-batch", json={"brief": {}, "n": 6, "channel_id": ch}).status_code == 422

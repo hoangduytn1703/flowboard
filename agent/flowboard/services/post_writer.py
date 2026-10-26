@@ -47,13 +47,48 @@ LENGTHS: dict[str, str] = {
     "medium": "80-150 words",
     "long": "150-260 words",
 }
+#: The default is "none": a post simply to be read, no ask at the end.
 CTAS: dict[str, str] = {
+    "none": "no call to action: a post simply to be read — end on a natural closing line (a thought, a takeaway, a "
+            "warm sign-off); do not ask readers to comment, inbox, share or buy",
     "comment": "invite readers to comment (answer the question / share their experience)",
     "inbox": "invite readers to inbox / comment 'ib' for details",
     "link": "say the shop link is in the first comment (do not put a URL in the body)",
     "share": "invite readers to share or tag a friend who needs it",
 }
 MAX_IMAGES = 4
+
+# What makes a post travel (separate from the call to action). key → (label, instruction); "auto" = the writer picks.
+HOOKS: dict[str, tuple[str, str]] = {
+    "auto": ("AI tự chọn", ""),
+    "question": ("Câu hỏi chạm đúng vấn đề", "open with a question the reader instantly answers in their head"),
+    "surprise": ("Sự thật bất ngờ", "open with a surprising but TRUE fact or observation drawn from the given facts"),
+    "pain": ("Nỗi khổ quen thuộc", "open with a familiar everyday frustration the audience lives with"),
+    "number": ("Con số / “3 điều…”", "open with a number promise (e.g. '3 điều mình ước biết sớm hơn…') and deliver exactly that many points"),
+    "story": ("Khoảnh khắc kể chuyện", "open in the middle of a small real-life moment (time, place, what happened)"),
+    "contrarian": ("Ngược số đông", "open with a gentle, defensible opinion that goes against a common belief, then explain it"),
+}
+FORMATS: dict[str, tuple[str, str]] = {
+    "auto": ("AI tự chọn", ""),
+    "lines": ("Đoạn ngắn, xuống dòng nhiều", "short paragraphs of 1-2 lines with a blank line between them"),
+    "list": ("Danh sách gạch đầu dòng", "the core as a scannable list, one emoji bullet per point"),
+    "qa": ("Hỏi – đáp", "a few short question/answer pairs"),
+    "before_after": ("Trước – sau", "a clear before / after contrast"),
+}
+#: Extra pushes for reach and interaction; any number may be on.
+BOOSTS: dict[str, tuple[str, str]] = {
+    "question_end": ("Kết bằng câu hỏi dễ trả lời", "close with ONE easy, specific question people can answer in a few words"),
+    "choice": ("Cho chọn A hay B", "give readers a light A-or-B choice to pick in the comments"),
+    "save": ("Đáng lưu lại", "make part of it a mini checklist / tip list worth saving, and say it is worth saving for later"),
+    "open_loop": ("Giữ người đọc tới cuối", "tease something early that is only resolved near the end, so people read to the last line"),
+    "relatable": ("Chạm nỗi niềm chung", "name a feeling or situation most readers share ('ai cũng từng…')"),
+    "share": ("Đáng chia sẻ", "make it useful for someone the reader knows, so sharing feels natural (never beg for shares)"),
+}
+EMOJIS: dict[str, tuple[str, str]] = {
+    "few": ("Ít emoji", "at most 2 emoji in the whole post"),
+    "some": ("Vừa phải", "a few emoji as bullets or emphasis"),
+    "many": ("Nhiều emoji", "lively, emoji on most lines"),
+}
 
 _SYSTEM = (
     "You write social posts (Facebook by default; the brief names the platform) in natural Vietnamese for a Vietnamese TikTok Shop / Shopee affiliate seller who wants "
@@ -63,8 +98,11 @@ _SYSTEM = (
     "and blank lines between ideas; emoji sparingly as bullets or emphasis.\n"
     "- Sound like a real person (xưng 'mình', gọi 'mọi người' / 'các bạn' / 'cả nhà'), not an ad. Use only facts "
     "given about the product; never invent prices, discounts, prizes, certifications or health / medical claims.\n"
-    "- End with the requested call to action; posts aimed at engagement end with a question. Never put URLs in the "
-    "body (the link goes in the first comment).\n"
+    "- End the way the CALL TO ACTION line says — it may say there is none; then do not tack on an ask. Never put URLs "
+    "in the body (the link goes in the first comment).\n"
+    "- Reach: the first two lines decide whether people tap 'Xem thêm', so they must create curiosity without "
+    "clickbait lies. Facebook demotes engagement bait ('comment CÓ', 'like nếu…', 'tag 3 người', 'share để nhận'), so "
+    "invite interaction the natural way the REACH lines ask for, never with those phrases.\n"
     "- hashtags: 3-6 relevant Vietnamese/English hashtags without spaces, as a list of strings starting with '#'.\n"
     "- image_prompts: exactly the number of images requested (0 if none), each an ENGLISH prompt for a photorealistic "
     "image that fits the post (lifestyle / product scene, natural light, no text, no logos, no real people's faces "
@@ -81,6 +119,14 @@ _SYSTEM = (
 
 class PostWriterError(RuntimeError):
     pass
+
+
+def post_text_of(body: str, hashtags: Any) -> str:
+    """The text as it is posted: body, blank line, hashtags (same as the
+    frontend's ``postText``). ``hashtags`` is the stored string or a list."""
+    tags = " ".join(hashtags) if isinstance(hashtags, list) else str(hashtags or "")
+    tags = tags.strip()
+    return f"{(body or '').strip()}\n\n{tags}" if tags else (body or "").strip()
 
 
 def _product_block(product: Optional[dict]) -> str:
@@ -138,7 +184,15 @@ def _brief_block(brief: dict, platform: str) -> str:
         out.append(f"Audience: {str(brief['audience'])[:200]}")
     out.append(f"Tone: {TONES.get(brief.get('tone') or 'friendly', TONES['friendly'])}")
     out.append(f"Length: {LENGTHS.get(brief.get('length') or 'medium', LENGTHS['medium'])}")
-    out.append(f"Call to action: {CTAS.get(brief.get('cta') or 'comment', CTAS['comment'])}")
+    out.append(f"CALL TO ACTION: {CTAS.get(brief.get('cta') or 'none', CTAS['none'])}")
+    if (hook := HOOKS.get(brief.get("hook") or "auto")) and hook[1]:
+        out.append(f"Opening line: {hook[1]}")
+    if (fmt := FORMATS.get(brief.get("format") or "auto")) and fmt[1]:
+        out.append(f"Layout: {fmt[1]}")
+    out.append(f"Emoji: {EMOJIS.get(brief.get('emoji') or 'some', EMOJIS['some'])[1]}")
+    boosts = [BOOSTS[b][1] for b in (brief.get("boosts") or []) if b in BOOSTS]
+    if boosts:
+        out.append("REACH (do all of these): " + "; ".join(boosts))
     n = _image_count(brief)
     out.append(f"Images requested: {n}" + (f" — wishes: {str(brief.get('image_wish'))[:300]}" if n and brief.get("image_wish") else ""))
     return "\n".join(out)
@@ -210,11 +264,12 @@ async def revise_image_prompt(current: str, request: str, *, timeout: float = 60
 async def write_post(brief: dict, *, product: Optional[dict] = None, clip: Optional[dict] = None,
                      channel: Optional[dict] = None, series: Optional[dict] = None, current: Optional[dict] = None,
                      message: Optional[str] = None, history: Optional[list[dict]] = None,
-                     timeout: float = 120.0) -> dict[str, Any]:
+                     extra: Optional[str] = None, timeout: float = 120.0) -> dict[str, Any]:
     """A new post from ``brief``, or ``current`` revised per ``message``.
     ``history`` is the chat so far (``[{role: user|assistant, text}]``).
     ``channel`` (with its brainstorm) sets the platform format and the
-    direction the post must follow."""
+    direction the post must follow. ``extra`` is one more block for the
+    prompt (e.g. the structure of a viral post to follow)."""
     brief = brief or {}
     if series and series.get("name") and not brief.get("kind"):
         brief = {**brief, "kind": "serial"}
@@ -228,6 +283,8 @@ async def write_post(brief: dict, *, product: Optional[dict] = None, clip: Optio
         parts.append(pb)
     if (cb := _clip_block(clip)):
         parts.append(cb)
+    if extra and extra.strip():
+        parts.append(extra.strip()[:4000])
     if history:
         convo = "\n".join(f"{'SELLER' if h.get('role') == 'user' else 'YOU'}: {str(h.get('text') or '')[:500]}"
                           for h in history[-8:])

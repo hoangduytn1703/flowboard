@@ -1,0 +1,105 @@
+/* Posting calendar ("Lịch đăng"): the week view, the slot cards, the dialog */
+.qt-sched-dialog { width: min(94vw, 560px); max-height: calc(100vh - 40px); overflow-y: auto; }
+.qt-sched-dialog__what { margin: -4px 0 0; font-size: 15px; color: var(--muted); }
+.qt-sched-dialog__auto {
+  display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px;
+  border: 1px dashed rgba(255, 106, 43, 0.4); border-radius: 10px; background: rgba(255, 106, 43, 0.06); cursor: pointer;
+}
+.qt-sched-dialog__auto.is-off { opacity: 0.7; cursor: default; }
+.qt-sched-dialog__auto input { margin-top: 3px; }
+.qt-sched-dialog__auto span { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
+.qt-sched-dialog__auto small { color: var(--muted); line-height: 1.45; }
+.qt-sched-dialog input[type="datetime-local"] {
+  padding: 8px 10px; font: inherit; font-size: 15px; color: var(--text);
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px; color-scheme: dark;
+}
+
+.qt-sched { display: flex; flex-direction: column; gap: 14px; }
+.qt-sched__nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.qt-sched__nav strong { font-size: 16px; margin: 0 6px; }
+.qt-sched__week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 1100px) { .qt-sched__week { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .qt-sched__week { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.qt-sched__day { display: flex; flex-direction: column; gap: 6px; min-height: 180px; padding: 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+.qt-sched__day.is-today { border-color: rgba(255, 106, 43, 0.6); box-shadow: 0 0 0 1px rgba(255, 106, 43, 0.25) inset; }
+.qt-sched__day.is-past { opacity: 0.75; }
+.qt-sched__dayhead { display: flex; align-items: baseline; justify-content: space-between; font-size: 13px; color: var(--muted); }
+.qt-sched__dayhead strong { font-size: 15px; color: var(--text); }
+.qt-sched__day.is-today .qt-sched__dayhead strong { color: var(--qt-accent); }
+.qt-sched__slot {
+  display: flex; flex-direction: column; gap: 3px; padding: 7px 8px; text-align: left;
+  font: inherit; color: var(--text); background: var(--panel-high); border: 1px solid var(--border); border-left-width: 4px; border-radius: 8px; cursor: pointer;
+}
+.qt-sched__slot:hover { border-color: rgba(255, 106, 43, 0.65); }
+.qt-sched__slot.is-open { border-color: var(--qt-accent); }
+.qt-sched__slot--post { border-left-color: #93c5fd; }
+.qt-sched__slot--clip { border-left-color: #c4b5fd; }
+.qt-sched__slot--posted { border-left-color: #86efac; opacity: 0.8; }
+.qt-sched__slot--failed { border-left-color: #f87171; }
+.qt-sched__slot--due { border-left-color: #fbbf24; background: rgba(251, 191, 36, 0.08); }
+.qt-sched__slot time { font-size: 13px; font-weight: 700; }
+.qt-sched__slot .t { font-size: 13px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.qt-sched__slot small { font-size: 11px; color: var(--muted); }
+.qt-sched__slot img { width: 100%; height: 54px; object-fit: cover; border-radius: 5px; }
+.qt-sched__empty { margin: auto; font-size: 12px; color: var(--muted); text-align: center; }
+.qt-sched__addbtn { margin-top: auto; }
+
+.qt-sched__grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; align-items: start; }
+@media (max-width: 1100px) { .qt-sched__grid { grid-template-columns: 1fr; } }
+.qt-sched__detail { position: sticky; top: 12px; }
+.qt-sched__detail img { width: 100%; max-height: 220px; object-fit: cover; border-radius: 8px; }
+.qt-sched__kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 14px; }
+.qt-sched__kv dt { color: var(--muted); }
+.qt-sched__kv dd { margin: 0; }
+.qt-sched__status { display: inline-block; padding: 1px 8px; font-size: 12px; font-weight: 600; border-radius: 999px; border: 1px solid var(--border); }
+.qt-sched__status--planned { color: #93c5fd; border-color: rgba(147, 197, 253, 0.5); }
+.qt-sched__status--due { color: #fbbf24; border-color: rgba(251, 191, 36, 0.6); }
+.qt-sched__status--posted { color: #86efac; border-color: rgba(134, 239, 172, 0.5); }
+.qt-sched__status--failed { color: #fca5a5; border-color: rgba(248, 113, 113, 0.6); }
+.qt-sched__status--skipped { color: var(--muted); }
+.qt-sched__err { padding: 8px 10px; font-size: 13px; color: #fecaca; background: rgba(239, 68, 68, 0.1); border-radius: 8px; white-space: pre-wrap; }
+.qt-sched__legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: var(--muted); }
+.qt-sched__legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+
+/* "Đến giờ đăng" rows (Today + calendar top) */
+.qt-sched__due { border-color: rgba(251, 191, 36, 0.5); }
+.qt-sched__due .qt-today__list li { border-color: rgba(251, 191, 36, 0.35); }
+
+/* Facebook Page connection card (channel page) */
+.qt-fbconnect { display: flex; flex-direction: column; gap: 10px; }
+.qt-fbconnect__on { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; background: rgba(134, 239, 172, 0.08); border: 1px solid rgba(134, 239, 172, 0.35); font-size: 14px; }
+.qt-fbconnect__on strong { color: #86efac; }
+.qt-fbconnect textarea { font-family: ui-monospace, monospace; font-size: 12px; }
+.qt-fbconnect__pages { display: flex; flex-wrap: wrap; gap: 6px; }
+.qt-fbconnect ol { margin: 6px 0 0; padding-left: 20px; font-size: 14px; line-height: 1.6; color: var(--muted); }
+.qt-fbconnect ol code { color: var(--text); }
+
+/* "🎁 Gói nội dung" dialog */
+.qt-bundle { width: min(94vw, 600px); max-height: calc(100vh - 40px); overflow-y: auto; }
+.qt-bundle__part { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; line-height: 1.45; cursor: pointer; }
+.qt-bundle__part input { margin-top: 3px; }
+.qt-bundle__sub { margin: -4px 0 0 26px; }
+.qt-bundle__results { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.qt-bundle__results li { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-left: 4px solid #86efac; border-radius: 8px; background: var(--panel-high); font-size: 14px; }
+.qt-bundle__results li.is-bad { border-left-color: #f87171; }
+.qt-bundle__err { color: #fecaca; }
+.qt-bundle__btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.qt-bundle__caption { white-space: pre-wrap; color: var(--muted); }
+
+/* Drag & drop on the calendar */
+.qt-sched__day.is-droppable { border-style: dashed; border-color: rgba(255, 106, 43, 0.5); }
+.qt-sched__day.is-over { background: rgba(255, 106, 43, 0.12); border-color: #ff6a2b; box-shadow: 0 0 0 2px rgba(255, 106, 43, 0.35) inset; }
+.qt-sched__day.is-blocked { opacity: 0.4; cursor: not-allowed; }
+.qt-sched__slot[draggable="true"] { cursor: grab; }
+.qt-sched__pool { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.qt-sched__card { display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-high); cursor: grab; transition: border-color 120ms ease, transform 120ms ease; }
+.qt-sched__card:hover { border-color: rgba(255, 106, 43, 0.6); transform: translateY(-1px); }
+.qt-sched__card.is-dragging { opacity: 0.45; }
+.qt-sched__cardthumb { display: grid; place-items: center; height: 110px; font-size: 30px; background: var(--panel); position: relative; }
+.qt-sched__cardthumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.qt-sched__cardbody { display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; flex: 1; }
+.qt-sched__cardbody strong { font-size: 14px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.qt-sched__cardbody small { font-size: 12px; color: var(--muted); }
+.qt-sched__card > .qt-btn { margin: 0 10px 10px; }
+.qt-droptime { width: min(94vw, 460px); }
+.qt-droptime__time { width: 140px; padding: 8px 10px; font: inherit; font-size: 16px; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 8px; color-scheme: dark; }

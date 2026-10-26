@@ -115,7 +115,8 @@ def test_write_route_uses_the_clip_channel(client, monkeypatch):
     board = client.post("/api/boards/from-template", json={"template_id": "fast_food_ad", "channel_id": c["id"]}).json()
     r = client.post("/api/posts/write", json={"brief": {}, "board_id": board["id"]}).json()
     assert r["channel_id"] == c["id"]
-    assert client.post("/api/posts/write", json={"brief": {}}).json()["channel_id"] is None
+    # neither the request nor the clip names a channel → refused
+    assert client.post("/api/posts/write", json={"brief": {}}).status_code == 400
 
 
 def test_post_channel_column_migration(tmp_path):

@@ -206,6 +206,9 @@ class Post(SQLModel, table=True):
     episode: int = 0
     images: list = Field(default_factory=list, sa_column=Column(JSON))
     image_prompts: list = Field(default_factory=list, sa_column=Column(JSON))
+    # A short Flow video (media id) posted instead of the images (a Facebook
+    # post carries photos or one video, not both). ``db.ensure_post_video_column``.
+    video: str = ""
     brief: dict = Field(default_factory=dict, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
@@ -233,8 +236,54 @@ class Channel(SQLModel, table=True):
     link: str = ""
     page_review: Optional[dict] = Field(default=None, sa_column=Column(JSON))
     brainstorm: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+    # A connected Facebook Page (Graph API): the page's id and name. The page
+    # access token itself lives in the central settings store, never here
+    # (``services/facebook_publish``). Added after the table shipped:
+    # ``db.ensure_channel_facebook_columns``.
+    fb_page_id: str = ""
+    fb_page_name: str = ""
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class Schedule(SQLModel, table=True):
+    """One slot on the posting calendar ("Lịch đăng"): a saved post or a
+    finished clip, on a channel, at a time. ``auto`` = publish through the
+    channel's connected Facebook Page when the time comes (the scheduler
+    loop in ``services/scheduler``); otherwise the slot only reminds, and
+    the seller marks it posted. ``create_all`` adds the table."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    kind: str = Field(index=True)  # "post" | "clip"
+    post_id: Optional[int] = Field(default=None, index=True)
+    board_id: Optional[int] = Field(default=None, index=True)
+    channel_id: Optional[int] = Field(default=None, index=True)
+    scheduled_at: datetime = Field(index=True)  # UTC
+    # planned → (due) → posted | failed | skipped. "due" is derived (planned and past).
+    status: str = Field(default="planned", index=True)
+    auto: bool = False
+    note: str = ""
+    # What publishing produced: the Facebook post id / permalink, or the error.
+    result: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+    posted_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class Swipe(SQLModel, table=True):
+    """A post or video that did well somewhere ("Mẫu đang hot"), kept with
+    the LLM's breakdown of why — hook, structure, triggers — so the seller
+    can write their own version for a product. ``create_all`` adds the table."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    kind: str = "post"  # "post" | "video"
+    url: str = ""
+    platform: str = ""
+    title: str = ""
+    text: str = ""  # the captured caption / transcript
+    analysis: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+    tags: list = Field(default_factory=list, sa_column=Column(JSON))
+    # Our own posts / clips written from this swipe.
+    uses: int = 0
+    created_at: datetime = Field(default_factory=_utcnow)
 
 
 class Product(SQLModel, table=True):
