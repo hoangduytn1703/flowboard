@@ -3,8 +3,9 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { listProducts, mediaUrl, type Product } from "../../api/client";
 import {
   deletePost, getPostOptions, listPosts, listSeries, savePost, splitTags, updatePost, writePost, writePostBatch,
-  type ChatTurn, type PostBrief, type PostDraft, type PostOptions, type PostSeries, type SavedPost,
+  type ChatTurn, type PostBrief, type PostDraft, type PostOptions, type PostSeries, type SavedPost, type WritePostResult,
 } from "../../api/posts";
+import { latestOp } from "../../components/BackgroundTasks";
 import { brainstormIfDue } from "../../api/channels";
 import { toast } from "../../store/toast";
 import { ChannelPicker, useChannels } from "../channels/ChannelPicker";
@@ -67,11 +68,19 @@ export function PostsPage() {
   const [series, setSeries] = useState("");
   const [episode, setEpisode] = useState(0);
   const [allSeries, setAllSeries] = useState<PostSeries[]>([]);
+  // A story belongs to one page: only the chosen channel's series are offered
+  // (old ones never tied to a channel stay pickable), never another page's.
+  const channelSeries = useMemo(
+    () => (channelId ? allSeries.filter((x) => x.channel_id === channelId || x.channel_id == null) : []),
+    [allSeries, channelId],
+  );
   const [boardId, setBoardId] = useState<number | null>(null);
   const [draft, setDraft] = useState<PostDraft>(EMPTY);
   const [images, setImages] = useState<string[]>([]);
   // "🎬 Video kèm": posted instead of the images; bumped token = make it after a fresh write.
   const [video, setVideo] = useState("");
+  // A post written for a clip goes out with that clip's video (services/scheduler).
+  const [clipVideo, setClipVideo] = useState("");
   const [autoVideo, setAutoVideo] = useState(0);
   // bumped after a fresh write that asked for images → PostEditor renders them at once
   const [autoMake, setAutoMake] = useState(0);
@@ -91,6 +100,17 @@ export function PostsPage() {
   const [count, setCount] = useState(1);
   // "＋ Loạt truyện mới…" picked in the series select → type a name.
   const [newSeries, setNewSeries] = useState(false);
+  // Switching to another page drops a series that belongs to the previous one,
+  // so episode N of page A is never written onto page B by mistake.
+  useEffect(() => {
+    const name = series.trim();
+    if (!name || newSeries) return;
+    const owners = allSeries.filter((x) => x.name === name);
+    if (owners.length && !owners.some((x) => x.channel_id === channelId || x.channel_id == null)) {
+      setSeries("");
+      setEpisode(0);
+    }
+  }, [channelId, allSeries]); // eslint-disable-line react-hooks/exhaustive-deps
   const [nextBusy, setNextBusy] = useState<string | null>(null);
   const [batch, setBatch] = useState<number[]>([]);
   const [slots, setSlots] = useState<Record<number, string>>({});
@@ -120,6 +140,46 @@ export function PostsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wanted, saved.length]);
 
+  // Came back while (or after) the AI wrote a post asked for on this page: pick
+  // it up instead of losing it — the agent keeps it 15 minutes
+  // (services/op_tracker). The page's own write claims its result while the
+  // page is still open, so this only fires after leaving and returning.
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => {
+    if (params.get("post")) return;
+    let live = true;
+    let timer: number | undefined;
+    const check = async () => {
+      const op = await latestOp("post_write").catch(() => null);
+      if (!live || !op?.op_id) return;
+      if (op.status === "running") {
+        setBusy(true);
+        timer = window.setTimeout(() => void check(), 3000);
+        return;
+      }
+      const got = await latestOp("post_write", true).catch(() => null);
+      if (!live) return;
+      setBusy(false);
+      if (!got || got.op_id !== op.op_id) return;
+      if (got.status === "error") { toast.error(`Bài AI viết lúc bạn rời trang không thành: ${got.message}`); return; }
+      const res = got.result as WritePostResult | null;
+      if (!res?.post) return;
+      setDraft(res.post);
+      setImages([]);
+      setVideo("");
+      setPostId(null);
+      if (res.product_id) setProductId(res.product_id);
+      if (res.channel_id) setChannelId(res.channel_id);
+      if (res.series) { setSeries(res.series); setEpisode(res.episode); }
+      setDirty(true);
+      toast.info("Đã mở lại bài AI viết xong lúc bạn ở trang khác — xem, sửa rồi bấm Lưu.", { duration: 9000 });
+    };
+    void check();
+    return () => { live = false; if (timer) window.clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => { chatEnd.current?.scrollIntoView({ block: "nearest" }); }, [chat.length]);
 
   const product = useMemo(() => products.find((p) => p.id === productId) ?? null, [products, productId]);
@@ -131,6 +191,7 @@ export function PostsPage() {
     setDraft(draftOf(p));
     setImages(p.images);
     setVideo(p.video ?? "");
+    setClipVideo(p.clip_video ?? "");
     setAutoVideo(0);
     setAutoMake(0); // a saved post: never auto-render its prompts
     setPostId(p.id);
@@ -150,6 +211,7 @@ export function PostsPage() {
     setDraft(EMPTY);
     setImages([]);
     setVideo("");
+    setClipVideo("");
     setAutoVideo(0);
     setAutoMake(0);
     setPostId(null);
@@ -174,6 +236,8 @@ export function PostsPage() {
         message: text || undefined,
         history: text ? history : [],
       });
+      // Still on the page: this result is shown here, so it must not be "restored" on the next visit.
+      if (mounted.current) void latestOp("post_write", true).catch(() => undefined);
       setDraft(res.post);
       if (!text) {
         // a new post: the previous post's pictures do not belong to it
@@ -190,6 +254,7 @@ export function PostsPage() {
       setChat((c) => (text ? [...c, answer] : [...c, { role: "user", text: "Viết bài theo mẫu đã điền" }, answer]));
       if (text) setMessage("");
     } catch (e) {
+      if (mounted.current) void latestOp("post_write", true).catch(() => undefined);
       const err = e instanceof Error ? e.message : String(e);
       toast.error(err);
       if (text) setChat((c) => [...c, { role: "assistant", text: `⚠ ${err}` }]);
@@ -295,6 +360,7 @@ export function PostsPage() {
       const isNew = postId === null;
       const row = isNew ? await savePost(input) : await updatePost(postId, input);
       setPostId(row.id);
+      setClipVideo(row.clip_video ?? "");
       setSaved((list) => [row, ...list.filter((p) => p.id !== row.id)]);
       setDirty(false);
       if (row.series) void listSeries().then(setAllSeries).catch(() => undefined);
@@ -338,7 +404,8 @@ export function PostsPage() {
   async function publishNow() {
     const ch = channels.find((c) => c.id === channelId);
     if (!ch?.fb_connected) return;
-    if (!window.confirm(`Đăng bài này lên Page "${ch.fb_page_name || ch.name}" ngay bây giờ?${images.length ? ` (kèm ${images.length} ảnh)` : ""}${draft.first_comment ? " Bình luận đầu sẽ được thêm sau khi đăng." : ""}`)) return;
+    const withWhat = video ? " (kèm video)" : boardId !== null ? " (kèm video của clip)" : images.length ? ` (kèm ${images.length} ảnh)` : "";
+    if (!window.confirm(`Đăng bài này lên Page "${ch.fb_page_name || ch.name}" ngay bây giờ?${withWhat}${draft.first_comment ? " Bình luận đầu sẽ được thêm sau khi đăng." : ""}`)) return;
     setPublishing(true);
     try {
       const id = dirty || postId === null ? await save(true) : postId;
@@ -518,21 +585,22 @@ export function PostsPage() {
                     {brief.kind && KIND_HINT[brief.kind] && <small className="qt-card__hint">{KIND_HINT[brief.kind]}</small>}
                   </label>
                   {brief.kind === "serial" && (() => {
-                    const known = allSeries.find((x) => x.name === series.trim());
+                    const known = channelSeries.find((x) => x.name === series.trim());
+                    const chName = channels.find((c) => c.id === channelId)?.name ?? "";
                     return (
                       <div className="qt-field">
-                        <span>Loạt truyện</span>
+                        <span>{chName ? `Loạt truyện của kênh “${chName.replace(/\.$/, "")}”` : "Loạt truyện"}</span>
                         <select value={newSeries ? "__new" : known ? known.name : ""}
                                 onChange={(e) => {
                                   const v = e.target.value;
                                   if (v === "__new") { setNewSeries(true); setSeries(""); return; }
                                   setNewSeries(false);
                                   setSeries(v);
-                                  const row = allSeries.find((x) => x.name === v);
-                                  if (row?.channel_id && !channelId) setChannelId(row.channel_id);
                                 }}>
-                          <option value="">— Chọn loạt truyện —</option>
-                          {allSeries.map((x) => <option key={x.name} value={x.name}>{x.name} · {x.episodes} tập</option>)}
+                          <option value="">{channelId ? (channelSeries.length ? "— Chọn loạt truyện —" : "— Kênh này chưa có loạt truyện —") : "— Chọn kênh trước —"}</option>
+                          {channelSeries.map((x) => (
+                            <option key={x.name} value={x.name}>{x.name} · {x.episodes} tập{x.channel_id == null ? " · chưa gắn kênh" : ""}</option>
+                          ))}
                           <option value="__new">＋ Loạt truyện mới…</option>
                         </select>
                         {newSeries && (
@@ -764,7 +832,12 @@ export function PostsPage() {
                         ? <>Đăng lên <strong>{channel.fb_page_name || channel.name}</strong> <span className="qt-posts__fbok">⚡ tự đăng được</span></>
                         : <>Kênh <strong>{channel.name}</strong> chưa kết nối Page — copy rồi đăng tay, hoặc <button type="button" className="qt-link" onClick={() => navigate(`/channels?id=${channel.id}`)}>kết nối Page</button></>
                     ) : <>Chọn kênh ở bước 1 để đăng.</>}
-                    {video ? <> · kèm <strong>video</strong></> : images.length > 0 && <> · kèm <strong>{images.length} ảnh</strong></>}
+                    {video ? <> · kèm <strong>video</strong></>
+                      : boardId !== null
+                        ? (clipVideo
+                          ? <> · kèm <strong>video của clip</strong></>
+                          : <span className="qt-posts__wait"> · ⚠ bài này viết cho clip nhưng clip chưa ghép xong — ghép ở Bước 5 rồi đăng</span>)
+                        : images.length > 0 && <> · kèm <strong>{images.length} ảnh</strong></>}
                     {imagesBusy && <span className="qt-posts__wait"> · 🎨 đang tạo ảnh — đợi xong rồi đăng</span>}
                     {published && <> · đã đăng {new Date(published.at).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}{published.link && <> — <a href={published.link} target="_blank" rel="noreferrer">xem bài ↗</a></>}</>}
                   </div>
@@ -774,8 +847,10 @@ export function PostsPage() {
                             title={imagesBusy ? "Đợi ảnh tạo xong rồi lên lịch" : undefined}
                             onClick={async () => { const id = dirty || postId === null ? await save(true) : postId; if (id) setSchedule({ kind: "post", postId: id, channelId, title: draft.title || draft.body.split("\n")[0] }); }}>📅 Lên lịch</button>
                     {channel?.fb_connected && (
-                      <button type="button" className="qt-btn qt-btn--accent" disabled={publishing || imagesBusy || !draft.body.trim()} onClick={() => void publishNow()}
-                              title={imagesBusy ? "Đợi ảnh tạo xong rồi đăng" : undefined}>
+                      <button type="button" className="qt-btn qt-btn--accent"
+                              disabled={publishing || imagesBusy || !draft.body.trim() || (boardId !== null && !video && !clipVideo)}
+                              onClick={() => void publishNow()}
+                              title={imagesBusy ? "Đợi ảnh tạo xong rồi đăng" : boardId !== null && !video && !clipVideo ? "Clip của bài chưa ghép xong" : undefined}>
                         {publishing ? "Đang đăng…" : imagesBusy ? "⏳ Đợi ảnh…" : published ? "🚀 Đăng lại" : "🚀 Đăng ngay"}
                       </button>
                     )}

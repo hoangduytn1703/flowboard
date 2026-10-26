@@ -316,6 +316,17 @@ def _payload(sc: Schedule) -> tuple[str, list[Path], Optional[Path], str]:
                 if video is None:
                     raise ScheduleError("Không thấy file video của bài trên máy này (tạo lại video ở trang Bài viết).")
                 return post_text_of(p.body, p.hashtags), [], video, p.first_comment or ""
+            if p.board_id and s.get(Board, p.board_id) is not None:
+                # Written for a clip (step 5, a bundle): it is that clip's caption, so
+                # the clip goes with it — never the caption alone. Facebook takes
+                # photos or one video; the clip wins over the post's own pictures.
+                clip_media = _final_media(p.board_id)
+                if not clip_media:
+                    raise ScheduleError("Bài này viết cho một clip nhưng clip chưa ghép xong — ghép ở Bước 5 rồi đăng lại.")
+                video = _media_file(clip_media)
+                if video is None:
+                    raise ScheduleError("Không thấy file clip đã ghép trên máy này (tải về từ cloud hoặc ghép lại).")
+                return post_text_of(p.body, p.hashtags), [], video, p.first_comment or ""
             photos = [f for f in (_media_file(m) for m in (p.images or [])[:facebook_publish.MAX_PHOTOS]) if f]
             return post_text_of(p.body, p.hashtags), photos, None, p.first_comment or ""
         b = s.get(Board, sc.board_id or 0)

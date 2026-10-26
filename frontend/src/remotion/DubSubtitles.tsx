@@ -8,7 +8,7 @@
 // Kept separate from the ffmpeg/ASS subtitle path (services/dub.py
 // `write_sub_ass`): that one is untouched, this is the second engine.
 import { loadFont } from "@remotion/google-fonts/BeVietnamPro";
-import { AbsoluteFill, interpolate, OffthreadVideo, useCurrentFrame, useVideoConfig } from "remotion";
+import { AbsoluteFill, Img, interpolate, OffthreadVideo, useCurrentFrame, useVideoConfig } from "remotion";
 
 const { fontFamily } = loadFont("normal", { weights: ["600", "700", "800"], subsets: ["latin", "vietnamese"] });
 
@@ -16,6 +16,8 @@ export interface DubCue {
   start: number;
   end: number;
   text: string;
+  /** this line's own x / y / scale / w (editor "chỉnh riêng câu này") */
+  look?: { x?: number; y?: number; scale?: number; w?: number } | null;
 }
 
 export interface DubBlurSpec {
@@ -26,13 +28,45 @@ export interface DubBlurSpec {
   amount: number;
 }
 
+export interface DubFrameSpec {
+  scale: number;
+  bg: "blur" | "color" | "image";
+  bg_image?: string;
+  color: string;
+  border: number;
+  border_color: string;
+}
+
+export interface DubMascotSpec {
+  media_id: string;
+  x: number;
+  y: number;
+  size: number;
+  motion: "dance" | "bounce" | "sway" | "none";
+  shape: "circle" | "plain";
+}
+
+/** The sticker's motion at time ``t`` (s) for a sticker ``px`` tall — the same
+ * curves as services/dub_decor.mascot_filter: [dx px, dy px, rotation rad]. */
+export function mascotMotion(motion: DubMascotSpec["motion"], t: number, px: number): [number, number, number] {
+  const s = Math.sin;
+  if (motion === "dance") return [px * 0.05 * s(2 * Math.PI * 0.9 * t), -px * 0.1 * Math.abs(s(2 * Math.PI * 1.1 * t)), 0.13 * s(2 * Math.PI * 0.9 * t)];
+  if (motion === "bounce") return [0, -px * 0.12 * Math.abs(s(2 * Math.PI * t)), 0];
+  if (motion === "sway") return [0, 0, 0.09 * s(2 * Math.PI * 0.6 * t)];
+  return [0, 0, 0];
+}
+
 export interface DubLayoutSpec {
   /** bottom-centre of the subtitle box, fractions of the frame */
   x: number;
   y: number;
   /** font multiplier (1 = 3.6 % of the frame height, same as the ASS engine) */
   scale: number;
+  /** subtitle box width, fraction of the frame width (null = automatic, up to 88 %) */
+  w?: number | null;
   blur?: DubBlurSpec | null;
+  frame?: DubFrameSpec | null;
+  mascot?: DubMascotSpec | null;
 }
 
 export type DubRemotionStyle = "rm_box" | "rm_karaoke" | "rm_outline";
@@ -51,6 +85,10 @@ export type DubSubtitlesProps = {
   style: DubRemotionStyle;
   /** preview only: the <Player> is muted, the render keeps the audio */
   muted?: boolean;
+  /** the sticker image (render: served by render.mjs; preview: /media/<id>) */
+  mascotSrc?: string;
+  /** the frame's background picture (bg "image"), same serving as the sticker */
+  frameBgSrc?: string;
 };
 
 export const DUB_REMOTION_STYLES: { key: DubRemotionStyle; label: string }[] = [
@@ -79,12 +117,13 @@ export function wordWindows(cue: DubCue): { word: string; from: number; to: numb
   });
 }
 
-export const DubSubtitles: React.FC<DubSubtitlesProps> = ({ src, height, cues, layout, style, muted }) => {
+export const DubSubtitles: React.FC<DubSubtitlesProps> = ({ src, width, height, cues, layout, style, muted, mascotSrc, frameBgSrc }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const t = frame / fps;
   const cue = cueAt(cues, t);
-  const fontPx = height * 0.036 * (layout.scale || 1);
+  const lay = cue?.look ? { ...layout, ...cue.look } : layout;
+  const fontPx = height * 0.036 * (lay.scale || 1);
   const blur = layout.blur ?? null;
 
   // a short fade so the box does not pop
@@ -92,7 +131,23 @@ export const DubSubtitles: React.FC<DubSubtitlesProps> = ({ src, height, cues, l
 
   return (
     <AbsoluteFill style={{ background: "#000" }}>
-      <OffthreadVideo src={src} muted={muted} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+      {layout.frame ? (
+        <>
+          {layout.frame.bg === "image" && frameBgSrc
+            ? <Img src={frameBgSrc} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
+            : layout.frame.bg === "color"
+              ? <AbsoluteFill style={{ background: layout.frame.color }} />
+              : <OffthreadVideo src={src} muted style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover",
+                                                      filter: `blur(${Math.round(Math.min(width, height) / 30)}px)`, transform: "scale(1.08)" }} />}
+          <div style={{
+            position: "absolute", left: `${(1 - layout.frame.scale) * 50}%`, top: `${(1 - layout.frame.scale) * 50}%`,
+            width: `${layout.frame.scale * 100}%`, height: `${layout.frame.scale * 100}%`,
+            boxShadow: layout.frame.border > 0 ? `0 0 0 ${Math.round(height * layout.frame.border)}px ${layout.frame.border_color}` : undefined,
+          }}>
+            <OffthreadVideo src={src} muted={muted} style={{ width: "100%", height: "100%", objectFit: "fill" }} />
+          </div>
+        </>
+      ) : <OffthreadVideo src={src} muted={muted} style={{ width: "100%", height: "100%", objectFit: "contain" }} />}
       {blur && (
         <div
           style={{
@@ -103,11 +158,28 @@ export const DubSubtitles: React.FC<DubSubtitlesProps> = ({ src, height, cues, l
           }}
         />
       )}
+      {layout.mascot && mascotSrc && (() => {
+        const m = layout.mascot;
+        const px = Math.round(height * m.size);
+        const [dx, dy, rot] = mascotMotion(m.motion, t, px);
+        const ring = Math.max(3, Math.round(px / 28));
+        return (
+          <div style={{ position: "absolute", left: m.x * width + dx, top: m.y * height + dy, transform: `translate(-50%, -100%) rotate(${rot}rad)`,
+                        transformOrigin: "50% 50%", height: px, width: m.shape === "circle" ? px : undefined }}>
+            {m.shape === "circle"
+              ? <Img src={mascotSrc} style={{ width: px, height: px, objectFit: "cover", objectPosition: "50% 0%", borderRadius: "50%",
+                                               boxShadow: `0 0 0 ${ring}px #fff`, boxSizing: "border-box" }} />
+              : <Img src={mascotSrc} style={{ height: px, width: "auto" }} />}
+          </div>
+        );
+      })()}
       {cue && (
         <div
           style={{
-            position: "absolute", left: `${layout.x * 100}%`, top: `${layout.y * 100}%`, transform: "translate(-50%, -100%)",
-            maxWidth: "88%", opacity: alpha, fontFamily, fontSize: fontPx, lineHeight: 1.25, textAlign: "center",
+            position: "absolute", left: `${lay.x * 100}%`, top: `${lay.y * 100}%`, transform: "translate(-50%, -100%)",
+            // max-content: an absolute box at left: x% would otherwise shrink to the (1 − x) of the
+            // frame on its right and wrap a short line into 3 (seen 26/10)
+            width: "max-content", maxWidth: `${(lay.w ?? 0.88) * 100}%`, boxSizing: "border-box", opacity: alpha, fontFamily, fontSize: fontPx, lineHeight: 1.25, textAlign: "center",
             whiteSpace: "pre-wrap", wordBreak: "break-word",
             ...boxCss(style, fontPx),
           }}

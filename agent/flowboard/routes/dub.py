@@ -11,7 +11,9 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from pathlib import Path
+
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -43,6 +45,10 @@ class RenderBody(BaseModel):
     channel_id: Optional[int] = None
     # {x, y, scale}: where the subtitle box sits (fractions of the frame) and its size.
     layout: Optional[dict[str, Any]] = None
+    # timeline editor: new [start, end] (seconds) for every line
+    timings: Optional[list[list[float]]] = Field(default=None, max_length=2000)
+    # timeline editor: a line's own {x, y, scale, w} (null = the clip-wide layout)
+    looks: Optional[list[Optional[dict[str, Any]]]] = Field(default=None, max_length=2000)
 
 
 @router.get("/status")
@@ -91,10 +97,184 @@ async def render(job_id: str, body: RenderBody) -> dict[str, Any]:
     try:
         sent = body.model_dump(exclude_unset=True)
         dub.render_job(job, lines=body.lines, voice=body.voice, style=body.style, keep_bgm=body.keep_bgm,
-                       name=body.name, layout=body.layout, engine=body.engine, **({"channel_id": body.channel_id} if "channel_id" in sent else {}))
+                       name=body.name, layout=body.layout, engine=body.engine, timings=body.timings, looks=body.looks,
+                       **({"channel_id": body.channel_id} if "channel_id" in sent else {}))
     except dub.DubError as exc:
         raise HTTPException(400, str(exc))
     return job.public()
+
+
+_MASCOT_EXT = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}
+MAX_MASCOT_BYTES = 10 * 1024 * 1024
+
+
+@router.post("/mascot", status_code=201)
+async def upload_mascot(file: UploadFile = File(...)) -> dict[str, Any]:
+    """An image or animated GIF for the dancing sticker (services/dub_decor):
+    stored on this machine as an image Asset, never sent to Flow."""
+    import uuid
+
+    from flowboard.db import get_session
+    from flowboard.db.models import Asset
+    from flowboard.services import media as media_service
+
+    mime = (file.content_type or "").lower().split(";")[0].strip()
+    ext = _MASCOT_EXT.get(mime) or (Path(file.filename or "").suffix.lower() if Path(file.filename or "").suffix.lower() in _MASCOT_EXT.values() else None)
+    if ext is None:
+        raise HTTPException(415, "Chỉ nhận ảnh PNG / JPG / WEBP hoặc GIF động")
+    raw = await file.read(MAX_MASCOT_BYTES + 1)
+    if not raw:
+        raise HTTPException(400, "File rỗng")
+    if len(raw) > MAX_MASCOT_BYTES:
+        raise HTTPException(413, "Ảnh / GIF lớn hơn 10 MB")
+    media_id = uuid.uuid4().hex
+    media_service.MEDIA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    path = media_service.MEDIA_CACHE_DIR / f"{media_id}{ext}"
+    path.write_bytes(raw)
+    with get_session() as s:
+        s.add(Asset(kind="image", uuid_media_id=media_id, local_path=str(path),
+                    mime=next(m for m, e in _MASCOT_EXT.items() if e == ext)))
+        s.commit()
+    return {"media_id": media_id, "url": f"/media/{media_id}", "animated": ext == ".gif"}
+
+
+# ── frames & stickers: AI chat, background removal, favourites ─────────────
+
+class DecorChatBody(BaseModel):
+    message: str = Field(min_length=1, max_length=600)
+    history: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
+    frame: Optional[dict[str, Any]] = None
+    mascot: Optional[dict[str, Any]] = None
+    orientation: str = "portrait"
+
+
+@router.post("/decor/chat")
+async def decor_chat(body: DecorChatBody) -> dict[str, Any]:
+    """"💬 Nhờ AI": the AI designs the frame / sticker (services/decor_ai); the
+    browser draws any picture it asks for with Flow, then cuts the sticker out."""
+    from flowboard.db import get_session
+    from flowboard.db.models import DecorPreset
+    from flowboard.services import decor_ai
+    from sqlmodel import select
+
+    with get_session() as s:
+        presets = [{"kind": p.kind, "name": p.name, "data": dict(p.data or {})}
+                   for p in s.exec(select(DecorPreset).order_by(DecorPreset.uses.desc(), DecorPreset.id.desc()).limit(12)).all()]  # type: ignore[union-attr]
+    try:
+        return await decor_ai.chat(body.message, history=body.history, frame=body.frame, mascot=body.mascot,
+                                   orientation=body.orientation if body.orientation in ("portrait", "landscape", "square") else "portrait",
+                                   presets=presets)
+    except decor_ai.DecorAIError as exc:
+        raise HTTPException(502, str(exc))
+
+
+class CutoutBody(BaseModel):
+    media_id: str = Field(min_length=8, max_length=64)
+
+
+@router.post("/decor/cutout", status_code=201)
+async def decor_cutout(body: CutoutBody) -> dict[str, Any]:
+    """A sticker picture without its plain background (a new PNG media).
+    A picture Flow just drew is not on this machine yet: fetch it first."""
+    import asyncio
+    import uuid
+
+    from flowboard.db import get_session
+    from flowboard.db.models import Asset
+    from flowboard.services import dub_decor
+    from flowboard.services import media as media_service
+
+    src = media_service.cached_path(body.media_id)
+    if not src or not Path(src).is_file():
+        fetched = await media_service.fetch_and_cache(body.media_id)
+        src = fetched[2] if fetched else None
+    if not src or not Path(src).is_file():
+        raise HTTPException(404, "Không tải được ảnh này về máy (Flow chưa trả ảnh?)")
+    media_id = uuid.uuid4().hex
+    dst = media_service.MEDIA_CACHE_DIR / f"{media_id}.png"
+    try:
+        await asyncio.to_thread(dub_decor.cutout, Path(src), dst)
+    except Exception as exc:  # noqa: BLE001 — a picture Pillow cannot read
+        raise HTTPException(422, f"Không tách nền được: {exc}")
+    with get_session() as s:
+        s.add(Asset(kind="image", uuid_media_id=media_id, local_path=str(dst), mime="image/png"))
+        s.commit()
+    return {"media_id": media_id, "url": f"/media/{media_id}"}
+
+
+class PresetBody(BaseModel):
+    kind: str = Field(pattern="^(frame|mascot)$")
+    name: str = Field(default="", max_length=60)
+    data: dict[str, Any]
+    thumb: str = Field(default="", max_length=64)
+
+
+def _preset_row(p: Any) -> dict[str, Any]:
+    return {"id": p.id, "kind": p.kind, "name": p.name, "data": dict(p.data or {}), "thumb": p.thumb or "",
+            "uses": p.uses, "created_at": p.created_at.isoformat() if p.created_at else None}
+
+
+@router.get("/decor/presets")
+def list_presets(kind: Optional[str] = None) -> list[dict[str, Any]]:
+    from flowboard.db import get_session
+    from flowboard.db.models import DecorPreset
+    from sqlmodel import select
+
+    with get_session() as s:
+        q = select(DecorPreset).order_by(DecorPreset.uses.desc(), DecorPreset.id.desc())  # type: ignore[union-attr]
+        if kind in ("frame", "mascot"):
+            q = q.where(DecorPreset.kind == kind)
+        return [_preset_row(p) for p in s.exec(q).all()]
+
+
+@router.post("/decor/presets", status_code=201)
+def save_preset(body: PresetBody) -> dict[str, Any]:
+    """"★ Lưu": keep this frame / sticker (normalised) for later."""
+    from flowboard.db import get_session
+    from flowboard.db.models import DecorPreset
+    from flowboard.services import dub_decor
+
+    data = dub_decor.normalize_frame(body.data) if body.kind == "frame" else dub_decor.normalize_mascot(body.data)
+    if not data:
+        raise HTTPException(400, "Chưa có gì để lưu" if body.kind == "frame" else "Nhân vật chưa có ảnh")
+    thumb = body.thumb or (data.get("bg_image") or "" if body.kind == "frame" else data.get("media_id") or "")
+    with get_session() as s:
+        p = DecorPreset(kind=body.kind, name=(body.name or ("Khung" if body.kind == "frame" else "Nhân vật")).strip()[:60],
+                        data=data, thumb=thumb)
+        s.add(p)
+        s.commit()
+        s.refresh(p)
+        return _preset_row(p)
+
+
+@router.post("/decor/presets/{preset_id}/use")
+def use_preset(preset_id: int) -> dict[str, Any]:
+    from flowboard.db import get_session
+    from flowboard.db.models import DecorPreset
+
+    with get_session() as s:
+        p = s.get(DecorPreset, preset_id)
+        if p is None:
+            raise HTTPException(404, "Không thấy mẫu này")
+        p.uses = (p.uses or 0) + 1
+        s.add(p)
+        s.commit()
+        s.refresh(p)
+        return _preset_row(p)
+
+
+@router.delete("/decor/presets/{preset_id}")
+def delete_preset(preset_id: int) -> dict[str, Any]:
+    from flowboard.db import get_session
+    from flowboard.db.models import DecorPreset
+
+    with get_session() as s:
+        p = s.get(DecorPreset, preset_id)
+        if p is None:
+            raise HTTPException(404, "Không thấy mẫu này")
+        s.delete(p)
+        s.commit()
+    return {"ok": True}
 
 
 @router.get("/jobs/{job_id}/nosub")
@@ -106,6 +286,51 @@ def nosub(job_id: str) -> FileResponse:
     if path is None or not path.is_file():
         raise HTTPException(404, "Chưa có bản video không phụ đề cho job này")
     return FileResponse(str(path), media_type="video/mp4")
+
+
+# ── timeline editor: what the preview plays and draws ──────────────────────
+
+@router.get("/jobs/{job_id}/voice")
+def voice_track(job_id: str) -> FileResponse:
+    """The Vietnamese voice track (synced to the source video in the editor)."""
+    job = _job(job_id)
+    path = (job.work / "voice.wav") if job.work else None
+    if path is None or not path.is_file():
+        raise HTTPException(404, "Chưa có giọng đọc")
+    return FileResponse(str(path), media_type="audio/wav", headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/jobs/{job_id}/bgm")
+def bgm_track(job_id: str) -> FileResponse:
+    job = _job(job_id)
+    path = (job.work / "bgm.wav") if job.work else None
+    if path is None or not path.is_file() or not job.keep_bgm:
+        raise HTTPException(404, "Không giữ nhạc nền")
+    return FileResponse(str(path), media_type="audio/wav")
+
+
+@router.get("/jobs/{job_id}/filmstrip.jpg")
+async def filmstrip(job_id: str) -> FileResponse:
+    import asyncio
+
+    job = _job(job_id)
+    try:
+        path = await asyncio.to_thread(dub.filmstrip, job)
+    except dub.DubError as exc:
+        raise HTTPException(404, str(exc))
+    return FileResponse(str(path), media_type="image/jpeg")
+
+
+@router.get("/jobs/{job_id}/wave.png")
+async def wave(job_id: str) -> FileResponse:
+    import asyncio
+
+    job = _job(job_id)
+    try:
+        path = await asyncio.to_thread(dub.waveform, job)
+    except dub.DubError as exc:
+        raise HTTPException(404, str(exc))
+    return FileResponse(str(path), media_type="image/png", headers={"Cache-Control": "no-cache"})
 
 
 @router.post("/jobs/{job_id}/stop")

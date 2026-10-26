@@ -269,6 +269,21 @@ class Schedule(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=_utcnow)
 
 
+class DecorPreset(SQLModel, table=True):
+    """A frame or a dancing sticker the seller kept ("★ Lưu") for the dubbing
+    editor (services/dub_decor): ``kind`` "frame" | "mascot", ``data`` the
+    layout part as is (frame params incl. a background image media id, or
+    the mascot spec). ``thumb`` = a media id to show in the list. ``create_all``
+    adds the table."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    kind: str = Field(index=True)
+    name: str = ""
+    data: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    thumb: str = ""
+    uses: int = 0
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
 class Swipe(SQLModel, table=True):
     """A post or video that did well somewhere ("Mẫu đang hot"), kept with
     the LLM's breakdown of why — hook, structure, triggers — so the seller

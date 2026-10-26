@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { detectBands } from "../../api/clean";
+import { useSearchParams } from "react-router-dom";
+import { announceRunning } from "../../components/BackgroundTasks";
 import {
-  DEFAULT_BLUR, DEFAULT_LAYOUT, fmtClock, getDubJob, getDubStatus, listDubJobs, renderDub, startDub, stopDub, uploadDubVideo,
-  type DubJob, type DubLayout, type DubStatus,
+  getDubJob, getDubStatus, listDubJobs, startDub, stopDub, uploadDubVideo,
+  type DubJob, type DubStatus,
 } from "../../api/dub";
-import { SubPositioner } from "../dub/SubPositioner";
+import { DubEditor } from "../dub/editor/DubEditor";
 import type { DubEngine } from "../../api/dub";
 import { toast } from "../../store/toast";
 import { ChannelPicker } from "../channels/ChannelPicker";
@@ -28,7 +28,8 @@ function errMessage(e: unknown): string {
  * a clip, so it can belong to a channel and get a Facebook post.
  */
 export function DubPage() {
-  const navigate = useNavigate();
+
+  const [searchParams, setSearchParams] = useSearchParams();
   const [status, setStatus] = useState<DubStatus | null>(null);
   const [url, setUrl] = useState("");  // one link per line → one job each (up to 5 queued)
   const [file, setFile] = useState<File | null>(null);
@@ -41,16 +42,13 @@ export function DubPage() {
   const [channelId, setChannelId] = useState<number | null>(null);
   const [starting, setStarting] = useState(false);
   const [job, setJob] = useState<DubJob | null>(null);
-  const [lines, setLines] = useState<string[]>([]);
-  const [layout, setLayout] = useState<DubLayout>({ ...DEFAULT_LAYOUT });
-  const [detecting, setDetecting] = useState(false);
   const [recent, setRecent] = useState<DubJob[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     document.title = "Lồng tiếng video · Flowboard";
     void getDubStatus().then((s) => { setStatus(s); if (!s.separate) setKeepBgm(false); })
-      .catch((e) => { toast.error(errMessage(e)); setStatus({ available: false, reason: errMessage(e), root: "", ytdlp: false, whisper: false, separate: false, styles: [], max_minutes: 10, remotion: false }); });
+      .catch((e) => { toast.error(errMessage(e)); setStatus({ available: false, reason: errMessage(e), root: "", ytdlp: false, whisper: false, separate: false, styles: [], max_minutes: 30, remotion: false }); });
     void listDubJobs().then(setRecent).catch(() => undefined);
   }, []);
 
@@ -71,8 +69,6 @@ export function DubPage() {
         const j = await getDubJob(job.job_id);
         if (stopped) return;
         setJob(j);
-        if (j.status === "review" || j.status === "done") setLines(j.segments.map((s) => s.text));
-        if (j.status === "done") setLayout({ ...DEFAULT_LAYOUT, ...j.layout });
         if (j.status === "done") { toast.success("Video lồng tiếng xong — đã lưu thành clip."); void listDubJobs().then(setRecent).catch(() => undefined); }
         if (j.status === "error") toast.error(j.error ?? "Lồng tiếng lỗi.");
       } catch (e) {
@@ -104,7 +100,8 @@ export function DubPage() {
         });
         if (i === 0) first = j;
       }
-      if (first) { setJob(first); setLines([]); }
+      if (first) setJob(first);
+      announceRunning();
       if (sources.length > 1) toast.success(`Đã xếp ${sources.length} video vào hàng — chạy lần lượt, xem tiến độ ở "Gần đây".`);
       void listDubJobs().then(setRecent).catch(() => undefined);
     } catch (e) {
@@ -114,46 +111,27 @@ export function DubPage() {
     }
   }
 
-  async function render() {
-    if (!job) return;
-    try {
-      const j = await renderDub(job.job_id, { lines, voice, style, engine, keep_bgm: keepBgm, name: name.trim() || undefined, channel_id: channelId, layout });
-      setJob(j);
-    } catch (e) {
-      toast.error(errMessage(e));
-    }
-  }
-
-  /** OCR the source video for its hard-sub band and put the blur rectangle there. */
-  async function detectOriginalSubs() {
-    if (!job?.source_media_id) return;
-    setDetecting(true);
-    try {
-      const res = await detectBands(job.source_media_id);
-      const band = res.bands[0];
-      if (!band) { toast.warning("OCR không thấy dải chữ nào trên video gốc — kéo vùng mờ bằng tay nhé."); return; }
-      setLayout((l) => ({ ...l, blur: { ...(l.blur ?? DEFAULT_BLUR), x: 0.05, w: 0.9, y: Math.max(0, band.y0 - 0.01), h: Math.min(0.4, band.y1 - band.y0 + 0.02) } }));
-      toast.success(`Thấy chữ gốc ở ${Math.round(band.y0 * 100)}–${Math.round(band.y1 * 100)}% chiều cao — đã đặt vùng mờ.`);
-    } catch (e) {
-      toast.error(errMessage(e));
-    } finally {
-      setDetecting(false);
-    }
-  }
-
   function openJob(j: DubJob) {
     setJob(j);
-    setLines(j.segments.map((s) => s.text));
-    setVoice(j.voice);
-    setStyle(j.style);
-    setEngine(j.engine ?? "ass");
-    setLayout({ ...DEFAULT_LAYOUT, ...j.layout });
-    setKeepBgm(j.keep_bgm);
-    setChannelId(j.channel_id);
-    setName(j.name);
-    if (j.url) setUrl(j.url);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
+  function closeJob() {
+    setJob(null);
+    setSearchParams({}, { replace: true });
+    void listDubJobs().then(setRecent).catch(() => undefined);
+  }
+
+  // /tools/dub?job=<id> (the "đang chạy" badge links here) opens that job.
+  const wantedJob = searchParams.get("job");
+  useEffect(() => {
+    if (!wantedJob || job?.job_id === wantedJob) return;
+    void getDubJob(wantedJob).then(openJob).catch(() => toast.warning("Không thấy video lồng tiếng này nữa (agent đã khởi động lại?)."));
+  }, [wantedJob]); // eslint-disable-line react-hooks/exhaustive-deps
+  // …and the URL follows the job on screen, so a reload or the badge lands back on it.
+  useEffect(() => {
+    const id = job?.job_id ?? null;
+    if (id && searchParams.get("job") !== id) setSearchParams({ job: id }, { replace: true });
+  }, [job?.job_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (status === null) return <PageLoading text="Đang kiểm tra công cụ lồng tiếng…" />;
   const working = !!job && ["queued", "running", "rendering"].includes(job.status);
@@ -163,19 +141,24 @@ export function DubPage() {
     const opts = next === "remotion" ? status?.remotion_styles ?? [] : status?.styles ?? [];
     if (!opts.some((o) => o.key === style)) setStyle(opts[0]?.key ?? (next === "remotion" ? "rm_box" : "box_yellow"));
   }
-  const playerData = job && engine === "remotion" && job.nosub_url
-    ? { src: job.nosub_url, cues: job.segments.map((s) => ({ start: s.start, end: s.end, text: s.text })),
-        width: job.width || 1080, height: job.height || 1920, durationS: job.duration_s }
-    : null;
-  const editable = !!job && (job.status === "review" || job.status === "done" || job.status === "error") && job.segments.length > 0;
+  // An opened video with its lines → the CapCut-style editor (full width); a fresh job still
+  // transcribing / translating → the progress card next to the form.
+  const editing = !!job && job.segments.length > 0 && (["review", "done", "error"].includes(job.status) || !!job.media_id);
 
   return (
     <>
       <header className="qt-header">
-        <span className="qt-header__crumb">🎙 Lồng tiếng video</span>
+        <span className="qt-header__crumb">🎙 Lồng tiếng video{editing && job ? ` › ${job.name || job.title || "chỉnh sửa"}` : ""}</span>
       </header>
       <div className="qt-home qt-dub">
-        {!status.available ? (
+        {editing && job ? (
+          <>
+            <DubEditor key={job.job_id} job={job} status={status} onJob={setJob} onClose={closeJob} />
+            {job.status === "done" && job.board_id && (
+              <ClipPost boardId={job.board_id} productId={null} channelId={job.channel_id} />
+            )}
+          </>
+        ) : !status.available ? (
           <PageEmpty icon="🎙" title="Chưa dùng được trên máy này">
             {status.reason ?? "Thiếu pyvideotrans / mô hình Whisper."} Lồng tiếng cần máy có repo <code>pyvideotrans</code> (VieDub) với mô hình
             Whisper large-v3-turbo — như máy nhà.
@@ -258,7 +241,7 @@ export function DubPage() {
 
             <div className="qt-dub__right">
               {!job ? (
-                <div className="qt-empty qt-dub__placeholder">Kết quả hiện ở đây: tiến độ từng bước, bản dịch sửa được, video xem trước, rồi lưu kênh và viết bài đăng.</div>
+                <div className="qt-empty qt-dub__placeholder">Tiến độ hiện ở đây. Xong là mở trình chỉnh sửa kiểu CapCut: xem video với giọng Việt, sửa chữ ngay trên hình, kéo câu trên timeline.</div>
               ) : (
                 <>
                   <section className="qt-card">
@@ -277,58 +260,7 @@ export function DubPage() {
                         <span>{job.status === "error" ? `⚠ ${job.error}` : `${job.phase}… ${job.progress}%`}</span>
                       </div>
                     )}
-                    {job.status === "review" && <p className="qt-card__hint">Đã dịch xong. Sửa câu nào cần rồi bấm <strong>Render video</strong>.</p>}
-                    {job.media_url && job.status === "done" && (
-                      <div className="qt-dub__result">
-                        <video className="qt-dub__video" src={job.media_url} controls playsInline />
-                        <div className="qt-post__actions">
-                          <a className="qt-btn qt-btn--accent" href={job.media_url} download={`${(job.name || job.title || "video-long-tieng").replace(/[\\/:*?"<>|]+/g, " ").trim()}.mp4`}>⬇ Tải video</a>
-                          {job.board_id && <button type="button" className="qt-btn" onClick={() => navigate(`/clips/${job.board_id}/export`)}>Mở clip →</button>}
-                        </div>
-                      </div>
-                    )}
                   </section>
-
-                  {job.media_url && job.status === "done" && (
-                    <details className="qt-card qt-dub__layout" open>
-                      <summary>🎯 Vị trí phụ đề & làm mờ chữ gốc <small className="qt-card__hint">(kéo trên video như CapCut)</small></summary>
-                      <SubPositioner
-                        src={job.media_url} layout={layout} style={style} styles={styleOptions} player={playerData}
-                        sample={job.segments.find((s) => s.text.trim())?.text ?? "Phụ đề mẫu"}
-                        width={0} height={0} busy={working} detecting={detecting}
-                        onChange={setLayout} onStyle={setStyle} onApply={() => void render()}
-                        onDetect={job.source_media_id ? () => void detectOriginalSubs() : null}
-                      />
-                    </details>
-                  )}
-
-                  {editable && (
-                    <section className="qt-card">
-                      <div className="qt-card__head">
-                        <h3 className="qt-card__title">Bản dịch</h3>
-                        <button type="button" className={`qt-btn${job.status === "review" ? " qt-btn--accent" : ""}`} disabled={working} onClick={() => void render()}>
-                          {job.status === "review" ? "🎬 Render video" : "↻ Render lại với bản sửa"}
-                        </button>
-                      </div>
-                      <p className="qt-card__hint">Mỗi dòng là một câu đọc + một hộp phụ đề, giữ trong khoảng thời gian của câu gốc; câu dài sẽ bị đọc nhanh hơn — rút gọn nếu quá dài. Để trống = bỏ câu đó.</p>
-                      <ol className="qt-dub__lines">
-                        {job.segments.map((s, i) => (
-                          <li key={i}>
-                            <div className="qt-dub__time">{fmtClock(s.start)}–{fmtClock(s.end)}<small>{(s.end - s.start).toFixed(1)}s</small></div>
-                            <div className="qt-dub__texts">
-                              <small className="qt-dub__src">{s.src}</small>
-                              <textarea className="qt-textarea" value={lines[i] ?? ""} rows={1} disabled={working}
-                                        onChange={(e) => setLines((l) => { const n = [...l]; n[i] = e.target.value; return n; })} />
-                            </div>
-                          </li>
-                        ))}
-                      </ol>
-                    </section>
-                  )}
-
-                  {job.status === "done" && job.board_id && (
-                    <ClipPost boardId={job.board_id} productId={null} channelId={job.channel_id} />
-                  )}
                 </>
               )}
             </div>

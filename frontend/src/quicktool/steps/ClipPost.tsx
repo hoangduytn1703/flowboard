@@ -7,7 +7,8 @@ import {
 } from "../../api/posts";
 import { brainstormIfDue } from "../../api/channels";
 import { toast } from "../../store/toast";
-import { ChannelPicker } from "../channels/ChannelPicker";
+import { ChannelPicker, useChannels } from "../channels/ChannelPicker";
+import { createSlot, publishSlot } from "../../api/schedule";
 import { PostEditor } from "../posts/PostEditor";
 import { ScheduleDialog } from "../schedule/ScheduleDialog";
 import "../posts.css";
@@ -38,6 +39,10 @@ export function ClipPost({ boardId, productId, channelId: clipChannel = null }: 
   const [change, setChange] = useState("");
   const [productMedia, setProductMedia] = useState<string[]>([]);
   const [scheduling, setScheduling] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [published, setPublished] = useState<{ link: string } | null>(null);
+  const [channels] = useChannels();
+  const channel = channels.find((c) => c.id === channelId) ?? null;
 
   // Only when opened: nothing to load for sellers who never use it.
   useEffect(() => {
@@ -108,6 +113,32 @@ export function ClipPost({ boardId, productId, channelId: clipChannel = null }: 
     }
   }
 
+  /** "🚀 Đăng ngay": save, then post this caption WITH the clip's video to the
+   * channel's Facebook Page (a slot at "now", so it shows in Lịch đăng too).
+   * The scheduler sends a clip's post with the clip as its video. */
+  async function publishNow() {
+    if (!channel?.fb_connected || !draft) return;
+    if (!window.confirm(`Đăng clip này kèm bài viết lên Page "${channel.fb_page_name || channel.name}" ngay bây giờ?`
+      + (draft.first_comment ? " Bình luận đầu (link) sẽ được thêm sau khi đăng." : ""))) return;
+    setPublishing(true);
+    try {
+      const id = dirty || postId === null ? await save() : postId;
+      if (!id) return;
+      const slot = await createSlot({ kind: "post", post_id: id, channel_id: channel.id, at: new Date().toISOString(), note: "Đăng ngay từ Bước 5 (kèm video clip)" });
+      const out = await publishSlot(slot.id);
+      if (out.status === "posted") {
+        setPublished({ link: out.result?.permalink ?? "" });
+        toast.success(`Đã đăng clip lên Page "${channel.fb_page_name || channel.name}".`, { duration: 9000 });
+      } else {
+        toast.error(out.result?.error ?? "Đăng không được.");
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPublishing(false);
+    }
+  }
+
   async function openInPosts() {
     const id = dirty || !postId ? await save() : postId;
     if (id) navigate(`/posts?post=${id}`);
@@ -165,6 +196,13 @@ export function ClipPost({ boardId, productId, channelId: clipChannel = null }: 
                   <button type="button" className="qt-btn qt-btn--small" disabled={!dirty && postId !== null} onClick={() => void save()}>💾 {postId ? "Lưu thay đổi" : "Lưu bài"}</button>
                   <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={() => void openInPosts()}>Mở ở trang Bài viết →</button>
                   <button type="button" className="qt-btn qt-btn--small" onClick={() => setScheduling(true)} title="Lên lịch đăng clip (kèm caption này) lên kênh">📅 Lên lịch đăng clip</button>
+                  {channel?.fb_connected ? (
+                    <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={publishing || !draft.body.trim()} onClick={() => void publishNow()}
+                            title="Đăng ngay lên Facebook Page: video clip + bài viết này + bình luận đầu">
+                      {publishing ? "Đang đăng…" : published ? "🚀 Đăng lại" : "🚀 Đăng ngay (kèm video)"}
+                    </button>
+                  ) : channel ? <small className="qt-card__hint">Kênh chưa kết nối Facebook Page — kết nối ở Kênh của tôi để đăng thẳng.</small> : null}
+                  {published?.link && <a className="qt-link" href={published.link} target="_blank" rel="noreferrer">Xem bài ↗</a>}
                 </div>
                 {scheduling && (
                   <ScheduleDialog target={{ kind: "clip", boardId, channelId, title: draft.title || draft.body.split("\n")[0] || `Clip #${boardId}` }}

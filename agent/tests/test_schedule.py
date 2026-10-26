@@ -243,3 +243,40 @@ def test_post_with_a_video_goes_out_as_a_video(client, graph, monkeypatch, tmp_p
     # a posted slot cannot be moved
     r = client.patch(f"/api/schedule/{slot['id']}", json={"at": _iso(datetime.now(timezone.utc) + timedelta(hours=2))})
     assert r.status_code == 400
+
+
+def test_a_post_written_for_a_clip_goes_out_with_the_clip_video(client, graph, monkeypatch, tmp_path):
+    from flowboard.db import get_session
+    from flowboard.db.models import Node
+    from flowboard.services import facebook_publish, scheduler
+
+    ch = client.post("/api/channels", json={"name": "Page", "platforms": ["facebook"]}).json()["id"]
+    board = client.post("/api/boards", json={"name": "Clip có bài"}).json()["id"]
+    post = client.post("/api/posts", json={"body": "Caption của clip", "board_id": board, "channel_id": ch,
+                                           "images": ["img1"], "first_comment": "link"}).json()
+    sent = {}
+
+    async def fake_publish(channel_id, page_id, message, *, photos=None, video=None, first_comment=""):
+        sent.update(message=message, photos=photos, video=video, first_comment=first_comment)
+        return {"post_id": "1_2", "permalink": "", "comment_id": ""}
+
+    monkeypatch.setattr(facebook_publish, "publish_post", fake_publish)
+    monkeypatch.setattr(scheduler, "can_auto", lambda cid: True)
+    with get_session() as s:
+        from flowboard.db.models import Channel
+        c = s.get(Channel, ch); c.fb_page_id = "999"; s.add(c); s.commit()
+    at = scheduler._now().isoformat()
+    slot = client.post("/api/schedule", json={"kind": "post", "post_id": post["id"], "channel_id": ch, "at": at}).json()
+    # clip not joined yet → a clear error, never a caption-only post
+    out = client.post(f"/api/schedule/{slot['id']}/publish").json()
+    assert out["status"] == "failed" and "chưa ghép xong" in out["result"]["error"] and not sent
+    # joined → the clip goes up as the video, the post's own pictures are not used
+    clip = tmp_path / "clip.mp4"; clip.write_bytes(b"0")
+    with get_session() as s:
+        s.add(Node(board_id=board, short_id="exp1", type="export", x=0, y=0, data={"mediaId": "clipmedia"}, status="done"))
+        s.commit()
+    monkeypatch.setattr(scheduler, "_media_file", lambda mid: clip if mid == "clipmedia" else None)
+    client.patch(f"/api/schedule/{slot['id']}", json={"status": "planned"})
+    out = client.post(f"/api/schedule/{slot['id']}/publish").json()
+    assert out["status"] == "posted" and sent["video"] == clip and sent["photos"] == [] and sent["first_comment"] == "link"
+    assert client.get("/api/posts").json()[0]["clip_video"] == "clipmedia"

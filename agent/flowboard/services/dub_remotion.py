@@ -39,7 +39,7 @@ STYLES: dict[str, str] = {
 DEFAULT_STYLE = "rm_box"
 FPS = 30
 #: the first render also downloads Chrome and builds the webpack bundle
-RENDER_TIMEOUT_S = 45 * 60
+RENDER_TIMEOUT_S = 120 * 60  # a 30-minute video draws at roughly 1-2x real time on CPU
 
 
 class RemotionError(RuntimeError):
@@ -61,7 +61,14 @@ def available() -> tuple[bool, str]:
     return True, ""
 
 
-def build_spec(*, src: Path, out: Path, cues: list[tuple[float, float, str]], layout: dict[str, Any], style: str,
+def _cue(c: tuple) -> dict[str, Any]:
+    out: dict[str, Any] = {"start": round(float(c[0]), 3), "end": round(float(c[1]), 3), "text": c[2]}
+    if len(c) > 3 and c[3]:
+        out["look"] = dict(c[3])  # this line's own x / y / scale / w
+    return out
+
+
+def build_spec(*, src: Path, out: Path, cues: list[tuple], layout: dict[str, Any], style: str,
                width: int, height: int, duration_s: float, fps: int = FPS, concurrency: Optional[Any] = None) -> dict[str, Any]:
     if style not in STYLES:
         style = DEFAULT_STYLE
@@ -72,9 +79,10 @@ def build_spec(*, src: Path, out: Path, cues: list[tuple[float, float, str]], la
         "concurrency": concurrency,
         "props": {
             "width": int(width), "height": int(height), "fps": int(fps), "durationS": float(duration_s),
-            "cues": [{"start": round(float(a), 3), "end": round(float(b), 3), "text": t} for a, b, t in cues if t.strip()],
-            "layout": {"x": layout.get("x", 0.5), "y": layout.get("y", 0.8), "scale": layout.get("scale", 1.0),
-                       "blur": layout.get("blur") or None},
+            "cues": [_cue(c) for c in cues if c[2].strip()],
+            "layout": {"x": layout.get("x", 0.5), "y": layout.get("y", 0.8), "scale": layout.get("scale", 1.0), "w": layout.get("w"),
+                       "blur": layout.get("blur") or None, "frame": layout.get("frame") or None,
+                       "mascot": layout.get("mascot") or None},
             "style": style,
             "muted": False,
         },

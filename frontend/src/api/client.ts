@@ -607,6 +607,10 @@ export function createRequest(body: {
   return api<RequestDTO>("/api/requests", {
     method: "POST",
     body: JSON.stringify(body),
+  }).then((r) => {
+    // components/BackgroundTasks listens (RUNNING_EVENT) to show the "đang chạy" badge at once.
+    window.dispatchEvent(new Event("flowboard:running"));
+    return r;
   });
 }
 

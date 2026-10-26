@@ -101,8 +101,28 @@ class PostBody(BaseModel):
     brief: Optional[dict[str, Any]] = None
 
 
-def _row(p: Post) -> dict[str, Any]:
+def _clip_videos(board_ids: set[int]) -> dict[int, str]:
+    """board id → its finished (joined) clip's media id, one query for all."""
+    if not board_ids:
+        return {}
+    out: dict[int, str] = {}
+    with get_session() as s:
+        rows = s.exec(select(Node.board_id, Node.id, Node.data)
+                      .where(Node.board_id.in_(board_ids), Node.type.in_(["export", "merge"]))  # type: ignore[union-attr]
+                      .order_by(Node.id)).all()
+    for bid, _nid, data in rows:
+        if isinstance(data, dict) and data.get("mediaId"):
+            out[bid] = data["mediaId"]
+    return out
+
+
+def _row(p: Post, clip_video: Optional[str] = None) -> dict[str, Any]:
+    """``clip_video``: the joined clip of ``p.board_id`` — what publishing sends
+    when the post has no video of its own (services/scheduler)."""
+    if clip_video is None and p.board_id:
+        clip_video = _clip_videos({p.board_id}).get(p.board_id)
     return {
+        "clip_video": clip_video or "",
         "id": p.id, "kind": p.kind, "title": p.title, "body": p.body, "hashtags": p.hashtags,
         "first_comment": p.first_comment or "",
         "product_id": p.product_id, "board_id": p.board_id, "channel_id": p.channel_id, "series": p.series or "",
@@ -149,9 +169,11 @@ def list_series(channel_id: Optional[int] = Query(None)) -> list[dict[str, Any]]
         if channel_id is not None:
             q = q.where((Post.channel_id == channel_id) | (Post.channel_id.is_(None)))  # type: ignore[union-attr]
         rows = s.exec(q.order_by(Post.id.desc())).all()
-    out: dict[str, dict[str, Any]] = {}
+    # One entry per (series, channel): two pages may each run a story with the
+    # same name, and the picker must not merge them (it filters by channel).
+    out: dict[tuple[str, Optional[int]], dict[str, Any]] = {}
     for p in rows:
-        row = out.setdefault(p.series, {"name": p.series, "episodes": 0, "last_episode": 0, "last_title": p.title, "channel_id": p.channel_id})
+        row = out.setdefault((p.series, p.channel_id), {"name": p.series, "episodes": 0, "last_episode": 0, "last_title": p.title, "channel_id": p.channel_id})
         row["episodes"] += 1
         row["last_episode"] = max(row["last_episode"], p.episode or 0)
     return list(out.values())
@@ -301,7 +323,9 @@ def list_posts(board_id: Optional[int] = Query(None), channel_id: Optional[int] 
             q = q.where(Post.board_id == board_id)
         if channel_id is not None:
             q = q.where(Post.channel_id == channel_id)
-        return [_row(p) for p in s.exec(q).all()]
+        rows = s.exec(q).all()
+    videos = _clip_videos({p.board_id for p in rows if p.board_id})  # one query, not one per post
+    return [_row(p, videos.get(p.board_id) or "") for p in rows]
 
 
 @router.post("", status_code=201)

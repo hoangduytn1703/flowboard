@@ -35,7 +35,7 @@ from sqlmodel import select
 from flowboard.db import get_session
 from flowboard.db.models import Asset, Board, Node
 from flowboard.services import media as media_service
-from flowboard.services import dub_remotion, tts
+from flowboard.services import dub_decor, dub_remotion, tts
 from flowboard.services.llm import run_llm
 from flowboard.services.llm.base import LLMError
 from flowboard.services.video_clean import erase_python, erase_root
@@ -45,14 +45,21 @@ from flowboard.short_id import generate_unique_short_id
 logger = logging.getLogger(__name__)
 
 RUNNER_PATH = Path(__file__).with_name("dub_runner.py")
-MAX_DURATION_S = 10 * 60
+MAX_DURATION_S = 30 * 60
 #: how much faster than natural a Vietnamese line may be spoken to fit its slot
 MAX_SPEEDUP = 1.45
 #: one subtitle line (as in the reference page: one short yellow box)
 SUB_MAX_CHARS = 34
 BGM_VOLUME = 0.6
 LLM_TIMEOUT_S = 180
-STEP_TIMEOUT_S = 900
+STEP_TIMEOUT_S = 45 * 60  # Whisper / spleeter on a 30-minute track (CPU fallback is the slow case)
+#: Re-encoding the dubbed video (subtitles burned in) of a 30-minute source.
+ENCODE_TIMEOUT_S = 60 * 60
+#: Lines per translation call: a 30-minute video has hundreds of lines, and one
+#: call for all of them runs past the LLM timeout or comes back short.
+TRANSLATE_BATCH = 60
+#: Already-translated lines shown to the next batch so the voice stays consistent.
+TRANSLATE_CONTEXT = 4
 
 STYLES: dict[str, str] = {
     "box_yellow": "Hộp vàng, chữ đen (như page mẫu)",
@@ -226,16 +233,49 @@ def normalize_layout(raw: Any) -> dict[str, Any]:
     hiding the original hard-coded subtitles under the Vietnamese ones."""
     out: dict[str, Any] = dict(DEFAULT_LAYOUT)
     out["blur"] = None
+    out["frame"] = None   # services/dub_decor: shrink onto a blurred / coloured background
+    out["mascot"] = None  # services/dub_decor: a bouncing sticker
+    out["w"] = None       # subtitle box width (fraction of the frame); None = automatic
     if isinstance(raw, dict):
         out["x"] = _num(raw, "x", 0.05, 0.95, out["x"])
         out["y"] = _num(raw, "y", 0.08, 0.98, out["y"])
         out["scale"] = _num(raw, "scale", 0.5, 2.2, out["scale"])
+        if raw.get("w") is not None:
+            out["w"] = _num(raw, "w", W_MIN, W_MAX, 0.8)
+        out["frame"] = dub_decor.normalize_frame(raw.get("frame"))
+        out["mascot"] = dub_decor.normalize_mascot(raw.get("mascot"))
         b = raw.get("blur")
         if isinstance(b, dict) and b:
             x, y = _num(b, "x", 0.0, 0.95, 0.1), _num(b, "y", 0.0, 0.97, 0.6)
             out["blur"] = {"x": x, "y": y, "w": _num(b, "w", 0.05, round(1 - x, 3), min(0.8, 1 - x)),
                            "h": _num(b, "h", 0.02, round(1 - y, 3), min(0.08, 1 - y)), "amount": _num(b, "amount", 1, 10, 5)}
     return out
+
+
+#: subtitle box width range (fraction of the frame width)
+W_MIN, W_MAX = 0.2, 0.96
+LOOK_KEYS = ("x", "y", "scale", "w")
+
+
+def normalize_look(raw: Any) -> Optional[dict[str, float]]:
+    """A line's own placement (timeline editor "chỉnh riêng câu này"): any of
+    x / y / scale / w, overriding the clip-wide layout for that line only."""
+    if not isinstance(raw, dict):
+        return None
+    out: dict[str, float] = {}
+    bounds = {"x": (0.05, 0.95), "y": (0.08, 0.98), "scale": (0.5, 2.2), "w": (W_MIN, W_MAX)}
+    for k in LOOK_KEYS:
+        if raw.get(k) is not None:
+            lo, hi = bounds[k]
+            out[k] = _num(raw, k, lo, hi, (lo + hi) / 2)
+    return out or None
+
+
+def effective_layout(layout: Optional[dict], look: Optional[dict]) -> dict[str, Any]:
+    lay = normalize_layout(layout)
+    if look:
+        lay.update({k: v for k, v in look.items() if k in LOOK_KEYS})
+    return lay
 
 
 def blur_filter(blur: Optional[dict], width: int, height: int, src: str = "[0:v]", out: str = "[vb]") -> str:
@@ -252,12 +292,27 @@ def blur_filter(blur: Optional[dict], width: int, height: int, src: str = "[0:v]
             f"[vb_base][vb_b]overlay={x}:{y}{out}")
 
 
-def video_filter(ass: Path, width: int, height: int, layout: Optional[dict]) -> str:
-    """The whole ``-filter_complex`` video part: optional blur, then subtitles → ``[v]``."""
+def video_filter(ass: Path, width: int, height: int, layout: Optional[dict],
+                 mascot_index: Optional[int] = None, mascot_animated: bool = False,
+                 frame_bg_index: Optional[int] = None) -> str:
+    """The whole ``-filter_complex`` video part → ``[v]``: frame, blur band,
+    mascot (input ``mascot_index``, prepared by ``dub_decor.prepare_mascot``),
+    then subtitles. Each step is optional."""
     lay = normalize_layout(layout)
-    blur = blur_filter(lay["blur"], width, height)
-    src = "[vb]" if blur else "[0:v]"
-    return (blur + ";" if blur else "") + f"{src}ass='{_filter_path(ass)}'[v]"
+    parts: list[str] = []
+    src = "[0:v]"
+    if lay.get("frame"):
+        parts.append(dub_decor.frame_filter(lay["frame"], width, height, src, "[vf]", frame_bg_index))
+        src = "[vf]"
+    blur = blur_filter(lay["blur"], width, height, src, "[vb]")
+    if blur:
+        parts.append(blur)
+        src = "[vb]"
+    if lay.get("mascot") and mascot_index is not None:
+        parts.append(dub_decor.mascot_filter(lay["mascot"], mascot_index, width, height, src, "[vm]", mascot_animated))
+        src = "[vm]"
+    parts.append(f"{src}ass='{_filter_path(ass)}'[v]")
+    return ";".join(parts)
 
 
 def sub_font_px(height: int, scale: float = 1.0) -> int:
@@ -269,8 +324,13 @@ def sub_max_chars(width: int, height: int, layout: Optional[dict] = None) -> int
     per character; the line may use the frame minus the side margins, and an
     off-centre box only the narrower side twice."""
     lay = normalize_layout(layout)
+    font = sub_font_px(height, lay["scale"])
+    if lay.get("w"):
+        # a set box width: as many characters as fit inside it (minus the box padding)
+        usable = width * min(lay["w"], 2 * min(lay["x"], 1 - lay["x"])) - font * 1.1
+        return max(6, min(80, int(usable / (font * 0.5))))  # measured on burned frames: ~0.49 em per character
     usable = width * max(0.3, 2 * min(lay["x"], 1 - lay["x"]) - 2 * SUB_MARGIN_X_FRAC)
-    return max(10, min(SUB_MAX_CHARS, int(usable / (sub_font_px(height, lay["scale"]) * 0.56))))
+    return max(10, min(SUB_MAX_CHARS, int(usable / (font * 0.56))))
 
 
 def write_sub_ass(cues: list[tuple[float, float, str]], path: Path, *, width: int, height: int, style: str = "box_yellow",
@@ -303,7 +363,19 @@ def write_sub_ass(cues: list[tuple[float, float, str]], path: Path, *, width: in
         line, "", "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ])
-    events = [f"Dialogue: 0,{_ass_time(s)},{_ass_time(e)},Sub,,0,0,0,,{pos}{t.replace(chr(10), ' ')}" for s, e, t in cues if t.strip()]
+    events = []
+    for cue in cues:
+        s, e, t = cue[0], cue[1], cue[2]
+        if not t.strip():
+            continue
+        tag = pos
+        look = cue[3] if len(cue) > 3 else None
+        if look:
+            own = effective_layout(lay, look)
+            own_font = sub_font_px(height, own["scale"])
+            extra = "" if own_font == font else f"\\fs{own_font}" + ("" if style == "outline" else f"\\bord{max(8, own_font // 4)}")
+            tag = f"{{\\an2\\pos({round(width * own['x'])},{round(height * own['y'])}){extra}}}"
+        events.append(f"Dialogue: 0,{_ass_time(s)},{_ass_time(e)},Sub,,0,0,0,,{tag}{t.replace(chr(10), ' ')}")
     path.write_text(header + "\n" + "\n".join(events) + "\n", encoding="utf-8")
     return path
 
@@ -321,9 +393,14 @@ class Segment:
     end: float
     src: str
     text: str = ""
+    #: this line's own placement (normalize_look), None = the clip-wide layout
+    look: Optional[dict] = None
 
     def public(self) -> dict[str, Any]:
-        return {"start": self.start, "end": self.end, "src": self.src, "text": self.text}
+        out: dict[str, Any] = {"start": self.start, "end": self.end, "src": self.src, "text": self.text}
+        if self.look:
+            out["look"] = dict(self.look)
+        return out
 
 
 @dataclass
@@ -373,6 +450,10 @@ class Job:
         if self.media_id:
             out["media_id"] = self.media_id
             out["media_url"] = f"/media/{self.media_id}"
+        if self.work is not None and (self.work / "voice.wav").is_file():
+            out["voice_url"] = f"/api/dub/jobs/{self.id}/voice"
+            if self.keep_bgm and (self.work / "bgm.wav").is_file():
+                out["bgm_url"] = f"/api/dub/jobs/{self.id}/bgm"
         if self.work is not None and (self.work / "nosub.mp4").is_file():
             # remotion: the dubbed video without subtitles, for the live preview
             out["nosub_url"] = f"/api/dub/jobs/{self.id}/nosub"
@@ -425,22 +506,53 @@ def _download(job: Job) -> Path:
 def _extract_wav(ffmpeg: str, src: Path, dst: Path, rate: int, mono: bool) -> None:
     cmd = [ffmpeg, "-y", "-v", "error", "-i", str(src), "-vn", "-ar", str(rate), "-ac", "1" if mono else "2",
            "-c:a", "pcm_s16le", str(dst)]
-    err = _run(cmd, 300)
+    err = _run(cmd, 900)
     if err:
         raise DubError(f"không tách được tiếng: {err}")
 
 
+def translation_batches(n: int, size: int = TRANSLATE_BATCH) -> list[tuple[int, int]]:
+    """``[(start, end)]`` index ranges covering ``n`` lines, ``size`` at a time;
+    a short tail (< a quarter batch) joins the batch before it."""
+    if n <= 0:
+        return []
+    out = [(i, min(n, i + size)) for i in range(0, n, size)]
+    if len(out) > 1 and out[-1][1] - out[-1][0] < max(1, size // 4):
+        tail = out.pop()
+        out[-1] = (out[-1][0], tail[1])
+    return out
+
+
 async def _translate(job: Job) -> None:
-    lines = [f"[{i + 1}] ({s.start:.1f}s–{s.end:.1f}s) {s.src}" for i, s in enumerate(job.segments)]
-    prompt = (f"Source language: {job.language or 'unknown'}. Video title: {job.title or '-'}.\n"
-              f"TRANSCRIPT ({len(lines)} lines):\n" + "\n".join(lines) + "\n\nTranslate now.")
-    try:
-        text = await run_llm("auto_prompt", prompt, system_prompt=_TRANSLATE_SYSTEM, timeout=LLM_TIMEOUT_S)
-    except LLMError as exc:
-        raise DubError(f"dịch thất bại: {exc}") from exc
-    title, vi = parse_translation(text, len(job.segments))
-    for seg, line in zip(job.segments, vi):
-        seg.text = line
+    """Translate in batches of :data:`TRANSLATE_BATCH` lines, in order; each
+    batch sees the last few lines already translated so the voice and the
+    terms stay the same across the whole video."""
+    segs = job.segments
+    batches = translation_batches(len(segs))
+    title = ""
+    for b, (start, end) in enumerate(batches):
+        if len(batches) > 1:
+            _set(job, f"Đang dịch sang tiếng Việt ({b + 1}/{len(batches)})", 52 + int(8 * b / len(batches)))
+        lines = [f"[{i - start + 1}] ({segs[i].start:.1f}s-{segs[i].end:.1f}s) {segs[i].src}" for i in range(start, end)]
+        head = f"Source language: {job.language or 'unknown'}. Video title: {job.title or '-'}.\n"
+        if len(batches) > 1:
+            head += (f"This is part {b + 1} of {len(batches)} of one long video (lines {start + 1}-{end} of {len(segs)}). "
+                     "Translate ONLY the lines below; keep the voice and terms of the earlier part.\n")
+            prev = [s for s in segs[max(0, start - TRANSLATE_CONTEXT):start] if s.text.strip()]
+            if prev:
+                head += "ALREADY TRANSLATED (just before, for context - do not output these):\n" + "\n".join(
+                    f"- {s.src} => {s.text}" for s in prev) + "\n"
+        prompt = head + f"TRANSCRIPT ({len(lines)} lines):\n" + "\n".join(lines) + "\n\nTranslate now."
+        try:
+            text = await run_llm("auto_prompt", prompt, system_prompt=_TRANSLATE_SYSTEM, timeout=LLM_TIMEOUT_S)
+        except LLMError as exc:
+            where = f" (phần {b + 1}/{len(batches)})" if len(batches) > 1 else ""
+            raise DubError(f"dịch thất bại{where}: {exc}") from exc
+        part_title, vi = parse_translation(text, end - start)
+        for seg, line in zip(segs[start:end], vi):
+            seg.text = line
+        if b == 0:
+            title = part_title
     if title:
         job.title = title
 
@@ -543,8 +655,91 @@ def _timeline_wav(ffmpeg: str, pieces: list[tuple[float, Path, float]], total_s:
         raise DubError(f"không ghép được giọng: {err}")
 
 
+def filmstrip(job: Job) -> Path:
+    """A strip of thumbnails across the source video (timeline "Video" track),
+    made once per job. Key frames only, so it is quick even for 30 minutes."""
+    if job.work is None or job.src_path is None or not Path(job.src_path).is_file():
+        raise DubError("Chưa có video gốc")
+    out = job.work / "filmstrip.jpg"
+    if out.is_file() and out.stat().st_size > 0:
+        return out
+    dur = job.duration_s or 10.0
+    n = int(min(60, max(6, round(dur / 1.5))))
+    vf = ["-vf", f"fps={n}/{dur:.3f},scale=-2:72,tile={n}x1", "-frames:v", "1", "-q:v", "6", str(out)]
+    # Long videos: key frames only (seconds, not minutes). Short ones decode every
+    # frame — key frames can be 10 s apart, which left the last tiles black.
+    fast = ["-skip_frame", "nokey"] if dur > 240 else []
+    err = _run([_ffmpeg(), "-y", "-v", "error", *fast, "-i", str(job.src_path), *vf], 600)
+    if fast and (err or not out.is_file()):
+        err = _run([_ffmpeg(), "-y", "-v", "error", "-i", str(job.src_path), *vf], 900)
+    if err or not out.is_file():
+        raise DubError(f"không tạo được dải hình: {err}")
+    return out
+
+
+def waveform(job: Job) -> Path:
+    """The Vietnamese voice track drawn as a waveform (timeline "Giọng" track);
+    redrawn whenever voice.wav is newer."""
+    if job.work is None:
+        raise DubError("Chưa có giọng đọc")
+    voice = job.work / "voice.wav"
+    if not voice.is_file():
+        raise DubError("Chưa có giọng đọc — render video trước")
+    out = job.work / "wave.png"
+    if out.is_file() and out.stat().st_mtime >= voice.stat().st_mtime:
+        return out
+    err = _run([_ffmpeg(), "-y", "-v", "error", "-i", str(voice), "-filter_complex",
+                "aformat=channel_layouts=mono,showwavespic=s=2400x80:colors=#5eead4:scale=sqrt", "-frames:v", "1", str(out)], 180)
+    if err or not out.is_file():
+        raise DubError(f"không vẽ được sóng âm: {err}")
+    return out
+
+
 def voice_key(job: Job) -> str:
+    """What voice.wav was made from: the voice, every line, and every line's
+    slot (the timeline editor moves / stretches lines → the voice is placed
+    again; the TTS itself comes from its cache)."""
+    slots = ",".join(f"{s.start:.2f}-{s.end:.2f}" for s in job.segments)
+    return job.voice + "|" + "\x1f".join(s.text for s in job.segments) + "|t:" + slots
+
+
+def _legacy_voice_key(job: Job) -> str:
     return job.voice + "|" + "\x1f".join(s.text for s in job.segments)
+
+
+def _upgrade_voice_key(job: Job) -> None:
+    """Jobs saved before slots were part of the key: same voice + lines → still valid."""
+    if job.voice_key and job.voice_key == _legacy_voice_key(job):
+        job.voice_key = voice_key(job)
+
+
+#: the shortest a line may be squeezed to on the timeline (seconds)
+MIN_SLOT_S = 0.3
+
+
+def apply_timings(job: Job, timings: list[list[float]]) -> None:
+    """New [start, end] for every line (timeline editor). Kept in order, never
+    overlapping, inside the video, at least MIN_SLOT_S long."""
+    if len(timings) != len(job.segments):
+        raise DubError("Số mốc thời gian không khớp số câu")
+    total = job.duration_s or max((float(t[1]) for t in timings if len(t) == 2), default=0.0)
+    prev_end = 0.0
+    out: list[tuple[float, float]] = []
+    for i, pair in enumerate(timings):
+        if len(pair) != 2:
+            raise DubError(f"Mốc thời gian câu {i + 1} không hợp lệ")
+        start, end = float(pair[0]), float(pair[1])
+        if not (start == start and end == end):  # NaN
+            raise DubError(f"Mốc thời gian câu {i + 1} không hợp lệ")
+        start = max(prev_end, start)
+        if total:
+            start = min(start, max(0.0, total - MIN_SLOT_S))
+            end = min(end, total)
+        end = max(end, start + MIN_SLOT_S)
+        out.append((round(start, 3), round(end, 3)))
+        prev_end = end
+    for seg, (start, end) in zip(job.segments, out):
+        seg.start, seg.end = start, end
 
 
 def _render(job: Job) -> None:
@@ -557,6 +752,7 @@ def _render(job: Job) -> None:
         raise DubError("Không đọc được video")
     job.width, job.height = info.width, info.height
     voice = job.work / "voice.wav"
+    _upgrade_voice_key(job)
     key = voice_key(job)
     if voice.is_file() and job.voice_key == key:
         _set(job, "Dùng lại giọng đã đọc", 81)  # only the subtitles / layout changed
@@ -579,9 +775,10 @@ def _render(job: Job) -> None:
             logger.warning("dub: keep_bgm asked but spleeter models are missing; original audio dropped")
     _set(job, "Đang ghép video + phụ đề", 91)
     cues: list[tuple[float, float, str]] = []
-    max_chars = sub_max_chars(info.width, info.height, job.layout)
     for s in job.segments:
-        cues += split_cue(s.start, s.end, s.text, max_chars)
+        own = effective_layout(job.layout, s.look)
+        for a, b, t in split_cue(s.start, s.end, s.text, sub_max_chars(info.width, info.height, own)):
+            cues.append((a, b, t, s.look) if s.look else (a, b, t))
     if job.engine == "remotion":
         _render_remotion(job, ffmpeg, src, voice, bgm, info, cues)
         return
@@ -589,16 +786,30 @@ def _render(job: Job) -> None:
     media_id = uuid.uuid4().hex
     dst = media_service.MEDIA_CACHE_DIR / f"{media_id}.mp4"
     cmd = [ffmpeg, "-y", "-v", "error", "-i", str(src), "-i", str(voice)]
-    vgraph = video_filter(ass, info.width, info.height, job.layout)
     if bgm is not None:
-        cmd += ["-i", str(bgm), "-filter_complex",
+        cmd += ["-i", str(bgm)]
+    next_index = 3 if bgm is not None else 2
+    frame_bg = dub_decor.frame_bg_path(normalize_layout(job.layout).get("frame"))
+    frame_bg_index = None
+    if frame_bg is not None:
+        frame_bg_index = next_index
+        next_index += 1
+        cmd += ["-loop", "1", "-framerate", "30", "-i", str(frame_bg)]
+    mascot = dub_decor.prepare_mascot(normalize_layout(job.layout).get("mascot"), info.height, job.work)
+    mascot_index = None
+    if mascot is not None:
+        mascot_index = next_index
+        cmd += dub_decor.mascot_input_args(*mascot)
+    vgraph = video_filter(ass, info.width, info.height, job.layout, mascot_index, bool(mascot and mascot[1]), frame_bg_index)
+    if bgm is not None:
+        cmd += ["-filter_complex",
                 f"{vgraph};[2:a]volume={BGM_VOLUME}[b];[1:a][b]amix=inputs=2:duration=first:normalize=0[a]",
                 "-map", "[v]", "-map", "[a]"]
     else:
         cmd += ["-filter_complex", vgraph, "-map", "[v]", "-map", "1:a:0"]
     cmd += [*_encode_args(ffmpeg), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-shortest",
             "-movflags", "+faststart", str(dst)]
-    err = _run(cmd, 1200)
+    err = _run(cmd, ENCODE_TIMEOUT_S)
     if err or not dst.is_file() or dst.stat().st_size == 0:
         raise DubError(f"ffmpeg ghép lỗi: {err or 'file rỗng'}")
     with get_session() as s:
@@ -629,7 +840,7 @@ def _render_remotion(job: Job, ffmpeg: str, src: Path, voice: Path, bgm: Optiona
             cmd += ["-map", "0:v:0", "-map", "1:a:0"]
         cmd += ["-c:v", "copy"] if copy_video else [*_encode_args(ffmpeg), "-pix_fmt", "yuv420p"]
         cmd += ["-c:a", "aac", "-b:a", "160k", "-shortest", "-movflags", "+faststart", str(nosub)]
-        return _run(cmd, 1200)
+        return _run(cmd, ENCODE_TIMEOUT_S)
 
     err = mux(True)
     if err or not nosub.is_file() or nosub.stat().st_size == 0:
@@ -638,8 +849,19 @@ def _render_remotion(job: Job, ffmpeg: str, src: Path, voice: Path, bgm: Optiona
         raise DubError(f"ffmpeg ghép tiếng lỗi: {err or 'file rỗng'}")
     media_id = uuid.uuid4().hex
     dst = media_service.MEDIA_CACHE_DIR / f"{media_id}.mp4"
-    spec = dub_remotion.build_spec(src=nosub, out=dst, cues=cues, layout=job.layout, style=job.style,
+    spec = dub_remotion.build_spec(src=nosub, out=dst, cues=cues, layout=normalize_layout(job.layout), style=job.style,
                                    width=info.width, height=info.height, duration_s=info.duration)
+    mascot = normalize_layout(job.layout).get("mascot")
+    if mascot:
+        try:
+            mpath = media_service.cached_path(mascot["media_id"])
+        except Exception:  # noqa: BLE001 — the sticker is optional
+            mpath = None
+        if mpath:
+            spec["mascot_file"] = str(mpath)  # render.mjs serves it; the composition draws it
+    bg_file = dub_decor.frame_bg_path(normalize_layout(job.layout).get("frame"))
+    if bg_file is not None:
+        spec["frame_bg_file"] = str(bg_file)
     labels = {"browser": "Remotion: chuẩn bị Chrome (lần đầu tải ~150 MB)", "bundle": "Remotion: đóng gói giao diện phụ đề (lần đầu)",
               "select": "Remotion: đọc video"}
 
@@ -777,7 +999,8 @@ def load_jobs() -> None:
                       progress=int(d.get("progress") or 0), title=str(d.get("title") or ""),
                       duration_s=float(d.get("duration_s") or 0), media_id=d.get("media_id"), board_id=d.get("board_id"),
                       error=d.get("error"), started_at=float(d.get("started_at") or meta.stat().st_mtime), work=meta.parent)
-            job.segments = [Segment(float(s["start"]), float(s["end"]), str(s.get("src") or ""), str(s.get("text") or ""))
+            job.segments = [Segment(float(s["start"]), float(s["end"]), str(s.get("src") or ""), str(s.get("text") or ""),
+                                    normalize_look(s.get("look")))
                             for s in d.get("segments") or []]
             if job.status in ("queued", "running", "rendering"):
                 job.status, job.error = "error", "Agent khởi động lại giữa chừng — làm lại từ link"
@@ -863,13 +1086,24 @@ _UNSET: Any = object()
 
 def render_job(job: Job, *, lines: Optional[list[str]], voice: Optional[str], style: Optional[str],
                keep_bgm: Optional[bool], name: Optional[str], channel_id: Any = _UNSET,
-               layout: Optional[dict] = None, engine: Optional[str] = None) -> Job:
+               layout: Optional[dict] = None, engine: Optional[str] = None,
+               timings: Optional[list[list[float]]] = None,
+               looks: Optional[list[Optional[dict]]] = None) -> Job:
     """Render (again) with edited lines / options. Allowed from ``review``,
-    ``done`` and ``error`` (after a render failure)."""
+    ``done`` and ``error`` (after a render failure). ``timings`` = new
+    [start, end] per line from the timeline editor."""
     if job.status in ("queued", "running", "rendering"):
         raise DubError("Video này đang chạy")
     if not job.segments or job.src_path is None or not Path(job.src_path).is_file():
         raise DubError("Chưa có bản dịch để render (agent đã khởi động lại?) — làm lại từ link.")
+    _upgrade_voice_key(job)
+    if timings is not None:
+        apply_timings(job, timings)
+    if looks is not None:
+        if len(looks) != len(job.segments):
+            raise DubError("Số kiểu riêng không khớp số câu")
+        for seg, look in zip(job.segments, looks):
+            seg.look = normalize_look(look)
     if lines is not None:
         if len(lines) != len(job.segments):
             raise DubError("Số câu không khớp")

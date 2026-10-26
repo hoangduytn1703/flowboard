@@ -213,3 +213,16 @@ def test_write_batch_side_by_side_and_as_a_story(client, monkeypatch):
     r = client.post("/api/posts/write-batch", json={"brief": {}, "n": 2, "channel_id": ch, "series": "Chuyện bầu"}).json()
     assert [p["episode"] for p in r["posts"]] == [4, 5]
     assert client.post("/api/posts/write-batch", json={"brief": {}, "n": 6, "channel_id": ch}).status_code == 422
+
+
+def test_series_list_is_per_channel_and_never_merges_two_pages(client):
+    a = client.post("/api/channels", json={"name": "Trang A", "platforms": ["facebook"]}).json()["id"]
+    b = client.post("/api/channels", json={"name": "Trang B", "platforms": ["facebook"]}).json()["id"]
+    for ch, ep in ((a, 1), (a, 2), (b, 1)):
+        client.post("/api/posts", json={"body": "x", "series": "Nhật ký", "episode": ep, "channel_id": ch})
+    client.post("/api/posts", json={"body": "y", "series": "Hệ mặt trời", "episode": 1, "channel_id": b})
+    everything = client.get("/api/posts/series").json()
+    assert sorted((r["name"], r["channel_id"], r["episodes"]) for r in everything) == [
+        ("Hệ mặt trời", b, 1), ("Nhật ký", a, 2), ("Nhật ký", b, 1)]
+    only_a = client.get(f"/api/posts/series?channel_id={a}").json()
+    assert [(r["name"], r["episodes"]) for r in only_a] == [("Nhật ký", 2)]

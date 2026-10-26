@@ -81,6 +81,8 @@ export interface SavedPost {
   images: string[];
   /** a Flow video posted instead of the images ("" = none) */
   video?: string;
+  /** the joined clip of `board_id`: what publishing sends when the post has no video of its own */
+  clip_video?: string;
   image_prompts: string[];
   brief: PostBrief;
   created_at: string | null;

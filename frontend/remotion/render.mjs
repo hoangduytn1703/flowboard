@@ -55,10 +55,16 @@ async function ensureBundle() {
   return out;
 }
 
-/** Serve one file with Range support on 127.0.0.1:<random port>. */
-function serveFile(file) {
-  const size = fs.statSync(file).size;
+const MIME = { ".mp4": "video/mp4", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif" };
+
+/** Serve the input video (and the mascot sticker) with Range support on 127.0.0.1:<random port>. */
+function serveFile(file, extra = {}) {
   const server = http.createServer((req, res) => {
+    const name = (req.url || "").split("?")[0];
+    const target = name === "/input.mp4" ? file : extra[name];
+    if (!target) { res.writeHead(404); res.end(); return; }
+    const size = fs.statSync(target).size;
+    const type = MIME[path.extname(target).toLowerCase()] || "application/octet-stream";
     const range = /bytes=(\d*)-(\d*)/.exec(req.headers.range || "");
     let start = 0, end = size - 1;
     if (range) {
@@ -69,14 +75,17 @@ function serveFile(file) {
     }
     if (start > end || start >= size) { res.writeHead(416, { "Content-Range": `bytes */${size}` }); res.end(); return; }
     res.writeHead(range ? 206 : 200, {
-      "Content-Type": "video/mp4", "Accept-Ranges": "bytes", "Content-Length": end - start + 1,
+      "Content-Type": type, "Accept-Ranges": "bytes", "Content-Length": end - start + 1,
       ...(range ? { "Content-Range": `bytes ${start}-${end}/${size}` } : {}),
     });
     if (req.method === "HEAD") { res.end(); return; }
-    fs.createReadStream(file, { start, end }).pipe(res);
+    fs.createReadStream(target, { start, end }).pipe(res);
   });
   return new Promise((resolve) => {
-    server.listen(0, "127.0.0.1", () => resolve({ server, url: `http://127.0.0.1:${server.address().port}/input.mp4` }));
+    server.listen(0, "127.0.0.1", () => {
+      const base = `http://127.0.0.1:${server.address().port}`;
+      resolve({ server, url: `${base}/input.mp4`, base });
+    });
   });
 }
 
@@ -86,9 +95,15 @@ async function main() {
   log("PHASE browser");
   await ensureBrowser({ onBrowserDownload: () => ({ onProgress: ({ percent }) => log(`BROWSER ${Math.round(percent * 100)}`) }) });
   const serveUrl = await ensureBundle();
-  const { server, url } = await serveFile(spec.src);
+  const extra = {};
+  if (spec.mascot_file && fs.existsSync(spec.mascot_file)) extra[`/mascot${path.extname(spec.mascot_file).toLowerCase()}`] = spec.mascot_file;
+  if (spec.frame_bg_file && fs.existsSync(spec.frame_bg_file)) extra[`/framebg${path.extname(spec.frame_bg_file).toLowerCase()}`] = spec.frame_bg_file;
+  const { server, url, base } = await serveFile(spec.src, extra);
   try {
-    const inputProps = { ...(spec.props || {}), src: url };
+    const mascotPath = Object.keys(extra).find((k) => k.startsWith("/mascot"));
+    const bgPath = Object.keys(extra).find((k) => k.startsWith("/framebg"));
+    const inputProps = { ...(spec.props || {}), src: url, ...(mascotPath ? { mascotSrc: `${base}${mascotPath}` } : {}),
+                         ...(bgPath ? { frameBgSrc: `${base}${bgPath}` } : {}) };
     log("PHASE select");
     const composition = await selectComposition({ serveUrl, id: spec.composition || "DubSubtitles", inputProps });
     log(`FRAMES ${composition.durationInFrames} ${composition.width}x${composition.height}@${composition.fps}`);

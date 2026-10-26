@@ -137,8 +137,9 @@ def fetch_video(text: str, media_id: str, out_dir: Path, *, max_duration_s: Opti
         try:
             info = douyin_info(url)
             if max_duration_s and info["duration"] > max_duration_s:
-                raise FetchError(f"video dài {info['duration'] / 60:.0f} phút — tối đa {max_duration_s / 60:.0f} phút "
-                                 "(link này là một tuyển tập/合集; chọn một video lẻ)") from None
+                # Far past the limit: almost always a 合集 (compilation) link, not one clip.
+                hint = " (link này là một tuyển tập/合集; chọn một video lẻ)" if info["duration"] > 2 * max_duration_s else ""
+                raise FetchError(f"video dài {info['duration'] / 60:.0f} phút — tối đa {max_duration_s / 60:.0f} phút{hint}") from None
             dest = out_dir / f"{media_id}.mp4"
             download_direct(info["direct_url"], dest)
             logger.info("video_fetch: douyin %s → %s (%.0fs)", info["id"], media_id, info["duration"])

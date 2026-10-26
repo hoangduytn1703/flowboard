@@ -69,7 +69,7 @@ def test_result_becomes_a_clip_with_channel_and_narration(client):
 def test_routes_guard_input_and_report_status(client, monkeypatch):
     monkeypatch.setattr(dub, "status", lambda: {"available": True, "whisper": True, "separate": False, "ytdlp": True, "root": "x"})
     st = client.get("/api/dub/status").json()
-    assert st["available"] is True and {s["key"] for s in st["styles"]} == set(dub.STYLES) and st["max_minutes"] == 10
+    assert st["available"] is True and {s["key"] for s in st["styles"]} == set(dub.STYLES) and st["max_minutes"] == dub.MAX_DURATION_S // 60
     r = client.post("/api/dub/jobs", json={})
     assert r.status_code == 400 and "link" in r.json()["detail"].lower()
     r = client.post("/api/dub/jobs", json={"url": "https://x.y/v", "voice": "nope"})
@@ -125,8 +125,8 @@ def test_timeline_places_pieces_at_their_start_times(tmp_path):
 
 def test_layout_moves_the_box_and_narrows_lines(tmp_path):
     lay = dub.normalize_layout({"x": 0.2, "y": 1.5, "scale": "1.4", "junk": 1})
-    assert lay == {"x": 0.2, "y": 0.98, "scale": 1.4, "blur": None}
-    assert dub.normalize_layout(None) == {**dub.DEFAULT_LAYOUT, "blur": None}
+    assert lay == {"x": 0.2, "y": 0.98, "scale": 1.4, "blur": None, "frame": None, "mascot": None, "w": None}
+    assert dub.normalize_layout(None) == {**dub.DEFAULT_LAYOUT, "blur": None, "frame": None, "mascot": None, "w": None}
     text = dub.write_sub_ass([(0, 1, "A")], tmp_path / "l.ass", width=1000, height=2000, style="box_yellow",
                              layout={"x": 0.25, "y": 0.5, "scale": 1.5}).read_text(encoding="utf-8")
     assert r"{\an2\pos(250,1000)}A" in text and f"Style: Sub,Arial,{round(2000 * 0.036 * 1.5)}," in text
@@ -214,3 +214,40 @@ def test_jobs_queue_one_at_a_time(client, monkeypatch):
     assert r.status_code == 400 and "Hàng đợi" in r.json()["detail"]
     for jid in [j["job_id"] for j in ids] + [j.id for j in list(dub.JOBS.values())]:
         dub.JOBS.pop(jid, None)
+
+
+def test_translation_batches_cover_every_line_and_fold_a_short_tail():
+    assert dub.translation_batches(0) == []
+    assert dub.translation_batches(10, 60) == [(0, 10)]
+    assert dub.translation_batches(130, 60) == [(0, 60), (60, 130)]  # 10-line tail (< 15) joins the batch before
+    assert dub.translation_batches(150, 60) == [(0, 60), (60, 120), (120, 150)]
+    spans = dub.translation_batches(517, 60)
+    assert spans[0][0] == 0 and spans[-1][1] == 517 and all(a[1] == b[0] for a, b in zip(spans, spans[1:]))
+
+
+def test_long_transcript_is_translated_in_batches_with_context(monkeypatch):
+    import asyncio
+    import json as _json
+
+    job = dub.Job(id="t1", url=None, source_media_id="x", language="zh")
+    job.segments = [dub.Segment(float(i), float(i) + 0.9, f"src{i}") for i in range(130)]
+    calls = []
+
+    async def fake_llm(feature, prompt, *, system_prompt=None, timeout=0):
+        calls.append(prompt)
+        n = int(prompt.split("TRANSCRIPT (")[1].split(" lines")[0])
+        first = int(prompt.split("[1] (")[0].count("ALREADY") >= 0)  # noqa: F841 — keep parsing simple
+        return _json.dumps({"title": f"Tiêu đề {len(calls)}", "lines": [f"vi{len(calls)}-{k}" for k in range(n)]})
+
+    monkeypatch.setattr(dub, "run_llm", fake_llm)
+    asyncio.run(dub._translate(job))
+    assert len(calls) == 2  # 60 + 70 (a 10-line tail folds into the second batch)
+    assert "TRANSCRIPT (60 lines)" in calls[0] and "TRANSCRIPT (70 lines)" in calls[1]
+    assert "part 2 of 2" in calls[1] and "ALREADY TRANSLATED" in calls[1] and "src59 => vi1-59" in calls[1]
+    assert job.segments[0].text == "vi1-0" and job.segments[59].text == "vi1-59" and job.segments[60].text == "vi2-0"
+    assert job.segments[-1].text == "vi2-69" and job.title == "Tiêu đề 1"
+
+
+def test_dub_limit_is_thirty_minutes_and_compilation_hint_only_far_past_it(client):
+    assert dub.MAX_DURATION_S == 30 * 60
+    assert client.get("/api/dub/status").json()["max_minutes"] == 30

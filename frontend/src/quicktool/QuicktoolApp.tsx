@@ -38,6 +38,7 @@ import { SchedulePage } from "./pages/SchedulePage";
 import { SwipesPage } from "./pages/SwipesPage";
 import { useFlowCredits } from "../components/credits";
 import { AccountSwitchBanner } from "../components/AccountSwitchBanner";
+import { BackgroundTasks } from "../components/BackgroundTasks";
 import { useToastOn } from "../store/toast";
 import { PageEmpty, PageLoading } from "./PageState";
 
@@ -102,6 +103,7 @@ export function QuicktoolApp() {
       <QuicktoolSidebar />
       <div className="qt-content">
         <AccountSwitchBanner />
+        <BackgroundTasks />
         <Routes>
           {/* Static paths first so "new" / "from-video" are never read as a clip id. */}
           <Route path="/clips" element={<Library templates={templates} />} />
@@ -585,7 +587,8 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
           {step === 2 && <StepScript roles={roles} category={clipCategory} productId={qt.product_id ?? null} boardId={routeId} />}
           {step === 3 && <StepMedia roles={roles} kind="image" />}
           {step === 4 && (isDrama ? <StepSequence roles={roles} /> : <StepMedia roles={roles} kind="video" productName={productLabel.name} boardName={boardName} />)}
-          {step === 5 && <StepExport roles={roles} productName={productLabel.name} price={productLabel.price} channelId={qt.channel_id ?? null} />}
+          {step === 5 && <StepExport roles={roles} productName={productLabel.name} price={productLabel.price} channelId={qt.channel_id ?? null}
+                                     dubJobId={qt.template_id === "dub" ? ((qt as { dub?: { job_id?: string } }).dub?.job_id ?? null) : null} />}
           {step === 1 && loaded && <ClipChannel boardId={routeId} channelId={qt.channel_id ?? null} />}
           {step === 5 && loaded && <ClipPost boardId={routeId} productId={qt.product_id ?? null} channelId={qt.channel_id ?? null} />}
           <div className="qt-footer">

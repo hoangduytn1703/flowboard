@@ -155,6 +155,19 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   - Shopee không liên quan tới app Facebook: link aff chỉ là text trong bình luận đầu. Token hết hạn thì lặp lại Generate → Extend → dán lại ở Kênh.
 - **Component mount cùng lúc với "token" đã bump thì effect `useRef(token)` không chạy** (25/10, `PostEditor` chỉ xuất hiện sau lần viết
   đầu nên `seenToken` khởi tạo = token mới → bỏ qua): khởi tạo ref = 0, coi 0 là "không làm gì", chỗ mở dữ liệu cũ đặt token về 0.
+- **Gemini TTS đọc to cả câu lệnh hướng dẫn tiếng Anh** (26/10, bug người dùng báo trong video lồng tiếng "Bài tập vai cổ…" giây 8): ngoài lỗi
+  đọc "phong cách" đã sửa 22/10, Gemini còn thỉnh thoảng đọc nguyên khối prompt ("Read the transcript below… The director's notes… Director's notes.
+  Giọng đọc tự nhiên, rõ ràng.") rồi mới tới câu thoại — đo thật: 8/41 câu (~20 %) của job đó, câu 6 chữ ra 11,8 s. Không đoán được câu nào bị, nên
+  **kiểm tra bằng độ dài**: `tts.gemini_leaked(text, dur)` = dài hơn `max_speech_seconds` (số chữ / 2,5 + 1,5 s; câu bình thường chỉ tới 0,79 lần ngưỡng,
+  câu lỗi 1,5–4 lần) → đọc lại, tối đa `GEMINI_ATTEMPTS = 3`, **lần cuối gửi đúng câu thoại không kèm hướng dẫn** (`_synth_gemini(plain=True)`); 3 lần đều
+  lỗi → `TTSError` rõ ràng. File cache cũ bị lỗi cũng được kiểm khi đọc lại và tự đọc lại. Áp cho mọi chỗ dùng giọng Gemini (lồng tiếng, ghép Bước 5,
+  nghe thử). Lồng tiếng: in lại nhanh dùng lại `voice.wav` khi câu/giọng không đổi → job cũ dính lỗi phải bỏ `voice.wav` rồi render lại. Test
+  `test_tts_gemini_leak.py` (5).
+- **Khung chỉnh vị trí phụ đề luôn dọc 9:16 → lệch với video ngang** (26/10, người dùng báo: chỉnh trên khung thì chuẩn, lên clip thì lệch):
+  `DubPage` truyền `width={0} height={0}` nên `SubPositioner` dùng 9:16, video ngang bị thu nhỏ có viền đen trên dưới nhưng toạ độ (x, y = tỉ lệ
+  khung) lại tính theo cả khung dọc → 80 % khung dọc ≈ 40 % hình thật. Giờ khung lấy tỉ lệ thật: props `job.width/height` (job lưu từ lần render),
+  không có thì `videoWidth/videoHeight` của thẻ video; video ngang dùng khung rộng 720 px (`.qt-subpos__stage--landscape`). Bố cục đã chỉnh trên
+  khung sai trước đây phải chỉnh lại rồi "Áp dụng".
 - **TikTok lúc có lúc không trả trang "Security Check"** thay cho trang sản phẩm (thấy thật 21/10): `product_link.fetch_page` nhận diện trang chặn (`_looks_blocked`), thử lại 1 lần sau 3 s rồi báo lỗi — trước đó đã lưu một sản phẩm tên "Security Check".
 - **Vite có lúc giữ bản biên dịch RỖNG của một file vừa sửa** (21/10: `AccountPanel.tsx` trả 0 byte → cả app trắng, lỗi "does not provide an export named …" dù `tsc` sạch). Kiểm tra `curl -s -o /dev/null -w '%{size_download}' localhost:5174/src/<file>`; sửa bằng `touch <file>`.
 - **Gemini chậm/treo không hẳn do key rẻ, mà do model**: đo cùng một câu hỏi, `gemini-3.1-flash-lite` ~4 s, `3.5-flash` ~21 s (nhiều thinking token), `3.7`/`3.8-flash` quá 40 s. Việc đọc sản phẩm từ link dùng `product_link.EXTRACT_MODEL` (lite, ~13 s cả quy trình). Kịch bản clip (`analyze`) vẫn dùng model mặc định, có thể chậm; chưa đổi vì chưa so chất lượng. Fallback chỉ xử lý 503, không xử lý treo/timeout.
@@ -524,6 +537,13 @@ của người dùng (console.neon.tech, secure.backblaze.com).
     Đã xem ảnh render chữ tiếng Việt trên clip thật; thử UI trên clip Cơm cháy (chặn lệnh ghép, kiểm tham số, trả tuỳ chọn về cũ).
     **Chưa ghép thật một clip có cắt + chữ qua giao diện.** Emoji (👇) libass vẽ dạng nét viền.
 
+- **Hôm nay — giao diện bảng điều khiển** (26/10, thiết kế lại theo yêu cầu "chuyên nghiệp hơn"): `TodayPage.tsx` + `today.css` viết lại phần trình bày, logic
+  tải/poll/hành động giữ nguyên. Bố cục: tiêu đề "Tổng quan hôm nay" + ngày + "N việc cần bạn xử lý" + nút Viết bài / **Clip mới** (→ `/clips/new`); hàng
+  5 thẻ KPI (`Kpi`: icon, nhãn, số lớn, ghi chú; đỏ khi có lỗi, cam khi đang chạy); lưới 2 cột (trái: Đến giờ đăng, Cần xử lý, Clip đang làm dở — phải: Đang chạy,
+  Đã ghép chưa tải); mỗi khối là `Section` (icon + tiêu đề + số đếm + nút), **khối trống thu thành một dòng "✓ Không có…"**, không còn thẻ lớn rỗng. Icon là
+  SVG nét (`ICONS` trong file, không emoji). Hàng danh sách `.qt-today__list li` đổi sang đường kẻ ngăn (dùng chung với `DueList` của Lịch đăng — đã xem lại trang
+  `/schedule`). Tiền tố class mới `td-*`. Đã chụp Playwright 1635 px và 900 px; **chưa xem được hàng có dữ liệu** (lúc chụp không có clip lỗi / việc đang chạy).
+
 - **Trang "Hôm nay" + tải hàng loạt** (24/10): `/today` là **trang mở đầu** (`App.tsx` `/` → `/today`; sidebar mục đầu "📋 Hôm nay").
   `quicktool/pages/TodayPage.tsx` (+ `today.css`): ô credit Flow / việc đang chạy / xong / lỗi / credit hôm nay; mục Đang chạy
   (`listHistory status=queued,running`), Cần xử lý (clip có cảnh/video lỗi → nút Sửa sang đúng bước), Đã ghép xong chưa tải về (Tải
@@ -738,7 +758,7 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   `render_job` **dùng lại voice.wav + bgm.wav** khi `voice_key` (giọng + các câu) không đổi → in lại chỉ mất ~27 s cho video 6 phút
   (phase "Đang in lại phụ đề"). Job ghi `<media>/dub/<id>/job.json` sau mỗi bước (`persist`), `load_jobs()` đọc lại khi gọi
   `GET /api/dub/jobs[/{id}]` (job đang chạy lúc tắt → error "Agent khởi động lại giữa chừng"; work dir, src_path, voice_key suy lại).
-  Frontend `quicktool/dub/SubPositioner.tsx`: video xem trước (câm, thanh kéo thời điểm ±1 s) + hộp phụ đề kéo được (pointer capture),
+  Frontend (cũ, **26/10 đã thay bằng trình chỉnh sửa `dub/editor/`**, xem mục "Trình chỉnh sửa kiểu CapCut") `quicktool/dub/SubPositioner.tsx`: video xem trước (câm, thanh kéo thời điểm ±1 s) + hộp phụ đề kéo được (pointer capture),
   mũi tên 1 % / Shift 5 %, phím +/− cỡ chữ, slider ngang/dọc/cỡ, preset dưới/sát đáy/giữa/trên, kiểu; vùng mờ kéo được + tay nắm góc đổi cỡ
   + slider cao/rộng/vị trí/độ mờ, "🔍 Tự tìm chữ gốc (OCR)" gọi `POST /api/clean/{source_media_id}/detect` (RapidOCR của công cụ xoá
   chữ) → đặt vùng mờ theo dải chữ, "Đặt ngay trên phụ đề"; "✓ Áp dụng" → render với layout. Mục `<details>` "🎯 Vị trí phụ đề &
@@ -760,6 +780,75 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   script Node giả). Cảnh báo console "`ref` is not a prop … AbsoluteFillWithTiming" là của Remotion 4.0.538 với React 18, vô hại. Chưa: chọn font khác,
   hiệu ứng vào/ra, chữ bật từng từ chính xác theo mốc từ của Edge TTS (có thể lấy từ word boundary sau này).
 
+- **Lồng tiếng: giới hạn 30 phút + dịch theo đợt** (26/10): `dub.MAX_DURATION_S = 30 * 60` (trước 10 phút; `/api/dub/status.max_minutes`
+  hiện trên trang). Kéo theo: `STEP_TIMEOUT_S` 45 phút (Whisper / spleeter, nhất là khi rơi về CPU), `ENCODE_TIMEOUT_S` 60 phút (ffmpeg in phụ
+  đề), tách WAV 900 s, Remotion `RENDER_TIMEOUT_S` 120 phút. **Dịch chia đợt** `TRANSLATE_BATCH = 60` câu (`translation_batches`, đuôi < 15 câu gộp
+  vào đợt trước), chạy lần lượt, mỗi đợt kèm `TRANSLATE_CONTEXT = 4` câu đã dịch ngay trước ("ALREADY TRANSLATED") để giọng và thuật ngữ liền mạch;
+  tiêu đề lấy từ đợt 1; phase "Đang dịch sang tiếng Việt (n/N)". `video_fetch`: gợi ý "link là tuyển tập/合集" chỉ khi video dài hơn **gấp đôi**
+  giới hạn (trước đó hiện cả với video 11 phút bình thường). Lưu ý: dòng dịch trong `dub.py` từng có ký tự "–" bị hỏng mã hoá thành "�" — đã thay
+  bằng "-". **Chưa thử thật video 20–30 phút** (thời gian TTS nối tiếp ~3 s/câu: video 30 phút ~400 câu ≈ 20 phút chỉ riêng bước giọng đọc).
+- **Bước 5 của clip lồng tiếng** (26/10): board `template_id = "dub"` không có cảnh/ảnh nên Bước 5 thường hiện "0 clip sẵn sàng" + "Ghép lại"
+  bị khoá, không có đường quay lại chỉnh (người dùng hỏi). `StepExport` nhận `dubJobId` (`QuicktoolApp` lấy `quicktool.dub.job_id`): thẻ bên trái
+  thay bằng "Chỉnh phụ đề, giọng đọc, bản dịch" + nút **"✏️ Mở trang chỉnh phụ đề & giọng"** → `/tools/dub?job=<id>`; thẻ Kết quả (tải về,
+  lên lịch, ảnh bìa) và bài đăng Facebook giữ nguyên. Chỉnh + "Áp dụng"/"Render lại" ở trang Lồng tiếng cập nhật cùng board.
+- **Lồng tiếng: khung video + nhân vật nhún nhảy** (26/10, trong khung "Vị trí phụ đề & làm mờ chữ gốc", in chung lượt "✓ Áp dụng"):
+  `layout.frame = {scale 0.6–1, bg blur|color, color, border 0–0.03 (tỉ lệ chiều cao), border_color}` và `layout.mascot = {media_id, x, y (đáy-giữa,
+  tỉ lệ khung), size 0.08–0.6 (tỉ lệ chiều cao), motion dance|bounce|sway|none, shape circle|plain}` — `services/dub_decor.py` (`normalize_frame/mascot`,
+  `frame_filter`, `prepare_mascot`, `mascot_input_args`, `mascot_filter`). Thứ tự graph ffmpeg trong `dub.video_filter`: **nguồn → khung (split, nền
+  scale+boxblur hoặc drawbox màu, video thu nhỏ + pad viền, overlay giữa) → vùng mờ → nhân vật → phụ đề**, nên mọi vị trí là tỉ lệ của khung đầu ra.
+  Nhân vật chuẩn bị **một lần bằng Pillow** (cắt vuông từ trên xuống — mặt nằm trên, mặt nạ tròn khử răng cưa + viền trắng; hoặc giữ ảnh) rồi
+  overlay ảnh tĩnh lặp `-loop 1 -framerate 30` (geq mỗi khung quá chậm cho video dài); GIF động + "giữ nguyên" thì overlay thẳng `-ignore_loop 0`;
+  chuyển động = `rotate` theo `t` + biểu thức x/y của `overlay` (`eval=frame:shortest=1` để nhân vật lặp không kéo dài video). Nhân vật lấy từ
+  **Người mẫu đã lưu** hoặc tải ảnh/GIF `POST /api/dub/mascot` (≤ 10 MB, Asset ảnh cục bộ, không lên Flow). Engine Remotion: composition vẽ
+  khung (video nền blur CSS + video thu nhỏ + box-shadow viền) và nhân vật (`mascotMotion` cùng công thức), `render.mjs` phục vụ thêm file nhân vật
+  (`spec.mascot_file` → `/mascot.<ext>`); GIF trong Remotion chỉ hiện khung đầu. Khung chỉnh (`SubPositioner`) giờ xem trước trên **video gốc**
+  (`/media/<source_media_id>`, không phải bản đã render) với khung CSS + nhân vật kéo thả (+ CSS animation); điều khiển ở `dub/DecorControls.tsx`.
+  Thử thật: in lại khung + người mẫu tròn nhún nhảy 12 s cho video 12,6 s (dùng lại giọng), ảnh khung hình đúng. Test `test_dub_decor.py` (5, có 2 lần
+  dựng ffmpeg thật: ảnh tròn + GIF động).
+  **AI chat + mẫu đã lưu (26/10)**: trên cùng mục khung/nhân vật là ô **"💬 Nhờ AI tạo khung / nhân vật"** (`DecorControls`): `POST
+  /api/dub/decor/chat {message, history, frame, mascot, orientation}` → `services/decor_ai.chat` — system prompt chỉ làm khung + nhân vật (hỏi
+  việc khác thì từ chối nhẹ, không đổi gì), đọc khung/nhân vật hiện tại, hướng video, **các mẫu đã lưu (gu của người dùng)** và 8 lượt chat gần nhất →
+  JSON `{reply, frame | "off" | null, bg_prompt, mascot | "off" | null, image_prompt}` (prompt ảnh tiếng Anh: nền trang trí giữa trống không chữ; nhân
+  vật một mình, toàn thân, nền trắng trơn, không người thật). Trình duyệt vẽ ảnh bằng `generateStandaloneImage` (Flow, ~25–40 s, chạy song song) →
+  nền khung `frame.bg = "image"` + `bg_image`; nhân vật dạng "plain" → `POST /api/dub/decor/cutout` (`dub_decor.cutout`: màu viền trung vị, loang
+  từ mép các điểm gần màu đó thành trong suốt, viền mềm, cắt sát; ảnh có viền rối thì để nguyên; **tự tải ảnh Flow vừa vẽ về** bằng
+  `fetch_and_cache` — bẫy: gọi ngay sau khi vẽ thì ảnh chưa có trên máy). Khung nền ảnh: ffmpeg thêm input ảnh lặp (`frame_filter(bg_index)`,
+  `scale+crop` phủ khung, `shortest=1`), Remotion `<Img>` + `render.mjs` phục vụ `/framebg.<ext>`; `dub_decor.local_media` tải ảnh về khi dựng nếu
+  máy chưa có. **★ Mẫu đã lưu**: bảng `DecorPreset` (kind frame|mascot, name, data JSON đã chuẩn hoá, thumb, uses; `create_all` tạo — đã tạo trên
+  Neon), `GET/POST /api/dub/decor/presets`, `POST …/{id}/use` (đếm lượt, xếp mẫu hay dùng lên đầu), `DELETE …/{id}`; UI: "★ Lưu khung này" / "★ Lưu
+  nhân vật này" (tên "Khung n · gợi ý từ câu chat"), danh sách thẻ có ảnh/ô màu, bấm để dùng, × để xoá. Thử thật 26/10: "khung hoa đào hồng nhạt,
+  viền trắng; bé chibi mẹ bầu vẫy tay góc dưới phải, nhún nhảy" → 44 s ra nền hoa đào + bé chibi đã tách nền (PNG trong suốt); lưu mẫu chạy (mẫu thử
+  đã xoá). Test thêm 5 (`test_dub_decor.py` 10).
+- **Lồng tiếng: trình chỉnh sửa kiểu CapCut** (26/10, thay `SubPositioner` + bảng "Bản dịch" + mục `<details>` cuộn dài): mở một video đã có câu
+  (`DubPage`: `segments` có và trạng thái review/done/error hoặc đã có `media_id`) → `quicktool/dub/editor/DubEditor.tsx` chiếm cả trang, vừa một màn
+  hình (`.dx` cao `100vh − 104px`): thanh trên (← Danh sách, tên, trạng thái "● Chưa xuất: …" / tiến độ + Dừng, ↶ ↷, ▶ Bản đã xuất, ⬇ Tải, Mở clip,
+  **✓ Xuất lại video** ghi rõ "đọc lại giọng" hay "nhanh"); giữa `EditorStage.tsx` (video gốc + **giọng Việt `voice.wav` (+ `bgm.wav`) phát đồng bộ**
+  bằng `<audio>`, vòng rAF chỉnh lệch > 0,25 s; Remotion đã render thì là `<Player>` thật; chọn nghe Giọng Việt / Tiếng gốc / Tắt): phụ đề **đúng câu
+  tại thời điểm đang xem** (cắt hộp y như `split_cue`/`sub_max_chars`, mirror trong `editor/cues.ts`), kéo để dời, chấm cam kéo ngang đổi cỡ, **bấm đúp
+  để gõ thẳng trên hình** (Enter lưu, Esc huỷ), vùng mờ + nhân vật kéo như cũ; phải `Inspector.tsx` 5 tab: 💬 Phụ đề (câu đang chọn: câu gốc, ô sửa, số
+  ký tự/giây — > 17 là cảnh báo đọc nhanh, giờ bắt đầu/kết thúc ±0,1 s, Bỏ câu, Về bản dịch / thời gian cũ, ▶ Nghe câu này; kiểu chữ + cỡ + vị trí cho mọi
+  câu), 📜 Các câu (cả bản dịch, sửa tại chỗ), 🌫 Làm mờ, 🎨 Trang trí (`DecorControls`), ⚙ Xuất (tên, giọng, engine, nhạc nền, kênh); dưới
+  `EditorTimeline.tsx` dùng **`@xzdarcy/react-timeline-editor` 1.0.0** (MIT, gói sẵn react-virtualized/interactjs nên không dính lỗi Vite; CSS
+  `dist/react-timeline-editor.css`, kiểu `TimelineAction/Row` import từ `@xzdarcy/timeline-engine`): hàng Video (dải hình `GET /api/dub/jobs/{id}/filmstrip.jpg`
+  = `dub.filmstrip`, ffmpeg `tile`, video > 4 phút chỉ giải mã key frame), **Phụ đề (mỗi câu một khối: kéo để dời, kéo mép để kéo dài/rút ngắn, không
+  vượt câu bên cạnh — `minStart/maxEnd`)**, Giọng (sóng âm `wave.png` = `dub.waveform`, `showwavespic`, vẽ lại khi voice.wav mới hơn), Làm mờ / Khung /
+  Nhân vật (khối cả clip, bấm để chọn); zoom −/+/thanh trượt/"Vừa khung", vạch ruler tự chọn bước 0,5 s…10 phút, con trỏ cam theo giờ đang phát (tự cuộn
+  theo). Đồng hồ thuộc stage; timeline chỉ `setTime` qua ref và gọi `seek`. **Hoàn tác / làm lại** (Ctrl+Z / Ctrl+Shift+Z, gộp các bước của một lần
+  kéo trong 0,9 s). Phím: Space, ←/→ từng khung (Shift 1 s), ↑/↓ câu trước/sau, Enter sửa chữ, Delete bỏ câu. Rời trang khi chưa xuất → trình duyệt hỏi.
+  Đang render thì chỉ xem (khoá sửa); render xong tài liệu nạp lại từ job. Backend: `POST …/render` nhận **`timings: [[start, end]…]`** →
+  `dub.apply_timings` (giữ thứ tự, không chồng, trong video, tối thiểu `MIN_SLOT_S` 0,3 s); **`voice_key` giờ gồm cả mốc giờ** (dời câu → đọc lại giọng;
+  TTS lấy từ cache nên chỉ tốn atempo + ghép), khoá kiểu cũ được `_upgrade_voice_key` coi là còn hợp lệ; `job.public()` có `voice_url`, `bgm_url`; routes
+  `GET /jobs/{id}/voice|bgm|filmstrip.jpg|wave.png`. Test `test_dub_editor.py` (4).
+  **Độ rộng + chỉnh riêng từng câu (27/10)**: tay nắm hai mép phụ đề trên video đổi **độ rộng** `layout.w` (tỉ lệ khung, `W_MIN` 0,2–`W_MAX` 0,96,
+  null = tự động như cũ), **không đổi cỡ chữ** (cỡ chữ chỉ ở thanh "Cỡ chữ" / phím +/−). `sub_max_chars` khi có `w`: chữ vừa `w` (trừ đệm hộp), hệ số
+  **0,5 em/ký tự** (đo trên khung đã in; chế độ tự động giữ 0,56 + trần 34); `cues.ts subMaxChars` mirror. Remotion: hộp phụ đề `width: max-content` +
+  `maxWidth = w (88 % khi tự động)` — **sửa lỗi hộp bị bóp còn (1 − x) khung nên câu ngắn gãy 3 dòng** (thấy 26/10). Mỗi câu có thể có **`look`**
+  `{x?, y?, scale?, w?}` riêng (`Segment.look`, `normalize_look`, `effective_layout`; lưu trong job.json; `POST …/render {looks}`; chỉ đổi hình nên giữ
+  giọng): ASS ghi `\pos` + `s`/`ord` riêng cho event của câu đó, Remotion nhận `look` trên từng cue. UI: tab Phụ đề có công tắc **"Chỉnh cho: Riêng
+  câu này / Tất cả câu"** (nhớ localStorage `flowboard.dub.scope`, mặc định riêng câu) — kéo trên video + thanh trượt đổi đúng phạm vi đó (câu đã có
+  look thì kéo nó luôn sửa look của nó, kể cả ở "Tất cả câu"); câu khác kiểu chung có nút **"⇪ Áp cho tất cả câu"** (look của câu thành kiểu chung, bỏ mọi
+  chỉnh riêng) và "↺ Câu này theo kiểu chung"; "Đồng bộ tất cả theo kiểu chung" khi còn N câu riêng; timeline đánh dấu câu riêng bằng ✎ + viền xanh
+  ngọc. Kiểu phụ đề (style) vẫn chung cả clip. Test `test_dub_editor.py` (7).
 - **Lồng tiếng: hàng đợi + nhiều link** (25/10): `POST /api/dub/jobs` không từ chối khi đang có việc chạy nữa — job vào `queued`
   (`MAX_QUEUE` 5 đang chờ), `_pump()` chạy lần lượt một video (Whisper/spleeter dùng chung GPU), gọi từ start / render / cuối
   `_run_job`; phase "Chờ đến lượt (n video trước)"; render lại cũng xếp hàng (`_render_only`). Ô link của DubPage là textarea, mỗi dòng
@@ -851,10 +940,49 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   #20 (đã xoá): tin nhắn, tải ảnh, copy ảnh, tự xếp cảnh, dừng Flow cảnh đang chạy, F5 giữ nhãn, ghép thật 20 s → 720×1280, 38 s, video vuông có
   viền đen. **Chưa thử với Muse thật** (người dùng test tối 26/10). Code `muse2api.py` / provider "muse" có sẵn từ flowkit **không dùng** cho việc này.
 
+- **Loạt truyện đi theo kênh** (26/10): ô "Loạt truyện" ở trang Bài viết chỉ liệt kê loạt của kênh đang chọn (`channelSeries` = loạt có
+  `channel_id` trùng kênh, hoặc loạt cũ chưa gắn kênh — ghi "· chưa gắn kênh"); nhãn ghi "Loạt truyện của kênh “X”"; chưa chọn kênh → "— Chọn kênh
+  trước —"; kênh chưa có loạt → "— Kênh này chưa có loạt truyện —". **Đổi kênh thì bỏ chọn loạt đang chọn** nếu loạt đó thuộc kênh khác (effect theo
+  `channelId`), để không viết tập tiếp của page A lên page B. Bỏ đoạn tự đổi kênh theo loạt. Backend `GET /api/posts/series` gom theo **(tên, kênh)**
+  thay vì chỉ tên — hai page có loạt trùng tên không bị cộng chung số tập. `_series_context` vốn đã lọc theo kênh. Test
+  `test_series_list_is_per_channel_and_never_merges_two_pages`.
+- **Nút "việc đang chạy" góc dưới phải** (26/10, yêu cầu: rời trang khi đang làm việc nặng không sợ mất): `components/BackgroundTasks.tsx`
+  (+ `backgroundTasks.css`, gắn trong khung `QuicktoolApp` nên có ở mọi trang Quicktool). Nguồn: `GET /api/running` (`routes/running.py`) gom
+  job lồng tiếng (queued/running/rendering → `/tools/dub?job=<id>`), job xoá chữ AI (`/tools/clean?job=<id>`), và request Flow đang chờ/chạy
+  (`gen_image`, `edit_image`, `gen_video*`, `export_video`) **gom theo clip** → `/clips/<id>/<images|videos|export>`; request không thuộc clip
+  (ảnh bài viết / người mẫu) → `/history`; bỏ request cũ hơn 2 giờ (dòng mồ côi). Nút: vòng xoay + tên việc (+ % nếu có) + số việc; **ẩn khi đang
+  ở đúng trang của việc** (`isHere`: cùng clip, hoặc cùng `?job=`); 1 việc → bấm là về thẳng, nhiều việc → bảng danh sách. Việc biến khỏi danh sách
+  → hỏi `GET /api/running/outcome?key=` → "✓ … xong" (xanh) hoặc "! … lỗi" + lý do (đỏ), giữ 3 phút, xem trang đó rồi thì tự bỏ. Poll 4 s khi có
+  việc, 15 s khi không, ngay khi đổi trang và khi có sự kiện `flowboard:running` (`announceRunning()` — gọi ở `createRequest` của `api/client.ts`,
+  bắt đầu lồng tiếng, bắt đầu xoá chữ AI). **Trang Lồng tiếng và Xoá chữ giờ mở lại đúng việc qua `?job=`** (URL tự đi theo job đang mở; xoá chữ
+  tải lại video nguồn + kết quả nếu đã xong; `CleanJob.source_media_id` thêm vào kiểu TS). Chưa có: các lệnh AI chạy trực tiếp trong trang (viết bài,
+  gói nội dung, phân tích mẫu hot) — rời trang lúc đó vẫn mất kết quả hiển thị; ảnh bài viết đang tạo mà rời trang thì ảnh không gắn vào bài.
+  Test `test_running.py` (4).
+  **Mở rộng 26/10 — mọi thao tác dài trong trang** (người dùng: "cover càng nhiều càng tốt"): middleware `main._track_long_ops` (khai báo trước
+  `_require_login` nên nằm bên trong nó — request bị 401 không tính) bọc các request trong `services/op_tracker.TRACKED` (~30 luật: viết bài / nhiều
+  bài / câu mở đầu / sửa prompt ảnh, 🎁 gói, định hướng + đánh giá + kết nối Page của kênh, đọc link + nhập tab sản phẩm, tạo clip theo mẫu /
+  viết lại kịch bản / ảnh bìa, viết prompt + lời thoại, xem + tải + dựng video mẫu, phân tích + viết theo mẫu hot, drama, OCR + xoá chữ khoanh vùng,
+  đăng Facebook, tải ảnh lên Flow, đồng bộ project / cloud, xoá logo Gemini, nghe thử giọng): `start` lúc vào (đường quay lại = **Referer** = trang
+  đang mở, không có thì link mặc định của luật), `finish` lúc ra (lỗi ≥ 400 → đọc `detail` làm lời nhắn). Op giữ 15 phút trong RAM (`KEEP_S`),
+  `GET /api/running` gộp op đang chạy (`active_items`), outcome key `op:<id>`. Luật `keep_result` (hiện chỉ `post_write`) giữ cả JSON trả về:
+  `GET /api/running/latest?kind=post_write&claim=true` → **trang Bài viết tự mở lại bài AI viết xong lúc bạn ở trang khác** (đang chạy thì trang
+  chờ + poll 3 s; trang tự `claim` kết quả của chính nó khi còn mở, nhờ `mounted` ref, để không mở lại hai lần). Biểu tượng theo loại
+  (`KIND_ICON`, ⏳ mặc định), tên khi xong bỏ "đang" (`doneTitle`). Thêm luật mới: một dòng `_r(...)` trong `TRACKED`. Kết quả các thao tác khác
+  phần lớn đã tự lưu ở backend (bài nhiều, gói, đánh giá kênh, kịch bản…) nên quay lại là thấy; còn mất nếu rời trang: đọc sản phẩm từ link (bản
+  nháp), câu mở đầu, phân tích video mẫu. Test thêm 3 (`test_running.py` 7).
+- **Bài viết của clip đăng kèm video clip** (26/10, người dùng: "làm clip xong, tạo bài viết thì đăng phải kèm video"): trước đó bài viết
+  gắn clip (`Post.board_id`, viết ở Bước 5 / 🎁 Gói) đăng từ trang Bài viết (loại lịch `post`) chỉ lên chữ + ảnh, **mất video clip**; chỉ lịch loại
+  `clip` mới gửi video. Giờ `scheduler._payload` (loại `post`): có `p.video` riêng → video đó; không có mà có `board_id` → **video clip đã ghép**
+  (`exports._final_media`), ảnh riêng của bài bị bỏ (Facebook nhận ảnh HOẶC 1 video); clip chưa ghép → lỗi rõ "clip chưa ghép xong", không bao giờ
+  đăng chữ không. `GET /api/posts*` trả thêm `clip_video` (`posts._clip_videos`, một truy vấn cho cả danh sách). Trang Bài viết: thanh đăng ghi
+  "kèm **video của clip**" hoặc cảnh báo clip chưa ghép + khoá "🚀 Đăng ngay". **Bước 5 có nút "🚀 Đăng ngay (kèm video)"** trong mục Bài đăng
+  Facebook (`ClipPost.publishNow`: lưu bài → lịch `post` lúc này → `publishSlot`; chỉ hiện khi kênh đã kết nối Page). Test
+  `test_a_post_written_for_a_clip_goes_out_with_the_clip_video`.
 - **Đăng xuất Flow phải bấm 2 lần** (21/10, `SettingsPanel.tsx`): lần đầu nút đổi thành "Bấm lần nữa để đăng xuất…" + "Huỷ",
   tự quay lại sau 5 s / khi đóng hộp; xong có toast (`AccountPanel.handleLogout`). Nút chỉ có ở hộp Cài đặt mở từ ⚙ cạnh tài khoản.
 
 ## Việc đang dở / chưa kiểm chứng
+- **Trình chỉnh sửa lồng tiếng (26/10)**: câu nào sát câu bên cạnh (Whisper thường để liền nhau) chỉ rút ngắn được, chưa dời được tới khi câu bên cạnh được rút lại; chưa có tách / gộp / thêm câu mới; lớp làm mờ / khung / nhân vật vẫn áp cả clip (chưa đặt theo khoảng thời gian); khối phụ đề video dài ở mức "Vừa khung" rất hẹp → phóng to mới bấm được.
 - **Nhập từ tab đang mở** (`list_shop_tabs` / `read_tab` / `scrape_page` trong `extension/background.js`, bản 0.5.0) mới test bằng extension giả + UI giả lập, chưa chạy trên tab TikTok / Shopee thật. Trang chi tiết sản phẩm thì chỉ lấy sản phẩm chính (không lấy "sản phẩm liên quan").
 - **Chưa thử thật (20/10)**: prompt 4 mẫu clip mới qua Flow; chế độ chỉ bàn tay qua Flow; tình huống hết credit → tự chuyển
   tài khoản; 2 Chrome profile cùng lúc; key OpenAI/xAI; nghe hội thoại nhiều giọng; hàng đợi nhiều clip với credit thật.
@@ -976,3 +1104,16 @@ của người dùng (console.neon.tech, secure.backblaze.com).
 - **26/10 tối** — Tìm hiểu nguồn video thay Flow (không code): Seedance 1.5 Pro 480p ~$0,012/s (rẻ nhất, mờ), Hailuo 02 6 s 768p ~$0,28, Kling 2.5 Turbo ~$0,07/s (qua fal.ai, một key), Seedance 2.0 chặn hẳn mặt người thật, bản free (Kling/Dreamina/PixVerse) không có API + watermark, muse2api (đã có `services/muse2api.py`) là v0.1 chưa thử với tài khoản thật + lái web bằng cookie. Flow Omni 8 s ≈ $0,24 vẫn rẻ. **Người dùng chọn giữ Flow** (chưa muốn tốn tiền) → làm prompt Flow thông minh + nhanh hơn. Nếu sau này cần: thêm "Nguồn tạo video" fal.ai làm dự phòng khi Flow bỏ lượt.
 - **26/10 tối** — Flow nhanh hơn / ít bị bỏ lượt (người dùng chọn giữ Flow, không tốn tiền): đo nhịp poll thật (clip giữ: vào danh sách ~10 s, xong ~33 s), phát hiện lượt "không vào danh sách" sau 90 s thay vì 5 phút, ảnh cảnh chạy 2 cái một lúc, tạo tự động chạy kiểm tra người mẫu song song + video theo từng ảnh xong; tìm ra ảnh shop có mặt người mẫu thật làm Flow bỏ video → cảnh báo + "✨ Tạo ảnh chỉ có sản phẩm" ở Bước 1 (`face_check.py`, `ProductFaceCheck.tsx`); preset người mẫu bỏ chữ "idol/flawless", thêm nét riêng; kịch bản tránh cận mặt; che token FB trong log. Thử thật cả lượt: ~4,5 phút cho clip 4 cảnh (clip #19). Commit `0dcbe0b`.
 - **26/10 tối** — 🎬 Làm video bằng Muse khi Flow chậm / bỏ lượt (Bước 4): khung 3 bước (chọn cảnh → copy một tin nhắn + tải/copy ảnh cảnh theo thứ tự → thả video Muse, tự xếp vào cảnh), dừng lượt Flow đang chạy khi gắn video Muse, đồng hồ "Flow đã chạy m:ss" + nút Muse ở cảnh chậm (≥ 150 s) và cảnh bị bỏ, nhãn Muse/Video của bạn giữ qua F5; ghép clip khác kích thước (fit 720×1280, viền đen cho video vuông/ngang) + sửa lỗi ffmpeg với clip câm. `steps/MuseBridge.tsx`, `quicktool/muse.ts`, `store/quicktool.attachMuseVideo`, `video_export.common_size/fit_filter`. Test 167 pass (thêm 2 test ghép), `tsc` sạch; Playwright trên clip thử (đã xoá) + ghép thật 38 s. Chưa thử với Muse thật. Commit + push.
+- **26/10** — Trang Hôm nay thiết kế lại (tiêu đề + ngày, 5 thẻ KPI có icon, 2 cột ưu tiên, khối trống thu một dòng, icon SVG). `TodayPage.tsx`, `today.css`. `tsc` sạch; Playwright 2 cỡ màn hình + kiểm tra trang Lịch đăng không vỡ. Chưa commit.
+- **26/10** — Lồng tiếng: tăng giới hạn video lên **30 phút** (người dùng gặp video Douyin 11 phút bị chặn), nâng các timeout theo (Whisper/spleeter, ffmpeg, Remotion), dịch chia đợt 60 câu có ngữ cảnh, bỏ gợi ý "tuyển tập" sai cho video chỉ hơi dài. `dub.py`, `dub_remotion.py`, `video_fetch.py`, `DubPage.tsx`. Test dub/remotion/fetch 26 pass (thêm 3), `tsc` sạch; agent `start74` báo `max_minutes 30`. Chưa thử thật video dài. Chưa commit.
+- **26/10** — Bài viết: ô Loạt truyện chỉ hiện loạt của kênh đang chọn, đổi kênh thì tự bỏ loạt của kênh cũ, nhãn ghi tên kênh; backend liệt kê loạt theo (tên, kênh). `PostsPage.tsx`, `routes/posts.py`. Test posts 12 pass, `tsc` sạch; Playwright trên dữ liệu thật (Mẹ bầu → chỉ "Những ngày đầu có thai", đổi sang Chúng ta hay tò mò → chỉ "hệ mặt trời", loạt đã chọn bị bỏ). **Agent chưa khởi động lại** (đang có job lồng tiếng chạy) → phần backend gom theo kênh có hiệu lực sau lần restart tới. Chưa commit.
+- **26/10** — Sửa gấp: giọng Gemini thỉnh thoảng đọc to cả câu lệnh tiếng Anh trước câu thoại (8/41 câu của video "Bài tập vai cổ cho mẹ bầu…"). `tts.py`: đo độ dài so với số chữ, đọc lại tối đa 3 lần (lần cuối chỉ gửi câu thoại), kiểm cả file cache. Test 19 TTS pass. Render lại job `00b00026da64` của người dùng (`voice.wav` cũ đổi tên `voice.leaked.wav`). Agent `start75` (kèm route `/api/running` mới, chưa gắn giao diện). Chưa commit.
+- **26/10** — Nút "việc đang chạy" nổi góc dưới phải trên mọi trang (lồng tiếng, xoá chữ AI, ảnh/video/ghép Flow theo clip), bấm về đúng màn hình, báo xong/lỗi khi kết thúc; Lồng tiếng + Xoá chữ mở lại việc qua `?job=`. `routes/running.py`, `BackgroundTasks.tsx`, `DubPage.tsx`, `CleanToolPage.tsx`, `api/client.ts`. Test running 4 pass, `tsc` sạch; thử thật với job lồng tiếng 12,6 s (nút hiện ở trang khác kèm %, bấm về `/tools/dub?job=…`, ẩn ở chính trang đó, xong → "✓ xong") + giả lập trạng thái lỗi. Lần thử đầu job lỗi vì Edge TTS chập chờn ("No audio was received" kể cả với 4 lần thử lại, edge-tts 7.3.1 là bản mới nhất) — lần sau chạy bình thường. Clip/job thử đã xoá. Agent `start76`. Chưa commit.
+- **26/10** — Sửa lỗi lồng tiếng video ngang: khung chỉnh vị trí phụ đề luôn dọc 9:16 nên vị trí chỉnh không khớp video thật; giờ khung theo đúng tỉ lệ video (job.width/height hoặc metadata của video), video ngang khung rộng 720 px. `SubPositioner.tsx`, `DubPage.tsx`, `dub.css`. `tsc` sạch; Playwright trên job ngang 1280×720 của người dùng: khung 720×405 (16:9), hộp phụ đề ở 0,67 khớp layout y=0,665. Chưa commit.
+- **26/10** — Clip lồng tiếng: Bước 5 có thẻ riêng dẫn về trang Lồng tiếng để chỉnh phụ đề / giọng / bản dịch (trước đó chỉ hiện nút Ghép lại bị khoá). `StepExport.tsx`, `QuicktoolApp.tsx`, `quicktool.css`. `tsc` sạch; Playwright trên clip #21 của người dùng: thẻ hiện, bấm → `/tools/dub?job=00b00026da64` có khung chỉnh. Chưa commit.
+- **26/10** — Đăng bài của clip giờ luôn kèm video clip (trang Bài viết lẫn Bước 5), clip chưa ghép thì báo lỗi thay vì đăng chữ không; Bước 5 thêm nút "🚀 Đăng ngay (kèm video)". `scheduler.py`, `routes/posts.py`, `PostsPage.tsx`, `ClipPost.tsx`, `api/posts.ts`. Test schedule + posts 22 pass, `tsc` sạch; Playwright chỉ xem (không đăng thật): bài #26 (clip #21 đã ghép) ghi "kèm video của clip", bài #19 (clip #15 chưa ghép) cảnh báo + khoá nút, Bước 5 clip #21 có nút mới. Agent `start77`. Chưa commit.
+- **26/10** — Nút "việc đang chạy" phủ thêm mọi thao tác dài trong trang (~30 loại: viết bài, gói nội dung, đánh giá kênh, đọc link sản phẩm, viết kịch bản, ảnh bìa, OCR, đăng Facebook, đồng bộ…) bằng middleware `_track_long_ops` + `services/op_tracker.py`; trang Bài viết tự mở lại bài AI viết xong khi bạn quay lại. Test running 7 + posts pass, `tsc` sạch; thử thật Playwright với AI thật: bấm viết rồi sang Sản phẩm → nút "AI đang viết bài" → "✓ … xong" → bấm về /posts, bài được mở lại (chưa lưu, không tạo bài thừa). Agent `start78`. Chưa commit.
+- **26/10** — Lồng tiếng: thêm **khung video** (thu nhỏ vào giữa, nền mờ/màu, viền) và **nhân vật nhún nhảy** (người mẫu đã lưu hoặc ảnh/GIF tải lên, tròn viền trắng hoặc giữ nguyên, nhún nhảy/nhún/lắc lư, kéo thả) ở khung chỉnh phụ đề, in chung lượt Áp dụng, cả 2 engine. `dub_decor.py`, `dub.py`, `routes/dub.py`, `dub_remotion.py`, `render.mjs`, `DubSubtitles.tsx`, `DecorControls.tsx`, `SubPositioner.tsx`, `DubPage.tsx`. Test dub 26 pass (thêm 5), `tsc` sạch; thử thật trên video thử (in lại 12 s, khung hình đúng) + Playwright (điều khiển, kéo nhân vật). Video thử đã xoá. Agent `start79`. Chưa commit.
+- **26/10** — Khung/nhân vật lồng tiếng: thêm **chat với AI** (chỉ làm khung + nhân vật, hiểu mẫu đã lưu; vẽ nền khung và nhân vật bằng Flow, tự tách nền nhân vật), **khung nền ảnh** (AI vẽ hoặc tải lên), **★ Mẫu đã lưu** (lưu / dùng lại / xoá, đồng bộ Neon). `decor_ai.py`, `dub_decor.py` (`cutout`, `local_media`, nền ảnh), bảng `DecorPreset`, `routes/dub.py` (`/decor/*`), `DecorControls.tsx`, `DubSubtitles.tsx`, `render.mjs`. Test decor 10 + dub pass, `tsc` sạch; thử thật với AI + Flow trên trang chỉnh video của người dùng (chỉ xem, không Áp dụng): 44 s, ~2 ảnh Flow. Agent `start81`. Chưa commit.
+- **26/10** — Lồng tiếng: thay khung chỉnh cuộn dài bằng **trình chỉnh sửa kiểu CapCut** một màn hình (video ở giữa phát kèm giọng Việt, sửa / kéo phụ đề ngay trên hình, bảng thuộc tính 5 tab, **timeline** `@xzdarcy/react-timeline-editor` với dải hình, khối từng câu kéo / kéo mép, sóng âm giọng, lớp làm mờ / khung / nhân vật; hoàn tác, phím tắt). Backend nhận mốc giờ mới từng câu (`apply_timings`, `voice_key` có mốc giờ) + routes voice/bgm/filmstrip/wave. `dub/editor/*`, `DubPage.tsx`, `dub.py`, `routes/dub.py`; bỏ `SubPositioner.tsx`. Test 978 pass (+1 lỗi 0600 có sẵn), `tsc` sạch. Thử thật Playwright (Chrome): video ngang 10:37 của người dùng — phát 2 s giọng lệch < 0,05 s, chọn câu, sửa trên hình, rút mép câu, kéo phụ đề, hoàn tác về đúng như cũ (**không xuất**); clip mẫu "Remotion test" — sửa chữ + rút câu 2 + chuyển phụ đề lên giữa → xuất 64 s, job lưu đúng chữ / mốc giờ / vị trí, sóng âm vẽ lại. Agent `start83`. Chưa commit.
+- **27/10** — Trình chỉnh sửa lồng tiếng: kéo mép phụ đề giờ đổi **độ rộng** (nền dài ra, nhiều chữ hơn một dòng), cỡ chữ chỉ ở thanh Cỡ chữ; **chỉnh riêng từng câu** (vị trí / cỡ / độ rộng) + nút **"⇪ Áp cho tất cả câu"** và "Đồng bộ tất cả theo kiểu chung"; sửa luôn lỗi Remotion gãy câu ngắn thành 3 dòng. `dub.py` (`layout.w`, `Segment.look`, `normalize_look`, `effective_layout`, ASS theo từng câu), `dub_remotion.py`, `DubSubtitles.tsx`, `dub/editor/*`. Test dub 38 pass, `tsc` sạch. Thử thật Playwright (Chrome) trên clip mẫu "Hàng đợi test 1": kéo rộng câu 1 → 96 %, Áp cho tất cả, câu 2 kéo lên riêng → xuất 5 s (giữ giọng), khung hình in đúng: câu 1 dưới, câu 2 ở 53 %; clip mẫu "Remotion test" chỉ xem (không xuất): câu ngắn nằm một dòng. Agent `start85`. Chưa commit.

@@ -123,3 +123,53 @@
 .qt-subpos__box--ghost.is-dragging { border-color: #ff6a2b; }
 .qt-subpos__blur--ghost { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; background: transparent; }
 .qt-subpos__stage > div[class*="__player"], .qt-subpos__stage > div:first-child { position: absolute; inset: 0; }
+
+/* a landscape source: a wider stage, same fractions as the burned subtitles */
+.qt-subpos__stage--landscape { width: min(100%, 720px); }
+
+/* frame + dancing sticker (services/dub_decor) previewed on the stage */
+.qt-subpos__media { position: absolute; inset: 0; overflow: hidden; }
+.qt-subpos__bgvid { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: blur(14px); transform: scale(1.08); pointer-events: none; }
+.qt-subpos__fg { position: absolute; inset: 0; }
+.qt-subpos__fg video { display: block; width: 100%; height: 100%; object-fit: fill; pointer-events: none; }
+.qt-subpos__mascot { position: absolute; transform: translate(-50%, -100%); cursor: grab; z-index: 3; touch-action: none; }
+.qt-subpos__mascot.is-dragging { cursor: grabbing; outline: 2px dashed #ff6a2b; outline-offset: 3px; }
+.qt-subpos__mascot--ghost { outline: 2px dashed rgba(255, 255, 255, 0.75); outline-offset: 2px; min-width: 24px; }
+.qt-subpos__mascotimg { display: block; height: 100%; width: auto; pointer-events: none; transform-origin: 50% 50%; }
+.qt-subpos__mascotimg--circle { width: 100%; object-fit: cover; object-position: 50% 0%; border-radius: 50%; }
+.qt-subpos__mascot--dance .qt-subpos__mascotimg { animation: qt-dance 1.1s ease-in-out infinite; }
+.qt-subpos__mascot--bounce .qt-subpos__mascotimg { animation: qt-bounce 1s ease-in-out infinite; }
+.qt-subpos__mascot--sway .qt-subpos__mascotimg { animation: qt-sway 1.7s ease-in-out infinite; }
+@keyframes qt-dance { 0%, 100% { transform: translateY(0) rotate(-7deg); } 50% { transform: translateY(-10%) rotate(7deg); } }
+@keyframes qt-bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-12%); } }
+@keyframes qt-sway { 0%, 100% { transform: rotate(-5deg); } 50% { transform: rotate(5deg); } }
+
+.qt-decor { display: flex; flex-direction: column; gap: 12px; margin-top: 4px; }
+.qt-decor__block { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: rgba(255, 255, 255, 0.02); }
+.qt-decor__pick { display: flex; flex-wrap: wrap; gap: 8px; }
+.qt-decor__thumb { width: 56px; height: 56px; padding: 0; border-radius: 10px; overflow: hidden; border: 2px solid transparent; background: #1c2029; cursor: pointer; color: var(--text); font-size: 11.5px; }
+.qt-decor__thumb img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 0%; display: block; }
+.qt-decor__thumb.is-on { border-color: #ff6a2b; box-shadow: 0 0 0 2px rgba(255, 106, 43, 0.3); }
+.qt-decor__thumb--add { border: 1px dashed #4b5263; }
+.qt-decor input[type="color"] { width: 100%; height: 34px; padding: 2px; border-radius: 8px; border: 1px solid var(--border); background: #1c2029; }
+
+/* 💬 AI chat + ★ saved frames / stickers */
+.qt-decor__ai { border-color: rgba(255, 106, 43, 0.35); background: rgba(255, 106, 43, 0.04); }
+.qt-decor__chat { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow: auto; padding: 4px 2px; }
+.qt-decor__msg { max-width: 92%; padding: 8px 11px; border-radius: 12px; font-size: 14px; line-height: 1.4; white-space: pre-wrap; }
+.qt-decor__msg--user { align-self: flex-end; background: rgba(255, 106, 43, 0.18); color: #ffd9c7; border-bottom-right-radius: 4px; }
+.qt-decor__msg--assistant { align-self: flex-start; background: #232833; color: var(--text); border-bottom-left-radius: 4px; }
+.qt-decor__msg--wait { color: #fbbf24; animation: qt-pulse 1.4s ease-in-out infinite; }
+.qt-decor__send { display: flex; gap: 8px; }
+.qt-decor__send input { flex: 1 1 auto; min-width: 0; padding: 9px 12px; border-radius: 9px; border: 1px solid var(--border); background: #1c2029; color: var(--text); font-size: 14px; }
+.qt-decor__presets { display: flex; flex-wrap: wrap; gap: 8px; }
+.qt-decor__preset { position: relative; }
+.qt-decor__presetbtn { display: flex; align-items: center; gap: 8px; padding: 5px 10px 5px 5px; border-radius: 10px; border: 1px solid var(--border); background: #1c2029; color: var(--text); cursor: pointer; max-width: 230px; }
+.qt-decor__presetbtn:hover { border-color: #ff6a2b; }
+.qt-decor__presetthumb { width: 34px; height: 34px; border-radius: 8px; overflow: hidden; flex: none; display: grid; place-items: center; background: #11141a; }
+.qt-decor__presetthumb img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 0%; }
+.qt-decor__swatch { width: 100%; height: 100%; display: block; }
+.qt-decor__presetname { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qt-decor__presetx { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; border-radius: 50%; border: 0; background: #3b4252; color: #fff; font-size: 13px; line-height: 20px; cursor: pointer; opacity: 0; transition: opacity 0.15s; }
+.qt-decor__preset:hover .qt-decor__presetx { opacity: 1; }
+.qt-decor__presetx:hover { background: #ef4444; }

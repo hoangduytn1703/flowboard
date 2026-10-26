@@ -1,0 +1,61 @@
+/* Floating "đang chạy" badge, bottom-right on every Quicktool page. */
+.bgt { position: fixed; right: 22px; bottom: 22px; z-index: 1100; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+
+.bgt__pill {
+  display: inline-flex; align-items: center; gap: 10px; max-width: 360px;
+  padding: 10px 16px 10px 12px; border-radius: 999px; cursor: pointer;
+  border: 1px solid rgba(255, 106, 43, 0.55); color: #fff; font-size: 14px; font-weight: 600;
+  background: linear-gradient(180deg, #2a2f3b, #1d212a);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45), 0 0 0 4px rgba(255, 106, 43, 0.08);
+  animation: bgt-in 0.22s ease-out;
+}
+.bgt__pill:hover { border-color: #ff8a52; background: linear-gradient(180deg, #333949, #232833); }
+.bgt__pill--done { border-color: rgba(110, 231, 183, 0.6); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45), 0 0 0 4px rgba(110, 231, 183, 0.08); }
+.bgt__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.bgt__pct { color: #ff8a52; font-variant-numeric: tabular-nums; }
+.bgt__count {
+  min-width: 22px; height: 22px; padding: 0 6px; border-radius: 999px; display: inline-grid; place-items: center;
+  background: rgba(255, 106, 43, 0.2); color: #ffb08a; font-size: 12px;
+}
+.bgt__pill--done .bgt__count { background: rgba(110, 231, 183, 0.18); color: #6ee7b7; }
+.bgt__spin {
+  width: 16px; height: 16px; flex: none; border-radius: 50%;
+  border: 2px solid rgba(255, 106, 43, 0.25); border-top-color: #ff6a2b; animation: bgt-spin 0.8s linear infinite;
+}
+.bgt__check { width: 18px; height: 18px; flex: none; border-radius: 50%; display: grid; place-items: center; background: #10b981; color: #052e1f; font-size: 12px; font-weight: 800; }
+
+.bgt__panel {
+  width: min(380px, calc(100vw - 32px)); max-height: 60vh; overflow: auto;
+  border: 1px solid #343a47; border-radius: 14px; background: #1c2029; box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
+  animation: bgt-in 0.16s ease-out;
+}
+.bgt__head { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px 8px; border-bottom: 1px solid #252932; }
+.bgt__head strong { font-size: 14px; }
+.bgt__head small { color: var(--muted); font-size: 12.5px; }
+.bgt__list { list-style: none; margin: 0; padding: 6px; }
+.bgt__row {
+  width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px; border: 0; border-radius: 10px;
+  background: transparent; color: var(--text); text-align: left; cursor: pointer;
+}
+.bgt__row:hover { background: rgba(255, 255, 255, 0.05); }
+.bgt__ico { width: 30px; height: 30px; flex: none; border-radius: 8px; display: grid; place-items: center; background: rgba(255, 106, 43, 0.12); font-size: 15px; }
+.bgt__row--done .bgt__ico { background: rgba(16, 185, 129, 0.16); color: #6ee7b7; font-weight: 800; }
+.bgt__text { display: flex; flex-direction: column; gap: 3px; flex: 1 1 auto; min-width: 0; }
+.bgt__title { color: #f3f4f6; font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bgt__detail { color: #a3a9b5; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bgt__bar { height: 4px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.bgt__bar span { display: block; height: 100%; background: linear-gradient(90deg, #ff6a2b, #ff9a5a); border-radius: inherit; transition: width 0.4s ease; }
+.bgt__go { color: #ff8a52; font-size: 13px; font-weight: 600; flex: none; }
+.bgt__row--done .bgt__go { color: #6ee7b7; }
+
+@keyframes bgt-spin { to { transform: rotate(360deg); } }
+@keyframes bgt-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (max-width: 760px) { .bgt { right: 12px; bottom: 12px; } .bgt__pill { max-width: calc(100vw - 24px); } }
+
+/* a task that ended in an error */
+.bgt__pill--failed { border-color: rgba(239, 68, 68, 0.7); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45), 0 0 0 4px rgba(239, 68, 68, 0.1); }
+.bgt__check--failed { background: #ef4444; color: #fff; }
+.bgt__pill--failed .bgt__count { background: rgba(239, 68, 68, 0.2); color: #fca5a5; }
+.bgt__row--failed .bgt__ico { background: rgba(239, 68, 68, 0.16); color: #f87171; font-weight: 800; }
+.bgt__row--failed .bgt__detail { color: #fca5a5; }
+.bgt__row--failed .bgt__go { color: #f87171; }

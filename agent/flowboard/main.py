@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import hmac
 import logging
@@ -6,7 +7,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Header, Request as FastAPIRequest
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from flowboard.config import EXTENSION_WS_PORT, WS_HOST
 from flowboard.db import get_session, init_db
@@ -25,6 +26,8 @@ from flowboard.routes import schedule as schedule_route
 from flowboard.routes import bundles as bundles_route
 from flowboard.routes import swipes as swipes_route
 from flowboard.routes import dub as dub_route
+from flowboard.routes import running as running_route
+from flowboard.services import op_tracker
 from flowboard.services.account_pool import account_pool
 from flowboard.routes import history as history_route
 from flowboard.routes import prompt_library as prompt_library_route
@@ -179,6 +182,41 @@ OPEN_PATHS = {"/api/account/login", "/api/account/me", "/api/account/register", 
 
 
 @app.middleware("http")
+async def _track_long_ops(request: FastAPIRequest, call_next):
+    """Long in-page operations (services/op_tracker.TRACKED) show on the
+    floating "đang chạy" badge while they run, and keep their outcome.
+    Declared before ``_require_login`` so it sits inside it: a request
+    refused for want of a login never reaches here."""
+    hit = op_tracker.match(request.method, request.url.path)
+    if hit is None:
+        return await call_next(request)
+    rule, groups = hit
+    op = op_tracker.start(rule, groups, request.headers.get("referer"))
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        op_tracker.finish(op, False, f"Lỗi: {exc}")
+        raise
+    if response.status_code < 400 and not rule.keep_result:
+        op_tracker.finish(op, True)
+        return response
+    # An error (for its message) or a result the page may restore: read the body once, hand it on unchanged.
+    body = b"".join([chunk async for chunk in response.body_iterator])
+    try:
+        data = json.loads(body) if body else None
+    except ValueError:
+        data = None
+    if response.status_code >= 400:
+        detail = data.get("detail") if isinstance(data, dict) else None
+        op_tracker.finish(op, False, detail if isinstance(detail, str) else f"Lỗi {response.status_code}")
+    else:
+        op_tracker.finish(op, True, result=data if len(body) < 300_000 else None)
+    out = Response(content=body, status_code=response.status_code)
+    out.raw_headers = [h for h in response.headers.raw if h[0].lower() != b"content-length"] + [(b"content-length", str(len(body)).encode())]
+    return out
+
+
+@app.middleware("http")
 async def _require_login(request: FastAPIRequest, call_next):
     path = request.url.path
     if accounts.auth_enabled() and (path.startswith("/api/") or path.startswith("/media/")) and path not in OPEN_PATHS:
@@ -211,6 +249,7 @@ if os.getenv("FLOWBOARD_DRAMA") == "1":
 app.include_router(reference_video_route.router)
 app.include_router(export_extras_route.router)
 app.include_router(requests_route.router)
+app.include_router(running_route.router)
 app.include_router(media.bytes_router)
 app.include_router(media.api_router)
 app.include_router(upload.router)

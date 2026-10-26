@@ -5,7 +5,8 @@
  *  Rendered inside the /clips layout like ProductsPage. */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { announceRunning } from "../../components/BackgroundTasks";
 
 import {
   aiStatus as fetchAiStatus,
@@ -13,6 +14,7 @@ import {
   detectBands,
   eraseBoxes,
   frameUrl,
+  cleanInfo,
   getCleanJob,
   MAX_CLEAN_VIDEO_BYTES,
   startAiErase,
@@ -46,6 +48,7 @@ function errMessage(e: unknown): string {
 
 export function CleanToolPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
     const prev = document.title;
     document.title = "Xoá chữ / logo · Flowboard";
@@ -255,6 +258,8 @@ export function CleanToolPage() {
     try {
       const { job_id } = await startAiErase(video.media_id, bands);
       setJob({ job_id, status: "queued", progress: 0 });
+      setSearchParams({ job: job_id }, { replace: true });
+      announceRunning();
     } catch (e) {
       setAiError(errMessage(e));
     }
@@ -299,6 +304,31 @@ export function CleanToolPage() {
     void tick();
     return () => { stopped = true; window.clearInterval(timer); };
   }, [job?.job_id, job?.status]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // /tools/clean?job=<id> (the "đang chạy" badge links here): reopen that AI
+  // erase — its source video, then the job (the poll above takes over).
+  const wantedJob = searchParams.get("job");
+  useEffect(() => {
+    if (!wantedJob || job?.job_id === wantedJob) return;
+    let live = true;
+    void (async () => {
+      try {
+        const j = await getCleanJob(wantedJob);
+        if (!j.source_media_id) throw new Error("no source");
+        const v = await cleanInfo(j.source_media_id);
+        if (!live) return;
+        resetForVideo(v);
+        setJob(j);
+        if (j.status === "done" && j.media_id && j.url) {
+          setResult({ media_id: j.media_id, url: j.url, duration_s: j.duration_s ?? v.duration_s, width: v.width, height: v.height });
+          setResultLabel("Đã xoá phụ đề bằng AI (LaMa)");
+        }
+      } catch {
+        if (live) setAiError("Không thấy tiến trình xoá chữ này nữa (agent đã khởi động lại?).");
+      }
+    })();
+    return () => { live = false; };
+  }, [wantedJob]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const jobRunning = job?.status === "queued" || job?.status === "running";
   const busyAny = boxBusy || bandBlurBusy || jobRunning || detecting;

@@ -36,6 +36,8 @@ export interface AiStatus {
 }
 
 export interface CleanJob {
+  /** the video being cleaned (GET /api/clean/jobs/{id} returns it) */
+  source_media_id?: string;
   job_id: string;
   status: "queued" | "running" | "done" | "error";
   progress: number;

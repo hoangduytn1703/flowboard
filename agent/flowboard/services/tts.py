@@ -140,12 +140,34 @@ def gemini_tts_prompt(text: str, style: Optional[str], rate: int = 0) -> str:
     )
 
 
-async def _synth_gemini(text: str, voice: str, rate: int, style: Optional[str], out: Path) -> None:
+#: Gemini TTS now and then reads the prompt's instructions aloud ("Read the
+#: transcript below… Director's notes… Giọng đọc tự nhiên") before the line —
+#: seen 26/10 in a dub: a 6-word line came back 11.8 s long. A clip that long
+#: for its words is that leak; it is re-spoken (the last try sends the bare
+#: line, nothing it could read out).
+GEMINI_ATTEMPTS = 3
+
+
+def max_speech_seconds(text: str) -> float:
+    """The longest a normal reading of ``text`` can take: Vietnamese words are
+    syllables, read at 4–6 a second; this allows a slow 2.5/s plus a pause."""
+    words = len(re.findall(r"\w+", text or ""))
+    return words / 2.5 + 1.5
+
+
+def gemini_leaked(text: str, duration: float) -> bool:
+    """True when the audio is far too long for ``text`` (instructions read aloud)."""
+    return duration > max_speech_seconds(text)
+
+
+async def _synth_gemini(text: str, voice: str, rate: int, style: Optional[str], out: Path,
+                        plain: bool = False) -> None:
     """Gemini TTS: the style instruction is spoken language, so the rate
-    becomes a hint too. Writes a WAV (24 kHz PCM) to ``out``."""
+    becomes a hint too. Writes a WAV (24 kHz PCM) to ``out``. ``plain`` sends
+    the line alone (no notes) — the fallback when the notes were read aloud."""
     from flowboard.services.llm import gemini_api
 
-    prompt = gemini_tts_prompt(text, style, rate)
+    prompt = text.strip() if plain else gemini_tts_prompt(text, style, rate)
     try:
         wav = await gemini_api.speak(prompt, voice.split(":", 1)[1])
     except gemini_api.GeminiAPIError as exc:
@@ -179,14 +201,29 @@ async def synthesize(text: str, voice: str = DEFAULT_VOICE, rate: int = 0,
     if mp3.is_file() and meta.is_file():
         try:
             saved = json.loads(meta.read_text(encoding="utf-8"))
-            return Narration(mp3, float(saved["duration"]),
-                             [Word(**w) for w in saved["words"]])
+            cached = Narration(mp3, float(saved["duration"]),
+                               [Word(**w) for w in saved["words"]])
+            if not (gemini and gemini_leaked(text, cached.duration)):
+                return cached
+            logger.warning("tts: cached Gemini line %s is %.1fs for %d chars — instructions read aloud, re-speaking",
+                           key, cached.duration, len(text))
         except (OSError, ValueError, KeyError, TypeError):
             pass  # a damaged cache entry is simply regenerated
 
     if gemini:
-        await _synth_gemini(text, voice, rate, style, mp3)
-        duration = _probe_duration(mp3) or 0.0
+        duration = 0.0
+        for attempt in range(GEMINI_ATTEMPTS):
+            plain = attempt == GEMINI_ATTEMPTS - 1
+            await _synth_gemini(text, voice, rate, style, mp3, plain=plain)
+            duration = _probe_duration(mp3) or 0.0
+            if not gemini_leaked(text, duration):
+                break
+            logger.warning("tts: Gemini read more than the line (%.1fs for %r, try %d/%d)%s",
+                           duration, text[:60], attempt + 1, GEMINI_ATTEMPTS,
+                           "" if plain else " — retrying")
+        else:
+            raise TTSError(f"Gemini đọc thừa (đọc cả câu hướng dẫn) ở câu \"{text[:50]}\" sau {GEMINI_ATTEMPTS} lần — "
+                           "thử lại hoặc đổi sang giọng Edge (Hoài My / Nam Minh)")
         # No word timings from Gemini: the cues spread over the audio.
         narration = Narration(mp3, duration, [])
         meta.write_text(json.dumps({"duration": duration, "words": []}), encoding="utf-8")

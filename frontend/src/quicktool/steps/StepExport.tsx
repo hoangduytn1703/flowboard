@@ -1,3 +1,4 @@
+import { useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import {
   BGM_DEFAULT_VOLUME, BGM_VOLUMES, COVER_STYLES, DEFAULT_VOICE, MAX_MUSIC_BYTES, MAX_SPEAKERS, VOICES, VOICE_GROUPS,
@@ -104,7 +105,12 @@ function DialogueLine({ text, tags }: { text: string; tags: string[] }) {
 }
 
 /** Step 5 — voice options, the clip list, the final file. */
-export function StepExport({ roles, productName = "", price = "", channelId = null }: { roles: ClipRoles; productName?: string; price?: string; channelId?: number | null }) {
+export function StepExport({ roles, productName = "", price = "", channelId = null, dubJobId = null }: {
+  roles: ClipRoles; productName?: string; price?: string; channelId?: number | null;
+  /** a clip made by the dubbing tool: it is edited there, not joined here */
+  dubJobId?: string | null;
+}) {
+  const navigate = useNavigate();
   const [scheduling, setScheduling] = useState(false);
   const ensureExportNode = useQuicktoolStore((s) => s.ensureExportNode);
   const exportClip = useQuicktoolStore((s) => s.exportClip);
@@ -244,6 +250,23 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
 
   return (
     <div className="qt-step qt-step--two">
+      {dubJobId ? (
+        <section className="qt-card qt-dubclip">
+          <div className="qt-card__eyebrow">Video lồng tiếng</div>
+          <h3 className="qt-card__title">Chỉnh phụ đề, giọng đọc, bản dịch</h3>
+          <p className="qt-card__hint">
+            Clip này làm từ công cụ <strong>Lồng tiếng video</strong>. Vị trí và cỡ phụ đề, kiểu chữ, vùng làm mờ chữ gốc, giọng đọc và
+            từng câu dịch đều chỉnh ở đó — bấm "Áp dụng" / "Render lại" xong thì clip này tự cập nhật bản mới.
+          </p>
+          <ul className="qt-dubclip__list">
+            <li>🎯 Kéo phụ đề, đổi cỡ chữ, kiểu hộp vàng / trắng / viền</li>
+            <li>🌫 Vùng làm mờ che chữ gốc</li>
+            <li>🗣 Đổi giọng đọc, sửa từng câu dịch</li>
+          </ul>
+          <a className="qt-btn qt-btn--accent qt-btn--big" href={`/tools/dub?job=${dubJobId}`}
+             onClick={(e) => { e.preventDefault(); navigate(`/tools/dub?job=${dubJobId}`); }}>✏️ Mở trang chỉnh phụ đề & giọng</a>
+        </section>
+      ) : (
       <section className="qt-card">
         <div className="qt-card__eyebrow">Bước 5</div>
         <h3 className="qt-card__title">Ghép & lồng tiếng</h3>
@@ -420,6 +443,7 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
         </button>
         {exp?.data.error && <div className="product-form__error">{String(exp.data.error)}</div>}
       </section>
+      )}
 
       <section className="qt-card qt-card--result">
         <div className="qt-card__eyebrow">Kết quả</div>
