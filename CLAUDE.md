@@ -222,6 +222,9 @@ của người dùng (console.neon.tech, secure.backblaze.com).
 - **Nhịp poll video Flow (đo 26/10)**: clip Flow giữ thì có trong danh sách project ngay vòng poll đầu (~10 s), có link video sau ~33 s.
   Bị bỏ có 2 kiểu: (a) vào danh sách rồi media thành NOT_FOUND → `DROP_DETECT_ROUNDS` bắt sau ~40 s; (b) **không bao giờ vào danh
   sách** → trước đây chờ đủ 5 phút, giờ `NOT_LISTED_DROP_S` (90 s, ≥ 2 lần tra danh sách rỗng) báo `FLOW_DROPPED_JOB` → worker thử lại ngay.
+- **`_voice_clip` với clip không có tiếng và không có lời thoại làm ffmpeg lỗi "Error binding filtergraph"** (thấy 26/10 khi viết test
+  ghép clip Muse): chỉ số luồng `anullsrc` tính bằng `len(inputs) // 2 - 1` sai khi input lavfi 4 token / có `-ss -t`. Giờ đếm `inputs.count("-i")`.
+  Trước đây dính khi cắt cảnh (Bước 5) một clip câm không có lời thoại.
 - `Product.media_ids` là media id của **Flow**, thuộc project lúc upload; ảnh gốc nằm trong `storage/media` (đổi project thì `media_project_sync` upload lại).
 
 ## Chỗ cần biết trong code
@@ -460,7 +463,7 @@ của người dùng (console.neon.tech, secure.backblaze.com).
 
 - **Video chạy song song** (22/10, `worker/processor.py`): `WorkerController` vẫn một hàng, nhưng `PARALLEL_TYPES` (`gen_video`,
   `gen_video_omni`) được tách thành task riêng, tối đa `FLOWBOARD_VIDEO_PARALLEL` (mặc định 3) cùng lúc; `active_count` = đang chạy +
-  đang chờ slot. Thử thật: 3 video bắt đầu cùng 07:53:40, xong cùng 07:59:47 (trước đây nối đuôi ~6 phút mỗi cái). Ảnh vẫn tuần tự.
+  đang chờ slot. Thử thật: 3 video bắt đầu cùng 07:53:40, xong cùng 07:59:47 (trước đây nối đuôi ~6 phút mỗi cái). Ảnh: 2 cái một lúc từ 26/10 (`IMAGE_PARALLEL_TYPES`).
   Job lỗi/timeout của loại có media giờ ghi `node.data.error` (trước chỉ ghi trên request → F5 thấy "lỗi:" trống).
   Bước 4: video timeout hiện "Flow bỏ lượt này" + hộp `.qt-dropped` (`FLOW_DROPPED_VIDEO` trong `store/generation.ts`, nhận cả
   `timeout_waiting_video` / `FLOW_DROPPED_JOB` / chữ "Timed out" cũ) gợi ý tạo lại / đổi ảnh cảnh / dùng video của bạn.
@@ -805,7 +808,7 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   13 s → bình luận đầu đúng mẫu + link, bài không chứa link và có câu "link ở bình luận". Chưa có: trang riêng "Shop hợp tác" (mới là
   gợi ý + lọc), chưa đếm bài đã đăng theo shop.
 
-- **Flow nhanh hơn + ít bị bỏ lượt** (26/10 tối, máy cty — chưa commit để dễ revert):
+- **Flow nhanh hơn + ít bị bỏ lượt** (26/10 tối, máy cty, commit `0dcbe0b`):
   - **Ảnh sản phẩm có mặt người thật**: `services/face_check.py` (OpenCV YuNet `assets/face_detection_yunet_2023mar.onnx`, 230 KB,
     ~20 ms/ảnh, bỏ mặt < 4 % cạnh ngắn) → `GET /api/media/{id}/faces {faces}`. Bước 1 dưới mỗi ảnh sản phẩm: `quicktool/ProductFaceCheck.tsx`
     hiện hộp cam "⚠ Ảnh có N gương mặt người thật" + "✨ Tạo ảnh chỉ có sản phẩm" (`cleanShotPrompt(name)` → `generateStandaloneImage(…,
@@ -826,6 +829,27 @@ của người dùng (console.neon.tech, secure.backblaze.com).
     (xong trong 58 s, 2 cái/lượt) → 4 video 47/52/94/116 s (1 cái bị bỏ, bắt sau ~70 s, thử lại ra) → ghép 62 s: **~4,5 phút từ lúc bấm**
     (hộp xác nhận cũ ước 12 phút). Tốn ~60 credit. Clip #19 để lại làm mẫu — xoá được.
   - Log httpx in nguyên `access_token` Facebook trong URL → `facebook_publish._RedactToken` che thành `***` (log cũ trong scratchpad còn token).
+
+- **🎬 Làm video bằng Muse (Meta) khi Flow chậm / bỏ lượt** (26/10 tối, máy cty): Muse **không có API** (là trợ lý chat "Sunday" trên
+  muse.ai, đăng nhập bằng Facebook; người dùng hỏi thẳng Sunday: ảnh tham chiếu được, ảnh → video được, mỗi clip ~10 s cố định, ≤ 6 video /
+  ≤ 4 ảnh mỗi tin nhắn, hạn mức miễn phí theo tuần; gói Power $16 / Maximum $80). Nên làm **cầu nối thủ công một lượt cho cả clip**, không
+  tự động hoá trang chat (dễ hỏng, có thể vi phạm điều khoản). Bước 4 (`steps/StepMedia.tsx`) có khung gập **`steps/MuseBridge.tsx`**:
+  ① tick cảnh (mặc định: chưa có video / lỗi / Flow chạy ≥ `FLOW_SLOW_AFTER_S` 150 s), ② "📋 Copy tin nhắn" (`muse.ts museMessage`: tiếng
+  Việt cho Sunday + prompt chuyển động tiếng Anh của từng cảnh, dọc 9:16, giữ nguyên sản phẩm, không chữ/không lời thoại/không nhạc, "Video 1,
+  Video 2…"; > 6 cảnh tách nhiều tin `museBatches`), "⬇ Tải N ảnh cảnh" (tên `<slug>-anh-<thứ tự>-canh-<n>.jpg`, tải lần lượt), "📋 Ảnh"
+  từng cảnh (clipboard PNG để Ctrl+V vào Muse), "↗ Mở Muse"; thứ tự ảnh của tin nhắn lưu localStorage `flowboard.muse.batch.<boardId>`;
+  ③ thả nhiều video một lần → xếp theo tên file (số tự nhiên) / giờ tải về vào đúng cảnh theo thứ tự đó, đổi được ở ô "Gắn vào", cảnh báo
+  video không phải 9:16 / > 200 MB / 2 video một cảnh → "✓ Gắn N video vào cảnh" = `store/quicktool.attachMuseVideo` (cảnh đang chạy Flow
+  thì hỏi rồi `stopFlowVideo`: bỏ poll `cancelGeneration` + `POST /api/requests/{id}/cancel` — worker không bao giờ ghi node của request đã
+  huỷ — rồi `uploadVideoToScene(…, "muse")`). Node video có `uploaded` + **`uploadedFrom: "own" | "muse"`** (đã thêm whitelist `store/board.ts`;
+  trước đây `uploaded` không có trong whitelist nên F5 là mất) → ô cảnh có nhãn "Muse" / "Video của bạn". Ô cảnh đang chạy hiện "đang tạo…
+  m:ss" (`useFlowWaits` đọc `created_at` từ `GET /api/boards/{id}/requests?active=true`, 15 s/lần), quá 150 s hiện dòng vàng "⏱ Flow đã chạy
+  … — 🎬 Làm cảnh này bằng Muse"; hộp "Flow bỏ lượt này" cũng có nút đó. "Tạo video tự động" lỗi ở video → câu lỗi chỉ sang khung Muse.
+  **Ghép clip khác kích thước** (`video_export`): `_mixed_frame_size` → `common_size` (khung phổ biến nhất) → mọi clip đi đường encode từng
+  clip với `fit_filter` (cùng tỉ lệ ±8 % thì cắt cho đầy, khác xa thì thêm viền đen) — trước đây ghép stream-copy clip khác cỡ ra hình hỏng
+  (cũng đúng cho "⬆ Dùng video của bạn" và ảnh drama). Thử thật bằng Playwright + 4 video giả (3 × 720×1280 10 s, 1 × 1080×1080) trên clip thử
+  #20 (đã xoá): tin nhắn, tải ảnh, copy ảnh, tự xếp cảnh, dừng Flow cảnh đang chạy, F5 giữ nhãn, ghép thật 20 s → 720×1280, 38 s, video vuông có
+  viền đen. **Chưa thử với Muse thật** (người dùng test tối 26/10). Code `muse2api.py` / provider "muse" có sẵn từ flowkit **không dùng** cho việc này.
 
 - **Đăng xuất Flow phải bấm 2 lần** (21/10, `SettingsPanel.tsx`): lần đầu nút đổi thành "Bấm lần nữa để đăng xuất…" + "Huỷ",
   tự quay lại sau 5 s / khi đóng hộp; xong có toast (`AccountPanel.handleLogout`). Nút chỉ có ở hộp Cài đặt mở từ ⚙ cạnh tài khoản.
@@ -864,6 +888,10 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   còn 3 kênh, 43 prompt mẫu, 252 asset, 1 người mẫu. Nếu KHÔNG phải người dùng tự dọn: Neon có khôi phục theo thời điểm (branch restore,
   console.neon.tech → Restore, chọn trước 25/10 20:41 giờ VN = 13:41 UTC) — cửa sổ lưu lịch sử của gói free ngắn, làm sớm.
   Bản SQLite sao lưu trước khi lên cloud: `storage/accounts/akiragosho/flowboard.db` (22/10 12:58).
+- **Muse (26/10)**: chưa thử với tài khoản Muse thật — cần xem Muse có giữ đúng thứ tự ảnh / video không, tên file video tải về từ Muse ra sao
+  (nếu tên ngẫu nhiên thì tự xếp theo giờ tải về — tải đúng thứ tự Video 1, 2…), Muse có tự thêm nhạc/tiếng nói hay watermark nhìn thấy không,
+  và chất lượng so với Flow. Tài khoản Muse người dùng hỏi lúc 26/10 vẫn báo **chưa có gói trả phí** (đã dùng 3 % hạn mức tuần, reset 6:26 1/11)
+  dù người dùng nói đã mua → có thể gói gắn tài khoản Facebook khác.
 - Chọn gói Pro/Ultra ngay trong Cài đặt (hiện sửa `.env`).
 - Triển khai cho người khác: **để sau**. Hướng đã bàn: bạn cài local (đóng gói script + agent phục vụ giao diện build sẵn) là rẻ nhất; chạy trên server cần sửa extension (địa chỉ server, `wss`), đăng nhập, và vì hệ thống là một người dùng nên mỗi người một bản. Vercel đơn thuần không chạy được agent.
 - Test trên Windows (20/10): 743 pass khi bỏ 5 file lỗi do môi trường — `test_llm_gemini.py` (CLI `agy`), `test_llm_secrets.py::…0600`
@@ -946,4 +974,5 @@ của người dùng (console.neon.tech, secure.backblaze.com).
 - **26/10 tối** — Sidebar hết thanh cuộn: mục menu thấp hơn (padding 5px, icon 26px), nhóm sát hơn, logo / credit / tài khoản gọn lại; màn thấp ≤ 900 px và ≤ 760 px thu nhỏ thêm; `.qt-nav` ẩn thanh cuộn (`scrollbar-width: none`, vẫn cuộn được bằng chuột nếu cửa sổ quá thấp). Khối CSS cuối `quicktool.css`. Đo Playwright: vừa khít ở cao 1000 / 900 / 800 / 720 px.
 - **26/10** — Sửa bug clip tạo từ 🎁 Gói (hoặc phía agent) không mở được từ "Clip của tôi" (giật rồi về thư viện): tải lại danh sách clip một lần và chờ xong mới kết luận link cũ. `QuicktoolApp.tsx`, `store/board.ts refreshBoards`. Playwright: tạo clip qua API → sang Bài viết → về Clip của tôi → bấm → vào Bước 1. Board thử #16–18 đã xoá. `tsc` sạch.
 - **26/10 tối** — Tìm hiểu nguồn video thay Flow (không code): Seedance 1.5 Pro 480p ~$0,012/s (rẻ nhất, mờ), Hailuo 02 6 s 768p ~$0,28, Kling 2.5 Turbo ~$0,07/s (qua fal.ai, một key), Seedance 2.0 chặn hẳn mặt người thật, bản free (Kling/Dreamina/PixVerse) không có API + watermark, muse2api (đã có `services/muse2api.py`) là v0.1 chưa thử với tài khoản thật + lái web bằng cookie. Flow Omni 8 s ≈ $0,24 vẫn rẻ. **Người dùng chọn giữ Flow** (chưa muốn tốn tiền) → làm prompt Flow thông minh + nhanh hơn. Nếu sau này cần: thêm "Nguồn tạo video" fal.ai làm dự phòng khi Flow bỏ lượt.
-- **26/10 tối** — Flow nhanh hơn / ít bị bỏ lượt (người dùng chọn giữ Flow, không tốn tiền): đo nhịp poll thật (clip giữ: vào danh sách ~10 s, xong ~33 s), phát hiện lượt "không vào danh sách" sau 90 s thay vì 5 phút, ảnh cảnh chạy 2 cái một lúc, tạo tự động chạy kiểm tra người mẫu song song + video theo từng ảnh xong; tìm ra ảnh shop có mặt người mẫu thật làm Flow bỏ video → cảnh báo + "✨ Tạo ảnh chỉ có sản phẩm" ở Bước 1 (`face_check.py`, `ProductFaceCheck.tsx`); preset người mẫu bỏ chữ "idol/flawless", thêm nét riêng; kịch bản tránh cận mặt; che token FB trong log. Thử thật cả lượt: ~4,5 phút cho clip 4 cảnh (clip #19). Đã push code trước đó (`045741e`); **phần này chưa commit** (theo yêu cầu, để revert được).
+- **26/10 tối** — Flow nhanh hơn / ít bị bỏ lượt (người dùng chọn giữ Flow, không tốn tiền): đo nhịp poll thật (clip giữ: vào danh sách ~10 s, xong ~33 s), phát hiện lượt "không vào danh sách" sau 90 s thay vì 5 phút, ảnh cảnh chạy 2 cái một lúc, tạo tự động chạy kiểm tra người mẫu song song + video theo từng ảnh xong; tìm ra ảnh shop có mặt người mẫu thật làm Flow bỏ video → cảnh báo + "✨ Tạo ảnh chỉ có sản phẩm" ở Bước 1 (`face_check.py`, `ProductFaceCheck.tsx`); preset người mẫu bỏ chữ "idol/flawless", thêm nét riêng; kịch bản tránh cận mặt; che token FB trong log. Thử thật cả lượt: ~4,5 phút cho clip 4 cảnh (clip #19). Commit `0dcbe0b`.
+- **26/10 tối** — 🎬 Làm video bằng Muse khi Flow chậm / bỏ lượt (Bước 4): khung 3 bước (chọn cảnh → copy một tin nhắn + tải/copy ảnh cảnh theo thứ tự → thả video Muse, tự xếp vào cảnh), dừng lượt Flow đang chạy khi gắn video Muse, đồng hồ "Flow đã chạy m:ss" + nút Muse ở cảnh chậm (≥ 150 s) và cảnh bị bỏ, nhãn Muse/Video của bạn giữ qua F5; ghép clip khác kích thước (fit 720×1280, viền đen cho video vuông/ngang) + sửa lỗi ffmpeg với clip câm. `steps/MuseBridge.tsx`, `quicktool/muse.ts`, `store/quicktool.attachMuseVideo`, `video_export.common_size/fit_filter`. Test 167 pass (thêm 2 test ghép), `tsc` sạch; Playwright trên clip thử (đã xoá) + ghép thật 38 s. Chưa thử với Muse thật. Commit + push.

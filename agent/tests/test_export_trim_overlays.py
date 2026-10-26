@@ -97,3 +97,36 @@ def test_negative_start_counts_from_the_end(tmp_path):
     ass = video_overlays.write_overlay_ass(ovs, tmp_path / "o.ass", width=720, height=1280, total_s=13.0)
     line = [l for l in ass.read_text(encoding="utf-8").splitlines() if l.startswith("Dialogue:")][0]
     assert ",0:00:09.00,0:00:13.00,price," in line
+
+
+def test_common_size_and_fit_filter():
+    """Mixed sizes pick the most common frame; near aspects crop, far ones letterbox."""
+    assert video_export.common_size([(720, 1280), (720, 1280)]) is None
+    assert video_export.common_size([(720, 1280), (1080, 1920), (720, 1280)]) == (720, 1280)
+    assert video_export.common_size([(1080, 1920), (720, 1280)]) == (1080, 1920)   # tie → first
+    assert video_export.common_size([(0, 0), (720, 1280)]) is None                 # unreadable ignored
+    assert video_export.fit_filter(720, 1280, (720, 1280)) is None
+    assert "crop=720:1280" in video_export.fit_filter(1080, 1920, (720, 1280))      # same 9:16
+    assert "pad=720:1280" in video_export.fit_filter(1280, 720, (720, 1280))        # landscape → bars
+
+
+@pytest.mark.skipif(FFMPEG is None or shutil.which("ffprobe") is None, reason="ffmpeg not installed")
+def test_real_export_fits_clips_of_different_sizes(tmp_path, monkeypatch):
+    """A Muse / own clip next to Flow's: stream-copying different sizes garbles
+    the join, so every clip is fitted to the common frame first."""
+    monkeypatch.setattr(video_export.config, "STORAGE_DIR", tmp_path)
+    ids = []
+    for i, size in enumerate(("360x640", "360x640", "540x960", "640x360")):
+        f = tmp_path / f"mix{i}.mp4"
+        subprocess.run([FFMPEG, "-y", "-f", "lavfi", "-i", f"testsrc=size={size}:rate=30:duration=1",
+                        "-c:v", "libx264", "-pix_fmt", "yuv420p", str(f)], check=True, capture_output=True)
+        with get_session() as s:
+            a = Asset(kind="video", uuid_media_id=f"{i}" * 8 + "-2222-4222-8222-222222222222", local_path=str(f))
+            s.add(a); s.commit(); s.refresh(a); ids.append(a.id)
+    media, err, report = video_export.export_video(ids, smooth60=False)
+    assert err is None and media
+    with get_session() as s:
+        out = Path(s.exec(__import__("sqlmodel").select(Asset).where(Asset.uuid_media_id == media)).first().local_path)
+    info = video_export.probe_clip(out)
+    assert (info.width, info.height) == (360, 640)
+    assert abs(info.duration - 4.0) < 0.4

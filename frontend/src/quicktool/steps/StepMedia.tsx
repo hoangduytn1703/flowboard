@@ -10,10 +10,12 @@ import { useFlowCredits } from "../../components/credits";
 import { creditsPerClip, hasMedia, isBusy, type ClipRoles } from "../roles";
 import { toast } from "../../store/toast";
 import { knownFlowCheck } from "../flowModelCheck";
+import { FLOW_SLOW_AFTER_S, clockOf } from "../muse";
+import { MuseBridge, flowWaitS, useFlowWaits, useNow, type MuseFocus } from "./MuseBridge";
 
-function statusLabel(n: FlowNode | null): string {
+function statusLabel(n: FlowNode | null, waitS: number | null = null): string {
   if (!n) return "chưa có node";
-  if (isBusy(n)) return n.data.autoPromptStatus === "pending" ? "đang viết prompt…" : "đang tạo…";
+  if (isBusy(n)) return n.data.autoPromptStatus === "pending" ? "đang viết prompt…" : `đang tạo…${waitS !== null ? ` ${clockOf(waitS)}` : ""}`;
   if (n.data.status === "error") return flowDropped(n.data.error) ? "Flow bỏ lượt này" : `lỗi: ${String(n.data.error ?? "không rõ").slice(0, 80)}`;
   if (hasMedia(n)) return "xong";
   return "chưa tạo";
@@ -113,7 +115,13 @@ function RegenBox({ node, kind, onSubmit, onClose }: {
 }
 
 /** Steps 3 and 4 — the same grid, once for scene images, once for clips. */
-export function StepMedia({ roles, kind }: { roles: ClipRoles; kind: "image" | "video" }) {
+export function StepMedia({ roles, kind, productName = "", boardName = "" }: {
+  roles: ClipRoles;
+  kind: "image" | "video";
+  /** For the Muse message ("clip bán hàng <tên sản phẩm>") and the still file names. */
+  productName?: string;
+  boardName?: string;
+}) {
   const generateScene = useQuicktoolStore((s) => s.generateScene);
   const generateVideo = useQuicktoolStore((s) => s.generateVideo);
   const generateAll = useQuicktoolStore((s) => (kind === "image" ? s.generateAllScenes : s.generateAllVideos));
@@ -131,8 +139,16 @@ export function StepMedia({ roles, kind }: { roles: ClipRoles; kind: "image" | "
   const modelCheck = knownFlowCheck(roles.model);
   const fileRef = useRef<HTMLInputElement>(null);
   const pendingScene = useRef<number | null>(null);
+  const [museFocus, setMuseFocus] = useState<MuseFocus | null>(null);
 
   const items = roles.scenes.map((s) => ({ scene: s, node: kind === "image" ? s.image : s.video }));
+  // How long each running clip has been waiting on Flow (step 4 only).
+  const busyVideoIds = kind === "video" ? items.filter((i) => isBusy(i.node)).map((i) => i.node!.id) : [];
+  const waits = useFlowWaits(kind === "video" ? boardId : null, busyVideoIds);
+  const now = useNow(busyVideoIds.length > 0);
+  function museFor(sceneIndex: number) {
+    setMuseFocus((prev) => ({ scene: sceneIndex, nonce: (prev?.nonce ?? 0) + 1 }));
+  }
   const done = items.filter((i) => hasMedia(i.node)).length;
   const busy = items.filter((i) => isBusy(i.node)).length;
   const blocked = kind === "video" ? roles.scenes.filter((s) => !hasMedia(s.image)).length : 0;
@@ -204,19 +220,25 @@ export function StepMedia({ roles, kind }: { roles: ClipRoles; kind: "image" | "
         </div>
         {kind === "video" && (
           <p className="qt-card__hint">
-            Mỗi clip 8 giây bằng {videoModel === "omni_flash" ? "Omni Flash (~12 credit)" : "Veo 3.1"}, mất 1–3 phút. Clip chưa ưng thì bấm "Tạo lại…" ở cảnh đó và ghi muốn sửa gì,
+            Mỗi clip 8 giây bằng {videoModel === "omni_flash" ? "Omni Flash (~12 credit)" : "Veo 3.1"}, thường 1–2 phút. Clip chưa ưng thì bấm "Tạo lại…" ở cảnh đó và ghi muốn sửa gì,
             hoặc <strong>⬆ Dùng video của bạn</strong> để thay bằng cảnh quay thật (mp4/mov, tối đa 200 MB, không tốn credit).
+            Flow chậm quá hoặc bỏ lượt thì làm cảnh đó bằng <strong>Muse</strong> (khung "🎬 Làm video bằng Muse" bên dưới).
           </p>
         )}
         {kind === "image" && (
           <p className="qt-card__hint">Mỗi ảnh mất khoảng 20–60 giây; ảnh chưa ưng thì bấm "Tạo lại…" ở cảnh đó và ghi muốn sửa gì (tiếng Việt cũng được).</p>
         )}
         <div className="qt-grid">
-          {items.map(({ scene, node }) => (
+          {items.map(({ scene, node }) => {
+            const waitS = kind === "video" ? flowWaitS(node, waits, now) : null;
+            const slow = waitS !== null && waitS >= FLOW_SLOW_AFTER_S;
+            const source = kind === "video" && node && hasMedia(node) && !isBusy(node)
+              ? (node.data.uploadedFrom === "muse" ? "Muse" : node.data.uploaded ? "Video của bạn" : null) : null;
+            return (
             <div key={scene.image.id} className={`qt-tile${node && isBusy(node) ? " qt-tile--busy" : ""}`}>
               <div className="qt-tile__head">
-                <span className="qt-tile__num">Cảnh {scene.index}</span>
-                <span className={`qt-tile__status qt-tile__status--${statusTone(node)}`} title={statusLabel(node)}>{statusLabel(node)}</span>
+                <span className="qt-tile__num">Cảnh {scene.index}{source && <span className="qt-tile__source">{source}</span>}</span>
+                <span className={`qt-tile__status qt-tile__status--${statusTone(node)}`} title={statusLabel(node, waitS)}>{statusLabel(node, waitS)}</span>
               </div>
               <div className="qt-tile__media" onClick={() => node && hasMedia(node) && useGenerationStore.getState().openResultViewer(node.id)}>
                 {node && hasMedia(node) ? (
@@ -265,10 +287,17 @@ export function StepMedia({ roles, kind }: { roles: ClipRoles; kind: "image" | "
                   </button>
                 )}
               </div>
+              {slow && (
+                <div className="qt-slow">
+                  <span>⏱ Flow đã chạy {clockOf(waitS ?? 0)} — lâu hơn thường lệ.</span>
+                  <button type="button" className="qt-btn qt-btn--small" onClick={() => museFor(scene.index)}>🎬 Làm cảnh này bằng Muse</button>
+                </div>
+              )}
               {kind === "video" && node && !isBusy(node) && node.data.status === "error"
                 && flowDropped(node.data.error) && (
                 <div className="qt-dropped">
                   <p>{FLOW_DROPPED_VIDEO}</p>
+                  <button type="button" className="qt-btn qt-btn--small" onClick={() => museFor(scene.index)}>🎬 Làm cảnh này bằng Muse</button>
                   {roles.model && modelCheck?.status !== "ok" ? (
                     <>
                       <p>{modelCheck?.status === "blocked"
@@ -288,7 +317,8 @@ export function StepMedia({ roles, kind }: { roles: ClipRoles; kind: "image" | "
                 <RegenBox node={node} kind={kind} onSubmit={(r) => regenerate(scene.index, r)} onClose={() => setRegenFor(null)} />
               )}
             </div>
-          ))}
+            );
+          })}
           {items.length === 0 && <div className="qt-empty">Board chưa có cảnh nào.</div>}
         </div>
         {kind === "video" && (
@@ -296,6 +326,10 @@ export function StepMedia({ roles, kind }: { roles: ClipRoles; kind: "image" | "
                  onChange={(e) => { void onVideoFile(e.target.files); e.target.value = ""; }} />
         )}
       </section>
+      {kind === "video" && roles.scenes.some((s) => s.video) && (
+        <MuseBridge roles={roles} productName={productName} boardName={boardName} boardId={boardId}
+                    focus={museFocus} waits={waits} now={now} />
+      )}
     </div>
   );
 }

@@ -262,7 +262,8 @@ def _synth_to_fit(text: str, opts: NarrationOptions, clip_s: float,
 
 
 def _image_clip(ffmpeg: str, src: Path, text: str, opts: NarrationOptions,
-                dst: Path, work: Path, caption: str = "", voice: Optional[str] = None) -> ClipReport:
+                dst: Path, work: Path, caption: str = "", voice: Optional[str] = None,
+                size: Optional[tuple[int, int]] = None) -> ClipReport:
     """A still rendered into a portrait clip that lasts as long as its
     voice line: slow push-in (Ken Burns), fade in/out, the headline at the
     top and the subtitles at the bottom."""
@@ -278,7 +279,8 @@ def _image_clip(ffmpeg: str, src: Path, text: str, opts: NarrationOptions,
             logger.warning("video_export: narration skipped for still %s: %s", src.name, exc)
     length = (narration.duration + _TAIL_S + 0.4) if narration else STILL_SILENT_S
     report.duration = round(length, 2)
-    w, h = STILL_SIZE
+    # ``size``: the frame the clips it is joined with share (see common_size).
+    w, h = size or STILL_SIZE
     frames = int(length * 24) + 1
     vf = [
         f"scale={w}:{h}:force_original_aspect_ratio=increase",
@@ -326,13 +328,51 @@ def clip_window(full: float, trim: Optional[tuple[float, Optional[float]]]) -> t
     return start, max(MIN_CLIP_S, end - start)
 
 
+#: Within this aspect-ratio difference a clip is cropped to fill the frame;
+#: past it (a landscape clip in a portrait video) it is letterboxed instead,
+#: so nothing important is cut away.
+_FILL_ASPECT_TOLERANCE = 0.08
+
+
+def common_size(sizes: list[tuple[int, int]]) -> Optional[tuple[int, int]]:
+    """The frame every clip is fitted to when the clips are not all the same
+    size (a Muse / own clip next to Flow's 720×1280): the most common size,
+    the first one on a tie. None when they already agree — the join can
+    stream-copy then and nothing needs re-sizing."""
+    known = [(w, h) for w, h in sizes if w > 0 and h > 0]
+    if len(set(known)) <= 1:
+        return None
+    counts: dict[tuple[int, int], int] = {}
+    for size in known:
+        counts[size] = counts.get(size, 0) + 1
+    best = max(counts.values())
+    return next(size for size in known if counts[size] == best)
+
+
+def fit_filter(src_w: int, src_h: int, size: tuple[int, int]) -> Optional[str]:
+    """ffmpeg filters that bring a ``src_w``×``src_h`` clip to ``size``:
+    crop-to-fill for a near aspect, letterbox (black bars) for a far one.
+    None when the clip already has that size."""
+    w, h = size
+    if (src_w, src_h) == (w, h) or src_w <= 0 or src_h <= 0:
+        return None
+    src_aspect, aspect = src_w / src_h, w / h
+    if abs(src_aspect - aspect) / aspect <= _FILL_ASPECT_TOLERANCE:
+        return f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1"
+    return (f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
+            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1")
+
+
 def _voice_clip(ffmpeg: str, src: Path, text: str, opts: NarrationOptions,
                 dst: Path, work: Path, caption: str = "", original_audio: Optional[str] = None,
-                voice: Optional[str] = None, trim: Optional[tuple[float, Optional[float]]] = None) -> ClipReport:
+                voice: Optional[str] = None, trim: Optional[tuple[float, Optional[float]]] = None,
+                size: Optional[tuple[int, int]] = None) -> ClipReport:
     """``src`` re-encoded into ``dst`` with the voice line, ducked original
     sound and burned subtitles. The clip is held on its last frame when the
     speech outlasts it. ``voice`` overrides the export's voice for this
-    clip; ``[A] … [B] …`` tags in ``text`` switch voices mid-line."""
+    clip; ``[A] … [B] …`` tags in ``text`` switch voices mid-line.
+    ``size`` fits the clip to that frame first (see :func:`common_size`):
+    the join stream-copies, so every clip has to come out the same size."""
     info = probe_clip(src)
     if info is None:
         return ClipReport(0.0, error="unreadable clip")
@@ -357,12 +397,17 @@ def _voice_clip(ffmpeg: str, src: Path, text: str, opts: NarrationOptions,
 
     inputs = ["-ss", f"{seek:.3f}", "-t", f"{duration:.3f}", "-i", str(src)] if trim else ["-i", str(src)]
     vf = ["[0:v]"]
+    out_w, out_h = info.width, info.height
+    fit = fit_filter(info.width, info.height, size) if size else None
+    if fit:
+        vf.append(fit)
+        out_w, out_h = size
     if report.extended_s > 0:
         vf.append(f"tpad=stop_mode=clone:stop_duration={report.extended_s:.3f}")
     if opts.subtitles and (narration is not None or caption):
         ass = work / f"{dst.stem}.ass"
         cues = tts.subtitle_cues(narration, tts.strip_speaker_tags(text)) if narration is not None else []
-        tts.write_ass(cues, ass, width=info.width, height=info.height, headline=caption, total_s=length)
+        tts.write_ass(cues, ass, width=out_w, height=out_h, headline=caption, total_s=length)
         vf.append(f"subtitles={_filter_path(ass)}")
     video_chain = (vf[0] + ",".join(vf[1:]) if len(vf) > 1 else vf[0] + "null") + "[v]"
 
@@ -379,8 +424,12 @@ def _voice_clip(ffmpeg: str, src: Path, text: str, opts: NarrationOptions,
     if not audio_sources:
         # No usable sound at all: a silent track keeps every clip's layout
         # identical so the join can stream-copy.
+        # Its input index is the count of inputs before it — counting tokens
+        # (`len(inputs) // 2`) broke on the 4-token lavfi input and on a
+        # trimmed source (`-ss … -t … -i`): "Error binding filtergraph".
+        silent_index = inputs.count("-i")
         inputs += ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]
-        chains.append(f"[{len(inputs) // 2 - 1}:a]apad[a]")
+        chains.append(f"[{silent_index}:a]apad[a]")
     elif len(audio_sources) == 1:
         chains.append(f"{audio_sources[0]}anull[a]")
     else:
@@ -466,6 +515,23 @@ def render_cover(src: Path, dst: Path, title: str, *, subtitle: Optional[str] = 
     return err
 
 
+def _mixed_frame_size(asset_ids: list[int], items: Optional[list["ExportItem"]]) -> Optional[tuple[int, int]]:
+    """:func:`common_size` over the clips about to be joined (stills count as
+    :data:`STILL_SIZE`); None when they agree or cannot be read."""
+    paths, err = _asset_paths([it.asset_id for it in items] if items else asset_ids)
+    if err:
+        return None
+    sizes: list[tuple[int, int]] = []
+    for i, path in enumerate(paths):
+        if items and items[i].kind == "image":
+            sizes.append(STILL_SIZE)
+            continue
+        info = probe_clip(path)
+        if info is not None:
+            sizes.append((info.width, info.height))
+    return common_size(sizes)
+
+
 def _asset_paths(asset_ids: list[int]) -> tuple[list[Path], Optional[str]]:
     paths: list[Path] = []
     with get_session() as s:
@@ -542,9 +608,13 @@ def export_video(
         narration.lines = [it.narration for it in items]
 
     trims = list(trims or [])
-    if any(trims) and narration is None:
+    # Clips of different sizes (a Muse clip, the seller's own, stills next to
+    # clips) cannot be stream-copied together — the join comes out garbled —
+    # so they all go through the per-clip encode, fitted to one frame.
+    fit_size = _mixed_frame_size(asset_ids, items)
+    if (any(trims) or fit_size) and narration is None:
         narration = NarrationOptions(lines=[])
-    if items or any(trims) or (narration is not None and narration.any_line()):
+    if items or any(trims) or fit_size or (narration is not None and narration.any_line()):
         ffmpeg = shutil.which("ffmpeg")
         if ffmpeg is None:
             return None, "ffmpeg_not_found", report.as_dict()
@@ -561,12 +631,13 @@ def export_video(
             line_voice = narration.voice_for(i)
             if item is not None and item.kind == "image":
                 clip = _image_clip(ffmpeg, src, line, narration, dst, work, caption=item.caption,
-                                   voice=line_voice)
+                                   voice=line_voice, size=fit_size)
             else:
                 clip = _voice_clip(ffmpeg, src, line, narration, dst, work,
                                    caption=item.caption if item else "",
                                    original_audio=item.original_audio if item else None,
-                                   voice=line_voice, trim=trims[i] if i < len(trims) else None)
+                                   voice=line_voice, trim=trims[i] if i < len(trims) else None,
+                                   size=fit_size)
             report.clips.append(clip)
             # ffmpeg leaves a 0-byte file behind when an encode fails, so
             # "exists" is not "worked".

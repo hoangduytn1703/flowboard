@@ -1,8 +1,35 @@
 import { create } from "zustand";
 import {
-  autoPrompt, createEdge, createNode, patchBoardData, patchNode, revisePromptApi, uploadImage, uploadReferenceVideo,
-  writeNarrationApi, type ExportItem, type QuicktoolState,
+  autoPrompt, cancelActivity, createEdge, createNode, listBoardRequests, patchBoardData, patchNode, revisePromptApi,
+  uploadImage, uploadReferenceVideo, writeNarrationApi, type ExportItem, type QuicktoolState,
 } from "../api/client";
+
+/** Where a scene clip that Flow did not render came from (step 4 badge). */
+export type VideoSource = "own" | "muse";
+
+/** Stop the Flow render on a scene's video node: the poll stops writing to
+ * the node, the request is cancelled (the worker never touches a cancelled
+ * row's node), and the card leaves "đang tạo…". The request id comes from
+ * the live poll, or — after a reload, before the poll is re-attached — from
+ * the board's in-flight list. */
+async function stopFlowVideo(node: FlowNode): Promise<void> {
+  const gen = useGenerationStore.getState();
+  let requestId: number | null = gen.active[node.id]?.requestId ?? null;
+  const boardId = useBoardStore.getState().boardId;
+  if (requestId === null && boardId !== null) {
+    try {
+      const { items } = await listBoardRequests(boardId, { active: true });
+      requestId = items.find((r) => String(r.node_id) === node.id)?.id ?? null;
+    } catch { /* no list: the cancel below is skipped, the upload still wins */ }
+  }
+  gen.cancelGeneration(node.id);
+  if (requestId !== null) {
+    try {
+      await cancelActivity(requestId);
+    } catch { /* 409: it settled meanwhile — the Muse clip replaces it anyway */ }
+  }
+  useBoardStore.getState().updateNodeData(node.id, { status: "idle" });
+}
 
 /** One entry of a drama clip's play order. */
 export interface SequenceItem {
@@ -58,7 +85,11 @@ interface QuicktoolStore {
   removeProductPhoto(rfId: string): Promise<void>;
   /** The user's own footage for a scene (step 4): a local video Asset
    * put on the scene's video node, in place of a Flow render. */
-  uploadVideoToScene(sceneIndex: number, file: File): Promise<boolean>;
+  uploadVideoToScene(sceneIndex: number, file: File, from?: VideoSource): Promise<boolean>;
+  /** A clip made in Muse for this scene (step 4, "Làm video bằng Muse"). A
+   * Flow render still running on the scene is cancelled first, so its late
+   * result cannot replace the Muse clip. */
+  attachMuseVideo(sceneIndex: number, file: File): Promise<boolean>;
   exportClip(): Promise<boolean>;
   // Drama clips: the play order (beat stills + spliced-in footage).
   isDrama(): boolean;
@@ -363,7 +394,7 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
     await useBoardStore.getState().deleteNodeByRfId(rfId);
   },
 
-  async uploadVideoToScene(sceneIndex, file) {
+  async uploadVideoToScene(sceneIndex, file, from = "own") {
     const scene = get().roles().scenes.find((s) => s.index === sceneIndex);
     if (!scene?.video || isBusy(scene.video)) return false;
     const video = scene.video;
@@ -372,7 +403,7 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
       // Stored like a reference video: a local Asset, never sent to Flow.
       const up = await uploadReferenceVideo(file);
       const patch = { mediaId: up.media_id, mediaIds: [up.media_id], variantCount: 1, status: "done" as const,
-                      error: undefined, uploaded: true };
+                      error: undefined, uploaded: true, uploadedFrom: from };
       useBoardStore.getState().updateNodeData(video.id, patch);
       if (!isNaN(dbId)) {
         patchNode(dbId, { status: "done", data: { ...patch, error: null, renderedAt: new Date().toISOString() } })
@@ -383,6 +414,13 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
       set({ error: `Không tải được video: ${err instanceof Error ? err.message : "lỗi"}` });
       return false;
     }
+  },
+
+  async attachMuseVideo(sceneIndex, file) {
+    const scene = get().roles().scenes.find((s) => s.index === sceneIndex);
+    if (!scene?.video) return false;
+    if (isBusy(scene.video)) await stopFlowVideo(scene.video);
+    return get().uploadVideoToScene(sceneIndex, file, "muse");
   },
 
   async uploadToNode(rfId, file) {
@@ -606,7 +644,11 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
           if (s?.video && hasMedia(s.image) && !hasMedia(s.video) && !isBusy(s.video)) await get().generateVideo(s.index);
         }
         for (const s of get().roles().scenes) {
-          if (s.video) await waitForNode(s.video.id, hasMedia);
+          if (!s.video) continue;
+          await waitForNode(s.video.id, hasMedia).catch((err: unknown) => {
+            throw new Error(`Cảnh ${s.index}: ${err instanceof Error ? err.message : String(err)}. `
+              + "Ở Bước 4 bấm \"Tạo\" lại, hoặc làm cảnh này bằng Muse (khung \"🎬 Làm video bằng Muse\").");
+          });
         }
       }
       if (!stillRunning(get)) return;
