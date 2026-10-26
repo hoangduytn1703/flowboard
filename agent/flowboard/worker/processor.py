@@ -1372,13 +1372,20 @@ def _commit_settlement(
 #: to :data:`PARALLEL_LIMIT` at once) instead of one after another, so four
 #: clips take about as long as one. Flow's own UI queues several videos too.
 PARALLEL_TYPES = frozenset({"gen_video", "gen_video_omni"})
+#: Scene images (~25 s each) used to queue one after another, so a 4-scene
+#: clip spent ~100 s on stills. Flow's own UI runs four image RPCs at once
+#: (staggered, see flow_sdk.IMAGE_UI_SUBMIT_OFFSETS_S); two side by side is
+#: well inside that. Kept apart from the video slots so stills never wait
+#: behind minutes-long clips.
+IMAGE_PARALLEL_TYPES = frozenset({"gen_image"})
+IMAGE_START_GAP_S = 1.0
 
 
-def _parallel_limit() -> int:
+def _parallel_limit(env: str = "FLOWBOARD_VIDEO_PARALLEL", default: int = 3) -> int:
     try:
-        return max(1, int(os.environ.get("FLOWBOARD_VIDEO_PARALLEL", "3")))
+        return max(1, int(os.environ.get(env, str(default))))
     except ValueError:
-        return 3
+        return default
 
 
 class WorkerController:
@@ -1393,6 +1400,8 @@ class WorkerController:
         # Parallel jobs handed to a task but not yet inside _process_one.
         self._spawned = 0
         self._slots: Optional[asyncio.Semaphore] = None
+        self._image_slots: Optional[asyncio.Semaphore] = None
+        self._last_image_start = 0.0
         self._tasks: set[asyncio.Task] = set()
         self._started_at: Optional[float] = None
 
@@ -1409,8 +1418,11 @@ class WorkerController:
                 rid = await asyncio.wait_for(self._queue.get(), timeout=0.5)
             except asyncio.TimeoutError:
                 continue
-            if self._request_type(rid) in PARALLEL_TYPES:
+            req_type = self._request_type(rid)
+            if req_type in PARALLEL_TYPES:
                 self._spawn_parallel(rid)
+            elif req_type in IMAGE_PARALLEL_TYPES:
+                self._spawn_parallel(rid, image=True)
             else:
                 await self._process_one(rid)
 
@@ -1422,10 +1434,15 @@ class WorkerController:
         except Exception:  # noqa: BLE001 — fall back to the sequential path
             return None
 
-    def _spawn_parallel(self, rid: int) -> None:
-        if self._slots is None:
-            self._slots = asyncio.Semaphore(_parallel_limit())
-        slots = self._slots
+    def _spawn_parallel(self, rid: int, image: bool = False) -> None:
+        if image:
+            if self._image_slots is None:
+                self._image_slots = asyncio.Semaphore(_parallel_limit("FLOWBOARD_IMAGE_PARALLEL", 2))
+            slots = self._image_slots
+        else:
+            if self._slots is None:
+                self._slots = asyncio.Semaphore(_parallel_limit())
+            slots = self._slots
         self._spawned += 1
 
         async def run() -> None:
@@ -1435,6 +1452,12 @@ class WorkerController:
                     # No await between these two: active_count never dips.
                     entered = True
                     self._spawned -= 1
+                    if image:
+                        # Stagger starts like Flow's UI (one captcha each).
+                        wait = self._last_image_start + IMAGE_START_GAP_S - time.monotonic()
+                        self._last_image_start = time.monotonic() + max(0.0, wait)
+                        if wait > 0:
+                            await asyncio.sleep(wait)
                     await self._process_one(rid)
             finally:
                 if not entered:  # cancelled while waiting for a slot

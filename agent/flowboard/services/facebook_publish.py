@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import mimetypes
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -24,6 +25,26 @@ import httpx
 from flowboard import accounts
 
 logger = logging.getLogger(__name__)
+
+_TOKEN_IN_URL = re.compile(r"(access_token=)[^&\s\"']+")
+
+
+class _RedactToken(logging.Filter):
+    """httpx logs every request URL at INFO — Graph API GETs carry the Page
+    token in the query string, which would land in the agent log as is."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.args:
+            record.args = tuple(
+                _TOKEN_IN_URL.sub(r"\1***", str(a)) if "access_token=" in str(a) else a
+                for a in (record.args if isinstance(record.args, tuple) else (record.args,))
+            )
+        if isinstance(record.msg, str) and "access_token=" in record.msg:
+            record.msg = _TOKEN_IN_URL.sub(r"\1***", record.msg)
+        return True
+
+
+logging.getLogger("httpx").addFilter(_RedactToken())
 
 GRAPH = "https://graph.facebook.com/v21.0"
 GRAPH_VIDEO = "https://graph-video.facebook.com/v21.0"

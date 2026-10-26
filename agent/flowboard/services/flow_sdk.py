@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import time
 from typing import Any, Optional
@@ -414,6 +415,12 @@ def _as_operation_envelope(operation_ids: list[str]) -> dict:
 # A resolved media id answering NOT_FOUND this many polls in a row, while the
 # operation has left the project listing, means Flow dropped the job.
 DROP_DETECT_ROUNDS = 3
+#: A clip Flow keeps is in the project listing from the first poll (~10 s,
+#: measured 26/10 on 3 of 3 clips) and done in ~35–70 s. One it drops silently
+#: never shows up there: after this long with every listing lookup coming back
+#: empty, it is dropped — retry now instead of waiting out the 5-minute budget.
+NOT_LISTED_DROP_S = float(os.getenv("FLOWBOARD_NOT_LISTED_DROP_S", "90"))
+NOT_LISTED_MIN_LOOKUPS = 2
 FLOW_DROPPED_JOB = (
     "FLOW_DROPPED_JOB: Flow accepted the video, then cancelled it and refunded "
     "the credits. Flow gives no reason; this is what Veo's safety filter on the "
@@ -448,6 +455,8 @@ class FlowSDK:
         # Consecutive rounds a resolved media id answered NOT_FOUND; see
         # _poll_operation for the drop detection built on it.
         self._operation_missing: dict[str, int] = {}
+        #: operation id -> (monotonic time of the first poll, empty listing lookups)
+        self._operation_unlisted: dict[str, tuple[float, int]] = {}
 
     # ── transport plumbing ─────────────────────────────────────────────────
     async def _payload(
@@ -506,6 +515,7 @@ class FlowSDK:
             self._operation_media.clear()
             self._operation_polls.clear()
             self._operation_missing.clear()
+            self._operation_unlisted.clear()
         self._operation_projects[operation_id] = project_id
 
     # ── project listing / creation (both unported) ─────────────────────────
@@ -998,8 +1008,18 @@ class FlowSDK:
         if not media_id:
             media_id, complaint = await self._find_operation_media(operation_id)
             if not media_id:
+                if self._never_listed(operation_id):
+                    self._operation_unlisted.pop(operation_id, None)
+                    return {
+                        "operation": {
+                            "name": operation_id,
+                            "error": {"code": 5, "message": FLOW_DROPPED_JOB},
+                        },
+                        "status": "MEDIA_GENERATION_STATUS_FAILED",
+                    }
                 return _pending_operation(operation_id, complaint=complaint)
             self._operation_media[operation_id] = media_id
+            self._operation_unlisted.pop(operation_id, None)
 
         try:
             urls = await self._media_urls(media_id)
@@ -1101,11 +1121,22 @@ class FlowSDK:
             )
             worth_looking = True
 
+        started, empty = self._operation_unlisted.get(operation_id, (time.monotonic(), 0))
+        self._operation_unlisted[operation_id] = (started, empty)
         if not worth_looking:
             return None, complaint
         if not project_id:
             return None, "no project id for the listing lookup"
-        return await self._media_id_for(operation_id, project_id), complaint
+        found = await self._media_id_for(operation_id, project_id)
+        if not found:
+            self._operation_unlisted[operation_id] = (started, empty + 1)
+        return found, complaint
+
+    def _never_listed(self, operation_id: str) -> bool:
+        """Long past the point every kept clip is listed, and the listing has
+        been asked (successfully) at least twice: Flow dropped the job."""
+        started, empty = self._operation_unlisted.get(operation_id, (time.monotonic(), 0))
+        return empty >= NOT_LISTED_MIN_LOOKUPS and time.monotonic() - started >= NOT_LISTED_DROP_S
 
     async def _media_id_for(
         self, operation_id: str, project_id: str

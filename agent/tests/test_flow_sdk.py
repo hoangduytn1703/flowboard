@@ -1064,6 +1064,57 @@ async def test_check_async_reports_a_dropped_job_instead_of_polling_forever():
 
 
 @pytest.mark.asyncio
+async def test_check_async_calls_a_job_that_never_reaches_the_listing_dropped(monkeypatch):
+    """Kept clips are listed from the first poll; one Flow drops silently never
+    is. Past NOT_LISTED_DROP_S with empty lookups, say so (retry now) instead
+    of polling out the 5-minute budget (rid 211, 26/10)."""
+    from flowboard.services import flow_sdk as mod
+    from flowboard.services.flow_sdk import FLOW_DROPPED_JOB, NOT_LISTED_DROP_S
+
+    clock = [1000.0]
+    monkeypatch.setattr(mod.time, "monotonic", lambda: clock[0])
+    rec = BatchRecorder(responses={
+        fb.RPC_OPERATION: [batch_envelope(
+            fb.RPC_OPERATION,
+            operation_payload("op-1", status=None, detail=complaint_detail("Media not found.")),
+        )] * 20,
+        fb.RPC_PROJECT_MEDIA: [""] * 20,
+    })
+    sdk = FlowSDK(client=rec)
+    rounds = 0
+    while clock[0] - 1000.0 < NOT_LISTED_DROP_S:
+        (op,) = (await sdk.check_async(["op-1"]))["operations"]
+        assert op["done"] is False and not op.get("error")
+        clock[0] += 10.0
+        rounds += 1
+    (op,) = (await sdk.check_async(["op-1"]))["operations"]
+    assert op["error"] == FLOW_DROPPED_JOB
+    assert rounds >= 2
+
+
+@pytest.mark.asyncio
+async def test_check_async_does_not_drop_a_listed_job_that_is_slow(monkeypatch):
+    """Listed (media id known) but slow to render: never the not-listed verdict."""
+    from flowboard.services import flow_sdk as mod
+
+    clock = [1000.0]
+    monkeypatch.setattr(mod.time, "monotonic", lambda: clock[0])
+    rec = BatchRecorder(responses={
+        fb.RPC_OPERATION: [batch_envelope(
+            fb.RPC_OPERATION,
+            operation_payload("op-1", status=None, detail=complaint_detail("Media not found.")),
+        )] * 30,
+        fb.RPC_PROJECT_MEDIA: [listing_payload_text("op-1", MEDIA)] * 30,
+        fb.RPC_MEDIA: [batch_envelope(fb.RPC_MEDIA, media_urls_payload(MEDIA, video=False))] * 30,
+    })
+    sdk = FlowSDK(client=rec)
+    for _ in range(20):
+        (op,) = (await sdk.check_async(["op-1"]))["operations"]
+        assert op["done"] is False and not op.get("error")
+        clock[0] += 10.0
+
+
+@pytest.mark.asyncio
 async def test_check_async_keeps_waiting_while_the_dropped_candidate_is_still_listed():
     """Same NOT_FOUND streak, but the operation is still in the listing: the
     clip may simply not be written yet, so no verdict."""

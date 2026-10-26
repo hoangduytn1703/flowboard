@@ -1629,3 +1629,12 @@
   .qt-nav__icon { width: 22px; height: 22px; font-size: 12px; }
   .qt-nav__group { margin: 6px 8px 2px; }
 }
+
+/* Step 1: a product photo with real people's faces (shop photo) — Flow drops those clips. */
+.qt-facewarn {
+  display: flex; flex-direction: column; gap: 6px; margin-top: 6px; padding: 8px 10px;
+  border: 1px solid rgba(255, 170, 60, 0.55); border-radius: 8px; background: rgba(255, 150, 40, 0.1);
+  font-size: 13px; line-height: 1.4; color: #f3d9b5;
+}
+.qt-facewarn strong { color: #ffc27a; font-size: 13.5px; }
+.qt-facewarn .qt-btn { align-self: flex-start; }

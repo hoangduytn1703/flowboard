@@ -638,9 +638,12 @@ async def test_canceling_a_muse_request_frees_the_worker_queue(client):
             if client.get(f"/api/requests/{muse_row['id']}").json()["status"] == "running":
                 break
         assert client.post(f"/api/requests/{muse_row['id']}/cancel").status_code == 200
+        # Stills run two at a time now, so the Flow one can finish before the
+        # cancel reaches the Muse job: wait for both.
         for _ in range(200):
             await asyncio.sleep(0.05)
-            if client.get(f"/api/requests/{flow_row['id']}").json()["status"] == "done":
+            if (client.get(f"/api/requests/{flow_row['id']}").json()["status"] == "done"
+                    and pq.list_provider_jobs(provider="muse")[0].status == "CANCELLED"):
                 break
         assert client.get(f"/api/requests/{muse_row['id']}").json()["status"] == "canceled"
         assert client.get(f"/api/requests/{flow_row['id']}").json()["status"] == "done"

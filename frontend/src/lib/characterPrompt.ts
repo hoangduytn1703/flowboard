@@ -12,6 +12,29 @@ import {
  * Generate dialog and the Quicktool wizard so both produce the same
  * reference-grade portrait.
  */
+// Flow silently drops every video made from a face it takes for a celebrity
+// (22/10, 26/10). Idealised "beauty preset" faces converge on the same few
+// idol looks, so each model gets two small traits of its own — an ordinary,
+// distinctive face matches nobody famous.
+const OWN_TRAITS = [
+  "a small beauty mark on one cheek",
+  "slightly uneven natural eyebrows",
+  "a soft rounded jawline",
+  "a few light freckles across the nose",
+  "a slightly wider nose bridge",
+  "a small dimple on one side when smiling",
+  "naturally fuller cheeks",
+  "a faint mole above the lip",
+  "slightly hooded eyes",
+  "a gently asymmetrical smile",
+] as const;
+
+export function ownTraits(): string {
+  const pool = [...OWN_TRAITS];
+  const pick = () => pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
+  return `${pick()} and ${pick()}`;
+}
+
 export function buildCharacterPrompt(
   gender: GenderKey | null,
   country: CountryKey | null,
@@ -32,12 +55,13 @@ export function buildCharacterPrompt(
     `Studio portrait headshot of a ${subject} character`,
     "subject directly faces the camera, head perfectly straight with zero tilt and zero turn",
     "shoulders square to camera, axially symmetric pose, nose centered, both eyes equally visible at the same height",
+    `an ordinary, non-famous everyday person with their own distinctive face (${ownTraits()}), natural skin texture with visible pores, not resembling any celebrity, idol, actor or influencer`,
     ...vibeTokens,
     tail || null,
     "head and shoulders framing, centered composition, sharp focus on face",
     "strictly front-on orientation, no head tilt, no head turn, no profile angle, no three-quarter view, no over-the-shoulder pose",
     "no glasses, no hat, no mask, no occlusion, nothing covering the face",
-    "photorealistic, ultra-detailed, consistent character reference",
+    "photorealistic, natural candid quality, consistent character reference",
   ]
     .filter(Boolean)
     .join(", ");

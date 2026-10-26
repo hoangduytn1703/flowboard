@@ -406,7 +406,9 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
     const cost = videos * creditsPerClip(videoModel, videoQuality);
     const parts = [images ? `${images} ảnh` : "", videos ? `${videos} video (~${cost} credit Flow)` : ""].filter(Boolean);
     const what = parts.length ? `Sẽ tạo ${parts.join(" + ")}, rồi viết lời thoại và ghép clip.` : "Mọi cảnh đã có — chỉ viết lời thoại và ghép clip.";
-    const mins = Math.max(1, Math.round(videos * 2 + images * 0.5 + 1));
+    // Stills two at a time (~30 s), clips three at a time (~1–2 min a wave), then the join
+    // (measured 26/10: 5 stills + 4 clips + export in ~4.5 min).
+    const mins = Math.max(1, Math.round(Math.ceil(images / 2) * 0.5 + Math.ceil(videos / 3) * 1.2 + 1.5));
     const balance = flowCredits === null ? "" : `\nTài khoản Flow còn ${flowCredits.toLocaleString("vi-VN")} credit${cost > flowCredits ? " — KHÔNG ĐỦ, clip sẽ hỏng giữa chừng" : ""}.`;
     if (!window.confirm(`${what}${balance}\nKhoảng ${mins} phút. Tiếp tục?`)) return;
     void runAuto();
@@ -576,6 +578,8 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
               sourceMediaId={(qt as { source_media_id?: string }).source_media_id ?? null}
               personRequired={!!template?.person_required || qt.reference?.category === "fashion"}
               hands={qt.hands ?? null}
+              productId={qt.product_id ?? null}
+              productName={productLabel.name || String(roles.products[0]?.data.title ?? "")}
             />
           )}
           {step === 2 && <StepScript roles={roles} category={clipCategory} productId={qt.product_id ?? null} boardId={routeId} />}

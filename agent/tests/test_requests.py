@@ -1115,3 +1115,39 @@ async def test_a_video_flow_dropped_is_retried_once():
         with get_session() as s:
             assert s.get(Request, rid).status == want_status
         assert len(calls) == want_calls and calls[0] is None
+
+
+@pytest.mark.asyncio
+async def test_worker_runs_two_scene_images_side_by_side(client, monkeypatch):
+    """Stills ran one after another (~25 s each); now two at a time, never more."""
+    from flowboard.worker import processor as proc
+
+    monkeypatch.setattr(proc, "IMAGE_START_GAP_S", 0.0)
+    live = {"now": 0, "max": 0}
+
+    async def slow_image(params):
+        live["now"] += 1
+        live["max"] = max(live["max"], live["now"])
+        await asyncio.sleep(0.2)
+        live["now"] -= 1
+        return ({"media_ids": ["m1"]}, None)
+
+    rows = [
+        client.post("/api/requests", json={"type": "gen_image", "params": {"prompt": f"p{i}"}}).json()
+        for i in range(4)
+    ]
+    w = WorkerController(handlers={"gen_image": slow_image})
+    task = asyncio.create_task(w.start())
+    try:
+        for r in rows:
+            w.enqueue(r["id"])
+        for _ in range(80):
+            await asyncio.sleep(0.05)
+            if all(client.get(f"/api/requests/{r['id']}").json()["status"] == "done" for r in rows):
+                break
+        states = [client.get(f"/api/requests/{r['id']}").json() for r in rows]
+        assert [x["status"] for x in states] == ["done"] * 4, [(x["status"], x["error"]) for x in states]
+        assert live["max"] == 2
+    finally:
+        w.request_shutdown()
+        await asyncio.wait_for(task, timeout=2.0)

@@ -11,6 +11,7 @@ import { VOICES, allowedModelGenders, mediaUrl, patchNode, setBoardModelMode, ty
 import { CHARACTER_COUNTRIES, CHARACTER_GENDERS, CHARACTER_VIBES } from "../../constants/character";
 import type { CountryKey, GenderKey, VibeKey } from "../../constants/character";
 import { buildCharacterPrompt } from "../../lib/characterPrompt";
+import { ProductFaceCheck } from "../ProductFaceCheck";
 import { useBoardStore, type FlowNode } from "../../store/board";
 import { useGenerationStore } from "../../store/generation";
 import { MAX_PRODUCT_PHOTOS, useQuicktoolStore } from "../../store/quicktool";
@@ -82,8 +83,11 @@ function FlowCheckNote({ node }: { node: FlowNode }) {
   return null;
 }
 
-export function StepSetup({ roles, sourceMediaId = null, personRequired = false, hands = null, productGender = "" }: {
+export function StepSetup({ roles, sourceMediaId = null, personRequired = false, hands = null, productGender = "", productId = null, productName = "" }: {
   roles: ClipRoles;
+  /** The saved product behind the clip: a clean product-only shot is added to its photos. */
+  productId?: number | null;
+  productName?: string;
   /** Who the clip's product is for; a men's / women's product only gets models of that gender. */
   productGender?: ProductGender;
   sourceMediaId?: string | null;
@@ -295,8 +299,9 @@ export function StepSetup({ roles, sourceMediaId = null, personRequired = false,
         <h3 className="qt-card__title">Ảnh & nội dung sản phẩm</h3>
         <p className="qt-card__hint">
           Ảnh thật của sản phẩm, tối đa {MAX_PRODUCT_PHOTOS} ảnh, mỗi ảnh một góc: mặt trước, mặt sau, cận chất liệu,
-          và nên có <strong>một ảnh người cầm sản phẩm trên tay</strong> để AI hiểu đúng kích thước. Mọi ảnh đều được
-          đưa vào từng cảnh làm tham chiếu.
+          và nên có <strong>một ảnh bàn tay cầm sản phẩm</strong> để AI hiểu đúng kích thước. Mọi ảnh đều được
+          đưa vào từng cảnh làm tham chiếu — <strong>tránh ảnh có mặt người mẫu thật</strong> (ảnh shop): Flow hay chặn video
+          làm từ mặt người thật.
         </p>
         <div className="qt-photos">
           {roles.products.map((p, i) => (
@@ -317,6 +322,7 @@ export function StepSetup({ roles, sourceMediaId = null, personRequired = false,
                   <button type="button" className="qt-link qt-link--danger" onClick={() => void removeProductPhoto(p.id)}>Bỏ ảnh</button>
                 )}
               </div>
+              {hasMedia(p) && <ProductFaceCheck node={p} productId={productId} productName={productName} />}
               {typeof p.data.aiBrief === "string" && p.data.aiBrief && (
                 <div className="qt-photo__brief" title={p.data.aiBrief}>✨ {p.data.aiBrief}</div>
               )}

@@ -212,6 +212,16 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   blackpink" — chắc chắn bị chặn.
   **Omni 4 s bị Flow bỏ** (cùng ảnh/prompt: 4 s bỏ sau 52 s, 8 s ra sau 68 s; mới thử 1 lần) — dùng 8 s. Thăm dò: `GET /api/flow/operations/{op}/lookup`, `/inflight`, `/listing` (`routes/flow_debug.py`).
   Tab Claude in Chrome là profile khác (akiragosho2000); project của extension mở được bằng `flow.google.com/u/5/project/<id>`.
+- **Ảnh sản phẩm lấy từ shop có mặt người mẫu thật → Flow bỏ video** (đo thật 26/10): ảnh shop Đầm Bầu (2 mặt người mẫu Hàn +
+  logo + chữ "OOTD") làm nguyên liệu Omni → lần 1 bị bỏ (42 s), lần 2 cùng ảnh/prompt lại ra (33 s) — chặn **không đều**. Ảnh mẹ bầu AI
+  vẽ (có mặt) ra ngay 33 s. Tệ hơn: ảnh sản phẩm là tham chiếu của **mọi ảnh cảnh**, mặt người mẫu shop lọt vào cảnh → video cảnh nào
+  cũng dễ bị bỏ (rid 211 lúc 16:07 chờ hết 5 phút rồi thử lại). Cách xử lý: Bước 1 cảnh báo + "✨ Tạo ảnh chỉ có sản phẩm" (xem Chỗ
+  cần biết). Preset người mẫu cũ ghi thẳng "K-pop idol styling" / "flawless porcelain" — kéo mặt về kiểu idol; đã bỏ.
+- **Sửa file backend trong lúc có job Flow chạy = mất job** (26/10): agent chạy `--reload` → khởi động lại → job đang chạy thành
+  `agent_restart_lost`. Kiểm `/api/history?status=queued,running` trống rồi mới sửa file trong `agent/`.
+- **Nhịp poll video Flow (đo 26/10)**: clip Flow giữ thì có trong danh sách project ngay vòng poll đầu (~10 s), có link video sau ~33 s.
+  Bị bỏ có 2 kiểu: (a) vào danh sách rồi media thành NOT_FOUND → `DROP_DETECT_ROUNDS` bắt sau ~40 s; (b) **không bao giờ vào danh
+  sách** → trước đây chờ đủ 5 phút, giờ `NOT_LISTED_DROP_S` (90 s, ≥ 2 lần tra danh sách rỗng) báo `FLOW_DROPPED_JOB` → worker thử lại ngay.
 - `Product.media_ids` là media id của **Flow**, thuộc project lúc upload; ảnh gốc nằm trong `storage/media` (đổi project thì `media_project_sync` upload lại).
 
 ## Chỗ cần biết trong code
@@ -795,6 +805,28 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   13 s → bình luận đầu đúng mẫu + link, bài không chứa link và có câu "link ở bình luận". Chưa có: trang riêng "Shop hợp tác" (mới là
   gợi ý + lọc), chưa đếm bài đã đăng theo shop.
 
+- **Flow nhanh hơn + ít bị bỏ lượt** (26/10 tối, máy cty — chưa commit để dễ revert):
+  - **Ảnh sản phẩm có mặt người thật**: `services/face_check.py` (OpenCV YuNet `assets/face_detection_yunet_2023mar.onnx`, 230 KB,
+    ~20 ms/ảnh, bỏ mặt < 4 % cạnh ngắn) → `GET /api/media/{id}/faces {faces}`. Bước 1 dưới mỗi ảnh sản phẩm: `quicktool/ProductFaceCheck.tsx`
+    hiện hộp cam "⚠ Ảnh có N gương mặt người thật" + "✨ Tạo ảnh chỉ có sản phẩm" (`cleanShotPrompt(name)` → `generateStandaloneImage(…,
+    SQUARE, [ảnh shop])`, ~25 s, 1 lượt ảnh) → thay `mediaId` của node, lưu `prevMediaId` (whitelist `store/board.ts`) để "↺ Dùng lại ảnh gốc",
+    và đưa ảnh sạch lên **đầu `Product.media_ids`** (clip sau dùng luôn). Gợi ý Bước 1 đổi "ảnh người cầm" → "ảnh bàn tay cầm, tránh mặt
+    người mẫu thật". Thử thật Đầm Bầu: ảnh sạch đúng đầm, 0 mặt.
+  - **Preset người mẫu** (`constants/character.ts`, `lib/characterPrompt.ts`): bỏ "K-pop idol styling", "flawless porcelain", "ethereal";
+    mỗi lần tạo thêm câu "ordinary, non-famous everyday person with their own distinctive face (2 nét riêng ngẫu nhiên từ `OWN_TRAITS`:
+    nốt ruồi, tàn nhang, lúm đồng tiền…), natural skin texture, not resembling any celebrity, idol…". Người mẫu thử qua kiểm tra Flow.
+  - **Kịch bản** (`script_tailor._SYSTEM`): cảnh có người mẫu → sản phẩm + bàn tay dẫn khung, góc nghiêng / ¾, không cận mặt, cấm chữ
+    celebrity/idol/K-pop/flawless; mỗi nhịp một động tác đơn giản.
+  - **Phát hiện bỏ lượt sớm**: `flow_sdk.NOT_LISTED_DROP_S` (xem Bẫy "Nhịp poll"). Test `test_flow_sdk.py` (+2).
+  - **Ảnh chạy song song 2 cái** (`worker/processor.py` `IMAGE_PARALLEL_TYPES`, `FLOWBOARD_IMAGE_PARALLEL`, cách nhau `IMAGE_START_GAP_S` 1 s,
+    hàng riêng với video). Test `test_worker_runs_two_scene_images_side_by_side`.
+  - **Tạo video tự động** (`store/quicktool.ts runAuto`): kiểm tra người mẫu chạy **song song** với vẽ cảnh (chờ kết luận trước video đầu),
+    ảnh cảnh nào xong thì gửi video cảnh đó luôn. Ước tính phút trong hộp xác nhận tính theo song song.
+  - Đo thật cả lượt (clip #19 "Đầm Bầu — thử tốc độ Flow", fashion_ad, ảnh sạch): người mẫu 26 s → kiểm tra Flow 60 s chạy cùng 4 ảnh
+    (xong trong 58 s, 2 cái/lượt) → 4 video 47/52/94/116 s (1 cái bị bỏ, bắt sau ~70 s, thử lại ra) → ghép 62 s: **~4,5 phút từ lúc bấm**
+    (hộp xác nhận cũ ước 12 phút). Tốn ~60 credit. Clip #19 để lại làm mẫu — xoá được.
+  - Log httpx in nguyên `access_token` Facebook trong URL → `facebook_publish._RedactToken` che thành `***` (log cũ trong scratchpad còn token).
+
 - **Đăng xuất Flow phải bấm 2 lần** (21/10, `SettingsPanel.tsx`): lần đầu nút đổi thành "Bấm lần nữa để đăng xuất…" + "Huỷ",
   tự quay lại sau 5 s / khi đóng hộp; xong có toast (`AccountPanel.handleLogout`). Nút chỉ có ở hộp Cài đặt mở từ ⚙ cạnh tài khoản.
 
@@ -914,3 +946,4 @@ của người dùng (console.neon.tech, secure.backblaze.com).
 - **26/10 tối** — Sidebar hết thanh cuộn: mục menu thấp hơn (padding 5px, icon 26px), nhóm sát hơn, logo / credit / tài khoản gọn lại; màn thấp ≤ 900 px và ≤ 760 px thu nhỏ thêm; `.qt-nav` ẩn thanh cuộn (`scrollbar-width: none`, vẫn cuộn được bằng chuột nếu cửa sổ quá thấp). Khối CSS cuối `quicktool.css`. Đo Playwright: vừa khít ở cao 1000 / 900 / 800 / 720 px.
 - **26/10** — Sửa bug clip tạo từ 🎁 Gói (hoặc phía agent) không mở được từ "Clip của tôi" (giật rồi về thư viện): tải lại danh sách clip một lần và chờ xong mới kết luận link cũ. `QuicktoolApp.tsx`, `store/board.ts refreshBoards`. Playwright: tạo clip qua API → sang Bài viết → về Clip của tôi → bấm → vào Bước 1. Board thử #16–18 đã xoá. `tsc` sạch.
 - **26/10 tối** — Tìm hiểu nguồn video thay Flow (không code): Seedance 1.5 Pro 480p ~$0,012/s (rẻ nhất, mờ), Hailuo 02 6 s 768p ~$0,28, Kling 2.5 Turbo ~$0,07/s (qua fal.ai, một key), Seedance 2.0 chặn hẳn mặt người thật, bản free (Kling/Dreamina/PixVerse) không có API + watermark, muse2api (đã có `services/muse2api.py`) là v0.1 chưa thử với tài khoản thật + lái web bằng cookie. Flow Omni 8 s ≈ $0,24 vẫn rẻ. **Người dùng chọn giữ Flow** (chưa muốn tốn tiền) → làm prompt Flow thông minh + nhanh hơn. Nếu sau này cần: thêm "Nguồn tạo video" fal.ai làm dự phòng khi Flow bỏ lượt.
+- **26/10 tối** — Flow nhanh hơn / ít bị bỏ lượt (người dùng chọn giữ Flow, không tốn tiền): đo nhịp poll thật (clip giữ: vào danh sách ~10 s, xong ~33 s), phát hiện lượt "không vào danh sách" sau 90 s thay vì 5 phút, ảnh cảnh chạy 2 cái một lúc, tạo tự động chạy kiểm tra người mẫu song song + video theo từng ảnh xong; tìm ra ảnh shop có mặt người mẫu thật làm Flow bỏ video → cảnh báo + "✨ Tạo ảnh chỉ có sản phẩm" ở Bước 1 (`face_check.py`, `ProductFaceCheck.tsx`); preset người mẫu bỏ chữ "idol/flawless", thêm nét riêng; kịch bản tránh cận mặt; che token FB trong log. Thử thật cả lượt: ~4,5 phút cho clip 4 cảnh (clip #19). Đã push code trước đó (`045741e`); **phần này chưa commit** (theo yêu cầu, để revert được).

@@ -42,10 +42,10 @@ export const CHARACTER_VIBES = [
     key: "douyin",
     label: "Douyin",
     tokens: [
-      "Douyin makeup styling, porcelain-smooth flawless complexion, glossy ethereal skin with subtle pearl glow",
+      "Douyin-trend makeup styling, smooth luminous complexion with subtle pearl glow and natural skin texture",
       "shimmery glittery eyeshadow with light-catching pearl highlights, defined aegyo sal under-eye accent, individual cluster false lashes",
       "blurred-edge gradient lip in soft berry or muted red tone with diffused outline, delicate styled hair with face-framing strands, refined feminine outfit",
-      "soft alluring expression with a composed sultry gaze, soft beauty lighting with subtle ethereal glow, clean pale studio backdrop, dreamy atmosphere",
+      "soft alluring expression with a composed sultry gaze, soft beauty lighting, clean pale studio backdrop, gentle dreamy atmosphere",
     ],
   },
   {
@@ -72,7 +72,7 @@ export const CHARACTER_VIBES = [
     key: "kpop",
     label: "K-Pop",
     tokens: [
-      "K-pop idol styling, glossy plump lips, soft sculpted contour, glittery inner-corner highlight, dewy skin",
+      "Seoul street-style makeup, glossy plump lips, soft sculpted contour, glittery inner-corner highlight, dewy skin",
       "glossy hair with face-framing layers, trendy stylish outfit, delicate accessories",
       "soft confident expression, gentle closed-lip smile",
       "soft beauty lighting, clean studio glow, smooth pastel backdrop",

@@ -569,35 +569,47 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
       }
       if (!stillRunning(get)) return;
 
-      // Flow drops every clip of a face it reads as a real / famous person
-      // (6 minutes each, for nothing). Check the model once, before spending
-      // the run on scenes and clips.
-      if (!get().isDrama()) {
-        const model = get().roles().model;
-        if (model && hasMedia(model) && knownFlowCheck(model)?.status !== "ok") {
-          set({ autoMessage: "Kiểm tra người mẫu với Flow (1–3 phút, ~12 credit nếu qua)…" });
-          const verdict = await checkModelNode(model);
+      // Flow drops every clip of a face it reads as a real / famous person.
+      // The check (~1 min) and the scene stills don't depend on each other, so
+      // they run side by side; the verdict is settled before any clip is sent.
+      const drama = get().isDrama();
+      let check: Promise<void> = Promise.resolve();
+      const model = get().roles().model;
+      if (!drama && model && hasMedia(model) && knownFlowCheck(model)?.status !== "ok") {
+        check = checkModelNode(model).then((verdict) => {
           if (verdict.status === "blocked") {
             throw new Error("Flow chặn video có gương mặt người mẫu này — ở Bước 1 bấm \"Tạo lại người mẫu\" hoặc chọn mẫu khác rồi chạy lại.");
           }
-          if (!stillRunning(get)) return;
-        }
+        });
+        check.catch(() => undefined); // awaited below; no unhandled rejection meanwhile
       }
 
-      set({ auto: "scenes", autoMessage: "Tạo ảnh các cảnh…" });
+      set({ auto: "scenes", autoMessage: model && !drama && knownFlowCheck(model)?.status !== "ok"
+        ? "Tạo ảnh các cảnh + kiểm tra người mẫu với Flow…" : "Tạo ảnh các cảnh…" });
       await get().generateAllScenes();
-      for (const s of get().roles().scenes) await waitForNode(s.image.id, hasMedia);
-      if (!stillRunning(get)) return;
-
-      // Drama clips have no videos to render: the export animates the stills.
-      if (!get().isDrama()) {
-        set({ auto: "videos", autoMessage: "Tạo video từng cảnh (1–3 phút mỗi clip)…" });
-        await get().generateAllVideos();
+      if (drama) {
+        // Drama clips have no videos to render: the export animates the stills.
+        for (const s of get().roles().scenes) await waitForNode(s.image.id, hasMedia);
+      } else {
+        // Each clip starts as soon as its own still is ready — it used to wait
+        // for every still first, so clip 1 idled while stills 2–4 were drawn.
+        let first = true;
+        for (const s0 of get().roles().scenes) {
+          await waitForNode(s0.image.id, hasMedia);
+          if (!stillRunning(get)) return;
+          if (first) {
+            await check;
+            first = false;
+            set({ auto: "videos", autoMessage: "Tạo video từng cảnh — cảnh nào có ảnh là làm video ngay (~1 phút mỗi clip)…" });
+          }
+          const s = get().roles().scenes.find((x) => x.index === s0.index);
+          if (s?.video && hasMedia(s.image) && !hasMedia(s.video) && !isBusy(s.video)) await get().generateVideo(s.index);
+        }
         for (const s of get().roles().scenes) {
           if (s.video) await waitForNode(s.video.id, hasMedia);
         }
-        if (!stillRunning(get)) return;
       }
+      if (!stillRunning(get)) return;
 
       const missing = !get().isDrama()
         && get().roles().scenes.some((s) => s.video && !(typeof s.video.data.narration === "string" && s.video.data.narration.trim()));

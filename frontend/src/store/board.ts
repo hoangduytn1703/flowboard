@@ -115,6 +115,8 @@ export interface FlowboardNodeData extends Record<string, unknown> {
   /** Image/video node: the prompt before the last "Tạo lại theo yêu cầu" and that request. */
   prevPrompt?: string;
   lastRequest?: string;
+  /** Product photo replaced by a clean product-only shot: the shop photo, to put back. */
+  prevMediaId?: string;
   /** Character node: verdict of "Kiểm tra với Flow" (flowModelCheck.ts). */
   flowCheck?: { status: "ok" | "blocked" | "running"; at: number; requestId?: number; mediaId?: string };
   /** Export node (step 5): clip order / clips left out (video node ids), cuts (seconds) and text overlays. */
@@ -388,6 +390,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           speakers: n.data["speakers"] as Record<string, string> | undefined,
           prevPrompt: n.data["prevPrompt"] as string | undefined,
           lastRequest: n.data["lastRequest"] as string | undefined,
+          prevMediaId: n.data["prevMediaId"] as string | undefined,
           flowCheck: n.data["flowCheck"] as FlowboardNodeData["flowCheck"],
           clipOrder: n.data["clipOrder"] as string[] | undefined,
           clipSkip: n.data["clipSkip"] as string[] | undefined,
@@ -477,6 +480,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           speakers: n.data["speakers"] as Record<string, string> | undefined,
           prevPrompt: n.data["prevPrompt"] as string | undefined,
           lastRequest: n.data["lastRequest"] as string | undefined,
+          prevMediaId: n.data["prevMediaId"] as string | undefined,
           flowCheck: n.data["flowCheck"] as FlowboardNodeData["flowCheck"],
           clipOrder: n.data["clipOrder"] as string[] | undefined,
           clipSkip: n.data["clipSkip"] as string[] | undefined,
@@ -608,6 +612,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           speakers: n.data["speakers"] as Record<string, string> | undefined,
           prevPrompt: n.data["prevPrompt"] as string | undefined,
           lastRequest: n.data["lastRequest"] as string | undefined,
+          prevMediaId: n.data["prevMediaId"] as string | undefined,
           flowCheck: n.data["flowCheck"] as FlowboardNodeData["flowCheck"],
           clipOrder: n.data["clipOrder"] as string[] | undefined,
           clipSkip: n.data["clipSkip"] as string[] | undefined,

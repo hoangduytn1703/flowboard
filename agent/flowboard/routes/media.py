@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from flowboard.services import media as media_service
-from flowboard.services import watermark
+from flowboard.services import face_check, watermark
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +71,22 @@ def set_clean_marks(body: CleanMarksBody) -> dict:
 async def run_clean_marks() -> dict:
     """Strip the sparkle from every cached generated image that still carries it."""
     return await asyncio.to_thread(watermark.clean_cached_images)
+
+
+@api_router.get("/{media_id}/faces")
+async def get_media_faces(media_id: str) -> dict:
+    """How many faces an image shows — a shop photo with a real model makes
+    Flow drop the clips (see services/face_check)."""
+    media_id = media_service.normalize_media_id(media_id)
+    if not media_service.is_valid_media_id(media_id):
+        raise HTTPException(status_code=400, detail="invalid media_id")
+    path = media_service.cached_path(media_id)
+    if path is None:
+        fetched = await media_service.fetch_and_cache(media_id)
+        path = fetched[2] if fetched else None
+    if path is None:
+        return {"faces": None}
+    return {"faces": await asyncio.to_thread(face_check.count_faces, path)}
 
 
 @api_router.get("/{media_id}/status")
