@@ -85,11 +85,26 @@ export interface SavedPost {
   clip_video?: string;
   image_prompts: string[];
   brief: PostBrief;
+  /** its place on "Lịch đăng": the next planned slot, else when it went out, else the last failed try */
+  schedule?: PostSchedule | null;
   created_at: string | null;
   updated_at: string | null;
 }
 
-export type SavedPostInput = Partial<Omit<SavedPost, "id" | "created_at" | "updated_at">>;
+export interface PostSchedule {
+  slot_id: number;
+  /** "due" = planned and the time has passed */
+  status: "planned" | "due" | "posted" | "failed";
+  /** UTC ISO: the planned time, or when it went out */
+  at: string;
+  auto: boolean;
+  /** the live post (posted through the Page) */
+  link: string;
+  /** how many planned slots it has */
+  planned: number;
+}
+
+export type SavedPostInput = Partial<Omit<SavedPost, "id" | "created_at" | "updated_at" | "schedule" | "clip_video">>;
 
 let optionsCache: Promise<PostOptions> | null = null;
 

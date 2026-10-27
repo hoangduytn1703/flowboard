@@ -33,6 +33,10 @@ POST_TYPES: dict[str, tuple[str, str]] = {
     "minigame": ("Minigame / giveaway", "a simple engagement game (comment to guess, tag a friend, vote with emoji) tied to the product; rules short and clear; never promise prizes the seller did not state"),
     "serial": ("Câu chuyện nhiều kỳ (tập tiếp theo)", "one episode of an ongoing story told in first person across several posts: pick up exactly where the previous episode stopped, move the story forward with one new development, and end on a hook that makes readers want the next episode"),
 }
+#: Kept for briefs saved before a series became its own yes/no (any kind can be a series); not offered in the form.
+LEGACY_KINDS = frozenset({"serial"})
+#: kinds whose episodes carry one plot forward; the others continue a theme (next tips, next comparison…)
+NARRATIVE_KINDS = frozenset({"serial", "story"})
 #: how many earlier episodes the writer gets to read (full text)
 SERIES_CONTEXT_EPISODES = 3
 TONES: dict[str, str] = {
@@ -152,25 +156,33 @@ def _clip_block(clip: Optional[dict]) -> str:
     return "\n".join(lines)
 
 
-def _series_block(series: Optional[dict]) -> str:
+def _series_block(series: Optional[dict], kind: Optional[str] = None) -> str:
     """``series = {name, episode, previous: [{episode, title, body}]}`` — the
-    story so far, so the new post continues it instead of restarting."""
+    story so far, so the new post continues it instead of restarting.
+    ``kind`` is the post type every episode is written as: a story moves one
+    plot forward; tips, reviews, comparisons… continue the series' theme."""
     if not series or not series.get("name"):
         return ""
     n = int(series.get("episode") or 1)
     prev = list(series.get("previous") or [])
-    lines = [f"STORY SERIES: \"{series['name']}\" — you are writing EPISODE {n}."]
+    narrative = not kind or kind in NARRATIVE_KINDS
+    lines = [f"STORY SERIES (Câu chuyện nhiều kỳ): \"{series['name']}\" — you are writing EPISODE {n}."]
+    if not narrative and kind in POST_TYPES:
+        lines.append(f"Every episode is a '{POST_TYPES[kind][0]}' post: write this episode in that POST TYPE. The series is the "
+                     "thread linking the episodes (same narrator, the same people and situation, the same voice), never a reason "
+                     "to drop the post type.")
+    new_part = "one new development" if narrative else "new content (the next tips / points / options — never ones an earlier episode gave)"
     if not prev:
-        lines.append("This is the first episode: set the scene and the people, give it a reason to follow, end on a hook. "
-                     "Open with 'Tập 1' or an equivalent marker.")
+        lines.append("This is the first episode: " + ("set the scene and the people" if narrative else "set up who is talking and what the series is about")
+                     + ", give it a reason to follow, end on a hook for the next episode. Open with 'Tập 1' or an equivalent marker.")
     else:
-        lines.append("Earlier episodes (oldest first; the last one is where the story currently stands):")
+        lines.append("Earlier episodes (oldest first; the last one is where the series currently stands):")
         for p in prev[-SERIES_CONTEXT_EPISODES:]:
             body = re.sub(r"\s+", " ", str(p.get("body") or "")).strip()[:900]
             lines.append(f"- Tập {p.get('episode')}: {body}")
         lines.append(f"Rules for episode {n}: start with a one-line recap for new readers (\"Tiếp tục câu chuyện lần trước…\" / "
                      "\"Tập trước mình kể…\"), keep names, facts and tone consistent with the earlier episodes, do NOT repeat "
-                     f"them, add one new development, end on a hook for episode {n + 1}. Mark it 'Tập {n}'.")
+                     f"them, add {new_part}, end on a hook for episode {n + 1}. Mark it 'Tập {n}'.")
     return "\n".join(lines)
 
 
@@ -275,7 +287,7 @@ async def write_post(brief: dict, *, product: Optional[dict] = None, clip: Optio
         brief = {**brief, "kind": "serial"}
     platform = brief.get("platform") or primary_platform(channel)
     parts = [_brief_block(brief, platform)]
-    if (sb := _series_block(series)):
+    if (sb := _series_block(series, brief.get("kind"))):
         parts.append(sb)
     if (chb := channel_block(channel)):
         parts.append(chb)

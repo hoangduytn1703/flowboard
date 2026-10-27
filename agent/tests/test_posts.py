@@ -226,3 +226,25 @@ def test_series_list_is_per_channel_and_never_merges_two_pages(client):
         ("Hệ mặt trời", b, 1), ("Nhật ký", a, 2), ("Nhật ký", b, 1)]
     only_a = client.get(f"/api/posts/series?channel_id={a}").json()
     assert [(r["name"], r["episodes"]) for r in only_a] == [("Nhật ký", 2)]
+
+
+def test_any_kind_of_post_can_run_as_a_series(client, monkeypatch):
+    """"Câu chuyện nhiều kỳ" is its own yes/no: a tips series stays tips, episode after episode."""
+    seen = []
+
+    async def fake_llm(feature, prompt, *, system_prompt=None, timeout=0):
+        seen.append(prompt)
+        return _answer(body=f"Mẹo tập {len(seen)}")
+
+    monkeypatch.setattr(post_writer, "run_llm", fake_llm)
+    kinds = [k["key"] for k in client.get("/api/posts/options").json()["kinds"]]
+    assert "serial" not in kinds and {"tips", "story", "review"} <= set(kinds)
+    ch = client.post("/api/channels", json={"name": "Page", "platforms": ["facebook"]}).json()["id"]
+    r = client.post("/api/posts/write-batch", json={"brief": {"kind": "tips"}, "n": 2, "channel_id": ch, "series": "Mẹo thai kỳ"}).json()
+    assert [(p["kind"], p["series"], p["episode"]) for p in r["posts"]] == [("tips", "Mẹo thai kỳ", 1), ("tips", "Mẹo thai kỳ", 2)]
+    assert all("POST TYPE: Mẹo / hướng dẫn" in p and "Every episode is a 'Mẹo / hướng dẫn' post" in p for p in seen)
+    assert "Mẹo tập 1" in seen[1] and "never ones an earlier episode gave" in seen[1]
+    # a story series keeps the plot rules, no "every episode is a … post" line
+    seen.clear()
+    client.post("/api/posts/write", json={"brief": {"kind": "story"}, "series": "Chuyện nhà", "channel_id": ch})
+    assert "one new development" not in seen[0] and "set the scene and the people" in seen[0] and "Every episode is" not in seen[0]

@@ -322,3 +322,30 @@
 .qt-series__loose small { font-weight: 400; color: var(--muted); }
 .qt-posts__ep { left: 6px; right: auto !important; background: rgba(124, 92, 255, 0.85) !important; font-weight: 700; }
 .qt-posts__seriesnext { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+
+/* "Câu chuyện nhiều kỳ": its own yes / no under "Kiểu bài" (any kind can run as a series) */
+.qt-posts__yesno { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.qt-posts__yesno label {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px; font-size: 14px; color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; background: var(--panel-high); cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.qt-posts__yesno label:hover { border-color: rgba(255, 106, 43, 0.6); }
+.qt-posts__yesno label.is-on { border-color: var(--qt-accent); background: rgba(255, 106, 43, 0.1); font-weight: 600; }
+.qt-posts__yesno input { flex: none; width: auto; height: auto; margin: 0; padding: 0; accent-color: var(--qt-accent); }
+@media (max-width: 600px) { .qt-posts__yesno { grid-template-columns: 1fr; } }
+.qt-posts__seriesbox { padding: 10px; border: 1px solid rgba(196, 181, 253, 0.35); border-radius: 8px; background: rgba(196, 181, 253, 0.05); }
+
+/* Calendar label of a saved post (scheduled / due / posted / failed): top right of its card, in its list row, next to the open post's status */
+.qt-posts__card { position: relative; }
+.qt-posts__sched {
+  display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; font-size: 12px; font-weight: 700; line-height: 1.4;
+  white-space: nowrap; border-radius: 999px; border: 1px solid transparent; cursor: pointer;
+}
+.qt-posts__sched--corner { position: absolute; top: 8px; right: 8px; z-index: 2; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45); }
+.qt-posts__sched--planned { color: #fff; background: rgba(37, 99, 235, 0.92); border-color: #60a5fa; }
+.qt-posts__sched--due { color: #1a1200; background: #fbbf24; border-color: #fcd34d; }
+.qt-posts__sched--posted { color: #052e16; background: #4ade80; border-color: #86efac; }
+.qt-posts__sched--failed { color: #fff; background: rgba(220, 38, 38, 0.92); border-color: #f87171; }
+.qt-posts__sched:hover { filter: brightness(1.1); }
+.qt-posts__saved .qt-posts__sched { flex: none; }

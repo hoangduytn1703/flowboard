@@ -280,3 +280,34 @@ def test_a_post_written_for_a_clip_goes_out_with_the_clip_video(client, graph, m
     out = client.post(f"/api/schedule/{slot['id']}/publish").json()
     assert out["status"] == "posted" and sent["video"] == clip and sent["photos"] == [] and sent["first_comment"] == "link"
     assert client.get("/api/posts").json()[0]["clip_video"] == "clipmedia"
+
+
+def test_saved_posts_say_where_they_stand_on_the_calendar(client):
+    """"Bài đã lưu" shows a label for posts already scheduled / posted, so nobody schedules them twice."""
+    ch = _channel(client)
+    planned, due, posted, skipped, loose = (_post(client, ch["id"], body=f"Bài {i}") for i in range(5))
+    soon = datetime.now(timezone.utc) + timedelta(days=1)
+
+    def slot(post, at=soon, **over):
+        return client.post("/api/schedule", json={"kind": "post", "post_id": post["id"], "at": _iso(at), **over}).json()
+
+    later = slot(planned, soon + timedelta(days=2))
+    first = slot(planned)  # two slots: the next one is shown
+    _backdate(slot(due)["id"], timedelta(minutes=10))
+    client.patch(f"/api/schedule/{slot(posted)['id']}", json={"status": "posted"})
+    client.patch(f"/api/schedule/{slot(skipped)['id']}", json={"status": "skipped"})
+    rows = {p["id"]: p["schedule"] for p in client.get("/api/posts").json()}
+    assert rows[planned["id"]]["status"] == "planned" and rows[planned["id"]]["slot_id"] == first["id"]
+    assert rows[planned["id"]]["planned"] == 2 and rows[planned["id"]]["at"].endswith("Z") and later["id"] != first["id"]
+    assert rows[due["id"]]["status"] == "due"
+    assert rows[posted["id"]]["status"] == "posted"
+    assert rows[skipped["id"]] is None and rows[loose["id"]] is None
+    # one post, read alone, carries it too
+    assert client.patch(f"/api/posts/{planned['id']}", json={"title": "Đổi tên"}).json()["schedule"]["slot_id"] == first["id"]
+    # a clip slot counts for the clip's newest post (the caption it goes out with)
+    board = client.post("/api/boards/from-template", json={"template_id": "fast_food_ad", "channel_id": ch["id"]}).json()
+    old = client.post("/api/posts", json={"body": "Caption cũ", "board_id": board["id"], "channel_id": ch["id"]}).json()
+    new = client.post("/api/posts", json={"body": "Caption mới", "board_id": board["id"], "channel_id": ch["id"]}).json()
+    client.post("/api/schedule", json={"kind": "clip", "board_id": board["id"], "at": _iso(soon)})
+    rows = {p["id"]: p["schedule"] for p in client.get("/api/posts").json()}
+    assert rows[new["id"]]["status"] == "planned" and rows[old["id"]] is None

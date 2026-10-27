@@ -630,7 +630,7 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   (bắt buộc), sản phẩm, kiểu bài, kiểu clip, mong muốn → "✍️ Viết bài theo mẫu" (mở bài) / "🎬 Tạo clip theo mẫu" (mở Bước 2). Menu
   "🔥 Mẫu đang hot". Test `test_swipes.py` (5). Thử thật: bài chữ 20 s phân tích đúng (ngược số đông, 6 bước), viết bài theo mẫu 15 s
   cho Đầm bầu + bình luận đầu kèm link; **chưa thử link video thật và link Facebook thật** (cần Chrome đăng nhập FB).
-- **Loạt truyện (series) dễ dùng hơn** (26/10 tối): kiểu bài "nhiều kỳ" có ô **chọn loạt** (các loạt đã có · số tập, hoặc "＋ Loạt
+- **Loạt truyện (series) dễ dùng hơn** (26/10 tối; từ 27/10 là ô Có/Không riêng, xem mục "Câu chuyện nhiều kỳ là lựa chọn riêng"): có ô **chọn loạt** (các loạt đã có · số tập, hoặc "＋ Loạt
   truyện mới…" → ô tên); chọn loạt có sẵn hiện "Đã có N tập" + nút **"⚡ Viết nhanh Tập N+1"**. `writeNext(name)` (PostsPage): lấy kênh,
   sản phẩm và `brief` của **tập cuối** (kind serial) → `POST /api/posts/write-batch` với `n: 1` (giờ `ge=1`) → AI đọc các tập trước, tập
   mới **được lưu ngay** rồi mở; nếu brief có ảnh/video thì tự tạo luôn (ảnh tự lưu vào bài qua `changeImages`). **"Bài đã lưu" gom theo
@@ -857,7 +857,7 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   đã chạy trên Neon). `POST /api/posts/write {series}` → `_series_context` gom các tập trước (cùng kênh hoặc không kênh, theo
   episode) → `post_writer._series_block`: tập 1 thì dựng bối cảnh + móc tập sau, tập n thì đọc ≤ `SERIES_CONTEXT_EPISODES` (3) tập
   gần nhất (≤ 900 ký tự/tập), mở bằng câu tóm "Tiếp tục câu chuyện lần trước…", thêm một diễn biến mới, kết móc tập n+1, ghi
-  "Tập n"; kiểu bài mới `serial` ("Câu chuyện nhiều kỳ (tập tiếp theo)", tự chọn khi có series). Trả về `series`, `episode` để
+  "Tập n"; kiểu bài `serial` (27/10: chỉ còn cho brief cũ, không hiện trong form — series là ô Có/Không riêng). Trả về `series`, `episode` để
   lưu. `GET /api/posts/series[?channel_id=]` liệt kê chuỗi (số tập, tập mới nhất). UI: ô "Câu chuyện nhiều kỳ" (datalist các chuỗi
   đã có) ở trang Bài viết và Bước 5; "Bài đã lưu" hiện "<chuỗi> · Tập n". Test `test_series_episodes_feed_the_next_one`.
 
@@ -978,6 +978,20 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   "kèm **video của clip**" hoặc cảnh báo clip chưa ghép + khoá "🚀 Đăng ngay". **Bước 5 có nút "🚀 Đăng ngay (kèm video)"** trong mục Bài đăng
   Facebook (`ClipPost.publishNow`: lưu bài → lịch `post` lúc này → `publishSlot`; chỉ hiện khi kênh đã kết nối Page). Test
   `test_a_post_written_for_a_clip_goes_out_with_the_clip_video`.
+- **Câu chuyện nhiều kỳ là lựa chọn riêng + nhãn lịch trên Bài đã lưu** (27/10, `PostsPage.tsx`, `posts.css`, `routes/posts.py`, `post_writer.py`):
+  - Form Bài viết: dưới "Kiểu bài" có ô **"Câu chuyện nhiều kỳ"** = 2 radio Không — bài lẻ / Có — một tập của loạt (state `seriesOn`, `.qt-posts__yesno`);
+    Có → hiện ô chọn loạt (`.qt-posts__seriesbox`). **Kiểu bài nào cũng chạy thành loạt được** (Mẹo, Review…): `GET /api/posts/options` bỏ
+    `serial` (`post_writer.LEGACY_KINDS`), `write-batch` không ép kind `serial` nữa (chỉ khi kind trống), `_series_block(series, kind)`:
+    kind kể chuyện (`NARRATIVE_KINDS` story/serial) → "một diễn biến mới"; kind khác → dòng "Every episode is a '<kiểu>' post" + "nội dung mới, không lặp
+    mẹo/ý của tập trước". Brief cũ `kind: "serial"` mở ra thành "Kể chuyện" (`normKind`); Bước 5 (`ClipPost`) cũng không tự đổi kind sang serial.
+    Có mà chưa chọn / đặt tên loạt → nút viết khoá + dòng nhắc. Ô chọn loạt gộp tập cùng tên có kênh + chưa gắn kênh thành một (backend vốn đọc cả hai;
+    trước đó hiện 2 dòng trùng key React).
+  - **Nhãn lịch**: `GET /api/posts` (và mỗi `_row`) trả `schedule` = `posts._post_schedules` (2 truy vấn cho cả danh sách): lịch `planned` sớm nhất
+    (`due` khi đã quá giờ), không có thì lần `posted` mới nhất, không có thì `failed` mới nhất; `skipped` bỏ qua; lịch loại `clip` tính cho **bài mới nhất
+    của clip** (caption clip đăng kèm). Field `{slot_id, status, at, auto, link, planned}`. UI `ScheduleBadge`: góc trên phải thẻ lưới (`--corner`),
+    trong dòng chế độ danh sách, và cạnh "✓ Đã lưu" của bài đang mở; xanh dương "📅 T4 29/10 · 20:00 ⚡" (⚡ = tự đăng), vàng "⏰ Đến giờ đăng", xanh lá
+    "✓ Đã đăng 26/10", đỏ "⚠ Đăng lỗi"; bấm → `/schedule`. Danh sách tải lại sau khi lên lịch / xếp lịch cả loạt / Đăng ngay. Test
+    `test_saved_posts_say_where_they_stand_on_the_calendar`, `test_any_kind_of_post_can_run_as_a_series`.
 - **Đăng xuất Flow phải bấm 2 lần** (21/10, `SettingsPanel.tsx`): lần đầu nút đổi thành "Bấm lần nữa để đăng xuất…" + "Huỷ",
   tự quay lại sau 5 s / khi đóng hộp; xong có toast (`AccountPanel.handleLogout`). Nút chỉ có ở hộp Cài đặt mở từ ⚙ cạnh tài khoản.
 
@@ -1117,3 +1131,4 @@ của người dùng (console.neon.tech, secure.backblaze.com).
 - **26/10** — Khung/nhân vật lồng tiếng: thêm **chat với AI** (chỉ làm khung + nhân vật, hiểu mẫu đã lưu; vẽ nền khung và nhân vật bằng Flow, tự tách nền nhân vật), **khung nền ảnh** (AI vẽ hoặc tải lên), **★ Mẫu đã lưu** (lưu / dùng lại / xoá, đồng bộ Neon). `decor_ai.py`, `dub_decor.py` (`cutout`, `local_media`, nền ảnh), bảng `DecorPreset`, `routes/dub.py` (`/decor/*`), `DecorControls.tsx`, `DubSubtitles.tsx`, `render.mjs`. Test decor 10 + dub pass, `tsc` sạch; thử thật với AI + Flow trên trang chỉnh video của người dùng (chỉ xem, không Áp dụng): 44 s, ~2 ảnh Flow. Agent `start81`. Chưa commit.
 - **26/10** — Lồng tiếng: thay khung chỉnh cuộn dài bằng **trình chỉnh sửa kiểu CapCut** một màn hình (video ở giữa phát kèm giọng Việt, sửa / kéo phụ đề ngay trên hình, bảng thuộc tính 5 tab, **timeline** `@xzdarcy/react-timeline-editor` với dải hình, khối từng câu kéo / kéo mép, sóng âm giọng, lớp làm mờ / khung / nhân vật; hoàn tác, phím tắt). Backend nhận mốc giờ mới từng câu (`apply_timings`, `voice_key` có mốc giờ) + routes voice/bgm/filmstrip/wave. `dub/editor/*`, `DubPage.tsx`, `dub.py`, `routes/dub.py`; bỏ `SubPositioner.tsx`. Test 978 pass (+1 lỗi 0600 có sẵn), `tsc` sạch. Thử thật Playwright (Chrome): video ngang 10:37 của người dùng — phát 2 s giọng lệch < 0,05 s, chọn câu, sửa trên hình, rút mép câu, kéo phụ đề, hoàn tác về đúng như cũ (**không xuất**); clip mẫu "Remotion test" — sửa chữ + rút câu 2 + chuyển phụ đề lên giữa → xuất 64 s, job lưu đúng chữ / mốc giờ / vị trí, sóng âm vẽ lại. Agent `start83`. Chưa commit.
 - **27/10** — Trình chỉnh sửa lồng tiếng: kéo mép phụ đề giờ đổi **độ rộng** (nền dài ra, nhiều chữ hơn một dòng), cỡ chữ chỉ ở thanh Cỡ chữ; **chỉnh riêng từng câu** (vị trí / cỡ / độ rộng) + nút **"⇪ Áp cho tất cả câu"** và "Đồng bộ tất cả theo kiểu chung"; sửa luôn lỗi Remotion gãy câu ngắn thành 3 dòng. `dub.py` (`layout.w`, `Segment.look`, `normalize_look`, `effective_layout`, ASS theo từng câu), `dub_remotion.py`, `DubSubtitles.tsx`, `dub/editor/*`. Test dub 38 pass, `tsc` sạch. Thử thật Playwright (Chrome) trên clip mẫu "Hàng đợi test 1": kéo rộng câu 1 → 96 %, Áp cho tất cả, câu 2 kéo lên riêng → xuất 5 s (giữ giọng), khung hình in đúng: câu 1 dưới, câu 2 ở 53 %; clip mẫu "Remotion test" chỉ xem (không xuất): câu ngắn nằm một dòng. Agent `start85`. Chưa commit.
+- **27/10** — Bài viết Facebook: (1) bài đã lên lịch / đã đăng / đến giờ / đăng lỗi có **nhãn ở góc trên phải** thẻ trong "Bài đã lưu" (+ chế độ danh sách, đầu bài đang mở), bấm → Lịch đăng; (2) **"Câu chuyện nhiều kỳ" tách khỏi Kiểu bài** thành 2 radio Không / Có — kiểu bài nào cũng viết thành loạt được (tập vẫn đúng kiểu Mẹo / Review…, không lặp nội dung tập trước). Sửa luôn ô chọn loạt hiện 2 dòng trùng khi loạt có tập chưa gắn kênh. `routes/posts.py` (`_post_schedules`, options bỏ `serial`), `post_writer.py` (`_series_block(kind)`), `PostsPage.tsx`, `ClipPost.tsx`, `posts.css`, `api/posts.ts`. Test posts + schedule + bundle + swipes + hooks 35 pass (thêm 2), `tsc` sạch. Thử Playwright trên dữ liệu thật (chỉ xem, không viết / đăng): nhãn đúng 10 bài có lịch, bài #28 mở ra radio "Có" + nhãn ở đầu. Máy Linux: cài thêm `@xzdarcy/react-timeline-editor` (npm), `package-lock.json` đã trả về. Chưa commit.

@@ -54,7 +54,8 @@ export function ClipPost({ boardId, productId, channelId: clipChannel = null }: 
       setDraft({ title: last.title ?? "", body: last.body, hashtags: splitTags(last.hashtags), image_prompts: last.image_prompts, first_comment: last.first_comment ?? "" });
       setImages(last.images);
       setPostId(last.id);
-      if (last.kind) setKind(last.kind);
+      // "serial" is no longer a kind (a series is its own field): an old one reads as a story
+      if (last.kind) setKind(last.kind === "serial" ? "story" : last.kind);
       if (last.channel_id) setChannelId(last.channel_id);
       if (last.series) { setSeries(last.series); setEpisode(last.episode); }
     }).catch(() => undefined);
@@ -160,7 +161,7 @@ export function ClipPost({ boardId, productId, channelId: clipChannel = null }: 
             </label>
             <label className="qt-field">
               <span>Câu chuyện nhiều kỳ <small>(không bắt buộc)</small></span>
-              <input value={series} onChange={(e) => { setSeries(e.target.value); if (e.target.value.trim()) setKind("serial"); }}
+              <input value={series} onChange={(e) => setSeries(e.target.value)}
                      placeholder="Tên chuỗi bài — AI nhớ các tập trước và viết tập tiếp" />
             </label>
             <label className="qt-field">

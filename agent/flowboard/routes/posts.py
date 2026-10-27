@@ -18,11 +18,12 @@ from pydantic import BaseModel, Field
 from sqlmodel import select
 
 from flowboard.db import get_session
-from flowboard.db.models import Board, Node, Post
+from flowboard.db.models import Board, Node, Post, Schedule
 from flowboard.routes.channels import get_channel
 from flowboard.services import hooks as hooks_svc
 from flowboard.services import post_writer
 from flowboard.services.products import get_product
+from flowboard.timestamps import utc_iso
 
 router = APIRouter(prefix="/api/posts", tags=["posts"])
 
@@ -116,13 +117,58 @@ def _clip_videos(board_ids: set[int]) -> dict[int, str]:
     return out
 
 
-def _row(p: Post, clip_video: Optional[str] = None) -> dict[str, Any]:
+def _post_schedules(posts: list[Post]) -> dict[int, dict[str, Any]]:
+    """post id → where it stands on the calendar ("Lịch đăng"), so "Bài đã lưu"
+    can show it is already taken care of. Its next planned slot (``due`` once
+    the time has passed), else when it went out, else its last failed try;
+    skipped slots do not count. A clip slot counts for the clip's newest post —
+    the caption the clip goes out with (services/scheduler). Two queries for all."""
+    from flowboard.services.scheduler import _aware, _now
+
+    ids = {p.id for p in posts if p.id}
+    boards = {p.board_id for p in posts if p.board_id}
+    if not ids:
+        return {}
+    with get_session() as s:
+        caption_of: dict[int, int] = {}
+        if boards:
+            for bid, pid in s.exec(select(Post.board_id, Post.id).where(Post.board_id.in_(boards))  # type: ignore[union-attr]
+                                   .order_by(Post.id)).all():
+                caption_of[bid] = pid  # the newest post wins
+        cond = (Schedule.kind == "post") & Schedule.post_id.in_(ids)  # type: ignore[union-attr]
+        if caption_of:
+            cond = cond | ((Schedule.kind == "clip") & Schedule.board_id.in_(set(caption_of)))  # type: ignore[union-attr]
+        slots = s.exec(select(Schedule).where(cond, Schedule.status.in_(["planned", "posted", "failed"]))).all()  # type: ignore[union-attr]
+    by_post: dict[int, list[Schedule]] = {}
+    for sc in slots:
+        pid = sc.post_id if sc.kind == "post" else caption_of.get(sc.board_id or 0)
+        if pid in ids:
+            by_post.setdefault(pid, []).append(sc)
+    now = _now()
+    out: dict[int, dict[str, Any]] = {}
+    for pid, items in by_post.items():
+        planned = sorted((x for x in items if x.status == "planned"), key=lambda x: _aware(x.scheduled_at))
+        posted = sorted((x for x in items if x.status == "posted"), key=lambda x: _aware(x.posted_at or x.scheduled_at))
+        failed = sorted((x for x in items if x.status == "failed"), key=lambda x: _aware(x.scheduled_at))
+        sc = planned[0] if planned else posted[-1] if posted else failed[-1]
+        when = _aware(sc.posted_at if sc.status == "posted" and sc.posted_at else sc.scheduled_at)
+        status = "due" if sc.status == "planned" and when <= now else sc.status
+        out[pid] = {"slot_id": sc.id, "status": status, "at": utc_iso(when), "auto": bool(sc.auto),
+                    "link": str((sc.result or {}).get("permalink") or ""), "planned": len(planned)}
+    return out
+
+
+def _row(p: Post, clip_video: Optional[str] = None, schedule: Any = ...) -> dict[str, Any]:
     """``clip_video``: the joined clip of ``p.board_id`` — what publishing sends
-    when the post has no video of its own (services/scheduler)."""
+    when the post has no video of its own (services/scheduler). ``schedule``:
+    its place on the calendar (:func:`_post_schedules`), looked up when not given."""
     if clip_video is None and p.board_id:
         clip_video = _clip_videos({p.board_id}).get(p.board_id)
+    if schedule is ...:
+        schedule = _post_schedules([p]).get(p.id or 0)
     return {
         "clip_video": clip_video or "",
+        "schedule": schedule,
         "id": p.id, "kind": p.kind, "title": p.title, "body": p.body, "hashtags": p.hashtags,
         "first_comment": p.first_comment or "",
         "product_id": p.product_id, "board_id": p.board_id, "channel_id": p.channel_id, "series": p.series or "",
@@ -182,7 +228,8 @@ def list_series(channel_id: Optional[int] = Query(None)) -> list[dict[str, Any]]
 @router.get("/options")
 def options() -> dict[str, Any]:
     return {
-        "kinds": [{"key": k, "label": v[0]} for k, v in post_writer.POST_TYPES.items()],
+        # A story series is its own yes/no now (any kind can run as one); "serial" stays only for old briefs.
+        "kinds": [{"key": k, "label": v[0]} for k, v in post_writer.POST_TYPES.items() if k not in post_writer.LEGACY_KINDS],
         "tones": [{"key": k, "label": v} for k, v in post_writer.TONES.items()],
         "lengths": [{"key": "short", "label": "Ngắn"}, {"key": "medium", "label": "Vừa"}, {"key": "long", "label": "Dài"}],
         "ctas": [{"key": "none", "label": "Không kêu gọi — bài để đọc"}, {"key": "comment", "label": "Mời bình luận"},
@@ -246,7 +293,8 @@ async def write_batch(body: WriteBatchBody) -> dict[str, Any]:
     posts: list[dict[str, Any]] = []
     errors: list[str] = []
     if name:
-        brief["kind"] = "serial"
+        # the episodes keep the kind the seller picked (tips, review…); none → a plain story
+        brief["kind"] = brief.get("kind") or "serial"
         ctx = _series_context(name, channel["id"]) or {"name": name, "episode": 1, "previous": []}
         for _ in range(body.n):
             try:
@@ -325,7 +373,8 @@ def list_posts(board_id: Optional[int] = Query(None), channel_id: Optional[int] 
             q = q.where(Post.channel_id == channel_id)
         rows = s.exec(q).all()
     videos = _clip_videos({p.board_id for p in rows if p.board_id})  # one query, not one per post
-    return [_row(p, videos.get(p.board_id) or "") for p in rows]
+    slots = _post_schedules(list(rows))
+    return [_row(p, videos.get(p.board_id) or "", slots.get(p.id or 0)) for p in rows]
 
 
 @router.post("", status_code=201)
