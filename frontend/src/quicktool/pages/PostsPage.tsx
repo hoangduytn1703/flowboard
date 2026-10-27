@@ -29,6 +29,27 @@ const KIND_HINT: Record<string, string> = {
 };
 /** "Câu chuyện nhiều kỳ" used to be a kind; it is its own yes/no now, so an old "serial" brief reads as a story. */
 const normKind = (kind: string | undefined) => (kind === "serial" ? "story" : kind);
+// No call to action by default: a post simply to be read.
+const DEFAULT_BRIEF: PostBrief = {
+  kind: "discussion", tone: "friendly", length: "medium", cta: "none", hook: "auto", format: "auto", emoji: "some", boosts: [], images: 0,
+};
+/** The settings the next episode of a series is written with: its last episode's, nothing from the form —
+ * the form may hold another page's notes (main idea, image wishes, audience) that must not leak in. */
+function seriesBrief(last: SavedPost): PostBrief {
+  const b = { ...DEFAULT_BRIEF, ...(last.brief ?? {}) };
+  return { ...b, kind: normKind(b.kind ?? last.kind ?? undefined) };
+}
+
+/** A story series in "Bài đã lưu": one page's episodes of one name, in order. */
+interface SeriesGroup {
+  key: string;
+  name: string;
+  eps: SavedPost[];
+  last: SavedPost;
+  latestAt: string;
+  channelId: number | null;
+  nextEpisode: number;
+}
 
 /** Saved posts per page: four cards a row × 3 in the grid, ten rows in the list. */
 const GRID_PER_PAGE = 12;
@@ -59,10 +80,7 @@ export function PostsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [saved, setSaved] = useState<SavedPost[]>([]);
   const [tab, setTab] = useState<"form" | "chat">("form");
-  // No call to action by default: a post simply to be read.
-  const [brief, setBrief] = useState<PostBrief>({
-    kind: "discussion", tone: "friendly", length: "medium", cta: "none", hook: "auto", format: "auto", emoji: "some", boosts: [], images: 0,
-  });
+  const [brief, setBrief] = useState<PostBrief>(DEFAULT_BRIEF);
   const [productId, setProductId] = useState<number | null>(null);
   const [channelId, setChannelId] = useState<number | null>(() => Number(params.get("channel")) || null);
   // "Câu chuyện nhiều kỳ" (yes / no, any kind of post): pick one of the page's series or name a new one;
@@ -302,19 +320,17 @@ export function PostsPage() {
     }
   }
 
-  /** "✍️ Viết tập tiếp theo" of a saved series, in one click: same channel, product and settings as
-   * its last episode; the AI reads the episodes before. Saved at once (then it can be scheduled). */
-  async function writeNext(name: string) {
-    const group = seriesGroups.find((g) => g.name === name);
-    const last = group?.last;
-    const ch = group?.channelId ?? channelId;
+  /** "✍️ Viết tập tiếp theo" of a saved series, in one click: same page, product and settings as
+   * its last episode — never the form's (it may be filled for another page); the AI reads the
+   * episodes before. Saved at once (then it can be scheduled). */
+  async function writeNext(group: SeriesGroup) {
+    const { name, last } = group;
+    const ch = group.channelId ?? channelId;
     if (!ch) { toast.warning("Loạt truyện này chưa gắn kênh — chọn kênh ở bước 1 rồi bấm lại."); return; }
-    // the next episode keeps the kind its series runs as (tips, review…)
-    const nextBrief: PostBrief = { ...brief, ...(last?.brief ?? {}) };
-    nextBrief.kind = normKind(nextBrief.kind ?? last?.kind ?? undefined);
-    setNextBusy(name);
+    const nextBrief = seriesBrief(last);
+    setNextBusy(group.key);
     try {
-      const res = await writePostBatch({ brief: nextBrief, n: 1, channel_id: ch, product_id: last?.product_id ?? productId, series: name });
+      const res = await writePostBatch({ brief: nextBrief, n: 1, channel_id: ch, product_id: last.product_id ?? null, series: name });
       const post = res.posts[0];
       if (!post) throw new Error("AI chưa viết được tập mới.");
       setSaved((list) => [post, ...list]);
@@ -491,16 +507,29 @@ export function PostsPage() {
   }
 
   // "Bài đã lưu": each story series is its own group (episodes in order), the other posts below, paged.
-  const seriesGroups = useMemo(() => {
+  // A series is one page's: two pages with the same series name are two groups. Episodes saved
+  // without a page join the only page running that name (the writer reads them for it too).
+  const seriesGroups = useMemo<SeriesGroup[]>(() => {
     const by = new Map<string, SavedPost[]>();
-    for (const p of saved) if (p.series) by.set(p.series, [...(by.get(p.series) ?? []), p]);
-    return [...by.entries()].map(([name, list]) => {
+    const add = (key: string, p: SavedPost) => by.set(key, [...(by.get(key) ?? []), p]);
+    const withPage = saved.filter((p) => p.series && p.channel_id != null);
+    for (const p of withPage) add(`${p.series}|${p.channel_id}`, p);
+    for (const p of saved.filter((x) => x.series && x.channel_id == null)) {
+      const pages = new Set(withPage.filter((x) => x.series === p.series).map((x) => x.channel_id));
+      add(pages.size === 1 ? `${p.series}|${[...pages][0]}` : `${p.series}|`, p);
+    }
+    return [...by.entries()].map(([key, list]) => {
       const eps = [...list].sort((a, b) => (a.episode || 0) - (b.episode || 0));
       const last = eps[eps.length - 1];
       const latest = [...list].sort((a, b) => (b.updated_at ?? b.created_at ?? "").localeCompare(a.updated_at ?? a.created_at ?? ""))[0];
-      return { name, eps, last, latestAt: latest.updated_at ?? latest.created_at ?? "", channelId: last.channel_id, nextEpisode: Math.max(...eps.map((e) => e.episode || 0)) + 1 };
+      const owner = eps.find((e) => e.channel_id != null)?.channel_id ?? null;
+      return { key, name: last.series, eps, last, latestAt: latest.updated_at ?? latest.created_at ?? "", channelId: owner,
+               nextEpisode: Math.max(...eps.map((e) => e.episode || 0)) + 1 };
     }).sort((a, b) => b.latestAt.localeCompare(a.latestAt));
   }, [saved]);
+  /** The saved group of series `name` on page `ch` (or the page-less one). */
+  const groupOf = (name: string, ch: number | null) =>
+    seriesGroups.find((g) => g.name === name && g.channelId === ch) ?? seriesGroups.find((g) => g.name === name && g.channelId == null);
   if (!options) return <PageLoading text="Đang mở trang bài viết…" />;
   const set = (patch: PostBrief) => setBrief((b) => ({ ...b, ...patch }));
   const toggleBoost = (key: string) => set({ boosts: (brief.boosts ?? []).includes(key) ? (brief.boosts ?? []).filter((b) => b !== key) : [...(brief.boosts ?? []), key] });
@@ -644,6 +673,14 @@ export function PostsPage() {
                                   if (v === "__new") { setNewSeries(true); setSeries(""); return; }
                                   setNewSeries(false);
                                   setSeries(v);
+                                  // continue it the way it was written: its last episode's settings replace the
+                                  // form's (which may be another page's notes) — main idea, images, tone, product
+                                  const g = v ? groupOf(v, channelId) : undefined;
+                                  if (g) {
+                                    setBrief(seriesBrief(g.last));
+                                    setProductId(g.last.product_id ?? null);
+                                    toast.info(`Đã lấy cài đặt của Tập ${g.last.episode} (ý chính, ảnh, giọng…) để viết tiếp đúng chủ đề "${v}".`);
+                                  }
                                 }}>
                           <option value="">{channelId ? (channelSeries.length ? "— Chọn loạt truyện —" : "— Kênh này chưa có loạt truyện —") : "— Chọn kênh trước —"}</option>
                           {channelSeries.map((x) => (
@@ -657,9 +694,14 @@ export function PostsPage() {
                         {known ? (
                           <div className="qt-posts__seriesnext">
                             <small className="qt-card__hint">Đã có {known.episodes} tập (mới nhất: Tập {known.last_episode}). AI đọc các tập trước rồi viết tiếp.</small>
-                            <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={!!nextBusy || busy} onClick={() => void writeNext(known.name)}>
-                              {nextBusy === known.name ? "AI đang viết…" : `⚡ Viết nhanh Tập ${known.last_episode + 1}`}
-                            </button>
+                            {(() => {
+                              const g = groupOf(known.name, channelId);
+                              return g && (
+                                <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={!!nextBusy || busy} onClick={() => void writeNext(g)}>
+                                  {nextBusy === g.key ? "AI đang viết…" : `⚡ Viết nhanh Tập ${known.last_episode + 1}`}
+                                </button>
+                              );
+                            })()}
                           </div>
                         ) : series.trim() ? (
                           <small className="qt-card__hint">Loạt mới — AI viết Tập 1 và kết bằng câu gợi tập sau.</small>
@@ -928,13 +970,13 @@ export function PostsPage() {
           {saved.length === 0 && <p className="qt-card__hint">Chưa có bài nào.</p>}
 
           {seriesGroups.map((g) => (
-            <details key={g.name} className="qt-series" open>
+            <details key={g.key} className="qt-series" open>
               <summary className="qt-series__head">
                 <span className="qt-series__title">📖 {g.name}</span>
                 <span className="qt-series__meta">{g.eps.length} tập · {channels.find((c) => c.id === g.channelId)?.name ?? "chưa gắn kênh"}</span>
                 <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={!!nextBusy || busy}
-                        onClick={(e) => { e.preventDefault(); void writeNext(g.name); }}>
-                  {nextBusy === g.name ? "AI đang viết…" : `✍️ Viết Tập ${g.nextEpisode}`}
+                        onClick={(e) => { e.preventDefault(); void writeNext(g); }}>
+                  {nextBusy === g.key ? "AI đang viết…" : `✍️ Viết Tập ${g.nextEpisode}`}
                 </button>
               </summary>
               {view === "grid" ? (

@@ -100,6 +100,9 @@ _SYSTEM = (
     "Rules:\n"
     "- First line is a hook that stops the scroll (a question, a surprising fact, a relatable pain). Then short lines "
     "and blank lines between ideas; emoji sparingly as bullets or emphasis.\n"
+    "- Write for the ONE page in the CHANNEL / PAGE block: its subject, audience and voice. Each page is separate — "
+    "never blend in another subject, audience or life situation the page is not about; a brief note (main idea, "
+    "audience, image wishes) that does not fit this page is dropped, not merged in.\n"
     "- Sound like a real person (xưng 'mình', gọi 'mọi người' / 'các bạn' / 'cả nhà'), not an ad. Use only facts "
     "given about the product; never invent prices, discounts, prizes, certifications or health / medical claims.\n"
     "- End the way the CALL TO ACTION line says — it may say there is none; then do not tack on an ask. Never put URLs "
@@ -166,7 +169,12 @@ def _series_block(series: Optional[dict], kind: Optional[str] = None) -> str:
     n = int(series.get("episode") or 1)
     prev = list(series.get("previous") or [])
     narrative = not kind or kind in NARRATIVE_KINDS
-    lines = [f"STORY SERIES (Câu chuyện nhiều kỳ): \"{series['name']}\" — you are writing EPISODE {n}."]
+    lines = [f"STORY SERIES (Câu chuyện nhiều kỳ): \"{series['name']}\" — you are writing EPISODE {n}.",
+             "This series belongs to THIS page only (the CHANNEL / PAGE block). Its subject is the series name and what the "
+             "earlier episodes are about — stay on it, with the same narrator, people, setting and voice. Never bring in a "
+             "subject, people, life situation or product that neither the earlier episodes nor this page are about. When the "
+             "seller's notes (main idea, audience, image wishes) pull toward another subject, keep the series' subject and use "
+             "only the part of the notes that fits it. The image prompts show this episode's subject too."]
     if not narrative and kind in POST_TYPES:
         lines.append(f"Every episode is a '{POST_TYPES[kind][0]}' post: write this episode in that POST TYPE. The series is the "
                      "thread linking the episodes (same narrator, the same people and situation, the same voice), never a reason "
@@ -181,8 +189,12 @@ def _series_block(series: Optional[dict], kind: Optional[str] = None) -> str:
             body = re.sub(r"\s+", " ", str(p.get("body") or "")).strip()[:900]
             lines.append(f"- Tập {p.get('episode')}: {body}")
         lines.append(f"Rules for episode {n}: start with a one-line recap for new readers (\"Tiếp tục câu chuyện lần trước…\" / "
-                     "\"Tập trước mình kể…\"), keep names, facts and tone consistent with the earlier episodes, do NOT repeat "
-                     f"them, add {new_part}, end on a hook for episode {n + 1}. Mark it 'Tập {n}'.")
+                     "\"Tập trước mình kể…\"), pick up the thread the last episode's ending left open, keep names, facts, "
+                     f"subject and tone consistent with the earlier episodes, do NOT repeat them, add {new_part}, end on a hook "
+                     f"for episode {n + 1}. Mark it 'Tập {n}'. If an earlier episode brought in something that does not belong "
+                     "to this page's subject (CHANNEL / PAGE) or to the series name — a life situation, people, a pregnancy, a "
+                     "product of another page — that was a mistake: do not follow the drift, leave it out of this episode and of "
+                     "its image prompts, and continue the subject the series was built on.")
     return "\n".join(lines)
 
 
@@ -206,7 +218,9 @@ def _brief_block(brief: dict, platform: str) -> str:
     if boosts:
         out.append("REACH (do all of these): " + "; ".join(boosts))
     n = _image_count(brief)
-    out.append(f"Images requested: {n}" + (f" — wishes: {str(brief.get('image_wish'))[:300]}" if n and brief.get("image_wish") else ""))
+    out.append(f"Images requested: {n}" + (f" — wishes (take only what fits this page and this post's subject, e.g. the style; "
+                                           f"drop people or subjects of another page): {str(brief.get('image_wish'))[:300]}"
+                                           if n and brief.get("image_wish") else ""))
     return "\n".join(out)
 
 

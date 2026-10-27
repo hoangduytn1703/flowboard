@@ -167,7 +167,7 @@ async def test_no_call_to_action_by_default_and_reach_options_reach_the_prompt(m
     await post_writer.write_post({"kind": "tips"})
     p = seen["prompt"]
     assert "CALL TO ACTION: no call to action" in p and "REACH" not in p and "Opening line" not in p
-    assert "engagement bait" in seen["system"]
+    assert "engagement bait" in seen["system"] and "Each page is separate" in seen["system"]
     await post_writer.write_post({"kind": "tips", "cta": "comment", "hook": "number", "format": "list", "emoji": "few",
                                   "boosts": ["save", "open_loop", "bogus"]})
     p = seen["prompt"]
@@ -244,6 +244,9 @@ def test_any_kind_of_post_can_run_as_a_series(client, monkeypatch):
     assert [(p["kind"], p["series"], p["episode"]) for p in r["posts"]] == [("tips", "Mẹo thai kỳ", 1), ("tips", "Mẹo thai kỳ", 2)]
     assert all("POST TYPE: Mẹo / hướng dẫn" in p and "Every episode is a 'Mẹo / hướng dẫn' post" in p for p in seen)
     assert "Mẹo tập 1" in seen[1] and "never ones an earlier episode gave" in seen[1]
+    # one page's series: stay on its subject, drop notes that pull toward another page's
+    assert all("This series belongs to THIS page only" in p and "keep the series' subject" in p for p in seen)
+    assert "do not follow the drift" in seen[1] and "pick up the thread" in seen[1]
     # a story series keeps the plot rules, no "every episode is a … post" line
     seen.clear()
     client.post("/api/posts/write", json={"brief": {"kind": "story"}, "series": "Chuyện nhà", "channel_id": ch})
