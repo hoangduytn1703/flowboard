@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { createSlot, slotLabel, suggestSlots, toLocalInput, updateSlot, type Slot, type SlotSuggestion } from "../../api/schedule";
+import { createSlot, slotLabel, suggestSlots, toLocalInput, updateSlot, type FbFormat, type Slot, type SlotSuggestion } from "../../api/schedule";
 import { toast } from "../../store/toast";
 import { ChannelPicker, useChannels } from "../channels/ChannelPicker";
+import { FormatPicker } from "./FormatPicker";
 import "../schedule.css";
 
 export interface ScheduleTarget {
@@ -29,6 +30,7 @@ export function ScheduleDialog({ target, onClose, onSaved }: {
   const [at, setAt] = useState(() => toLocalInput(target.slot ? new Date(target.slot.scheduled_at) : nextRoundHour()));
   const [auto, setAuto] = useState(target.slot?.auto ?? false);
   const [note, setNote] = useState(target.slot?.note ?? "");
+  const [fbFormat, setFbFormat] = useState<FbFormat>(target.slot?.fb_format ?? "post");
   const [suggestions, setSuggestions] = useState<SlotSuggestion[]>([]);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -56,9 +58,9 @@ export function ScheduleDialog({ target, onClose, onSaved }: {
     setBusy(true);
     try {
       const slot = target.slot
-        ? await updateSlot(target.slot.id, { at: when.toISOString(), channel_id: channelId, auto, note })
-        : await createSlot({ kind: target.kind, post_id: target.postId ?? null, board_id: target.boardId ?? null, channel_id: channelId, at: when.toISOString(), auto, note });
-      toast.success(`${target.slot ? "Đã đổi lịch" : "Đã lên lịch"}: ${slotLabel(slot.scheduled_at)}${slot.auto ? " · tự đăng lên Facebook Page" : " · tool sẽ nhắc ở Hôm nay"}.`);
+        ? await updateSlot(target.slot.id, { at: when.toISOString(), channel_id: channelId, auto, note, fb_format: fbFormat })
+        : await createSlot({ kind: target.kind, post_id: target.postId ?? null, board_id: target.boardId ?? null, channel_id: channelId, at: when.toISOString(), auto, note, fb_format: fbFormat });
+      toast.success(`${target.slot ? "Đã đổi lịch" : "Đã lên lịch"}: ${slotLabel(slot.scheduled_at)}${slot.fb_format === "reel" ? " · dạng Reel" : ""}${slot.auto ? " · tự đăng lên Facebook Page" : " · tool sẽ nhắc ở Hôm nay"}.`);
       onSaved(slot);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -73,6 +75,8 @@ export function ScheduleDialog({ target, onClose, onSaved }: {
         <h3 id="qt-sched-title" className="qt-card__title">📅 {target.slot ? "Đổi lịch đăng" : "Lên lịch đăng"}</h3>
         <p className="qt-sched-dialog__what">{target.kind === "clip" ? "🎬" : "📝"} {target.title}</p>
         <ChannelPicker value={channelId} onChange={setChannelId} required label="Đăng lên kênh / page" />
+        <FormatPicker value={fbFormat} onChange={setFbFormat}
+                      target={{ kind: target.kind, postId: target.postId ?? target.slot?.post_id, boardId: target.boardId ?? target.slot?.board_id }} />
         {suggestions.length > 0 && (
           <div className="qt-field">
             <span>Giờ vàng còn trống <small>(theo nền tảng của kênh, giờ Việt Nam)</small></span>

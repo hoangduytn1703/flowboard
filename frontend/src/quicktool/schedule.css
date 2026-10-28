@@ -103,3 +103,12 @@
 .qt-sched__card > .qt-btn { margin: 0 10px 10px; }
 .qt-droptime { width: min(94vw, 460px); }
 .qt-droptime__time { width: 140px; padding: 8px 10px; font: inherit; font-size: 16px; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 8px; color-scheme: dark; }
+
+/* "Đăng lên Facebook dạng 📰 Bài viết / 🎬 Reel" (schedule/FormatPicker.tsx) */
+.qt-fbformat { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+.qt-fbformat__opts { display: flex; gap: 6px; flex-wrap: wrap; }
+.qt-fbformat__opts .qt-chip:disabled { opacity: 0.45; cursor: not-allowed; }
+.qt-fbformat__why { color: var(--warn); line-height: 1.45; }
+.qt-fbformat__hint { line-height: 1.45; }
+.qt-fbformat--compact { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 6px; }
+.qt-fbformat--compact .qt-fbformat__why { flex-basis: 100%; }

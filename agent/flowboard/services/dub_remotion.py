@@ -69,7 +69,10 @@ def _cue(c: tuple) -> dict[str, Any]:
 
 
 def build_spec(*, src: Path, out: Path, cues: list[tuple], layout: dict[str, Any], style: str,
-               width: int, height: int, duration_s: float, fps: int = FPS, concurrency: Optional[Any] = None) -> dict[str, Any]:
+               width: int, height: int, duration_s: float, fps: int = FPS, concurrency: Optional[Any] = None,
+               highlights: Optional[dict[str, Any]] = None, sfx: Optional[list[tuple[float, float]]] = None) -> dict[str, Any]:
+    """``highlights`` = {words, zoom, y, points: [{at, words}]} (the key moments, None = off);
+    ``sfx`` = [(at, seconds)] — the files go in ``spec["sfx_files"]`` in the same order (render.mjs serves them)."""
     if style not in STYLES:
         style = DEFAULT_STYLE
     return {
@@ -85,6 +88,8 @@ def build_spec(*, src: Path, out: Path, cues: list[tuple], layout: dict[str, Any
                        "mascot": layout.get("mascot") or None},
             "style": style,
             "muted": False,
+            "highlights": highlights,
+            "sfx": [{"at": round(float(a), 3), "dur": round(float(d), 3)} for a, d in (sfx or [])],
         },
     }
 

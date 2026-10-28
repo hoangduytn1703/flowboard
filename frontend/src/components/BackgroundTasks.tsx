@@ -44,7 +44,7 @@ const POLL_IDLE_MS = 15000;
 const DONE_KEEP_MS = 3 * 60 * 1000;
 
 const KIND_ICON: Record<string, string> = {
-  dub: "🎙", clean: "🧽", clip: "🎬", flow: "🖼",
+  dub: "🎙", clean: "🧽", clip: "🎬", flow: "🖼", capcut: "✂️",
   // in-page operations (services/op_tracker.TRACKED)
   post_write: "✍️", post_batch: "✍️", ai: "✨", bundle: "🎁", channel: "📣", product: "🛍", clip_setup: "🎬",
   video: "🎞", publish: "🚀", upload: "⬆", media: "🗂",
@@ -72,7 +72,10 @@ export function latestOp(kind: string, claim = false): Promise<LatestOp> {
 /** True when the task's page is the one on screen (then it needs no badge). */
 function isHere(link: string, pathname: string, search: string): boolean {
   const [path, query = ""] = link.split("?");
-  if (query) return pathname === path && new URLSearchParams(search).toString().includes(query);
+  if (query) {
+    const here = new URLSearchParams(search);
+    return pathname === path && Array.from(new URLSearchParams(query)).every(([k, v]) => here.get(k) === v);
+  }
   // /clips/12/videos → being anywhere inside clip 12 counts.
   const clip = /^\/clips\/(\d+)/.exec(path);
   if (clip) return pathname.startsWith(`/clips/${clip[1]}`);

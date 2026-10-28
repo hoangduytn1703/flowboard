@@ -3,13 +3,14 @@ import {
   type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent,
 } from "react";
 import { Player, type PlayerRef } from "@remotion/player";
-import { DEFAULT_BLUR, type DubBlur, type DubLayout, type SubLook } from "../../../api/dub";
+import { DEFAULT_BLUR, emphasisY, type DubBlur, type DubHighlights, type DubLayout, type SubLook } from "../../../api/dub";
 import { mediaUrl } from "../../../api/client";
-import { DUB_FPS, DubSubtitles, type DubLayoutSpec, type DubRemotionStyle } from "../../../remotion/DubSubtitles";
+import { DUB_FPS, DubSubtitles, emphasisAt, emphasisFont, zoomAt, type DubLayoutSpec, type DubRemotionStyle } from "../../../remotion/DubSubtitles";
 import { chunkAt, effectiveLayout, splitAll, W_MAX, W_MIN, type EditCue } from "./cues";
 
 export type AudioMode = "dub" | "orig" | "off";
-export type Sel = { kind: "cue"; i: number } | { kind: "blur" } | { kind: "mascot" } | { kind: "frame" } | { kind: "style" } | null;
+export type Sel = { kind: "cue"; i: number } | { kind: "blur" } | { kind: "mascot" } | { kind: "frame" } | { kind: "style" }
+  | { kind: "hl"; i: number | null } | null;
 
 export interface StageHandle {
   play(): void;
@@ -58,6 +59,8 @@ export const EditorStage = forwardRef<StageHandle, {
   cues: EditCue[];
   layout: DubLayout;
   style: string;
+  /** the key moments: the preview zooms and shows the key word like the render will */
+  highlights: DubHighlights;
   selected: Sel;
   readOnly: boolean;
   audio: AudioMode;
@@ -73,7 +76,7 @@ export const EditorStage = forwardRef<StageHandle, {
   onDuration: (d: number) => void;
   onNatural: (w: number, h: number) => void;
 }>(function EditorStage({
-  src, voiceUrl, bgmUrl, player, frameW, frameH, cues, layout, style, selected, readOnly, audio,
+  src, voiceUrl, bgmUrl, player, frameW, frameH, cues, layout, style, highlights, selected, readOnly, audio,
   onLayout, onSubGeom, onSelect, onEditText, onTime, onPlaying, onDuration, onNatural,
 }, ref) {
   const area = useRef<HTMLDivElement>(null);
@@ -226,6 +229,12 @@ export const EditorStage = forwardRef<StageHandle, {
   const mascot = layout.mascot ?? null;
   const fontPx = stageH ? stageH * 0.036 * lay.scale : 16;
   const pad = fontPx * 0.25;
+  // "✨ Nhấn chữ quan trọng": the same curve / timing the render uses (remotion/DubSubtitles)
+  const hlOn = highlights.on && highlights.points.length > 0;
+  const zoom = hlOn && highlights.zoom ? zoomAt(highlights.points, t) : 1;
+  const emph = hlOn && highlights.words ? emphasisAt(highlights.points, t) : null;
+  const hlY = emphasisY(layout, highlights);
+  const hlSpec = hlOn ? { words: highlights.words, zoom: highlights.zoom, y: hlY, points: highlights.points.map((p) => ({ at: p.at, words: p.words })) } : null;
 
   // ── dragging on the picture ──────────────────────────────────────────────
   function pointFrom(e: ReactPointerEvent): { x: number; y: number } {
@@ -317,6 +326,7 @@ export const EditorStage = forwardRef<StageHandle, {
               src: player.src, width: player.width, height: player.height, fps, durationS: player.durationS,
               cues: chunks.map((c) => ({ start: c.start, end: c.end, text: c.text, look: cues[c.cue]?.look ?? null })),
               layout: layout as DubLayoutSpec, style: style as DubRemotionStyle, muted: audio !== "dub",
+              highlights: hlSpec, sfx: [],
               mascotSrc: mascot?.media_id ? mediaUrl(mascot.media_id) : undefined,
               frameBgSrc: frameSpec?.bg === "image" && frameSpec.bg_image ? mediaUrl(frameSpec.bg_image) : undefined,
             }}
@@ -334,8 +344,9 @@ export const EditorStage = forwardRef<StageHandle, {
             : undefined}>
             {frameSpec && (frameSpec.bg === "blur" || (frameSpec.bg === "image" && !frameSpec.bg_image)) &&
               <video ref={bgVideo} className="dx-stage__bgvid" src={src} muted playsInline preload="auto" />}
-            <div className="dx-stage__fg" style={frameStyle}>
+            <div className="dx-stage__fg" style={{ ...frameStyle, overflow: "hidden" }}>
               <video ref={video} src={src} muted playsInline preload="auto"
+                     style={zoom > 1 ? { transform: `scale(${zoom.toFixed(4)})`, transformOrigin: "50% 50%" } : undefined}
                      onLoadedMetadata={(e) => {
                        const v = e.currentTarget;
                        onDuration(v.duration || 0);
@@ -376,6 +387,14 @@ export const EditorStage = forwardRef<StageHandle, {
           </div>
         )}
 
+        {emph && !live && (
+          <div className={`dx-stage__emph${selected?.kind === "hl" ? " is-selected" : ""}`}
+               style={{ top: pct(hlY), fontSize: emphasisFont(box.w || 1, stageH || 1, layout.scale, emph.words),
+                        transform: `translate(-50%, -100%) scale(${(0.7 + 0.3 * emph.k).toFixed(3)})` }}
+               onPointerDown={(e) => { e.stopPropagation(); onSelect({ kind: "hl", i: null }); }}>
+            {emph.words}
+          </div>
+        )}
         {editing ? (
           <div className="dx-stage__edit" style={{ left: pct(lay.x), top: pct(lay.y), width: pct(Math.max(0.5, lay.w ?? 0.86)) }} onPointerDown={(e) => e.stopPropagation()}>
             <textarea autoFocus value={editing.text} rows={2} style={{ fontSize: Math.max(14, fontPx * 0.9) }}

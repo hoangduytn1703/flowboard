@@ -1,20 +1,40 @@
 import { useEffect, useRef } from "react";
-import { DEFAULT_BLUR, DEFAULT_LAYOUT, type DubBlur, type DubEngine, type DubLayout, type DubStatus } from "../../../api/dub";
+import {
+  DEFAULT_BLUR, DEFAULT_LAYOUT, emphasisY, HL_Y_MAX, HL_Y_MIN,
+  type DubBlur, type DubEngine, type DubHighlights, type DubLayout, type DubStatus,
+} from "../../../api/dub";
 import { ChannelPicker } from "../../channels/ChannelPicker";
 import { VoiceField } from "../../VoiceField";
 import { DecorControls } from "../DecorControls";
 import { clock, effectiveLayout, readingLoad, W_MAX, W_MIN, type EditCue, type GeomPatch } from "./cues";
 import type { Sel } from "./EditorStage";
 
-export type InspectorTab = "sub" | "list" | "blur" | "decor" | "out";
+export type InspectorTab = "sub" | "list" | "hl" | "blur" | "decor" | "out";
 
 const TABS: { key: InspectorTab; label: string }[] = [
   { key: "sub", label: "💬 Phụ đề" },
   { key: "list", label: "📜 Các câu" },
+  { key: "hl", label: "✨ Nhấn" },
   { key: "blur", label: "🌫 Làm mờ" },
   { key: "decor", label: "🎨 Trang trí" },
   { key: "out", label: "⚙ Xuất" },
 ];
+
+/** What the "✨ Nhấn" tab needs from the editor. */
+export interface HighlightsCtl {
+  value: DubHighlights;
+  set: (patch: Partial<DubHighlights>, coalesce?: string) => void;
+  /** "✨ AI chọn chữ quan trọng" — runs on the agent (a few seconds) */
+  pick: () => void;
+  picking: boolean;
+  /** "+ Thêm ở giờ đang xem" */
+  addAtNow: () => void;
+  setPoint: (i: number, patch: { at?: number; words?: string }) => void;
+  removePoint: (i: number) => void;
+  /** the preview's clock, for "+ Thêm" and the list's highlight */
+  now: number;
+  onPickPoint: (i: number) => void;
+}
 
 const POS_PRESETS: { label: string; y: number }[] = [
   { label: "Trên", y: 0.2 }, { label: "Giữa", y: 0.55 }, { label: "Dưới", y: 0.8 }, { label: "Sát đáy", y: 0.93 },
@@ -34,7 +54,7 @@ export function Inspector({
   tab, onTab, selected, onSelect, cues, origin, onCueText, onCueTiming, onPlayCue,
   layout, onLayout, style, onStyle, styles, status, out, onOut, orientation,
   readOnly, focusText, onDetect, detecting, activeCue, onPickCue,
-  scope, onScope, onGeom, onApplyAll, onClearLook, onClearAll, customCount,
+  scope, onScope, onGeom, onApplyAll, onClearLook, onClearAll, customCount, hl,
 }: {
   tab: InspectorTab;
   onTab: (t: InspectorTab) => void;
@@ -70,6 +90,7 @@ export function Inspector({
   onClearLook: (i: number) => void;
   onClearAll: () => void;
   customCount: number;
+  hl: HighlightsCtl;
 }) {
   const textRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -227,6 +248,8 @@ export function Inspector({
                    onPick={onPickCue} onText={onCueText} />
         )}
 
+        {tab === "hl" && <HighlightsPane hl={hl} layout={layout} status={status} readOnly={readOnly} selected={selected} onSelect={onSelect} />}
+
         {tab === "blur" && (
           <section className="dx-insp__sec">
             <label className="qt-check">
@@ -296,6 +319,96 @@ export function Inspector({
         )}
       </div>
     </aside>
+  );
+}
+
+/** "✨ Nhấn": the key moments — on/off, what happens at each (key word, zoom, sound), where the word sits,
+ * the list of points (AI-picked or typed), and the sound set. */
+function HighlightsPane({ hl, layout, status, readOnly, selected, onSelect }: {
+  hl: HighlightsCtl;
+  layout: DubLayout;
+  status: DubStatus;
+  readOnly: boolean;
+  selected: Sel;
+  onSelect: (s: Sel) => void;
+}) {
+  const v = hl.value;
+  const sel = selected?.kind === "hl" ? selected.i : null;
+  const list = useRef<HTMLOListElement>(null);
+  useEffect(() => {
+    if (sel === null) return;
+    (list.current?.children[sel] as HTMLElement | undefined)?.scrollIntoView({ block: "nearest" });
+  }, [sel]);
+  const sets = status.sfx_sets ?? [{ key: "builtin" as const, label: "Tiếng có sẵn", count: 4 }];
+  const y = emphasisY(layout, v);
+  return (
+    <>
+      <section className="dx-insp__sec">
+        <label className="qt-check dx-insp__hlon">
+          <input type="checkbox" checked={v.on} disabled={readOnly} onChange={(e) => hl.set({ on: e.target.checked })} />
+          <span><strong>✨ Nhấn chữ quan trọng</strong><small>Giá, con số, lợi ích… — chữ to bật lên, hình zoom nhẹ, một tiếng hiệu ứng. Kiểu video TikTok giữ chân người xem.</small></span>
+        </label>
+        {v.on && (
+          <>
+            <div className="dx-insp__hlopts">
+              <label className="qt-check"><input type="checkbox" checked={v.words} disabled={readOnly} onChange={(e) => hl.set({ words: e.target.checked })} /> Chữ to bật lên</label>
+              <label className="qt-check"><input type="checkbox" checked={v.zoom} disabled={readOnly} onChange={(e) => hl.set({ zoom: e.target.checked })} /> Zoom nhẹ (1,12–1,18×)</label>
+              <label className="qt-check"><input type="checkbox" checked={v.sfx} disabled={readOnly} onChange={(e) => hl.set({ sfx: e.target.checked })} /> Tiếng hiệu ứng</label>
+            </div>
+            {v.sfx && (
+              <label className="qt-field"><span>Bộ tiếng</span>
+                <select value={v.sfx_set} disabled={readOnly} onChange={(e) => hl.set({ sfx_set: e.target.value as DubHighlights["sfx_set"] })}>
+                  {sets.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                </select></label>
+            )}
+            {v.words && (
+              <label className="qt-field">
+                <span>Vị trí chữ to <small>{Math.round(y * 100)}%{v.y === null ? " · trên phụ đề" : ""}</small></span>
+                <div className="dx-insp__wrow">
+                  <input type="range" min={HL_Y_MIN} max={HL_Y_MAX} step={0.005} value={y} disabled={readOnly}
+                         onChange={(e) => hl.set({ y: Number(e.target.value) }, "hl-y")} />
+                  <label className="qt-check"><input type="checkbox" checked={v.y === null} disabled={readOnly}
+                         onChange={(e) => hl.set({ y: e.target.checked ? null : y })} /> Tự động</label>
+                </div>
+              </label>
+            )}
+          </>
+        )}
+      </section>
+      {v.on && (
+        <section className="dx-insp__sec">
+          <div className="dx-insp__cuehead">
+            <strong>Chỗ nhấn <small>{v.points.length ? `· ${v.points.length}` : ""}</small></strong>
+            <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={readOnly || hl.picking} onClick={hl.pick}
+                    title="AI đọc các câu, chọn khoảng 1 chỗ mỗi 12 giây">{hl.picking ? "AI đang chọn…" : v.points.length ? "✨ AI chọn lại" : "✨ AI chọn chữ quan trọng"}</button>
+            <button type="button" className="qt-btn qt-btn--small" disabled={readOnly} onClick={hl.addAtNow} title="Thêm một chỗ nhấn tại giờ đang xem">+ Thêm ở {clock(hl.now)}</button>
+          </div>
+          {v.points.length === 0 ? (
+            <p className="dx-insp__tip">Chưa có chỗ nào. Bấm “✨ AI chọn chữ quan trọng”, hoặc tua tới chỗ muốn nhấn rồi “+ Thêm”. Để trống mà xuất thì AI tự chọn lúc xuất.</p>
+          ) : (
+            <ol className="dx-list dx-hlist" ref={list}>
+              {v.points.map((p, k) => {
+                const live = hl.now >= p.at && hl.now < p.at + 1.2;
+                return (
+                  <li key={k} className={`${k === sel ? "is-selected" : ""}${live ? " is-active" : ""}`}>
+                    <button type="button" className="dx-list__time" onClick={() => hl.onPickPoint(k)} title="Tua tới chỗ này"><b>✨</b>{clock(p.at)}</button>
+                    <div className="dx-list__texts">
+                      <input value={p.words} maxLength={40} disabled={readOnly} placeholder="chữ hiện to"
+                             onFocus={() => onSelect({ kind: "hl", i: k })}
+                             onChange={(e) => hl.setPoint(k, { words: e.target.value })} />
+                    </div>
+                    <button type="button" className="dx-hlist__del" disabled={readOnly} title="Bỏ chỗ nhấn này" onClick={() => hl.removePoint(k)}>🗑</button>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+          <p className="dx-insp__tip">
+            Trên timeline hàng “✨ Nhấn”: kéo một khối để dời chỗ nhấn. {v.picked === "fallback" ? "Lần trước AI không chọn được nên tool lấy theo số / câu cảm thán." : ""}
+          </p>
+        </section>
+      )}
+    </>
   );
 }
 

@@ -137,3 +137,90 @@ def test_key_routes_mask_and_test(client, monkeypatch):
     assert results[0]["ok"] is True and results[0]["models"] == 1
     assert results[1]["ok"] is False and results[1]["error"] == "bị từ chối"
     assert r.json()["keys"][1]["parked"] is True
+
+
+def _quota(model: str, delay: str = "59431s", per_day: bool = True) -> httpx.Response:
+    desc = ("Generate content requests per day limit exceeded on Free Tier." if per_day
+            else "Generate content requests per minute limit exceeded.")
+    qid = "GenerateRequestsPerDayPerProjectPerModel-FreeTier" if per_day else "GenerateRequestsPerMinutePerProjectPerModel-FreeTier"
+    return httpx.Response(429, json={"error": {"status": "RESOURCE_EXHAUSTED", "message": "You exceeded your current quota", "details": [
+        {"@type": "type.googleapis.com/google.rpc.QuotaFailure",
+         "violations": [{"description": desc, "quotaId": qid, "quotaDimensions": {"location": "global", "model": model}, "quotaValue": "10"}]},
+        {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": delay}]}})
+
+
+def _audio() -> httpx.Response:
+    return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"inlineData": {"mimeType": "audio/wav", "data": "UklGRg=="}}]}}]})
+
+
+def test_tts_quota_parks_the_key_for_that_model_only_and_speaks_through_the_fallback_model(monkeypatch):
+    """Seen 27/10: the free tier allows 10 TTS requests a day per key; the
+    same key still answers gemini-3.8-flash-lite-tts and text requests."""
+    secrets.set_gemini_keys(["AQ.key-one-000000000001", "AQ.key-two-000000000002"])
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        model = request.url.path.split("/models/")[1].split(":")[0]
+        key = request.headers["x-goog-api-key"].split("-")[1]
+        seen.append((key, model))
+        if model == gemini_api.TTS_MODEL:
+            return _quota(model)
+        if model.endswith("-tts"):
+            return _audio()
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": "hello"}]}}]})
+
+    monkeypatch.setattr(httpx, "AsyncClient", _client_with(handler))
+    wav = asyncio.run(gemini_api.speak("xin chào", "Kore"))
+    assert wav
+    # every key was tried on the main TTS model first, then the first key spoke through the lite model
+    assert seen == [("one", gemini_api.TTS_MODEL), ("two", gemini_api.TTS_MODEL), ("one", "gemini-3.8-flash-lite-tts")]
+    snap = {s["masked"]: s for s in gemini_api.pool.snapshot()}
+    one = snap[gemini_api.mask("AQ.key-one-000000000001")]
+    assert not one["parked"] and gemini_api.TTS_MODEL in one["models_parked"] and one["model_limits"][gemini_api.TTS_MODEL] == "10"
+    # a text request still uses key one: the TTS quota does not block the key as a whole
+    seen.clear()
+    assert asyncio.run(gemini_api.generate_text("hi")) == "hello"
+    assert seen[0][0] == "one"
+    # the next line goes straight to the lite model (main one known to be out) without re-asking
+    seen.clear()
+    asyncio.run(gemini_api.speak("câu hai", "Kore"))
+    assert seen == [("one", "gemini-3.8-flash-lite-tts")]
+
+
+def test_tts_message_says_how_many_keys_rest_and_when_the_first_returns(monkeypatch):
+    secrets.set_gemini_keys(["k1", "k2", "k3"])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        model = request.url.path.split("/models/")[1].split(":")[0]
+        return _quota(model, delay="49585s")
+
+    monkeypatch.setattr(httpx, "AsyncClient", _client_with(handler))
+    with pytest.raises(gemini_api.NoKeyAvailable) as exc:
+        asyncio.run(gemini_api.speak("xin chào", "Kore"))
+    msg = str(exc.value)
+    assert "(3)" in msg and "3 key hết quota ngày" in msg and "10 lượt/ngày/key" in msg and "13 giờ" in msg and "Edge" in msg
+    # the second call does not say "1 key đã thử" as if the others were never tried
+    with pytest.raises(gemini_api.NoKeyAvailable) as exc2:
+        asyncio.run(gemini_api.speak("xin chào", "Kore"))
+    assert "3 key hết quota" in str(exc2.value) and "0 key vừa thử" not in str(exc2.value)
+
+
+def test_a_short_per_minute_limit_is_waited_out_instead_of_failing(monkeypatch):
+    secrets.set_gemini_keys(["k1"])
+    calls = []
+    slept = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return _quota("gemini-3.8-flash", delay="2s", per_day=False) if len(calls) == 1 \
+            else httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": "ok"}]}}]})
+
+    async def fake_sleep(s):
+        slept.append(s)
+        st = gemini_api.pool.states["k1"]
+        st.model_parked = {m: 0.0 for m in st.model_parked}  # the cooldown has passed
+
+    monkeypatch.setattr(httpx, "AsyncClient", _client_with(handler))
+    monkeypatch.setattr(gemini_api.asyncio, "sleep", fake_sleep)
+    assert asyncio.run(gemini_api.generate_text("hi")) == "ok"
+    assert len(calls) == 2 and slept and slept[0] <= 3

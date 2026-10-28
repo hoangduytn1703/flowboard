@@ -30,6 +30,7 @@ class SlotCreate(BaseModel):
     at: str = Field(min_length=10, max_length=40)
     auto: bool = False
     note: Optional[str] = Field(default=None, max_length=300)
+    fb_format: str = "post"
 
 
 class SlotPatch(BaseModel):
@@ -38,6 +39,7 @@ class SlotPatch(BaseModel):
     auto: Optional[bool] = None
     note: Optional[str] = Field(default=None, max_length=300)
     status: Optional[str] = None
+    fb_format: Optional[str] = None
 
 
 def _when(value: Optional[str]):
@@ -58,6 +60,12 @@ def list_schedule(from_: Optional[str] = Query(None, alias="from"), to: Optional
         start = scheduler._now() - timedelta(days=7)
         end = scheduler._now() + timedelta(days=28)
     return {"items": scheduler.list_slots(start, end, channel_id=channel_id, status=status)}
+
+
+@router.get("/reel-check")
+def reel_check(kind: str, post_id: Optional[int] = None, board_id: Optional[int] = None) -> dict[str, Any]:
+    """Can the item go out as a Facebook Reel (a video, 3–90 s, vertical-ish)? → {has_video, ok, reason}."""
+    return scheduler.reel_check(kind, post_id, board_id)
 
 
 @router.get("/due")
@@ -83,7 +91,7 @@ def create_slot(body: SlotCreate) -> dict[str, Any]:
     when = _when(body.at)
     try:
         return scheduler.create(body.kind, when, post_id=body.post_id, board_id=body.board_id,
-                                channel_id=body.channel_id, auto=body.auto, note=body.note or "")
+                                channel_id=body.channel_id, auto=body.auto, note=body.note or "", fb_format=body.fb_format)
     except scheduler.ScheduleError as exc:
         raise HTTPException(400, str(exc))
 

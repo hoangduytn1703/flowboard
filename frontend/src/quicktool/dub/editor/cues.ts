@@ -1,4 +1,4 @@
-import type { DubLayout, SubLook } from "../../../api/dub";
+import type { DubHighlights, DubLayout, SubLook } from "../../../api/dub";
 
 /** One dubbed line as the editor holds it: its slot on the timeline, the source text and the Vietnamese line. */
 export interface EditCue {
@@ -34,6 +34,8 @@ export interface EditDoc {
   cues: EditCue[];
   layout: DubLayout;
   style: string;
+  /** "✨ Nhấn chữ quan trọng" (normHighlights shape) */
+  highlights: DubHighlights;
 }
 
 // Mirrors services/dub.py (SUB_MAX_CHARS, SUB_MARGIN_X_FRAC, sub_font_px, sub_max_chars, split_cue)

@@ -1,9 +1,10 @@
 import { useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import {
-  BGM_DEFAULT_VOLUME, BGM_VOLUMES, COVER_STYLES, DEFAULT_VOICE, MAX_MUSIC_BYTES, MAX_SPEAKERS, VOICES, VOICE_GROUPS,
+  BGM_DEFAULT_VOLUME, BGM_VOLUMES, COVER_STYLES, DEFAULT_VOICE, MAX_MUSIC_BYTES, MAX_SPEAKERS, VOICES,
   createCover, isGeminiVoice, mediaUrl, parseSpeakers, patchNode, previewVoice, speakerTags, uploadMusic,
   type CoverStyle, patchBoardData } from "../../api/client";
+import { VoiceOptions, useVoiceGroups } from "../VoiceField";
 import { useBoardStore, type FlowboardNodeData } from "../../store/board";
 import { useQuicktoolStore } from "../../store/quicktool";
 import { hasMedia, isBusy, type ClipRoles } from "../roles";
@@ -110,6 +111,7 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
   /** a clip made by the dubbing tool: it is edited there, not joined here */
   dubJobId?: string | null;
 }) {
+  const voiceGroups = useVoiceGroups();
   const navigate = useNavigate();
   const [scheduling, setScheduling] = useState(false);
   const ensureExportNode = useQuicktoolStore((s) => s.ensureExportNode);
@@ -318,11 +320,7 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
               <VoicePreviewButton voice={voice} style={voiceStyle} />
             </span>
             <select value={voice} disabled={busy} onChange={(e) => { stopSample(); setOption({ voice: e.target.value }); }}>
-              {VOICE_GROUPS.map((g) => (
-                <optgroup key={g.id} label={g.label}>
-                  {g.voices.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
-                </optgroup>
-              ))}
+              <VoiceOptions groups={voiceGroups} />
             </select>
           </label>
           {isGeminiVoice(voice) && (
@@ -355,11 +353,7 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
                     <SpeakerChip tag={tag} tags={allTags} />
                     <select value={picked} disabled={busy} onChange={(e) => setSpeaker(tag, e.target.value)}>
                       <option value="">giọng chung ({VOICES[voice] ?? voice})</option>
-                      {VOICE_GROUPS.map((g) => (
-                        <optgroup key={g.id} label={g.id === "edge" ? "Edge" : "Gemini"}>
-                          {g.voices.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
-                        </optgroup>
-                      ))}
+                      <VoiceOptions groups={voiceGroups} short />
                     </select>
                     <VoicePreviewButton voice={picked || voice} style={voiceStyle} />
                     {usedTags.includes(tag)

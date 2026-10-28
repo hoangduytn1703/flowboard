@@ -1612,7 +1612,17 @@ export async function splitStoryboard(nodeId: number): Promise<SplitStoryboardRe
 
 /** Voice-over voices (`services/tts.py::VOICES`): Edge (free, instant) and
  * Gemini prebuilt voices (many, style-steerable, served by the key pool). */
-export const VOICE_GROUPS: { id: "edge" | "gemini"; label: string; voices: [string, string][] }[] = [
+export type VoiceGroupId = "edge" | "vieneu" | "gemini" | "fpt";
+export interface VoiceGroup {
+  id: VoiceGroupId;
+  label: string;
+  voices: [string, string][];
+  /** false = this family cannot speak on this machine right now (no key / no VieDub venv) */
+  available?: boolean;
+  reason?: string;
+}
+/** The static fallback (Edge + Gemini). `fetchVoiceGroups()` replaces it with the agent's list, which adds VieNeu / FPT. */
+export const VOICE_GROUPS: VoiceGroup[] = [
   {
     id: "edge",
     label: "Microsoft Edge — miễn phí, nhanh",
@@ -1642,11 +1652,46 @@ export const VOICE_GROUPS: { id: "edge" | "gemini"; label: string; voices: [stri
     ],
   },
 ];
+export const GROUP_SHORT: Record<VoiceGroupId, string> = { edge: "Edge", vieneu: "VieNeu", gemini: "Gemini", fpt: "FPT.AI" };
 export const VOICES: Record<string, string> = Object.fromEntries(
-  VOICE_GROUPS.flatMap((g) => g.voices.map(([id, label]) => [id, `${label} · ${g.id === "edge" ? "Edge" : "Gemini"}`])),
+  VOICE_GROUPS.flatMap((g) => g.voices.map(([id, label]) => [id, `${label} · ${GROUP_SHORT[g.id]}`])),
 );
 export const DEFAULT_VOICE = "vi-VN-HoaiMyNeural";
 export const isGeminiVoice = (id: string) => id.startsWith("gemini:");
+/** "edge" | "vieneu" | "gemini" | "fpt" of a voice id */
+export const voiceKind = (id: string): VoiceGroupId =>
+  id.startsWith("gemini:") ? "gemini" : id.startsWith("vieneu:") ? "vieneu" : id.startsWith("fpt:") ? "fpt" : "edge";
+
+let voiceGroupsPromise: Promise<VoiceGroup[]> | null = null;
+/** `GET /api/llm/voices`: every voice family the agent offers (Edge, VieNeu on the machine, Gemini, FPT.AI) with
+ * availability; the static list when the agent cannot be asked. Fetched once; `VOICES` is filled in with the result. */
+export function fetchVoiceGroups(force = false): Promise<VoiceGroup[]> {
+  if (!voiceGroupsPromise || force) {
+    voiceGroupsPromise = (async () => {
+      const res = await fetch("/api/llm/voices");
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
+      const data = await res.json() as { groups: { id: VoiceGroupId; label: string; available?: boolean; reason?: string; voices: { id: string; label: string }[] }[] };
+      const groups: VoiceGroup[] = data.groups.map((g) => ({
+        id: g.id, label: g.label, available: g.available ?? true, reason: g.reason, voices: g.voices.map((v) => [v.id, v.label] as [string, string]),
+      }));
+      for (const g of groups) for (const [id, label] of g.voices) VOICES[id] = `${label} · ${GROUP_SHORT[g.id] ?? g.id}`;
+      return groups;
+    })().catch((e) => { voiceGroupsPromise = null; throw e; });
+  }
+  return voiceGroupsPromise;
+}
+
+export async function getFptKey(): Promise<{ set: boolean; masked: string }> {
+  const res = await fetch("/api/llm/fpt-key");
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
+}
+export async function setFptKey(key: string): Promise<{ set: boolean; masked: string }> {
+  const res = await fetch("/api/llm/fpt-key", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key }) });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  voiceGroupsPromise = null;  // FPT availability changed
+  return res.json();
+}
 
 /** AI writes one Vietnamese voice line per video node (in clip order) and
  * stores it on each node's `data.narration`. */
@@ -1682,8 +1727,13 @@ export async function clearBoardMedia(
 
 export interface GeminiKeyState {
   masked: string;
+  /** the key as a whole is refused (bad key / API off) */
   parked: boolean;
   parked_for_s: number;
+  /** model → seconds until that model's quota comes back for this key (free-tier quotas are per model) */
+  models_parked?: Record<string, number>;
+  /** model → the quota Google named ("10" a day…) */
+  model_limits?: Record<string, string>;
   last_error: string | null;
   calls: number;
 }

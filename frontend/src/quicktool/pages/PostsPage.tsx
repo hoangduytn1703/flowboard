@@ -12,7 +12,8 @@ import { ChannelPicker, useChannels } from "../channels/ChannelPicker";
 import { PageLoading } from "../PageState";
 import { copyPost, PostEditor } from "../posts/PostEditor";
 import { ScheduleDialog, type ScheduleTarget } from "../schedule/ScheduleDialog";
-import { createSlot, publishSlot, slotLabel, suggestSlots } from "../../api/schedule";
+import { createSlot, publishSlot, slotLabel, suggestSlots, type FbFormat } from "../../api/schedule";
+import { FormatPicker } from "../schedule/FormatPicker";
 import "../posts.css";
 
 const EMPTY: PostDraft = { title: "", body: "", hashtags: [], image_prompts: [], first_comment: "" };
@@ -116,6 +117,8 @@ export function PostsPage() {
   // bumped after a fresh write that asked for images → PostEditor renders them at once
   const [autoMake, setAutoMake] = useState(0);
   const [postId, setPostId] = useState<number | null>(null);
+  const [fbFormat, setFbFormat] = useState<FbFormat>("post");
+  useEffect(() => { setFbFormat("post"); }, [postId]);
   const [dirty, setDirty] = useState(false);
   const [chat, setChat] = useState<ChatTurn[]>([]);
   const [message, setMessage] = useState("");
@@ -445,12 +448,14 @@ export function PostsPage() {
     const ch = channels.find((c) => c.id === channelId);
     if (!ch?.fb_connected) return;
     const withWhat = video ? " (kèm video)" : boardId !== null ? " (kèm video của clip)" : images.length ? ` (kèm ${images.length} ảnh)` : "";
-    if (!window.confirm(`Đăng bài này lên Page "${ch.fb_page_name || ch.name}" ngay bây giờ?${withWhat}${draft.first_comment ? " Bình luận đầu sẽ được thêm sau khi đăng." : ""}`)) return;
+    const asReel = fbFormat === "reel" && (video || boardId !== null);
+    if (!window.confirm(`Đăng ${asReel ? "Reel" : "bài này"} lên Page "${ch.fb_page_name || ch.name}" ngay bây giờ?${withWhat}${draft.first_comment ? " Bình luận đầu sẽ được thêm sau khi đăng." : ""}`)) return;
     setPublishing(true);
     try {
       const id = dirty || postId === null ? await save(true) : postId;
       if (!id) return;
-      const slot = await createSlot({ kind: "post", post_id: id, channel_id: ch.id, at: new Date().toISOString(), note: "Đăng ngay từ trang Bài viết" });
+      const slot = await createSlot({ kind: "post", post_id: id, channel_id: ch.id, at: new Date().toISOString(), note: "Đăng ngay từ trang Bài viết",
+                                      fb_format: (video || boardId !== null) ? fbFormat : "post" });
       const out = await publishSlot(slot.id);
       reloadSaved();
       if (out.status === "posted") {
@@ -940,12 +945,16 @@ export function PostsPage() {
                     <button type="button" className="qt-btn" disabled={!channel || publishing || imagesBusy}
                             title={imagesBusy ? "Đợi ảnh tạo xong rồi lên lịch" : undefined}
                             onClick={async () => { const id = dirty || postId === null ? await save(true) : postId; if (id) setSchedule({ kind: "post", postId: id, channelId, title: draft.title || draft.body.split("\n")[0] }); }}>📅 Lên lịch</button>
+                    {channel?.fb_connected && (video || boardId !== null) && (
+                      <FormatPicker compact value={fbFormat} onChange={setFbFormat} target={postId ? { kind: "post", postId } : null} />
+                    )}
                     {channel?.fb_connected && (
                       <button type="button" className="qt-btn qt-btn--accent"
                               disabled={publishing || imagesBusy || !draft.body.trim() || (boardId !== null && !video && !clipVideo)}
                               onClick={() => void publishNow()}
                               title={imagesBusy ? "Đợi ảnh tạo xong rồi đăng" : boardId !== null && !video && !clipVideo ? "Clip của bài chưa ghép xong" : undefined}>
-                        {publishing ? "Đang đăng…" : imagesBusy ? "⏳ Đợi ảnh…" : published ? "🚀 Đăng lại" : "🚀 Đăng ngay"}
+                        {publishing ? "Đang đăng…" : imagesBusy ? "⏳ Đợi ảnh…" : published ? "🚀 Đăng lại"
+                          : fbFormat === "reel" && (video || boardId !== null) ? "🚀 Đăng Reel ngay" : "🚀 Đăng ngay"}
                       </button>
                     )}
                   </div>

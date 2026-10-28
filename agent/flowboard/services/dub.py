@@ -35,7 +35,7 @@ from sqlmodel import select
 from flowboard.db import get_session
 from flowboard.db.models import Asset, Board, Node
 from flowboard.services import media as media_service
-from flowboard.services import dub_decor, dub_remotion, tts
+from flowboard.services import dub_decor, dub_remotion, key_moments, sfx, tts
 from flowboard.services.llm import run_llm
 from flowboard.services.llm.base import LLMError
 from flowboard.services.video_clean import erase_python, erase_root
@@ -71,7 +71,8 @@ _TRANSLATE_SYSTEM = (
     "You translate the timed transcript of a short social video into natural spoken Vietnamese for a Vietnamese "
     "voice-over and subtitles. Rules: keep the SAME number of lines, same order, one Vietnamese line per source line; "
     "casual spoken Vietnamese (xưng 'mình', gọi 'các mẹ' / 'mọi người' / 'bạn' as fits the topic); each line must be "
-    "speakable in its time slot, so stay about as long as the original or shorter — drop filler, never add facts; "
+    "speakable in its time slot: every line comes with a word budget (≤ N từ) — NEVER go over it, Vietnamese "
+    "takes longer to say than most languages, so cut filler, merge repeats and say it shorter; never add facts; "
     "numbers, product names and brand names stay as they are; no translator notes, no quotes. Also give a short "
     "Vietnamese clip title (<= 60 chars). Output ONLY one JSON object: {\"title\": str, \"lines\": [str, ...]}."
 )
@@ -99,6 +100,7 @@ def status() -> dict[str, Any]:
 
     out["whisper"] = (root / "models" / WHISPER_DIR / "model.bin").is_file()
     out["separate"] = (root / "models" / "onnx" / "vocals.fp16.onnx").is_file()
+    out["sfx_sets"] = sfx.sets()
     if not out["whisper"]:
         out["reason"] = f"Chưa có mô hình Whisper large-v3-turbo trong {root / 'models'} — mở VieDub chạy một video để nó tải về."
         return out
@@ -170,6 +172,22 @@ def parse_translation(text: str, n: int) -> tuple[str, list[str]]:
         raise DubError("bản dịch rỗng")
     lines = (lines + [""] * n)[:n]
     return str(data.get("title") or "").strip()[:80], lines
+
+
+#: Vietnamese words a line may have per second of its window (Edge reads ~3.3 words/s at normal pace, measured
+#: 28/10; this asks for ~1.27× — the voice can still be sped up to MAX_SPEEDUP)
+WORDS_PER_SECOND = 4.2
+
+
+def line_window(segs: list[Segment], i: int, total_s: float = 0.0) -> float:
+    """Time line ``i`` may be spoken in: its own slot plus the pause before the next line."""
+    seg = segs[i]
+    nxt = segs[i + 1].start if i + 1 < len(segs) else (total_s or seg.end)
+    return max(0.4, max(seg.end, nxt) - seg.start)
+
+
+def word_budget(segs: list[Segment], i: int, total_s: float = 0.0) -> int:
+    return max(2, int(line_window(segs, i, total_s) * WORDS_PER_SECOND))
 
 
 def speedup_for(voice_s: float, slot_s: float) -> float:
@@ -271,6 +289,125 @@ def normalize_look(raw: Any) -> Optional[dict[str, float]]:
     return out or None
 
 
+HL_Y_MIN, HL_Y_MAX = 0.1, 0.92
+HL_MAX_POINTS = key_moments.MAX_POINTS
+
+
+def normalize_highlights(raw: Any) -> dict[str, Any]:
+    """"✨ Nhấn chữ quan trọng": off by default; ``points`` = [{at, words, line}] picked by the AI or
+    typed in the editor; ``y`` = where the key word sits (bottom-centre fraction), None = above the subtitles."""
+    d = raw if isinstance(raw, dict) else {}
+    out: dict[str, Any] = {
+        "on": bool(d.get("on")), "words": d.get("words", True) is not False, "zoom": d.get("zoom", True) is not False,
+        "sfx": d.get("sfx", True) is not False,
+        "sfx_set": sfx.CAPCUT_SET if d.get("sfx_set") == sfx.CAPCUT_SET else sfx.BUILTIN_SET,
+        "y": None, "points": [], "picked": str(d.get("picked") or ""),
+    }
+    try:
+        if d.get("y") is not None:
+            out["y"] = round(min(HL_Y_MAX, max(HL_Y_MIN, float(d["y"]))), 4)
+    except (TypeError, ValueError):
+        pass
+    seen: list[float] = []
+    for p in d.get("points") or []:
+        if not isinstance(p, dict):
+            continue
+        try:
+            at = round(max(0.0, float(p.get("at"))), 3)
+        except (TypeError, ValueError):
+            continue
+        words = re.sub(r"\s+", " ", str(p.get("words") or "")).strip()[:40]
+        if not words:
+            continue
+        try:
+            line = int(p.get("line")) if p.get("line") is not None else None
+        except (TypeError, ValueError):
+            line = None
+        out["points"].append({"at": at, "words": words, "line": line})
+        seen.append(at)
+    out["points"].sort(key=lambda p: p["at"])
+    out["points"] = out["points"][:HL_MAX_POINTS]
+    return out
+
+
+def highlight_lines(job: "Job") -> list[key_moments.Line]:
+    return [key_moments.Line(s.start, s.end, s.text.strip()) for s in job.segments if s.text.strip()]
+
+
+def pick_highlights(job: "Job") -> tuple[list[dict[str, Any]], str]:
+    """The AI's key moments for this job's lines → ``(points, how)``; ``how`` = "ai" | "fallback"."""
+    lines = highlight_lines(job)
+    if not lines:
+        return [], ""
+    total = job.duration_s or (lines[-1].end if lines else 0)
+    try:
+        return asyncio.run(key_moments.pick_points(lines, total)), "ai"
+    except (LLMError, ValueError) as exc:
+        logger.warning("dub: AI could not pick key moments (%s) — falling back to numbers / exclamations", exc)
+        return key_moments.fallback_points(lines, total), "fallback"
+
+
+def _ensure_points(job: "Job") -> dict[str, Any]:
+    """The highlights with points: when on and none were picked yet, ask the AI now (once)."""
+    hl = normalize_highlights(job.highlights)
+    if hl["on"] and not hl["points"]:
+        _set(job, "AI đang chọn chữ quan trọng", 88)
+        pts, how = pick_highlights(job)
+        hl["points"], hl["picked"] = pts, how
+        job.highlights = hl
+    return hl
+
+
+def emphasis_y(layout: Optional[dict], hl: dict[str, Any]) -> float:
+    """Where the key word sits: its own y, else well above the subtitles."""
+    if hl.get("y") is not None:
+        return float(hl["y"])
+    lay = normalize_layout(layout)
+    return round(min(HL_Y_MAX, max(HL_Y_MIN, lay["y"] - 0.2)), 4)
+
+
+def emphasis_events(hl: dict[str, Any], layout: Optional[dict], total_s: float) -> list[tuple[float, float, str, float, float]]:
+    """``[(start, end, TEXT, x, y)]`` of the key words to burn in."""
+    if not (hl.get("on") and hl.get("words")):
+        return []
+    y = emphasis_y(layout, hl)
+    out = []
+    for p in hl["points"]:
+        a = float(p["at"])
+        b = min(total_s or a + key_moments.EMPHASIS_S, a + key_moments.EMPHASIS_S)
+        if b - a >= 0.3:
+            out.append((a, b, str(p["words"]).upper(), 0.5, y))
+    return out
+
+
+def zoom_filter(hl: dict[str, Any], width: int, height: int, fps: str) -> str:
+    """ffmpeg ``zoompan`` that pushes in at every point (and back), or "" when off."""
+    if not (hl.get("on") and hl.get("zoom") and hl["points"]):
+        return ""
+    z = key_moments.zoom_expr(hl["points"], "in_time")
+    return (f"zoompan=z='{z}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s={width}x{height}:fps={fps}")
+
+
+def probe_fps(path: Path) -> str:
+    """The source frame rate as ffmpeg writes it ("30000/1001"), "30" when unknown."""
+    probe = shutil.which("ffprobe")
+    if probe is None:
+        return "30"
+    try:
+        out = subprocess.run([probe, "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=r_frame_rate",
+                              "-of", "csv=p=0", str(path)], capture_output=True, timeout=60, text=True,
+                             **({"creationflags": 0x08000000} if os.name == "nt" else {}))
+        rate = (out.stdout or "").strip().split("\n")[0].strip()
+        num, _, den = rate.partition("/")
+        if num.isdigit() and (not den or den.isdigit()) and int(num) > 0 and (not den or int(den) > 0):
+            fps = int(num) / int(den or 1)
+            if 5 <= fps <= 120:
+                return rate
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    return "30"
+
+
 def effective_layout(layout: Optional[dict], look: Optional[dict]) -> dict[str, Any]:
     lay = normalize_layout(layout)
     if look:
@@ -294,13 +431,16 @@ def blur_filter(blur: Optional[dict], width: int, height: int, src: str = "[0:v]
 
 def video_filter(ass: Path, width: int, height: int, layout: Optional[dict],
                  mascot_index: Optional[int] = None, mascot_animated: bool = False,
-                 frame_bg_index: Optional[int] = None) -> str:
-    """The whole ``-filter_complex`` video part → ``[v]``: frame, blur band,
+                 frame_bg_index: Optional[int] = None, zoom: str = "") -> str:
+    """The whole ``-filter_complex`` video part → ``[v]``: zoom (key moments), frame, blur band,
     mascot (input ``mascot_index``, prepared by ``dub_decor.prepare_mascot``),
     then subtitles. Each step is optional."""
     lay = normalize_layout(layout)
     parts: list[str] = []
     src = "[0:v]"
+    if zoom:
+        parts.append(f"{src}{zoom}[vz]")
+        src = "[vz]"
     if lay.get("frame"):
         parts.append(dub_decor.frame_filter(lay["frame"], width, height, src, "[vf]", frame_bg_index))
         src = "[vf]"
@@ -334,7 +474,7 @@ def sub_max_chars(width: int, height: int, layout: Optional[dict] = None) -> int
 
 
 def write_sub_ass(cues: list[tuple[float, float, str]], path: Path, *, width: int, height: int, style: str = "box_yellow",
-                  layout: Optional[dict] = None) -> Path:
+                  layout: Optional[dict] = None, emphasis: Optional[list[tuple[float, float, str, float, float]]] = None) -> Path:
     """Subtitles for libass. ``box_*``: BorderStyle 3 — an opaque box behind
     each line (yellow / white) with dark bold text, like the reference page;
     ``outline``: classic white text with a dark outline. Lines are cut to
@@ -354,13 +494,17 @@ def write_sub_ass(cues: list[tuple[float, float, str]], path: Path, *, width: in
         # BorderStyle 3: Outline = box padding, Shadow 0. OutlineColour is the box colour.
         line = (f"Style: Sub,Arial,{font},{text_col},&H000000FF,{back},{back},-1,0,0,0,100,100,0,0,3,"
                 f"{max(8, font // 4)},0,2,{margin_x},{margin_x},{margin_v},1")
+    # the key word ("✨ Nhấn chữ quan trọng"): big yellow bold with a dark outline, popping in
+    emph_font = round(font * 1.6)
+    emph_line = (f"Style: Emph,Arial,{emph_font},&H0014D8FF,&H000000FF,&H00101010,&H80000000,-1,0,0,0,100,100,0,0,1,"
+                 f"{max(3, emph_font // 10)},{max(1, emph_font // 20)},5,{margin_x},{margin_x},0,1")
     header = "\n".join([
         "[Script Info]", "ScriptType: v4.00+", f"PlayResX: {width}", f"PlayResY: {height}", "WrapStyle: 0", "",
         "[V4+ Styles]",
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, "
         "Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, "
         "MarginR, MarginV, Encoding",
-        line, "", "[Events]",
+        line, emph_line, "", "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ])
     events = []
@@ -376,6 +520,10 @@ def write_sub_ass(cues: list[tuple[float, float, str]], path: Path, *, width: in
             extra = "" if own_font == font else f"\\fs{own_font}" + ("" if style == "outline" else f"\\bord{max(8, own_font // 4)}")
             tag = f"{{\\an2\\pos({round(width * own['x'])},{round(height * own['y'])}){extra}}}"
         events.append(f"Dialogue: 0,{_ass_time(s)},{_ass_time(e)},Sub,,0,0,0,,{tag}{t.replace(chr(10), ' ')}")
+    for a, b, text, ex, ey in emphasis or []:
+        cx, cy = round(width * ex), round(height * (ey - 0.03))  # \an5: the anchor is the centre
+        pop = "\\fscx70\\fscy70\\t(0,120,\\fscx100\\fscy100)"
+        events.append(f"Dialogue: 1,{_ass_time(a)},{_ass_time(b)},Emph,,0,0,0,,{{\\an5\\pos({cx},{cy}){pop}}}{text}")
     path.write_text(header + "\n" + "\n".join(events) + "\n", encoding="utf-8")
     return path
 
@@ -415,6 +563,8 @@ class Job:
     #: services/dub_remotion (HTML/CSS subtitles, live <Player> preview)
     engine: str = "ass"
     layout: dict = field(default_factory=lambda: dict(DEFAULT_LAYOUT))
+    #: "✨ Nhấn chữ quan trọng": {on, words, zoom, sfx, sfx_set, y, points: [{at, words, line}]} — normalize_highlights
+    highlights: dict = field(default_factory=dict)
     width: int = 0
     height: int = 0
     #: voice + lines the current voice.wav was made from (re-renders that only
@@ -423,6 +573,11 @@ class Job:
     channel_id: Optional[int] = None
     name: str = ""
     auto_render: bool = True
+    #: several links dubbed together ("loạt"): the editor lists them side by side and can apply one look to all
+    batch_id: str = ""
+    #: every mp4 this job rendered: [{media_id, size, sha256, at}] — "📂 Mở lại video đã làm" finds the
+    #: project from a downloaded file (the tag inside it first, these fingerprints second)
+    outputs: list[dict] = field(default_factory=list)
     language: str = ""
     status: str = "queued"  # queued | running | review | rendering | done | error
     phase: str = "Đang chờ"
@@ -441,9 +596,11 @@ class Job:
     def public(self) -> dict[str, Any]:
         out: dict[str, Any] = {
             "job_id": self.id, "status": self.status, "phase": self.phase, "progress": self.progress,
+            "started_at": self.started_at,
             "url": self.url, "source_media_id": self.source_media_id, "voice": self.voice, "keep_bgm": self.keep_bgm,
-            "style": self.style, "engine": self.engine, "layout": dict(self.layout), "channel_id": self.channel_id, "name": self.name, "language": self.language,
-            "width": self.width, "height": self.height,
+            "style": self.style, "engine": self.engine, "layout": dict(self.layout), "highlights": normalize_highlights(self.highlights),
+            "channel_id": self.channel_id, "name": self.name, "language": self.language,
+            "width": self.width, "height": self.height, "batch_id": self.batch_id,
             "title": self.title, "duration_s": round(self.duration_s, 1),
             "segments": [s.public() for s in self.segments],
         }
@@ -533,7 +690,8 @@ async def _translate(job: Job) -> None:
     for b, (start, end) in enumerate(batches):
         if len(batches) > 1:
             _set(job, f"Đang dịch sang tiếng Việt ({b + 1}/{len(batches)})", 52 + int(8 * b / len(batches)))
-        lines = [f"[{i - start + 1}] ({segs[i].start:.1f}s-{segs[i].end:.1f}s) {segs[i].src}" for i in range(start, end)]
+        lines = [f"[{i - start + 1}] ({segs[i].start:.1f}s-{segs[i].end:.1f}s, ≤ {word_budget(segs, i, job.duration_s)} từ) {segs[i].src}"
+                 for i in range(start, end)]
         head = f"Source language: {job.language or 'unknown'}. Video title: {job.title or '-'}.\n"
         if len(batches) > 1:
             head += (f"This is part {b + 1} of {len(batches)} of one long video (lines {start + 1}-{end} of {len(segs)}). "
@@ -596,36 +754,117 @@ def _prepare(job: Job) -> None:
     _set(job, "Đã dịch xong", 60)
 
 
+#: a line Edge keeps refusing gets this many rounds (each = tts.ATTEMPTS tries), VOICE_ROUND_WAIT_S apart
+VOICE_ROUNDS = 3
+VOICE_ROUND_WAIT_S = 30
+#: drop leading and trailing silence (Edge adds ~0.2 s at each end of a line)
+TRIM_SILENCE = ("silenceremove=start_periods=1:start_threshold=-50dB,areverse,"
+                "silenceremove=start_periods=1:start_threshold=-50dB,areverse")
+#: Edge lines read at once (each is a network round trip); the ffmpeg fit-to-slot conversions too
+EDGE_PARALLEL = 8  # measured 28/10: 1 at a time 21.6 s/line, 4 → 3.3–4.8 s, 8 → 1.5–3.1 s
+CONVERT_PARALLEL = 4
+
+
+def _prefetch_edge(job: Job, spoken: list[Segment]) -> None:
+    """Read every Edge line EDGE_PARALLEL at a time into the TTS cache; the loop in _voice_pieces then
+    only picks them up (and retries, round by round, whatever Edge refused here)."""
+    total = len(spoken)
+    done = 0
+
+    async def run() -> None:
+        nonlocal done
+        sem = asyncio.Semaphore(EDGE_PARALLEL)
+
+        async def one(seg: Segment) -> None:
+            nonlocal done
+            async with sem:
+                if job.stop:
+                    raise DubError("Đã dừng theo yêu cầu")
+                try:
+                    await tts.synthesize(seg.text, job.voice, 0)
+                except tts.TTSError:
+                    pass  # the loop below tries it again, with its rounds
+            done += 1
+            _set(job, f"Đang tạo giọng đọc ({done}/{total}, {EDGE_PARALLEL} câu một lúc)", 62 + int(16 * done / max(1, total)))
+
+        await asyncio.gather(*(one(s) for s in spoken))
+
+    asyncio.run(run())
+
+
 def _voice_pieces(job: Job) -> list[tuple[float, Path, float]]:
     """TTS for every line, each converted to 48 kHz mono WAV and sped up to
     fit its slot. Returns ``[(start, wav, duration)]``."""
     ffmpeg = _ffmpeg()
     pieces: list[tuple[float, Path, float]] = []
     spoken = [s for s in job.segments if s.text.strip()]
+    if tts.voice_kind(job.voice) == "vieneu" and spoken:
+        # VieNeu loads its model once for every line still missing (then each line below is a cache hit)
+        _set(job, f"Đang tạo giọng đọc VieNeu ({len(spoken)} câu, trên máy)", 62)
+        try:
+            asyncio.run(tts.synthesize_many([s.text for s in spoken], job.voice, 0))
+        except tts.TTSError as exc:
+            raise DubError(f"giọng đọc lỗi: {exc}") from exc
+    if tts.voice_kind(job.voice) == "edge" and len(spoken) > 1:
+        _prefetch_edge(job, spoken)
+    narrations: list[Any] = []
     for i, seg in enumerate(spoken):
         _set(job, f"Đang tạo giọng đọc ({i + 1}/{len(spoken)})", 62 + int(18 * i / max(1, len(spoken))))
-        try:
-            narr = asyncio.run(tts.synthesize(seg.text, job.voice, 0))
-        except tts.TTSError as exc:
-            raise DubError(f"giọng đọc lỗi ở câu {i + 1}: {exc}") from exc
-        slot = max(0.4, seg.end - seg.start)
-        factor = speedup_for(narr.duration, slot)
-        wav = job.work / f"v{i:03d}.wav"
-        af = ["aresample=48000", "aformat=sample_fmts=s16:channel_layouts=mono"]
-        if factor > 1.0:
-            af.insert(0, f"atempo={factor}")
-        err = _run([ffmpeg, "-y", "-v", "error", "-i", str(narr.path), "-af", ",".join(af), "-c:a", "pcm_s16le", str(wav)], 120)
+        narr = None
+        for round_no in range(VOICE_ROUNDS):
+            try:
+                narr = asyncio.run(tts.synthesize(seg.text, job.voice, 0))
+                break
+            except tts.TTSError as exc:
+                # Edge drops requests in streaks: one bad line should not end a long video — wait, then try it again
+                if round_no == VOICE_ROUNDS - 1 or tts.voice_kind(job.voice) != "edge":
+                    kept = f" {i} câu đầu đã đọc xong và được giữ lại — render lại sau chỉ đọc phần còn thiếu." if i else ""
+                    hint = (" Dịch vụ giọng Edge đang chập chờn — thử lại sau ít phút, hoặc đổi sang giọng VieNeu (miễn phí, chạy trên máy)."
+                            if tts.voice_kind(job.voice) == "edge" else "")
+                    raise DubError(f"giọng đọc lỗi ở câu {i + 1}/{len(spoken)}: {exc}{kept}{hint}") from exc
+                logger.warning("dub: job %s line %d: %s — waiting %ds before another round", job.id, i + 1, exc, VOICE_ROUND_WAIT_S)
+                for left in range(VOICE_ROUND_WAIT_S, 0, -1):
+                    _set(job, f"Giọng Edge đang chập chờn — chờ {left}s rồi đọc lại câu {i + 1}/{len(spoken)}",
+                         62 + int(18 * i / max(1, len(spoken))))
+                    time.sleep(1)
+        assert narr is not None
+        narrations.append(narr)
+
+    def fit(i: int) -> tuple[float, Path, float]:
+        seg, narr = spoken[i], narrations[i]
+        # Edge pads every line with ~0.2 s of silence at both ends: off, so the words start on the line's mark
+        trimmed = job.work / f"t{i:03d}.wav"
+        err = _run([ffmpeg, "-y", "-v", "error", "-i", str(narr.path), "-af", TRIM_SILENCE + ",aresample=48000,"
+                    "aformat=sample_fmts=s16:channel_layouts=mono", "-c:a", "pcm_s16le", str(trimmed)], 120)
         if err:
             raise DubError(f"không chuyển được giọng câu {i + 1}: {err}")
+        natural = tts._probe_duration(trimmed) or narr.duration
+        # the line may run into the pause before the next one before it has to be sped up
+        factor = speedup_for(natural, line_window(spoken, i, job.duration_s))
+        wav = job.work / f"v{i:03d}.wav"
+        if factor > 1.0:
+            err = _run([ffmpeg, "-y", "-v", "error", "-i", str(trimmed), "-af", f"atempo={factor}", "-c:a", "pcm_s16le", str(wav)], 120)
+            if err:
+                raise DubError(f"không chuyển được giọng câu {i + 1}: {err}")
+            trimmed.unlink(missing_ok=True)
+        else:
+            os.replace(trimmed, wav)
         # ffprobe-measured when possible (probe_clip is video-only), else computed.
-        dur = tts._probe_duration(wav) or (narr.duration / factor)
-        pieces.append((seg.start, wav, dur))
+        return seg.start, wav, tts._probe_duration(wav) or (natural / factor)
+
+    _set(job, f"Đang khớp độ dài {len(spoken)} câu giọng đọc", 80)
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=CONVERT_PARALLEL) as pool:
+        pieces.extend(pool.map(fit, range(len(spoken))))
     return pieces
 
 
-def _timeline_wav(ffmpeg: str, pieces: list[tuple[float, Path, float]], total_s: float, out: Path) -> None:
+def _timeline_wav(ffmpeg: str, pieces: list[tuple[float, Path, float]], total_s: float, out: Path) -> list[tuple[float, float]]:
     """The voice pieces at their start times on one silent track. A piece
-    that overruns its slot pushes the next one later (never overlaps)."""
+    that overruns its slot pushes the next one later (never overlaps).
+    Returns where each piece really landed: ``[(start, duration)]``."""
+    placed: list[tuple[float, float]] = []
     inputs: list[str] = []
     chains: list[str] = []
     labels: list[str] = []
@@ -641,6 +880,7 @@ def _timeline_wav(ffmpeg: str, pieces: list[tuple[float, Path, float]], total_s:
         idx = len(inputs) // 2 - 1
         chains.append(f"[{idx}:a]aformat=sample_fmts=s16:channel_layouts=mono[a{n}]")
         labels.append(f"[a{n}]")
+        placed.append((round(cursor, 3), dur))
         cursor += dur
         n += 1
     tail = total_s - cursor
@@ -653,6 +893,29 @@ def _timeline_wav(ffmpeg: str, pieces: list[tuple[float, Path, float]], total_s:
     err = _run(cmd, 300)
     if err:
         raise DubError(f"không ghép được giọng: {err}")
+    return placed
+
+
+#: a subtitle stays this long after its line has been said (never into the next line)
+SUB_TAIL_S = 0.25
+
+
+def follow_voice(job: Job, placed: list[tuple[float, float]], total_s: float) -> None:
+    """Subtitles follow the voice: every spoken line's start / end become where its voice really is on the track
+    (a long line pushes the next ones later — the subtitles used to stay on the original timing and ran 1–6 s
+    ahead of the voice, 28/10). Lines that are not spoken are kept between their neighbours."""
+    spoken = [s for s in job.segments if s.text.strip()]
+    for k, (seg, (start, dur)) in enumerate(zip(spoken, placed)):
+        nxt = placed[k + 1][0] if k + 1 < len(placed) else (total_s or start + dur + SUB_TAIL_S)
+        seg.start = round(start, 3)
+        seg.end = round(max(start + MIN_SLOT_S, min(start + dur + SUB_TAIL_S, nxt)), 3)
+    prev_end = 0.0
+    for seg in job.segments:
+        if seg.text.strip():
+            prev_end = seg.end
+        elif seg.start < prev_end:  # a line taken out: slide it after the previous spoken one
+            span = max(0.0, seg.end - seg.start)
+            seg.start, seg.end = round(prev_end, 3), round(prev_end + span, 3)
 
 
 def filmstrip(job: Job) -> Path:
@@ -742,6 +1005,13 @@ def apply_timings(job: Job, timings: list[list[float]]) -> None:
         seg.start, seg.end = start, end
 
 
+def _separate_bgm(job: Job, ffmpeg: str, src: Path, bgm: Path, progress: Optional[Callable[[int], None]]) -> None:
+    """The music under the original speech (spleeter) → ``bgm``."""
+    full = job.work / "full44.wav"
+    _extract_wav(ffmpeg, src, full, 44100, False)
+    _runner("separate", str(full), str(job.work / "vocals.wav"), str(bgm), progress=progress, stop=lambda: job.stop)
+
+
 def _render(job: Job) -> None:
     ffmpeg = _ffmpeg()
     job.status = "rendering"
@@ -754,25 +1024,54 @@ def _render(job: Job) -> None:
     voice = job.work / "voice.wav"
     _upgrade_voice_key(job)
     key = voice_key(job)
+    bgm_path = job.work / "bgm.wav"
+    bgm_thread: Optional[Any] = None
+    bgm_errors: list[BaseException] = []
+    if (job.keep_bgm and status().get("separate") and not bgm_path.is_file()
+            and not (voice.is_file() and job.voice_key == key)):
+        # Separate the music while the voice is being read (that step waits on the network): saves its whole run.
+        import threading
+
+        def separate() -> None:
+            try:
+                _separate_bgm(job, ffmpeg, src, bgm_path, progress=None)
+            except BaseException as exc:  # noqa: BLE001 — reported after the voice step
+                bgm_errors.append(exc)
+
+        bgm_thread = threading.Thread(target=separate, name=f"dub-bgm-{job.id}", daemon=True)
+        bgm_thread.start()
     if voice.is_file() and job.voice_key == key:
         _set(job, "Dùng lại giọng đã đọc", 81)  # only the subtitles / layout changed
     else:
         pieces = _voice_pieces(job)
         _set(job, "Đang xếp giọng theo thời gian", 81)
-        _timeline_wav(ffmpeg, pieces, info.duration, voice)
-        job.voice_key = key
+        placed = _timeline_wav(ffmpeg, pieces, info.duration, voice)
+        follow_voice(job, placed, info.duration)
+        job.voice_key = voice_key(job)  # the lines now sit where their voice is: a layout-only re-render reuses it
     bgm: Optional[Path] = None
     if job.keep_bgm:
         if status().get("separate"):
-            bgm = job.work / "bgm.wav"
+            bgm = bgm_path
+            if bgm_thread is not None:
+                if bgm_thread.is_alive():
+                    _set(job, "Đang tách nhạc nền khỏi tiếng gốc (sắp xong)", 84)
+                bgm_thread.join()
+                if bgm_errors:
+                    err = bgm_errors[0]
+                    raise err if isinstance(err, DubError) else DubError(f"tách nhạc nền lỗi: {err}")
             if not bgm.is_file():
                 _set(job, "Đang tách nhạc nền khỏi tiếng gốc", 84)
-                full = job.work / "full44.wav"
-                _extract_wav(ffmpeg, src, full, 44100, False)
-                _runner("separate", str(full), str(job.work / "vocals.wav"), str(bgm),
-                        progress=lambda p: _set(job, "Đang tách nhạc nền khỏi tiếng gốc", 84 + p * 0.06), stop=lambda: job.stop)
+                _separate_bgm(job, ffmpeg, src, bgm,
+                              progress=lambda p: _set(job, "Đang tách nhạc nền khỏi tiếng gốc", 84 + p * 0.06))
         else:
             logger.warning("dub: keep_bgm asked but spleeter models are missing; original audio dropped")
+    hl = _ensure_points(job)
+    sfx_track: Optional[Path] = None
+    sfx_pieces = sfx.pieces(hl["points"], hl["sfx_set"]) if hl["on"] and hl["sfx"] and hl["points"] else []
+    if sfx_pieces:
+        _set(job, "Đang xếp tiếng hiệu ứng", 90)
+        sfx_track = job.work / "sfx.wav"
+        _timeline_wav(ffmpeg, sfx_pieces, info.duration, sfx_track)
     _set(job, "Đang ghép video + phụ đề", 91)
     cues: list[tuple[float, float, str]] = []
     for s in job.segments:
@@ -780,15 +1079,21 @@ def _render(job: Job) -> None:
         for a, b, t in split_cue(s.start, s.end, s.text, sub_max_chars(info.width, info.height, own)):
             cues.append((a, b, t, s.look) if s.look else (a, b, t))
     if job.engine == "remotion":
-        _render_remotion(job, ffmpeg, src, voice, bgm, info, cues)
+        _render_remotion(job, ffmpeg, src, voice, bgm, info, cues, hl, sfx_pieces)
         return
-    ass = write_sub_ass(cues, job.work / "subs.ass", width=info.width, height=info.height, style=job.style, layout=job.layout)
+    ass = write_sub_ass(cues, job.work / "subs.ass", width=info.width, height=info.height, style=job.style, layout=job.layout,
+                        emphasis=emphasis_events(hl, job.layout, info.duration))
     media_id = uuid.uuid4().hex
     dst = media_service.MEDIA_CACHE_DIR / f"{media_id}.mp4"
     cmd = [ffmpeg, "-y", "-v", "error", "-i", str(src), "-i", str(voice)]
     if bgm is not None:
         cmd += ["-i", str(bgm)]
     next_index = 3 if bgm is not None else 2
+    sfx_index = None
+    if sfx_track is not None:
+        sfx_index = next_index
+        next_index += 1
+        cmd += ["-i", str(sfx_track)]
     frame_bg = dub_decor.frame_bg_path(normalize_layout(job.layout).get("frame"))
     frame_bg_index = None
     if frame_bg is not None:
@@ -800,18 +1105,19 @@ def _render(job: Job) -> None:
     if mascot is not None:
         mascot_index = next_index
         cmd += dub_decor.mascot_input_args(*mascot)
-    vgraph = video_filter(ass, info.width, info.height, job.layout, mascot_index, bool(mascot and mascot[1]), frame_bg_index)
-    if bgm is not None:
-        cmd += ["-filter_complex",
-                f"{vgraph};[2:a]volume={BGM_VOLUME}[b];[1:a][b]amix=inputs=2:duration=first:normalize=0[a]",
-                "-map", "[v]", "-map", "[a]"]
+    vgraph = video_filter(ass, info.width, info.height, job.layout, mascot_index, bool(mascot and mascot[1]), frame_bg_index,
+                          zoom=zoom_filter(hl, info.width, info.height, probe_fps(src)))
+    agraph, amap = audio_mix(bgm is not None, sfx_index)
+    if agraph:
+        cmd += ["-filter_complex", f"{vgraph};{agraph}", "-map", "[v]", "-map", amap]
     else:
-        cmd += ["-filter_complex", vgraph, "-map", "[v]", "-map", "1:a:0"]
+        cmd += ["-filter_complex", vgraph, "-map", "[v]", "-map", amap]
     cmd += [*_encode_args(ffmpeg), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-shortest",
-            "-movflags", "+faststart", str(dst)]
+            "-metadata", f"comment={output_tag(job)}", "-movflags", "+faststart", str(dst)]
     err = _run(cmd, ENCODE_TIMEOUT_S)
     if err or not dst.is_file() or dst.stat().st_size == 0:
         raise DubError(f"ffmpeg ghép lỗi: {err or 'file rỗng'}")
+    _record_output(job, dst, media_id)
     with get_session() as s:
         s.add(Asset(kind="video", uuid_media_id=media_id, local_path=str(dst), mime="video/mp4"))
         s.commit()
@@ -821,8 +1127,72 @@ def _render(job: Job) -> None:
     job.phase, job.progress, job.status = "Xong", 100, "done"
 
 
+def audio_mix(with_bgm: bool, sfx_index: Optional[int]) -> tuple[str, str]:
+    """``(filter part, map)`` for the voice ([1:a]) + music ([2:a], BGM_VOLUME) + sound effects (input
+    ``sfx_index``, SFX_VOLUME); the voice alone needs no filter."""
+    parts, ins = [], ["[1:a]"]
+    if with_bgm:
+        parts.append(f"[2:a]volume={BGM_VOLUME}[b]")
+        ins.append("[b]")
+    if sfx_index is not None:
+        parts.append(f"[{sfx_index}:a]volume={key_moments.SFX_VOLUME}[fx]")
+        ins.append("[fx]")
+    if len(ins) == 1:
+        return "", "1:a:0"
+    parts.append(f"{''.join(ins)}amix=inputs={len(ins)}:duration=first:normalize=0[a]")
+    return ";".join(parts), "[a]"
+
+
+def has_picture_layers(job: Job) -> bool:
+    lay = normalize_layout(job.layout)
+    return bool(lay.get("frame") or lay.get("blur") or lay.get("mascot"))
+
+
+def render_clean_video(job: Job, dst: Path) -> Path:
+    """The picture as the editor shows it — frame, blur band, sticker — with
+    no subtitles and no sound: Edit auto CapCut (``services/capcut_auto``)
+    puts the voice, the music and the subtitles on their own CapCut tracks.
+    A job without those layers needs no render: its source comes back."""
+    src = job.src_path
+    if src is None or not Path(src).is_file():
+        p = media_service.cached_path(job.source_media_id or "")
+        src = Path(p) if p else None
+    if src is None or not Path(src).is_file():
+        raise DubError("Không thấy file video nguồn")
+    if not has_picture_layers(job):
+        return Path(src)
+    ffmpeg = _ffmpeg()
+    info = probe_clip(src)
+    if info is None:
+        raise DubError("Không đọc được video")
+    work = job.work if job.work is not None else dst.parent
+    lay = normalize_layout(job.layout)
+    ass = write_sub_ass([], work / "capcut_nosub.ass", width=info.width, height=info.height, style=job.style, layout=job.layout)
+    cmd = [ffmpeg, "-y", "-v", "error", "-i", str(src)]
+    next_index = 1
+    frame_bg = dub_decor.frame_bg_path(lay.get("frame"))
+    frame_bg_index = None
+    if frame_bg is not None:
+        frame_bg_index = next_index
+        next_index += 1
+        cmd += ["-loop", "1", "-framerate", "30", "-i", str(frame_bg)]
+    mascot = dub_decor.prepare_mascot(lay.get("mascot"), info.height, work)
+    mascot_index = None
+    if mascot is not None:
+        mascot_index = next_index
+        cmd += dub_decor.mascot_input_args(*mascot)
+    vgraph = video_filter(ass, info.width, info.height, job.layout, mascot_index, bool(mascot and mascot[1]), frame_bg_index)
+    cmd += ["-filter_complex", vgraph, "-map", "[v]", "-an", "-t", f"{info.duration:.3f}", *_encode_args(ffmpeg),
+            "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(dst)]
+    err = _run(cmd, ENCODE_TIMEOUT_S)
+    if err or not dst.is_file() or dst.stat().st_size == 0:
+        raise DubError(f"ffmpeg dựng video nền lỗi: {err or 'file rỗng'}")
+    return dst
+
+
 def _render_remotion(job: Job, ffmpeg: str, src: Path, voice: Path, bgm: Optional[Path], info: Any,
-                     cues: list[tuple[float, float, str]]) -> None:
+                     cues: list[tuple[float, float, str]], hl: Optional[dict[str, Any]] = None,
+                     sfx_pieces: Optional[list[tuple[float, Path, float]]] = None) -> None:
     """The second engine: ffmpeg only muxes the dubbed audio into the video
     (``nosub.mp4``, stream copy when possible), Remotion draws the subtitles
     and the blur band on top (``services/dub_remotion``)."""
@@ -849,8 +1219,15 @@ def _render_remotion(job: Job, ffmpeg: str, src: Path, voice: Path, bgm: Optiona
         raise DubError(f"ffmpeg ghép tiếng lỗi: {err or 'file rỗng'}")
     media_id = uuid.uuid4().hex
     dst = media_service.MEDIA_CACHE_DIR / f"{media_id}.mp4"
+    hl = normalize_highlights(hl if hl is not None else job.highlights)
     spec = dub_remotion.build_spec(src=nosub, out=dst, cues=cues, layout=normalize_layout(job.layout), style=job.style,
-                                   width=info.width, height=info.height, duration_s=info.duration)
+                                   width=info.width, height=info.height, duration_s=info.duration,
+                                   highlights=({"words": hl["words"], "zoom": hl["zoom"], "y": emphasis_y(job.layout, hl),
+                                                "points": [{"at": p["at"], "words": p["words"]} for p in hl["points"]]}
+                                               if hl["on"] and hl["points"] else None),
+                                   sfx=[(at, dur) for at, _p, dur in (sfx_pieces or [])])
+    if sfx_pieces:
+        spec["sfx_files"] = [str(p) for _a, p, _d in sfx_pieces]
     mascot = normalize_layout(job.layout).get("mascot")
     if mascot:
         try:
@@ -872,6 +1249,8 @@ def _render_remotion(job: Job, ffmpeg: str, src: Path, voice: Path, bgm: Optiona
         dub_remotion.render(spec, progress=prog, stop=lambda: job.stop)
     except dub_remotion.RemotionError as exc:
         raise DubError(str(exc)) from exc
+    _tag_file(ffmpeg, dst, output_tag(job))
+    _record_output(job, dst, media_id)
     with get_session() as s:
         s.add(Asset(kind="video", uuid_media_id=media_id, local_path=str(dst), mime="video/mp4"))
         s.commit()
@@ -906,7 +1285,10 @@ def _save_board(job: Job) -> int:
     narration = " ".join(s.text for s in job.segments if s.text.strip())
     qt = {"template_id": "dub", "step": 5, "source_url": job.url, "channel_id": job.channel_id,
           "dub": {"job_id": job.id, "voice": job.voice, "style": job.style, "layout": dict(job.layout),
-                  "keep_bgm": job.keep_bgm, "language": job.language, "source_media_id": job.source_media_id}}
+                  "keep_bgm": job.keep_bgm, "language": job.language, "source_media_id": job.source_media_id,
+                  # the whole editable project, so it can be reopened even if <work>/job.json is gone
+                  # (another machine, cleaned media folder) — see restore_from_board
+                  "snapshot": snapshot(job)}}
     with get_session() as s:
         if job.board_id:
             board = s.get(Board, job.board_id)
@@ -971,7 +1353,7 @@ def persist(job: Job) -> None:
     try:
         work = job.work or (_jobs_root() / job.id)
         work.mkdir(parents=True, exist_ok=True)
-        data = job.public() | {"started_at": job.started_at, "auto_render": job.auto_render}
+        data = job.public() | {"started_at": job.started_at, "auto_render": job.auto_render, "outputs": job.outputs[-30:]}
         (work / "job.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     except OSError as exc:  # noqa: BLE001 — persistence is best effort
         logger.warning("dub: could not persist job %s: %s", job.id, exc)
@@ -988,33 +1370,41 @@ def load_jobs() -> None:
             jid = str(d.get("job_id") or meta.parent.name)
             if jid in JOBS:
                 continue
-            job = Job(id=jid, url=d.get("url"), source_media_id=d.get("source_media_id"),
-                      voice=d.get("voice") or tts.DEFAULT_VOICE, keep_bgm=bool(d.get("keep_bgm")),
-                      style=d.get("style") or "box_yellow", layout=normalize_layout(d.get("layout")),
-                      engine="remotion" if d.get("engine") == "remotion" else "ass",
-                      width=int(d.get("width") or 0), height=int(d.get("height") or 0),
-                      channel_id=d.get("channel_id"), name=str(d.get("name") or ""),
-                      auto_render=bool(d.get("auto_render", True)), language=str(d.get("language") or ""),
-                      status=str(d.get("status") or "error"), phase=str(d.get("phase") or ""),
-                      progress=int(d.get("progress") or 0), title=str(d.get("title") or ""),
-                      duration_s=float(d.get("duration_s") or 0), media_id=d.get("media_id"), board_id=d.get("board_id"),
-                      error=d.get("error"), started_at=float(d.get("started_at") or meta.stat().st_mtime), work=meta.parent)
-            job.segments = [Segment(float(s["start"]), float(s["end"]), str(s.get("src") or ""), str(s.get("text") or ""),
-                                    normalize_look(s.get("look")))
-                            for s in d.get("segments") or []]
-            if job.status in ("queued", "running", "rendering"):
-                job.status, job.error = "error", "Agent khởi động lại giữa chừng — làm lại từ link"
-            src = media_service.cached_path(job.source_media_id or "") if job.source_media_id else None
-            job.src_path = Path(src) if src else None
-            if (meta.parent / "voice.wav").is_file():
-                job.voice_key = voice_key(job)
-            JOBS[jid] = job
+            JOBS[jid] = _job_from_dict(d, meta.parent, meta.stat().st_mtime)
         except (OSError, ValueError, KeyError, TypeError) as exc:
             logger.warning("dub: skipped %s: %s", meta, exc)
 
 
+def _job_from_dict(d: dict, work: Path, fallback_time: float) -> Job:
+    """A job from its saved public dict (``job.json``, or the snapshot its clip keeps)."""
+    job = Job(id=str(d.get("job_id") or work.name), url=d.get("url"), source_media_id=d.get("source_media_id"),
+              voice=d.get("voice") or tts.DEFAULT_VOICE, keep_bgm=bool(d.get("keep_bgm")),
+              style=d.get("style") or "box_yellow", layout=normalize_layout(d.get("layout")),
+              highlights=normalize_highlights(d.get("highlights")),
+              engine="remotion" if d.get("engine") == "remotion" else "ass",
+              width=int(d.get("width") or 0), height=int(d.get("height") or 0),
+              channel_id=d.get("channel_id"), name=str(d.get("name") or ""),
+              auto_render=bool(d.get("auto_render", True)), batch_id=str(d.get("batch_id") or ""),
+              language=str(d.get("language") or ""),
+              status=str(d.get("status") or "error"), phase=str(d.get("phase") or ""),
+              progress=int(d.get("progress") or 0), title=str(d.get("title") or ""),
+              duration_s=float(d.get("duration_s") or 0), media_id=d.get("media_id"), board_id=d.get("board_id"),
+              error=d.get("error"), started_at=float(d.get("started_at") or fallback_time), work=work,
+              outputs=[o for o in d.get("outputs") or [] if isinstance(o, dict)])
+    job.segments = [Segment(float(s["start"]), float(s["end"]), str(s.get("src") or ""), str(s.get("text") or ""),
+                            normalize_look(s.get("look")))
+                    for s in d.get("segments") or []]
+    if job.status in ("queued", "running", "rendering"):
+        job.status, job.error = "error", "Agent khởi động lại giữa chừng — làm lại từ link"
+    src = media_service.cached_path(job.source_media_id or "") if job.source_media_id else None
+    job.src_path = Path(src) if src else None
+    if (work / "voice.wav").is_file():
+        job.voice_key = voice_key(job)
+    return job
+
+
 def start_job(*, url: Optional[str], source_media_id: Optional[str], voice: str, keep_bgm: bool, style: str,
-              channel_id: Optional[int], name: str, auto_render: bool, engine: str = "ass") -> Job:
+              channel_id: Optional[int], name: str, auto_render: bool, engine: str = "ass", batch_id: str = "") -> Job:
     st = status()
     if not st["available"]:
         raise DubError(st.get("reason", "Lồng tiếng chưa dùng được trên máy này"))
@@ -1028,7 +1418,7 @@ def start_job(*, url: Optional[str], source_media_id: Optional[str], voice: str,
     style = _style_for(engine, style)
     job = Job(id=uuid.uuid4().hex[:12], url=url or None, source_media_id=source_media_id or None, voice=voice,
               keep_bgm=keep_bgm, style=style, engine=engine, channel_id=channel_id, name=(name or "").strip(),
-              auto_render=auto_render)
+              auto_render=auto_render, batch_id=(batch_id or "").strip()[:40])
     JOBS[job.id] = job
     cutoff = time.time() - 6 * 3600
     for jid in [j.id for j in JOBS.values() if j.status in ("done", "error") and j.started_at < cutoff]:
@@ -1088,7 +1478,8 @@ def render_job(job: Job, *, lines: Optional[list[str]], voice: Optional[str], st
                keep_bgm: Optional[bool], name: Optional[str], channel_id: Any = _UNSET,
                layout: Optional[dict] = None, engine: Optional[str] = None,
                timings: Optional[list[list[float]]] = None,
-               looks: Optional[list[Optional[dict]]] = None) -> Job:
+               looks: Optional[list[Optional[dict]]] = None,
+               highlights: Optional[dict] = None) -> Job:
     """Render (again) with edited lines / options. Allowed from ``review``,
     ``done`` and ``error`` (after a render failure). ``timings`` = new
     [start, end] per line from the timeline editor."""
@@ -1119,6 +1510,8 @@ def render_job(job: Job, *, lines: Optional[list[str]], voice: Optional[str], st
         job.style = _style_for(job.engine, style or job.style)
     if layout is not None:
         job.layout = normalize_layout(layout)
+    if highlights is not None:
+        job.highlights = normalize_highlights(highlights)
     if keep_bgm is not None:
         job.keep_bgm = keep_bgm
     if name is not None:
@@ -1133,3 +1526,207 @@ def render_job(job: Job, *, lines: Optional[list[str]], voice: Optional[str], st
     persist(job)
     _pump()
     return job
+
+
+# ── reopen a finished video later ("📂 Mở lại video đã làm") ───────────────
+# Every mp4 the dubbing tool makes carries ``comment=flowboard-dub:<job id>``
+# and its fingerprint is kept in ``job.outputs``; the board keeps a snapshot
+# of the project. Dropping a downloaded video back into the page finds the
+# project again — the next day, after a restart, or on the other machine.
+
+TAG_PREFIX = "flowboard-dub:"
+SNAPSHOT_KEYS = ("url", "source_media_id", "voice", "keep_bgm", "style", "engine", "layout", "highlights", "width", "height",
+                 "channel_id", "name", "language", "title", "duration_s", "segments", "media_id", "batch_id")
+
+
+def output_tag(job: Job) -> str:
+    return f"{TAG_PREFIX}{job.id}"
+
+
+def _tag_file(ffmpeg: str, path: Path, tag: str) -> None:
+    """Write the tag into an already rendered mp4 (stream copy; best effort)."""
+    tmp = path.with_name(path.stem + ".tag.mp4")
+    err = _run([ffmpeg, "-y", "-v", "error", "-i", str(path), "-map", "0", "-c", "copy",
+                "-metadata", f"comment={tag}", "-movflags", "+faststart", str(tmp)], 600)
+    if err or not tmp.is_file() or tmp.stat().st_size == 0:
+        logger.warning("dub: could not tag %s: %s", path.name, err)
+        tmp.unlink(missing_ok=True)
+        return
+    os.replace(tmp, path)
+
+
+def file_sha256(path: Path) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _record_output(job: Job, path: Path, media_id: str) -> None:
+    try:
+        job.outputs.append({"media_id": media_id, "size": path.stat().st_size, "sha256": file_sha256(path), "at": time.time()})
+        job.outputs = job.outputs[-30:]
+    except OSError as exc:  # noqa: BLE001 — a fingerprint is a convenience
+        logger.warning("dub: could not fingerprint %s: %s", path, exc)
+
+
+def snapshot(job: Job) -> dict[str, Any]:
+    d = job.public()
+    snap = {k: d.get(k) for k in SNAPSHOT_KEYS}
+    snap.update(job_id=job.id, started_at=job.started_at, auto_render=True, status="done", outputs=job.outputs[-10:])
+    return snap
+
+
+def read_tag(path: Path) -> Optional[str]:
+    """The job id written into a video by this tool, if any."""
+    probe = shutil.which("ffprobe")
+    if probe is None:
+        return None
+    try:
+        out = subprocess.run([probe, "-v", "error", "-show_entries", "format_tags", "-of", "json", str(path)],
+                             capture_output=True, timeout=60, **({"creationflags": 0x08000000} if os.name == "nt" else {}))
+        tags = (json.loads(out.stdout or b"{}").get("format") or {}).get("tags") or {}
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    for value in tags.values():
+        text = str(value or "")
+        if text.startswith(TAG_PREFIX):
+            jid = text[len(TAG_PREFIX):].strip()
+            if re.fullmatch(r"[0-9a-f]{6,40}", jid):
+                return jid
+    return None
+
+
+def restore_from_board(job_id: str) -> Optional[Job]:
+    """Rebuild a job from the snapshot its clip keeps (Neon) when ``job.json`` is gone."""
+    with get_session() as s:
+        boards = s.exec(select(Board)).all()
+    for b in boards:
+        dub = (((b.data or {}).get("quicktool") or {}).get("dub") or {})
+        snap = dub.get("snapshot")
+        if dub.get("job_id") != job_id or not isinstance(snap, dict) or not snap.get("segments"):
+            continue
+        job = _job_from_dict({**snap, "job_id": job_id, "board_id": b.id, "status": "done", "error": None,
+                              "phase": "Mở lại từ clip đã lưu", "progress": 100}, _jobs_root() / job_id, time.time())
+        JOBS[job_id] = job
+        persist(job)
+        logger.info("dub: restored job %s from board %s", job_id, b.id)
+        return job
+    return None
+
+
+def delete_jobs(ids: list[str]) -> tuple[list[str], list[dict[str, str]]]:
+    """Remove jobs from the list ("🗑 Xoá khỏi danh sách"): the job and its work folder (job.json, the
+    voice / music tracks, temp files). The exported video, the source video and the clip are NOT touched —
+    they are Assets / a board of their own; dropping the video back in still reopens the project from the
+    snapshot its clip keeps (the voice is read again on the next export, from the TTS cache when it has the lines)."""
+    load_jobs()
+    root = _jobs_root().resolve()
+    deleted: list[str] = []
+    skipped: list[dict[str, str]] = []
+    for jid in dict.fromkeys(ids):
+        job = JOBS.get(jid)
+        if job is None:
+            skipped.append({"job_id": jid, "reason": "không có trong danh sách"})
+            continue
+        if job.status in ("queued", "running", "rendering"):
+            skipped.append({"job_id": jid, "reason": "đang chạy — dừng trước rồi xoá"})
+            continue
+        work = (job.work or (root / jid)).resolve()
+        if work.parent != root:  # never outside media/dub/<id>
+            skipped.append({"job_id": jid, "reason": "thư mục làm việc lạ"})
+            continue
+        shutil.rmtree(work, ignore_errors=True)
+        meta = work / "job.json"
+        if meta.exists():  # a file still open (Windows): at least take it off the list
+            try:
+                meta.unlink()
+            except OSError as exc:
+                skipped.append({"job_id": jid, "reason": f"không xoá được: {exc}"})
+                continue
+        JOBS.pop(jid, None)
+        deleted.append(jid)
+    return deleted, skipped
+
+
+_SNAPSHOT_CHECKED: set[str] = set()
+
+
+def backfill_snapshots() -> int:
+    """Clips made before snapshots existed get one (once per job per run), so they can be reopened anywhere."""
+    done = 0
+    for job in list(JOBS.values()):
+        if job.id in _SNAPSHOT_CHECKED or not job.board_id or not job.segments or job.status != "done":
+            continue
+        _SNAPSHOT_CHECKED.add(job.id)
+        try:
+            with get_session() as s:
+                board = s.get(Board, job.board_id)
+                qt = dict(((board.data or {}).get("quicktool") or {})) if board is not None else {}
+                d = dict(qt.get("dub") or {})
+                if board is None or d.get("job_id") != job.id or d.get("snapshot"):
+                    continue
+                d["snapshot"] = snapshot(job)
+                board.data = {**(board.data or {}), "quicktool": {**qt, "dub": d}}
+                s.add(board)
+                s.commit()
+                done += 1
+        except Exception as exc:  # noqa: BLE001 — never break the job list over this
+            logger.warning("dub: snapshot backfill for %s failed: %s", job.id, exc)
+    return done
+
+
+def find_job(job_id: str) -> Optional[Job]:
+    load_jobs()
+    return JOBS.get(job_id) or restore_from_board(job_id)
+
+
+def _dub_job_of_board(board: Board) -> Optional[str]:
+    qt = (board.data or {}).get("quicktool") or {}
+    return ((qt.get("dub") or {}).get("job_id") or None) if qt.get("template_id") == "dub" else None
+
+
+def identify(path: Path, *, sha256: Optional[str] = None) -> Optional[dict[str, Any]]:
+    """Which project made this video? ``{"kind": "dub", "job": Job, "via": "tag"|"fingerprint"}`` for a dubbed
+    video, ``{"kind": "clip", "board_id", "name"}`` for a clip made in the wizard, None when the tool did not
+    make it (or another app re-encoded it — TikTok / CapCut / Zalo all do)."""
+    jid = read_tag(path)
+    if jid:
+        job = find_job(jid)
+        if job is not None:
+            return {"kind": "dub", "job": job, "via": "tag"}
+    size = path.stat().st_size
+    digest = sha256 or file_sha256(path)
+    load_jobs()
+    for job in JOBS.values():
+        if any(o.get("sha256") == digest for o in job.outputs):
+            return {"kind": "dub", "job": job, "via": "fingerprint"}
+    # older files (made before tags): the final video of every clip, same size first, then the bytes
+    with get_session() as s:
+        exports = s.exec(select(Node.board_id, Node.data).where(Node.type.in_(["export", "merge"]))).all()
+        by_media: dict[str, int] = {}
+        for board_id, data in exports:
+            mid = (data or {}).get("mediaId") if isinstance(data, dict) else None
+            if mid:
+                by_media[str(mid)] = int(board_id)
+        rows = s.exec(select(Asset).where(Asset.uuid_media_id.in_(list(by_media)))).all() if by_media else []
+        candidates = [(by_media[r.uuid_media_id], Path(r.local_path)) for r in rows if r.local_path]
+    for board_id, local in candidates:
+        try:
+            if not local.is_file() or local.stat().st_size != size or file_sha256(local) != digest:
+                continue
+        except OSError:
+            continue
+        with get_session() as s:
+            board = s.get(Board, board_id)
+        if board is None:
+            continue
+        djid = _dub_job_of_board(board)
+        job = find_job(djid) if djid else None
+        if job is not None:
+            return {"kind": "dub", "job": job, "via": "fingerprint"}
+        return {"kind": "clip", "board_id": board_id, "name": board.name}
+    return None

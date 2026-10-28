@@ -17,6 +17,8 @@ export interface DubStatus {
   remotion?: boolean;
   remotion_reason?: string;
   remotion_styles?: { key: string; label: string }[];
+  /** sound-effect sets for the key moments: built-in, and the user's CapCut sounds when learned */
+  sfx_sets?: { key: "builtin" | "capcut"; label: string; count: number }[];
 }
 
 /** "ass" = ffmpeg/libass (the original), "remotion" = services/dub_remotion */
@@ -79,6 +81,52 @@ export interface DubMascot {
 }
 
 export const DEFAULT_LAYOUT: DubLayout = { x: 0.5, y: 0.8, scale: 1, blur: null, frame: null, mascot: null };
+
+/** One key moment: the key words are said at ``at`` (line ``line`` of the translation, when known). */
+export interface DubHighlightPoint {
+  at: number;
+  words: string;
+  line?: number | null;
+}
+
+/** "✨ Nhấn chữ quan trọng": a big key word, a quick push-in and a sound at the key moments (services/key_moments). */
+export interface DubHighlights {
+  on: boolean;
+  words: boolean;
+  zoom: boolean;
+  sfx: boolean;
+  /** "builtin" (pop, whoosh, ding, click) | "capcut" (the sounds learned from the user's CapCut) */
+  sfx_set: "builtin" | "capcut";
+  /** bottom-centre y of the key word (fraction); null = above the subtitles */
+  y: number | null;
+  points: DubHighlightPoint[];
+  /** how the points were picked: "ai" | "fallback" | "manual" | "" */
+  picked: string;
+}
+
+export const DEFAULT_HIGHLIGHTS: DubHighlights = { on: false, words: true, zoom: true, sfx: true, sfx_set: "builtin", y: null, points: [], picked: "" };
+export const HL_EMPHASIS_S = 1.2;
+export const HL_Y_MIN = 0.1, HL_Y_MAX = 0.92;
+
+/** The same shape the agent keeps (services/dub.normalize_highlights), so a doc and a job compare equal. */
+export function normHighlights(raw: Partial<DubHighlights> | null | undefined): DubHighlights {
+  const h = raw ?? {};
+  const points = (h.points ?? [])
+    .filter((p) => p && Number.isFinite(p.at) && String(p.words ?? "").trim())
+    .map((p) => ({ at: Math.round(Math.max(0, p.at) * 1000) / 1000, words: String(p.words).replace(/\s+/g, " ").trim().slice(0, 40),
+                   line: typeof p.line === "number" ? p.line : null }))
+    .sort((a, b) => a.at - b.at)
+    .slice(0, 40);
+  const y = typeof h.y === "number" && Number.isFinite(h.y) ? Math.round(Math.min(HL_Y_MAX, Math.max(HL_Y_MIN, h.y)) * 10000) / 10000 : null;
+  return { on: !!h.on, words: h.words !== false, zoom: h.zoom !== false, sfx: h.sfx !== false,
+           sfx_set: h.sfx_set === "capcut" ? "capcut" : "builtin", y, points, picked: h.picked ?? "" };
+}
+
+/** Where the key word sits (bottom-centre y): its own y, else above the subtitles — mirrors services/dub.emphasis_y. */
+export function emphasisY(layout: { y: number }, hl: { y: number | null }): number {
+  if (hl.y !== null) return hl.y;
+  return Math.round(Math.min(HL_Y_MAX, Math.max(HL_Y_MIN, layout.y - 0.2)) * 10000) / 10000;
+}
 export const DEFAULT_FRAME: DubFrame = { scale: 0.84, bg: "blur", color: "#111111", border: 0.006, border_color: "#ffd814" };
 export const DEFAULT_MASCOT: Omit<DubMascot, "media_id"> = { x: 0.83, y: 0.9, size: 0.26, motion: "dance", shape: "circle" };
 
@@ -153,6 +201,10 @@ export type DubJobStatus = "queued" | "running" | "review" | "rendering" | "done
 
 export interface DubJob {
   job_id: string;
+  /** unix seconds the job was started */
+  started_at?: number;
+  /** brief lists only: how many lines (the lines themselves are left out) */
+  lines?: number;
   status: DubJobStatus;
   phase: string;
   progress: number;
@@ -163,6 +215,8 @@ export interface DubJob {
   style: string;
   engine: DubEngine;
   layout: DubLayout;
+  /** "✨ Nhấn chữ quan trọng" (normHighlights shape) */
+  highlights?: DubHighlights;
   width?: number;
   height?: number;
   /** remotion: the dubbed video without subtitles — the live preview plays it */
@@ -173,6 +227,8 @@ export interface DubJob {
   bgm_url?: string;
   channel_id: number | null;
   name: string;
+  /** several links dubbed together: the editor lists them side by side */
+  batch_id?: string;
   language: string;
   title: string;
   duration_s: number;
@@ -193,6 +249,7 @@ export interface DubStart {
   channel_id?: number | null;
   name?: string;
   auto_render: boolean;
+  batch_id?: string;
 }
 
 export interface DubRender {
@@ -208,6 +265,13 @@ export interface DubRender {
   timings?: [number, number][];
   /** timeline editor: a line's own placement (null = the clip-wide layout) */
   looks?: (SubLook | null)[];
+  /** "✨ Nhấn chữ quan trọng" settings + points (on with no points = the AI picks them while rendering) */
+  highlights?: DubHighlights;
+}
+
+/** "✨ AI chọn chữ quan trọng": the key moments for the lines as the editor holds them, without rendering. */
+export function pickDubHighlights(id: string, body: { lines?: string[]; timings?: [number, number][] }): Promise<{ points: DubHighlightPoint[]; picked: string }> {
+  return post(`/api/dub/jobs/${id}/highlights/pick`, body);
 }
 
 /** Thumbnails across the source video, for the timeline's video track. */
@@ -238,8 +302,41 @@ export function getDubJob(id: string): Promise<DubJob> {
   return api<DubJob>(`/api/dub/jobs/${id}`);
 }
 
+/** "📂 Mở lại video đã làm": which project made this downloaded video. */
+export type IdentifyResult =
+  | { kind: "dub"; via: "tag" | "fingerprint"; job: DubJob }
+  | { kind: "clip"; board_id: number; name: string };
+
+export async function identifyVideo(file: File): Promise<IdentifyResult> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch("/api/dub/identify", { method: "POST", body: form });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
+}
+
+/** "🗑 Xoá khỏi danh sách": the jobs and their work folders; exported videos, sources and clips stay. */
+export function deleteDubJobs(ids: string[]): Promise<{ deleted: string[]; skipped: { job_id: string; reason: string }[] }> {
+  return post("/api/dub/jobs/delete", { ids });
+}
+
+/** Every saved job, newest first, without their lines (``lines`` = count) — "Gần đây" + "Xem tất cả". */
+export function listDubJobsBrief(): Promise<DubJob[]> {
+  return api<DubJob[]>("/api/dub/jobs?all=true&brief=true");
+}
+
 export function listDubJobs(): Promise<DubJob[]> {
   return api<DubJob[]>("/api/dub/jobs");
+}
+
+/** The jobs of one batch, in the order the links were pasted. */
+export function listDubBatch(batchId: string): Promise<DubJob[]> {
+  return api<DubJob[]>(`/api/dub/jobs?batch=${encodeURIComponent(batchId)}`);
+}
+
+/** Every http(s) link in a pasted text, in order (a Douyin share is "<title> <link>"; several shares = several links). */
+export function linksIn(text: string): string[] {
+  return Array.from(text.matchAll(/https?:\/\/[^\s<>"'）)]+/g), (m) => m[0].replace(/[.,;:!?]+$/, ""));
 }
 
 export function renderDub(id: string, body: DubRender): Promise<DubJob> {

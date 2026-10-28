@@ -13,7 +13,7 @@ from typing import Any, Optional
 
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -33,6 +33,8 @@ class StartBody(BaseModel):
     channel_id: Optional[int] = None
     name: str = Field(default="", max_length=80)
     auto_render: bool = True
+    # several links started together share a batch id (client-made); the editor groups them
+    batch_id: str = Field(default="", max_length=40)
 
 
 class RenderBody(BaseModel):
@@ -49,6 +51,8 @@ class RenderBody(BaseModel):
     timings: Optional[list[list[float]]] = Field(default=None, max_length=2000)
     # timeline editor: a line's own {x, y, scale, w} (null = the clip-wide layout)
     looks: Optional[list[Optional[dict[str, Any]]]] = Field(default=None, max_length=2000)
+    # "✨ Nhấn chữ quan trọng": {on, words, zoom, sfx, sfx_set, y, points: [{at, words, line}]}
+    highlights: Optional[dict[str, Any]] = None
 
 
 @router.get("/status")
@@ -66,24 +70,76 @@ async def start(body: StartBody) -> dict[str, Any]:
     try:
         job = dub.start_job(url=body.url, source_media_id=body.source_media_id, voice=body.voice, keep_bgm=body.keep_bgm,
                             style=body.style, engine=body.engine, channel_id=body.channel_id, name=body.name,
-                            auto_render=body.auto_render)
+                            auto_render=body.auto_render, batch_id=body.batch_id)
     except dub.DubError as exc:
         raise HTTPException(400, str(exc))
     return job.public()
 
 
 @router.get("/jobs")
-def list_jobs() -> list[dict[str, Any]]:
+def list_jobs(batch: Optional[str] = Query(None, max_length=40), all: bool = False,
+              limit: int = Query(20, ge=1, le=200), brief: bool = False) -> list[dict[str, Any]]:
+    """Recent jobs, newest first (``limit``, or every saved one with ``all``); ``batch`` = only that batch,
+    oldest first (the order the links were pasted). ``brief`` drops the lines (``lines`` = their count) —
+    the "Xem tất cả" list only needs names, states and dates."""
     dub.load_jobs()
-    return [j.public() for j in sorted(dub.JOBS.values(), key=lambda j: j.started_at, reverse=True)[:20]]
+    if batch:
+        return [j.public() for j in sorted((j for j in dub.JOBS.values() if j.batch_id == batch), key=lambda j: j.started_at)]
+    dub.backfill_snapshots()
+    jobs = sorted(dub.JOBS.values(), key=lambda j: j.started_at, reverse=True)
+    picked = jobs if all else jobs[:limit]
+    if brief:
+        return [j.public() | {"segments": [], "lines": len(j.segments)} for j in picked]
+    return [j.public() for j in picked]
 
 
 def _job(job_id: str) -> dub.Job:
-    dub.load_jobs()
-    job = dub.JOBS.get(job_id)
+    job = dub.find_job(job_id)  # job.json on this machine, else the snapshot its clip keeps
     if job is None:
-        raise HTTPException(404, "Không thấy việc lồng tiếng này (agent đã khởi động lại?)")
+        raise HTTPException(404, "Không thấy việc lồng tiếng này (thư mục làm việc đã bị xoá và clip không còn bản lưu)")
     return job
+
+
+MAX_IDENTIFY_BYTES = 2 * 1024 * 1024 * 1024
+
+
+@router.post("/identify")
+async def identify_video(file: UploadFile = File(...)) -> dict[str, Any]:
+    """"📂 Mở lại video đã làm": a video downloaded from this tool → the project that made it.
+    The file is only read (hashed + its tag), never kept."""
+    import asyncio
+    import hashlib
+    import os
+    import tempfile
+
+    fd, tmp = tempfile.mkstemp(prefix="flowboard_identify_", suffix=Path(file.filename or "x.mp4").suffix or ".mp4")
+    h = hashlib.sha256()
+    size = 0
+    try:
+        with os.fdopen(fd, "wb") as out:
+            while True:
+                chunk = await file.read(1 << 20)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_IDENTIFY_BYTES:
+                    raise HTTPException(413, "Video lớn hơn 2 GB")
+                h.update(chunk)
+                out.write(chunk)
+        if size == 0:
+            raise HTTPException(400, "File rỗng")
+        found = await asyncio.to_thread(dub.identify, Path(tmp), sha256=h.hexdigest())
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+    if found is None:
+        raise HTTPException(404, "Không nhận ra video này — chỉ mở lại được video tải về từ tool (bản tải lại từ TikTok / "
+                                 "Facebook hay đã qua CapCut, Zalo bị nén lại nên không còn giống). Dùng file đã tải ở nút ⬇ Tải.")
+    if found["kind"] == "dub":
+        return {"kind": "dub", "via": found["via"], "job": found["job"].public()}
+    return {"kind": "clip", "board_id": found["board_id"], "name": found["name"]}
 
 
 @router.get("/jobs/{job_id}")
@@ -98,10 +154,37 @@ async def render(job_id: str, body: RenderBody) -> dict[str, Any]:
         sent = body.model_dump(exclude_unset=True)
         dub.render_job(job, lines=body.lines, voice=body.voice, style=body.style, keep_bgm=body.keep_bgm,
                        name=body.name, layout=body.layout, engine=body.engine, timings=body.timings, looks=body.looks,
+                       highlights=body.highlights,
                        **({"channel_id": body.channel_id} if "channel_id" in sent else {}))
     except dub.DubError as exc:
         raise HTTPException(400, str(exc))
     return job.public()
+
+
+class PickBody(BaseModel):
+    # the lines as they stand in the editor (unsaved edits included); None = the job's own
+    lines: Optional[list[str]] = Field(default=None, max_length=2000)
+    timings: Optional[list[list[float]]] = Field(default=None, max_length=2000)
+
+
+@router.post("/jobs/{job_id}/highlights/pick")
+async def pick_highlights(job_id: str, body: PickBody) -> dict[str, Any]:
+    """"✨ AI chọn chữ quan trọng" in the editor: the key moments for the lines, without rendering.
+    → {points: [{at, words, line}], picked: "ai" | "fallback"}"""
+    import asyncio
+    import copy
+
+    job = _job(job_id)
+    probe = copy.copy(job)
+    probe.segments = [copy.copy(s) for s in job.segments]
+    if body.lines is not None and len(body.lines) == len(probe.segments):
+        for seg, line in zip(probe.segments, body.lines):
+            seg.text = str(line or "").strip()
+    if body.timings is not None and len(body.timings) == len(probe.segments):
+        for seg, (a, b) in zip(probe.segments, body.timings):
+            seg.start, seg.end = float(a), float(b)
+    points, how = await asyncio.to_thread(dub.pick_highlights, probe)
+    return {"points": points, "picked": how}
 
 
 _MASCOT_EXT = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}
@@ -331,6 +414,17 @@ async def wave(job_id: str) -> FileResponse:
     except dub.DubError as exc:
         raise HTTPException(404, str(exc))
     return FileResponse(str(path), media_type="image/png", headers={"Cache-Control": "no-cache"})
+
+
+class DeleteJobsBody(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=500)
+
+
+@router.post("/jobs/delete")
+def delete_jobs(body: DeleteJobsBody) -> dict[str, Any]:
+    """Take jobs off the list (their work folders go too); exported videos, sources and clips stay."""
+    deleted, skipped = dub.delete_jobs(body.ids)
+    return {"deleted": deleted, "skipped": skipped}
 
 
 @router.post("/jobs/{job_id}/stop")

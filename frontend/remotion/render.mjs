@@ -55,7 +55,8 @@ async function ensureBundle() {
   return out;
 }
 
-const MIME = { ".mp4": "video/mp4", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif" };
+const MIME = { ".mp4": "video/mp4", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif",
+               ".wav": "audio/wav", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac", ".ogg": "audio/ogg" };
 
 /** Serve the input video (and the mascot sticker) with Range support on 127.0.0.1:<random port>. */
 function serveFile(file, extra = {}) {
@@ -98,11 +99,20 @@ async function main() {
   const extra = {};
   if (spec.mascot_file && fs.existsSync(spec.mascot_file)) extra[`/mascot${path.extname(spec.mascot_file).toLowerCase()}`] = spec.mascot_file;
   if (spec.frame_bg_file && fs.existsSync(spec.frame_bg_file)) extra[`/framebg${path.extname(spec.frame_bg_file).toLowerCase()}`] = spec.frame_bg_file;
+  // the sound effects of the key moments: one served path per file (props.sfx[i] ↔ spec.sfx_files[i])
+  const sfxPaths = (spec.sfx_files || []).map((f, i) => {
+    if (!f || !fs.existsSync(f)) return null;
+    const p = `/sfx${i}${path.extname(f).toLowerCase()}`;
+    extra[p] = f;
+    return p;
+  });
   const { server, url, base } = await serveFile(spec.src, extra);
   try {
     const mascotPath = Object.keys(extra).find((k) => k.startsWith("/mascot"));
     const bgPath = Object.keys(extra).find((k) => k.startsWith("/framebg"));
-    const inputProps = { ...(spec.props || {}), src: url, ...(mascotPath ? { mascotSrc: `${base}${mascotPath}` } : {}),
+    const props = spec.props || {};
+    const sfx = (props.sfx || []).map((s, i) => (sfxPaths[i] ? { ...s, src: `${base}${sfxPaths[i]}` } : s));
+    const inputProps = { ...props, sfx, src: url, ...(mascotPath ? { mascotSrc: `${base}${mascotPath}` } : {}),
                          ...(bgPath ? { frameBgSrc: `${base}${bgPath}` } : {}) };
     log("PHASE select");
     const composition = await selectComposition({ serveUrl, id: spec.composition || "DubSubtitles", inputProps });

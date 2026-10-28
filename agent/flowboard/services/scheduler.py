@@ -89,6 +89,7 @@ def row(sc: Schedule, *, title: str = "", thumb: Optional[str] = None, channel: 
     return {
         "id": sc.id, "kind": sc.kind, "post_id": sc.post_id, "board_id": sc.board_id, "channel_id": sc.channel_id,
         "scheduled_at": utc_iso(when), "status": sc.status, "due": due, "auto": bool(sc.auto), "note": sc.note or "",
+        "fb_format": sc.fb_format or "post",
         "result": dict(sc.result) if sc.result else None, "posted_at": utc_iso(_aware(sc.posted_at)),
         "created_at": utc_iso(_aware(sc.created_at)),
         "title": title, "thumbnail": thumb, "channel": channel, "platforms": platforms or [],
@@ -177,15 +178,53 @@ def _check_target(kind: str, post_id: Optional[int], board_id: Optional[int], ch
     return int(channel_id)
 
 
+FORMATS = ("post", "reel")
+
+
+def reel_check(kind: str, post_id: Optional[int] = None, board_id: Optional[int] = None) -> dict[str, Any]:
+    """Can this item go out as a Reel? ``{has_video, ok, reason, warning}`` — the dialogs grey the choice out with
+    the reason; a warning (longer than the API's documented 90 s…) is only said."""
+    probe = Schedule(kind=kind, post_id=post_id, board_id=board_id, scheduled_at=_now())
+    try:
+        _message, _photos, video, _comment = _payload(probe)
+    except ScheduleError as exc:
+        return {"has_video": kind == "clip" or _post_has_video(post_id), "ok": False, "reason": str(exc), "warning": None}
+    if video is None:
+        return {"has_video": False, "ok": False, "reason": "Bài này không có video — Reel cần một video.", "warning": None}
+    why = facebook_publish.reel_problem(video)
+    return {"has_video": True, "ok": why is None, "reason": why,
+            "warning": None if why else facebook_publish.reel_warning(video)}
+
+
+def _post_has_video(post_id: Optional[int]) -> bool:
+    with get_session() as s:
+        p = s.get(Post, post_id or 0)
+        return bool(p and (p.video or p.board_id))
+
+
+def _check_format(kind: str, post_id: Optional[int], board_id: Optional[int], fb_format: str) -> None:
+    if fb_format not in FORMATS:
+        raise ScheduleError("Dạng đăng phải là bài viết hoặc Reel.")
+    if fb_format != "reel":
+        return
+    chk = reel_check(kind, post_id, board_id)
+    if not chk["has_video"]:
+        raise ScheduleError("Reel cần một video — bài này chỉ có chữ / ảnh.")
+    reason = chk.get("reason") or ""
+    if reason and "chưa ghép" not in reason and "Không thấy file" not in reason:
+        raise ScheduleError(reason)  # a clip not exported yet is checked again when it is published
+
+
 def create(kind: str, when: datetime, *, post_id: Optional[int] = None, board_id: Optional[int] = None,
-           channel_id: Optional[int] = None, auto: bool = False, note: str = "") -> dict[str, Any]:
+           channel_id: Optional[int] = None, auto: bool = False, note: str = "", fb_format: str = "post") -> dict[str, Any]:
     check_future(when)
     channel_id = _check_target(kind, post_id, board_id, channel_id)
+    _check_format(kind, post_id, board_id, fb_format)
     if auto and not can_auto(channel_id):
         raise ScheduleError("Kênh này chưa kết nối Facebook Page nên không tự đăng được — bỏ chọn \"Tự đăng\" hoặc kết nối Page trước.")
     with get_session() as s:
         sc = Schedule(kind=kind, post_id=post_id if kind == "post" else None, board_id=board_id if kind == "clip" else None,
-                      channel_id=channel_id, scheduled_at=when, auto=auto, note=(note or "").strip()[:300])
+                      channel_id=channel_id, scheduled_at=when, auto=auto, note=(note or "").strip()[:300], fb_format=fb_format)
         s.add(sc)
         s.commit()
         s.refresh(sc)
@@ -214,6 +253,11 @@ def update(slot_id: int, **fields: Any) -> dict[str, Any]:
             sc.auto = bool(fields["auto"])
         if "note" in fields and fields["note"] is not None:
             sc.note = str(fields["note"]).strip()[:300]
+        if fields.get("fb_format") and fields["fb_format"] != (sc.fb_format or "post"):
+            if sc.status == "posted":
+                raise ScheduleError("Bài này đã đăng rồi, không đổi dạng đăng được.")
+            _check_format(sc.kind, sc.post_id, sc.board_id, fields["fb_format"])
+            sc.fb_format = fields["fb_format"]
         if "status" in fields and fields["status"]:
             if fields["status"] not in STATUSES:
                 raise ScheduleError("Trạng thái không hợp lệ.")
@@ -360,8 +404,13 @@ async def publish(slot_id: int) -> dict[str, Any]:
         page_id, channel_id = ch.fb_page_id, ch.id
     try:
         message, photos, video, first_comment = _payload(sc)
-        out = await facebook_publish.publish_post(channel_id, page_id, message, photos=photos, video=video,
-                                                  first_comment=first_comment)
+        if (sc.fb_format or "post") == "reel":
+            if video is None:
+                raise ScheduleError("Reel cần một video — bài này chỉ có chữ / ảnh.")
+            out = await facebook_publish.publish_reel(channel_id, page_id, message, video=video, first_comment=first_comment)
+        else:
+            out = await facebook_publish.publish_post(channel_id, page_id, message, photos=photos, video=video,
+                                                      first_comment=first_comment)
         status, result = "posted", {"by": "facebook", **out}
     except (ScheduleError, facebook_publish.FacebookError) as exc:
         status, result = "failed", {"by": "facebook", "error": str(exc)}

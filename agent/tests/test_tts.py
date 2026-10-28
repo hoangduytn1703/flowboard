@@ -77,8 +77,13 @@ def test_gemini_voice_uses_the_key_pool_and_caches(tmp_path, monkeypatch):
     assert cues and cues[-1][1] == n.duration
 
 
-def test_voice_groups_lists_edge_and_gemini():
-    groups = tts.voice_groups()
-    assert [g["id"] for g in groups] == ["edge", "gemini"]
-    assert len(groups[0]["voices"]) == 2 and len(groups[1]["voices"]) >= 10
-    assert all(tts.is_gemini_voice(v["id"]) for v in groups[1]["voices"])
+def test_voice_groups_lists_every_family_with_availability():
+    groups = {g["id"]: g for g in tts.voice_groups()}
+    assert list(groups) == ["edge", "vieneu", "gemini", "fpt"]
+    assert len(groups["edge"]["voices"]) == 2 and len(groups["gemini"]["voices"]) >= 10
+    assert all(tts.is_gemini_voice(v["id"]) for v in groups["gemini"]["voices"])
+    assert len(groups["vieneu"]["voices"]) == 25 and all(tts.voice_kind(v["id"]) == "vieneu" for v in groups["vieneu"]["voices"])
+    assert len(groups["fpt"]["voices"]) == 7 and groups["fpt"]["available"] is False and "key" in groups["fpt"]["reason"]
+    for g in groups.values():
+        assert "available" in g
+    assert tts.voice_kind("vi-VN-HoaiMyNeural") == "edge" and tts.voice_kind("gemini:Kore") == "gemini"

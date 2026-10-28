@@ -311,3 +311,154 @@ def test_saved_posts_say_where_they_stand_on_the_calendar(client):
     client.post("/api/schedule", json={"kind": "clip", "board_id": board["id"], "at": _iso(soon)})
     rows = {p["id"]: p["schedule"] for p in client.get("/api/posts").json()}
     assert rows[new["id"]]["status"] == "planned" and rows[old["id"]] is None
+
+
+def _form(request: httpx.Request) -> dict[str, bytes]:
+    import re as _re
+
+    ctype = request.headers["content-type"]
+    if "boundary=" not in ctype:  # no file in it: a plain urlencoded form
+        from urllib.parse import parse_qsl
+
+        return {k: v.encode() for k, v in parse_qsl(request.content.decode())}
+    boundary = ctype.split("boundary=")[1].encode()
+    out = {}
+    for part in request.content.split(b"--" + boundary):
+        head, _, body = part.partition(b"\r\n\r\n")
+        m = _re.search(rb'name="([^"]+)"', head)
+        if m:
+            out[m.group(1).decode()] = body[:-2] if body.endswith(b"\r\n") else body
+    return out
+
+
+def test_a_big_video_goes_up_in_pieces(monkeypatch, tmp_path):
+    """A 152 MB clip in one request got 413 from Facebook (28/10): above CHUNKED_ABOVE the
+    video goes start → transfer (the byte range Facebook asks for) → finish."""
+    import asyncio
+
+    data = bytes(range(256)) * 10_000  # 2.56 MB
+    vid = tmp_path / "big.mp4"
+    vid.write_bytes(data)
+    got = bytearray()
+    phases = []
+    step = 1_000_000
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/videos"):
+            f = _form(request)
+            phase = f["upload_phase"].decode()
+            phases.append(phase)
+            if phase == "start":
+                assert int(f["file_size"]) == len(data)
+                return httpx.Response(200, json={"upload_session_id": "s1", "video_id": "v9", "start_offset": "0",
+                                                 "end_offset": str(step)})
+            if phase == "transfer":
+                a = int(f["start_offset"])
+                assert a == len(got)
+                got.extend(f["video_file_chunk"])
+                nxt = len(got)
+                return httpx.Response(200, json={"start_offset": str(nxt), "end_offset": str(min(len(data), nxt + step))})
+            assert f["description"].decode() == "Xin chào" and f["upload_session_id"] == b"s1"
+            return httpx.Response(200, json={"success": True})
+        if request.url.path.endswith("/comments"):
+            return httpx.Response(200, json={"id": "c1"})
+        return httpx.Response(200, json={"permalink_url": "https://www.facebook.com/v9"})
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(facebook_publish.httpx, "AsyncClient",
+                        lambda *a, **k: real(*a, **{**k, "transport": httpx.MockTransport(handler)}))
+    monkeypatch.setattr(facebook_publish, "get_token", lambda cid: "PAGE_TOKEN")
+    monkeypatch.setattr(facebook_publish, "CHUNKED_ABOVE", 1_000_000)
+    out = asyncio.run(facebook_publish.publish_post(1, "page9", "Xin chào", video=vid, first_comment="link"))
+    assert bytes(got) == data and phases == ["start", "transfer", "transfer", "transfer", "finish"]
+    assert out["post_id"] == "v9" and out["comment_id"] == "c1"
+
+
+def test_too_large_is_said_plainly():
+    msg = facebook_publish._error_message(httpx.Response(413, text="<html>Request Entity Too Large</html>"))
+    assert "quá lớn" in msg
+
+
+@pytest.mark.skipif(__import__("shutil").which("ffmpeg") is None, reason="needs ffmpeg")
+def test_what_can_be_a_reel(tmp_path):
+    import subprocess
+
+    def make(name, size, secs):
+        out = tmp_path / name
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", f"color=c=red:s={size}:d={secs}:r=5",
+                        "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(out)], check=True)
+        return out
+
+    ok = make("ok.mp4", "540x960", 4)
+    assert facebook_publish.reel_problem(ok) is None and facebook_publish.reel_warning(ok) is None
+    assert "ít nhất 3 giây" in facebook_publish.reel_problem(make("short.mp4", "540x960", 1))
+    # the Facebook app takes long Reels (a 3:00 one posted by hand): longer than the API's 90 s only warns
+    long = make("long.mp4", "540x960", 95)
+    assert facebook_publish.reel_problem(long) is None and "tối đa 90 giây" in facebook_publish.reel_warning(long)
+    assert "ngang hơn 16:9" in facebook_publish.reel_warning(make("wide.mp4", "1280x480", 4))
+    assert "nhỏ hơn chuẩn Reel" in facebook_publish.reel_warning(make("tiny.mp4", "360x640", 4))
+
+
+def test_a_video_post_can_go_out_as_a_reel(client, monkeypatch, tmp_path):
+    """fb_format "reel": video_reels start → the file to rupload → finish (PUBLISHED, caption) → wait → first comment."""
+    vid = tmp_path / "r.mp4"
+    vid.write_bytes(b"REELDATA" * 1000)
+    calls = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        path, host = request.url.path, request.url.host
+        if host == "rupload.facebook.com":
+            calls.append(("upload", request.headers.get("offset"), request.headers.get("file_size"), len(request.content),
+                          request.headers.get("authorization")))
+            return httpx.Response(200, json={"success": True})
+        if path.endswith("/video_reels"):
+            f = _form(request)
+            calls.append(("reels", f["upload_phase"].decode(), f.get("video_state", b"").decode(), f.get("description", b"").decode()))
+            if f["upload_phase"] == b"start":
+                return httpx.Response(200, json={"video_id": "r77", "upload_url": "https://rupload.facebook.com/video-upload/v21.0/r77"})
+            return httpx.Response(200, json={"success": True})
+        if path.endswith("/comments"):
+            calls.append(("comment", path))
+            return httpx.Response(200, json={"id": "c9"})
+        if "r77" in path and request.url.params.get("fields") == "status":
+            calls.append(("status",))
+            return httpx.Response(200, json={"status": {"video_status": "ready"}})
+        if "r77" in path:
+            return httpx.Response(200, json={"permalink_url": "/reel/r77"})
+        if path.endswith("/me/accounts"):
+            return httpx.Response(200, json={"data": [{"id": "page9", "name": "P", "access_token": "PAGE_TOKEN_xxxxxxxxxxxx"}]})
+        if path.endswith("/me"):
+            return httpx.Response(200, json={"id": "u1", "name": "Duy"})
+        return httpx.Response(404, json={"error": {"message": "no", "code": 803}})
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(facebook_publish.httpx, "AsyncClient",
+                        lambda *a, **k: real(*a, **{**k, "transport": httpx.MockTransport(handler)}))
+    monkeypatch.setattr(facebook_publish, "reel_problem", lambda v: None)
+    monkeypatch.setattr(scheduler, "_media_file", lambda m: vid if m == "vid1" else None)
+    ch = _channel(client)
+    client.post(f"/api/channels/{ch['id']}/facebook", json={"token": "USER_TOKEN_yyyyyyyyyyyyyy"})
+    text_only = _post(client, ch["id"])
+    r = client.post("/api/schedule", json={"kind": "post", "post_id": text_only["id"], "fb_format": "reel",
+                                           "at": _iso(datetime.now(timezone.utc))})
+    assert r.status_code == 400 and "Reel cần một video" in r.json()["detail"]
+    assert client.get("/api/schedule/reel-check", params={"kind": "post", "post_id": text_only["id"]}).json()["has_video"] is False
+    post = client.post("/api/posts", json={"body": "Reel nè", "hashtags": "#reel", "channel_id": ch["id"], "video": "vid1",
+                                           "first_comment": "Link ở đây"}).json()
+    monkeypatch.setattr(facebook_publish, "reel_warning", lambda v: None)
+    assert client.get("/api/schedule/reel-check", params={"kind": "post", "post_id": post["id"]}).json() == \
+        {"has_video": True, "ok": True, "reason": None, "warning": None}
+    slot = client.post("/api/schedule", json={"kind": "post", "post_id": post["id"], "fb_format": "reel",
+                                              "at": _iso(datetime.now(timezone.utc))}).json()
+    assert slot["fb_format"] == "reel"
+    out = client.post(f"/api/schedule/{slot['id']}/publish").json()
+    assert out["status"] == "posted", out["result"]
+    assert out["result"]["post_id"] == "r77" and out["result"]["permalink"] == "https://www.facebook.com/reel/r77"
+    assert calls[0] == ("reels", "start", "", "")
+    assert calls[1] == ("upload", "0", str(len(vid.read_bytes())), len(vid.read_bytes()), "OAuth PAGE_TOKEN_xxxxxxxxxxxx")
+    assert calls[2][:3] == ("reels", "finish", "PUBLISHED") and "Reel nè" in calls[2][3]
+    assert ("status",) in calls and calls[-1][0] == "comment"
+    # switching a planned slot back to a normal post
+    slot2 = client.post("/api/schedule", json={"kind": "post", "post_id": post["id"], "fb_format": "reel",
+                                               "at": _iso(datetime.now(timezone.utc) + timedelta(hours=3))}).json()
+    assert client.patch(f"/api/schedule/{slot2['id']}", json={"fb_format": "post"}).json()["fb_format"] == "post"

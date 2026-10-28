@@ -8,7 +8,7 @@
 // Kept separate from the ffmpeg/ASS subtitle path (services/dub.py
 // `write_sub_ass`): that one is untouched, this is the second engine.
 import { loadFont } from "@remotion/google-fonts/BeVietnamPro";
-import { AbsoluteFill, Img, interpolate, OffthreadVideo, useCurrentFrame, useVideoConfig } from "remotion";
+import { AbsoluteFill, Audio, Img, interpolate, OffthreadVideo, Sequence, useCurrentFrame, useVideoConfig } from "remotion";
 
 const { fontFamily } = loadFont("normal", { weights: ["600", "700", "800"], subsets: ["latin", "vietnamese"] });
 
@@ -71,6 +71,46 @@ export interface DubLayoutSpec {
 
 export type DubRemotionStyle = "rm_box" | "rm_karaoke" | "rm_outline";
 
+/** "✨ Nhấn chữ quan trọng": the key moments — a big key word, a quick push-in, a sound (services/key_moments). */
+export interface DubHighlightsSpec {
+  words: boolean;
+  zoom: boolean;
+  /** bottom-centre y of the key word, fraction of the frame */
+  y: number;
+  points: { at: number; words: string }[];
+}
+
+export interface DubSfxSpec {
+  at: number;
+  dur: number;
+  /** the sound file (render: served by render.mjs; preview: none → silent) */
+  src?: string;
+}
+
+export const HL_EMPHASIS_S = 1.2;
+const ZOOM_LEVELS = [1.12, 1.18];
+const ZOOM_RISE = 0.3, ZOOM_HOLD = 1.0, ZOOM_FALL = 0.4;
+export const SFX_VOLUME = 0.3;
+
+/** The zoom factor at ``t`` — the same curve as services/key_moments.zoom_expr (rise, hold, fall; levels alternate). */
+export function zoomAt(points: { at: number }[], t: number): number {
+  let z = 1;
+  points.forEach((p, i) => {
+    const lvl = ZOOM_LEVELS[i % ZOOM_LEVELS.length];
+    const e = p.at + ZOOM_RISE + ZOOM_HOLD + ZOOM_FALL;
+    const up = Math.max(0, Math.min(1, (t - p.at) / ZOOM_RISE));
+    const down = Math.max(0, Math.min(1, (e - t) / ZOOM_FALL));
+    z += (lvl - 1) * Math.min(up, down);
+  });
+  return z;
+}
+
+/** The key word on screen at ``t`` (with how far into its pop-in it is, 0…1), or null. */
+export function emphasisAt(points: { at: number; words: string }[], t: number): { words: string; k: number } | null {
+  for (const p of points) if (t >= p.at && t < p.at + HL_EMPHASIS_S) return { words: p.words.toUpperCase(), k: Math.min(1, (t - p.at) / 0.12) };
+  return null;
+}
+
 // Remotion wants composition props to be a Record<string, unknown>: a type alias
 // (not an interface) satisfies that index-signature constraint.
 export type DubSubtitlesProps = {
@@ -89,6 +129,10 @@ export type DubSubtitlesProps = {
   mascotSrc?: string;
   /** the frame's background picture (bg "image"), same serving as the sticker */
   frameBgSrc?: string;
+  /** the key moments (null / undefined = off) */
+  highlights?: DubHighlightsSpec | null;
+  /** sound effects at the key moments */
+  sfx?: DubSfxSpec[];
 };
 
 export const DUB_REMOTION_STYLES: { key: DubRemotionStyle; label: string }[] = [
@@ -98,6 +142,15 @@ export const DUB_REMOTION_STYLES: { key: DubRemotionStyle; label: string }[] = [
 ];
 
 export const DUB_FPS = 30;
+
+export function fontPxOf(height: number, scale: number): number {
+  return height * 0.036 * (scale || 1);
+}
+
+/** The key word's font: 1.6× the subtitle font, smaller when a long word would run off a ``width`` px frame. */
+export function emphasisFont(width: number, height: number, scale: number, words: string): number {
+  return Math.min(fontPxOf(height, scale) * 1.6, (width * 0.9) / Math.max(4, words.length) / 0.62);
+}
 
 export function cueAt(cues: DubCue[], t: number): DubCue | null {
   for (const c of cues) if (t >= c.start && t < c.end) return c;
@@ -117,17 +170,29 @@ export function wordWindows(cue: DubCue): { word: string; from: number; to: numb
   });
 }
 
-export const DubSubtitles: React.FC<DubSubtitlesProps> = ({ src, width, height, cues, layout, style, muted, mascotSrc, frameBgSrc }) => {
+export const DubSubtitles: React.FC<DubSubtitlesProps> = ({ src, width, height, cues, layout, style, muted, mascotSrc, frameBgSrc, highlights, sfx }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const t = frame / fps;
   const cue = cueAt(cues, t);
+  const hlPoints = highlights?.points ?? [];
+  const zoom = highlights?.zoom ? zoomAt(hlPoints, t) : 1;
+  const emph = highlights?.words ? emphasisAt(hlPoints, t) : null;
+  // the key word on one line: 1.6× the subtitle font, smaller when a long word would run off the frame (seen 28/10)
+  const emphFont = emph ? Math.min(fontPxOf(height, layout.scale) * 1.6, (width * 0.9) / Math.max(4, emph.words.length) / 0.62) : 0;
+  // the push-in scales the picture about its centre: the plain video, or the video inside its frame
+  const zoomCss: React.CSSProperties = zoom > 1 ? { transform: `scale(${zoom.toFixed(4)})`, transformOrigin: "50% 50%" } : {};
   const lay = cue?.look ? { ...layout, ...cue.look } : layout;
   const fontPx = height * 0.036 * (lay.scale || 1);
   const blur = layout.blur ?? null;
 
   // a short fade so the box does not pop
-  const alpha = cue ? interpolate(t, [cue.start, cue.start + 0.12, cue.end - 0.08, cue.end], [0, 1, 1, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }) : 0;
+  // (a cue shorter than 0.2 s would put the fade points out of order — interpolate throws; seen 28/10)
+  const mid = cue ? (cue.start + cue.end) / 2 : 0;
+  const alpha = cue && cue.end > cue.start
+    ? interpolate(t, [cue.start, Math.min(cue.start + 0.12, mid - 0.001), Math.max(cue.end - 0.08, mid + 0.001), cue.end], [0, 1, 1, 0],
+                  { extrapolateLeft: "clamp", extrapolateRight: "clamp" })
+    : 0;
 
   return (
     <AbsoluteFill style={{ background: "#000" }}>
@@ -141,13 +206,13 @@ export const DubSubtitles: React.FC<DubSubtitlesProps> = ({ src, width, height, 
                                                       filter: `blur(${Math.round(Math.min(width, height) / 30)}px)`, transform: "scale(1.08)" }} />}
           <div style={{
             position: "absolute", left: `${(1 - layout.frame.scale) * 50}%`, top: `${(1 - layout.frame.scale) * 50}%`,
-            width: `${layout.frame.scale * 100}%`, height: `${layout.frame.scale * 100}%`,
+            width: `${layout.frame.scale * 100}%`, height: `${layout.frame.scale * 100}%`, overflow: "hidden",
             boxShadow: layout.frame.border > 0 ? `0 0 0 ${Math.round(height * layout.frame.border)}px ${layout.frame.border_color}` : undefined,
           }}>
-            <OffthreadVideo src={src} muted={muted} style={{ width: "100%", height: "100%", objectFit: "fill" }} />
+            <OffthreadVideo src={src} muted={muted} style={{ width: "100%", height: "100%", objectFit: "fill", ...zoomCss }} />
           </div>
         </>
-      ) : <OffthreadVideo src={src} muted={muted} style={{ width: "100%", height: "100%", objectFit: "contain" }} />}
+      ) : <OffthreadVideo src={src} muted={muted} style={{ width: "100%", height: "100%", objectFit: "contain", ...zoomCss }} />}
       {blur && (
         <div
           style={{
@@ -173,6 +238,22 @@ export const DubSubtitles: React.FC<DubSubtitlesProps> = ({ src, width, height, 
           </div>
         );
       })()}
+      {emph && (
+        <div style={{
+          position: "absolute", left: "50%", top: `${(highlights?.y ?? 0.6) * 100}%`,
+          transform: `translate(-50%, -100%) scale(${(0.7 + 0.3 * emph.k).toFixed(3)})`, transformOrigin: "50% 100%",
+          fontFamily, fontWeight: 800, fontSize: emphFont, lineHeight: 1.1, textAlign: "center", whiteSpace: "nowrap",
+          color: "#ffd814", WebkitTextStroke: `${Math.max(2, emphFont * 0.1)}px #101010`, paintOrder: "stroke fill",
+          textShadow: `0 ${emphFont * 0.06}px ${emphFont * 0.2}px rgba(0,0,0,0.55)`,
+        }}>
+          {emph.words}
+        </div>
+      )}
+      {!muted && (sfx ?? []).filter((s) => s.src).map((s, i) => (
+        <Sequence key={i} from={Math.round(s.at * fps)} durationInFrames={Math.max(1, Math.ceil(s.dur * fps))}>
+          <Audio src={s.src!} volume={SFX_VOLUME} />
+        </Sequence>
+      ))}
       {cue && (
         <div
           style={{

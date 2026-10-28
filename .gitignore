@@ -55,3 +55,7 @@ coverage/
 # Local runtime junk
 *.log
 .chrome-profile*/
+
+# JunOps CapCut skills: compiled files and the per-machine learned store
+.claude/skills/**/__pycache__/
+.claude/skills/junops-edit-capcut/du_lieu/

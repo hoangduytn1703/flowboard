@@ -13,6 +13,8 @@ export interface Slot {
   due: boolean;
   /** publish through the channel's Facebook Page when the time comes */
   auto: boolean;
+  /** how a video goes out on Facebook: a feed post or a Reel */
+  fb_format: FbFormat;
   note: string;
   result: { by?: string; post_id?: string; permalink?: string; comment_id?: string; error?: string } | null;
   posted_at: string | null;
@@ -23,6 +25,24 @@ export interface Slot {
   platforms: string[];
   /** the channel can auto-publish (Facebook Page connected) */
   fb_connected: boolean;
+}
+
+export type FbFormat = "post" | "reel";
+
+/** Can the item go out as a Reel (`/api/schedule/reel-check`)? */
+export interface ReelCheck {
+  has_video: boolean;
+  ok: boolean;
+  reason: string | null;
+  /** may be turned down by Facebook (e.g. longer than the API's documented 90 s) — said, not blocked */
+  warning?: string | null;
+}
+
+export function reelCheck(t: { kind: "post" | "clip"; postId?: number | null; boardId?: number | null }): Promise<ReelCheck> {
+  const p = new URLSearchParams({ kind: t.kind });
+  if (t.postId) p.set("post_id", String(t.postId));
+  if (t.boardId) p.set("board_id", String(t.boardId));
+  return api<ReelCheck>(`/api/schedule/reel-check?${p}`);
 }
 
 export interface SlotSuggestion {
@@ -50,13 +70,13 @@ export function suggestSlots(channelId: number, limit = 6): Promise<SlotSuggesti
 
 export function createSlot(input: {
   kind: "post" | "clip"; post_id?: number | null; board_id?: number | null; channel_id?: number | null;
-  at: string; auto?: boolean; note?: string;
+  at: string; auto?: boolean; note?: string; fb_format?: FbFormat;
 }): Promise<Slot> {
   return api<Slot>("/api/schedule", { method: "POST", body: JSON.stringify(input) });
 }
 
 export function updateSlot(id: number, patch: {
-  at?: string; channel_id?: number | null; auto?: boolean; note?: string; status?: Slot["status"];
+  at?: string; channel_id?: number | null; auto?: boolean; note?: string; status?: Slot["status"]; fb_format?: FbFormat;
 }): Promise<Slot> {
   return api<Slot>(`/api/schedule/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
 }

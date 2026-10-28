@@ -9,7 +9,8 @@ from .session import init_db as _init_db_tables
 __all__ = ["engine", "get_session", "init_db", "current_engine", "set_engine", "make_engine", "has_engine", "NoActiveAccount",
            "ensure_reference_meta_column", "ensure_product_gender_column", "ensure_reference_media_id_not_unique",
            "ensure_post_channel_column", "ensure_post_series_columns", "ensure_channel_link_columns",
-           "ensure_channel_categories_column", "ensure_product_aff_columns", "ensure_channel_facebook_columns", "ensure_post_video_column"]
+           "ensure_channel_categories_column", "ensure_product_aff_columns", "ensure_channel_facebook_columns", "ensure_post_video_column",
+           "ensure_schedule_format_column"]
 
 
 def ensure_reference_meta_column(db_engine: Engine | None = None) -> bool:
@@ -166,6 +167,20 @@ def ensure_post_video_column(db_engine: Engine | None = None) -> bool:
         return True
 
 
+def ensure_schedule_format_column(db_engine: Engine | None = None) -> bool:
+    """Add ``schedule.fb_format`` ("post" | "reel": how a video goes out on Facebook)."""
+    db_engine = db_engine or current_engine()
+    with db_engine.connect() as conn:
+        insp = inspect(conn)
+        if not insp.has_table("schedule"):
+            return False
+        if "fb_format" in {c["name"] for c in insp.get_columns("schedule")}:
+            return False
+        conn.exec_driver_sql("ALTER TABLE schedule ADD COLUMN fb_format VARCHAR DEFAULT 'post'")
+        conn.commit()
+        return True
+
+
 def ensure_channel_facebook_columns(db_engine: Engine | None = None) -> bool:
     """Add ``channel.fb_page_id`` / ``channel.fb_page_name`` (connected Facebook Page)."""
     db_engine = db_engine or current_engine()
@@ -219,3 +234,4 @@ def init_db(target: Engine | None = None) -> None:
     ensure_product_aff_columns(target)
     ensure_channel_facebook_columns(target)
     ensure_post_video_column(target)
+    ensure_schedule_format_column(target)

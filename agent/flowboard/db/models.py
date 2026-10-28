@@ -261,6 +261,8 @@ class Schedule(SQLModel, table=True):
     # planned → (due) → posted | failed | skipped. "due" is derived (planned and past).
     status: str = Field(default="planned", index=True)
     auto: bool = False
+    # How a video goes out on Facebook: "post" (a feed post with the video) | "reel" (Reels, 3–90 s vertical).
+    fb_format: str = Field(default="post")
     note: str = ""
     # What publishing produced: the Facebook post id / permalink, or the error.
     result: Optional[dict] = Field(default=None, sa_column=Column(JSON))

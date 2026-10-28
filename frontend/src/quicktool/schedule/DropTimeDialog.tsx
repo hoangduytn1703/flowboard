@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api/client";
-import { createSlot, slotLabel, updateSlot, type Slot } from "../../api/schedule";
+import { createSlot, slotLabel, updateSlot, type FbFormat, type Slot } from "../../api/schedule";
+import { FormatPicker } from "./FormatPicker";
 import { toast } from "../../store/toast";
 import { ChannelPicker, useChannels } from "../channels/ChannelPicker";
 import type { ScheduleTarget } from "./ScheduleDialog";
@@ -50,6 +51,7 @@ export function DropTimeDialog({ day, target, slot, onClose, onSaved }: {
   };
   const [time, setTime] = useState(firstFree);
   const [auto, setAuto] = useState(slot?.auto ?? false);
+  const [fbFormat, setFbFormat] = useState<FbFormat>(slot?.fb_format ?? "post");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -75,8 +77,8 @@ export function DropTimeDialog({ day, target, slot, onClose, onSaved }: {
     setBusy(true);
     try {
       const out = slot
-        ? await updateSlot(slot.id, { at: when.toISOString(), auto })
-        : await createSlot({ kind: target!.kind, post_id: target!.postId ?? null, board_id: target!.boardId ?? null, channel_id: channelId, at: when.toISOString(), auto });
+        ? await updateSlot(slot.id, { at: when.toISOString(), auto, fb_format: fbFormat })
+        : await createSlot({ kind: target!.kind, post_id: target!.postId ?? null, board_id: target!.boardId ?? null, channel_id: channelId, at: when.toISOString(), auto, fb_format: fbFormat });
       toast.success(`${slot ? "Đã dời lịch" : "Đã lên lịch"}: ${slotLabel(out.scheduled_at)}${out.auto ? " · tự đăng lên Page" : ""}.`);
       onSaved(out);
     } catch (e) {
@@ -108,6 +110,8 @@ export function DropTimeDialog({ day, target, slot, onClose, onSaved }: {
           <input type="time" value={time} step={300} onChange={(e) => setTime(e.target.value)} className="qt-droptime__time" autoFocus />
           {past && <small className="qt-posts__need">Giờ này đã qua — chọn giờ muộn hơn.</small>}
         </label>
+        <FormatPicker value={fbFormat} onChange={setFbFormat}
+                      target={{ kind: (slot?.kind ?? target?.kind) as "post" | "clip", postId: slot?.post_id ?? target?.postId, boardId: slot?.board_id ?? target?.boardId }} />
         {channel?.fb_connected && (
           <label className="qt-sched-dialog__auto">
             <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />

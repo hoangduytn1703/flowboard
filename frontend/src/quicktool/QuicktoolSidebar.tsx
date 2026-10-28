@@ -45,6 +45,10 @@ export function QuicktoolSidebar() {
                 title="Dán link video nước ngoài → bỏ tiếng gốc, đọc lại bằng giọng Việt, in phụ đề hộp vàng, lưu thành clip">
           <span className="qt-nav__icon">🎙</span> Lồng tiếng video
         </button>
+        <button type="button" className={`qt-nav__item${is("/tools/capcut") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/tools/capcut")}
+                title="Biến video lồng tiếng / clip / video của bạn thành dự án CapCut: phụ đề, chữ nhấn mạnh, zoom, âm thanh — mở CapCut chỉnh tiếp">
+          <span className="qt-nav__icon">✂️</span> Edit auto CapCut
+        </button>
         <button type="button" className={`qt-nav__item${is("/schedule") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/schedule")}
                 title="Lịch tuần: bài viết và clip đăng lúc nào, giờ vàng theo nền tảng, nhắc đến giờ, tự đăng lên Facebook Page">
           <span className="qt-nav__icon">📅</span> Lịch đăng

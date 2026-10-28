@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { VOICE_GROUPS, patchNode, refinePromptApi, tailorBoardApi } from "../../api/client";
+import { patchNode, refinePromptApi, tailorBoardApi } from "../../api/client";
+import { VoiceOptions, useVoiceGroups } from "../VoiceField";
 import { toast } from "../../store/toast";
 import { PromptLibraryButtons } from "../PromptLibraryButtons";
 import { sceneTagOf } from "../promptTags";
@@ -41,11 +42,7 @@ function VoicePick({ node }: { node: FlowNode }) {
       Giọng:
       <select value={value} onChange={(e) => saveVoice(node, e.target.value)}>
         <option value="">mặc định (bước 5)</option>
-        {VOICE_GROUPS.map((g) => (
-          <optgroup key={g.id} label={g.id === "edge" ? "Edge" : "Gemini"}>
-            {g.voices.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
-          </optgroup>
-        ))}
+        <VoiceOptions groups={useVoiceGroups()} short />
       </select>
     </span>
   );

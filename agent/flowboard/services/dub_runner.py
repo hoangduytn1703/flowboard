@@ -1,10 +1,15 @@
 """Runs inside pyvideotrans' virtualenv (torch / faster-whisper / sherpa-onnx
 live there, not in flowboard's). Called by ``services/dub.py``:
 
-  python dub_runner.py transcribe <audio.wav> <out.json> [language]
-      → {"language": "zh", "segments": [{"start", "end", "text"}]}
+  python dub_runner.py transcribe <audio.wav> <out.json> [language] [words]
+      → {"language": "zh", "segments": [{"start", "end", "text"[, "words": [{"start", "end", "word"}]]}]}
+      ("words" as the 4th argument adds each word's timing — Edit auto CapCut cuts subtitles on them)
   python dub_runner.py separate <audio.wav> <vocals.wav> <bgm.wav>
       → {"ok": true}
+  python dub_runner.py vieneu <voice> <lines.json>
+      lines.json = [{"text": …, "out": "<file.wav>"}, …] → {"ok": true, "done": n}
+      (VieNeu-TTS v3 Turbo, the ``vieneu`` package of VieDub: 25 Vietnamese
+      voices, ONNX on the CPU, the model in the HuggingFace cache ~580 MB)
 
 Progress goes to stderr as ``PROGRESS <0-100>`` lines; the result JSON is the
 last stdout line. ``FLOWBOARD_ERASE_ROOT`` is pyvideotrans' folder (the
@@ -52,7 +57,7 @@ def _load_whisper():
     raise SystemExit(f"could not load whisper: {last}")
 
 
-def transcribe(audio: str, out: str, language: str | None) -> None:
+def transcribe(audio: str, out: str, language: str | None, words: bool = False) -> None:
     _progress(5)
     model = _load_whisper()
     _progress(15)
@@ -63,6 +68,7 @@ def transcribe(audio: str, out: str, language: str | None) -> None:
         vad_filter=True,
         vad_parameters={"min_silence_duration_ms": 350},
         condition_on_previous_text=False,
+        word_timestamps=words,
     )
     total = max(float(getattr(info, "duration", 0.0) or 0.0), 0.1)
     rows = []
@@ -70,7 +76,11 @@ def transcribe(audio: str, out: str, language: str | None) -> None:
         text = (seg.text or "").strip()
         if not text:
             continue
-        rows.append({"start": round(float(seg.start), 3), "end": round(float(seg.end), 3), "text": text})
+        row = {"start": round(float(seg.start), 3), "end": round(float(seg.end), 3), "text": text}
+        if words:
+            row["words"] = [{"start": round(float(w.start), 3), "end": round(float(w.end), 3), "word": (w.word or "").strip()}
+                            for w in (getattr(seg, "words", None) or []) if (w.word or "").strip()]
+        rows.append(row)
         _progress(15 + min(80, int(80 * float(seg.end) / total)))
     lang = getattr(info, "language", None) or language or ""
     if lang in ("zh", "yue"):
@@ -118,9 +128,45 @@ def separate(audio: str, vocals_out: str, bgm_out: str) -> None:
     print(json.dumps({"ok": True}))
 
 
+def vieneu(voice: str, lines_json: str) -> None:
+    """Speak every line of ``lines_json`` with one loaded VieNeu model (loading
+    it is the slow part: a few seconds; a line takes ~0.5 s per second of
+    speech on the CPU). Writes 48 kHz mono WAV files."""
+    lines = json.loads(Path(lines_json).read_text(encoding="utf-8"))
+    if not lines:
+        print(json.dumps({"ok": True, "done": 0}))
+        return
+    _progress(2)
+    try:
+        from vieneu import Vieneu
+    except ImportError as exc:
+        raise SystemExit(f"vieneu package missing in this venv: {exc}")
+    # ONNX / CPU like VieDub: the GPU path wants a newer torch, and the GPU is Whisper's.
+    tts = Vieneu(mode="v3turbo", backend="onnx")
+    _progress(10)
+    done = 0
+    for i, item in enumerate(lines):
+        text = str(item.get("text") or "").strip()
+        out = str(item["out"])
+        if not text:
+            continue
+        wav = tts.infer(text, voice=voice)
+        if getattr(wav, "size", 0) == 0:
+            raise SystemExit(f"vieneu returned no audio for line {i + 1}")
+        tts.save(wav, out)
+        done += 1
+        _progress(10 + int(88 * (i + 1) / len(lines)))
+    _progress(100)
+    print(json.dumps({"ok": True, "done": done}))
+
+
 def main(argv: list[str]) -> int:
+    if len(argv) == 3 and argv[0] == "vieneu":
+        vieneu(argv[1], argv[2])
+        return 0
     if len(argv) >= 3 and argv[0] == "transcribe":
-        transcribe(argv[1], argv[2], argv[3] if len(argv) > 3 and argv[3] not in ("", "auto") else None)
+        transcribe(argv[1], argv[2], argv[3] if len(argv) > 3 and argv[3] not in ("", "auto") else None,
+                   words=len(argv) > 4 and argv[4] == "words")
         return 0
     if len(argv) == 4 and argv[0] == "separate":
         separate(argv[1], argv[2], argv[3])

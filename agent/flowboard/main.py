@@ -26,6 +26,7 @@ from flowboard.routes import schedule as schedule_route
 from flowboard.routes import bundles as bundles_route
 from flowboard.routes import swipes as swipes_route
 from flowboard.routes import dub as dub_route
+from flowboard.routes import capcut as capcut_route
 from flowboard.routes import running as running_route
 from flowboard.services import op_tracker
 from flowboard.services.account_pool import account_pool
@@ -267,6 +268,7 @@ app.include_router(schedule_route.router)
 app.include_router(bundles_route.router)
 app.include_router(swipes_route.router)
 app.include_router(dub_route.router)
+app.include_router(capcut_route.router)
 app.include_router(prompt_library_route.router)
 app.include_router(video_clean_route.router)
 app.include_router(activity.router)

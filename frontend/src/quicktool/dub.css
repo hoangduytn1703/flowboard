@@ -10,6 +10,25 @@
   .qt-dub__grid { grid-template-columns: 1fr; }
 }
 .qt-dub__left, .qt-dub__right { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+/* one input per link */
+.qt-dub__links { display: flex; flex-direction: column; gap: 6px; }
+.qt-dub__linkrow { display: flex; align-items: center; gap: 6px; }
+.qt-dub__linkrow input { flex: 1 1 auto; min-width: 0; }
+.qt-dub__linkno { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 11.5px; font-weight: 700; color: var(--muted); background: #1c2029; border: 1px solid var(--border); }
+.qt-dub__linkx { flex: none; width: 26px; height: 26px; border-radius: 7px; border: 1px solid var(--border); background: #1c2029; color: var(--muted); font-size: 16px; line-height: 1; cursor: pointer; }
+.qt-dub__linkx:hover { color: #fff; border-color: #ef4444; }
+.qt-dub__addlink { align-self: flex-start; }
+/* a batch of links: one row per clip */
+.qt-dub__batch { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.qt-dub__batch li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; }
+.qt-dub__batch li.is-done { border-color: rgba(34, 197, 94, 0.45); }
+.qt-dub__batch li.is-error { border-color: rgba(239, 68, 68, 0.55); }
+.qt-dub__batch li.is-running, .qt-dub__batch li.is-rendering { border-color: rgba(255, 106, 43, 0.6); }
+.qt-dub__batchno { flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 13px; background: #1c2029; border: 1px solid var(--border); }
+.qt-dub__batchbody { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.qt-dub__batchname { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qt-dub__batchstate { font-size: 12.5px; color: var(--muted); }
+.qt-dub__batch .qt-dub__bar { margin-top: 2px; }
 .qt-dub__or { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
 .qt-dub__placeholder { min-height: 180px; display: grid; place-items: center; text-align: center; }
 .qt-dub__progress { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
@@ -173,3 +192,74 @@
 .qt-decor__presetx { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; border-radius: 50%; border: 0; background: #3b4252; color: #fff; font-size: 13px; line-height: 20px; cursor: pointer; opacity: 0; transition: opacity 0.15s; }
 .qt-decor__preset:hover .qt-decor__presetx { opacity: 1; }
 .qt-decor__presetx:hover { background: #ef4444; }
+
+/* 📂 reopen a video the tool made (drop on the page, or pick it in the box) */
+.qt-dub { position: relative; }
+.qt-dub__reopen { flex-direction: row; align-items: center; gap: 12px; border-style: dashed; border-color: #3a4050; background: rgba(255, 106, 43, 0.04); }
+.qt-dub__reopenicon { font-size: 26px; flex: none; }
+.qt-dub__reopen > .qt-btn { flex: none; white-space: nowrap; }
+.qt-dub__reopentext { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.qt-dub__reopentext strong { font-size: 15px; }
+.qt-dub__reopentext small { color: var(--muted); font-size: 12.5px; line-height: 1.4; }
+.qt-dub__dropmask {
+  position: absolute; inset: 0; z-index: 30; pointer-events: none;
+  border: 2px dashed #ff6a2b; border-radius: 14px; background: rgba(12, 14, 18, 0.82);
+}
+/* the page can be taller than the window: keep the label in the middle of what is on screen */
+.qt-dub__dropmask div { position: sticky; top: 42vh; width: fit-content; margin: 42vh auto 0; padding: 14px 22px; border-radius: 12px;
+  background: #ff6a2b; color: #fff; font-size: 17px; font-weight: 700; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5); }
+.qt-dub__match { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 9px 11px; border-radius: 10px;
+  border: 1px solid rgba(255, 106, 43, 0.45); background: rgba(255, 106, 43, 0.08); font-size: 13.5px; }
+.qt-dub__match small { color: var(--muted); }
+
+/* "Xem tất cả": every dubbed video, searchable, 10 a page */
+.project-modal.qt-dubjobs { width: min(96vw, 1040px); max-height: 88vh; padding: 20px 22px 16px; gap: 14px; }
+.qt-dubjobs__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.qt-dubjobs__head .project-modal__title { margin-bottom: 2px; }
+.qt-dubjobs__close { width: 34px; height: 34px; flex: none; border-radius: 9px; border: 1px solid var(--border); background: #1c2029;
+  color: var(--text); font-size: 20px; line-height: 1; cursor: pointer; }
+.qt-dubjobs__close:hover { border-color: #ff6a2b; }
+.qt-dubjobs__tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.qt-dubjobs__search { flex: 1 1 260px; min-width: 0; padding: 9px 12px; border-radius: 9px; border: 1px solid var(--border);
+  background: #1c2029; color: var(--text); font: inherit; font-size: 14px; }
+.qt-dubjobs__search:focus { border-color: #ff6a2b; outline: none; }
+.qt-dubjobs__filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.qt-dubjobs__filters .qt-chip:disabled { cursor: not-allowed; opacity: 0.4; }
+.qt-dubjobs__count { margin-left: 4px; padding: 0 6px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); font-size: 11.5px; }
+.qt-dubjobs__body { flex: 1 1 auto; min-height: 120px; overflow: auto; border: 1px solid var(--border); border-radius: 10px; }
+.qt-dubjobs__table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.qt-dubjobs__table th { position: sticky; top: 0; z-index: 1; padding: 9px 12px; text-align: left; font-size: 12px; font-weight: 600;
+  color: var(--muted); background: #181b22; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.qt-dubjobs__table td { padding: 9px 12px; border-bottom: 1px solid #1d2028; vertical-align: middle; }
+.qt-dubjobs__table tbody tr:last-child td { border-bottom: 0; }
+.qt-dubjobs__table tbody tr:hover { background: rgba(255, 255, 255, 0.025); }
+.qt-dubjobs__name { max-width: 420px; }
+.qt-dubjobs__name strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.qt-dubjobs__name small { color: var(--muted); font-size: 12px; }
+.qt-dubjobs__num { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.qt-dubjobs__act { text-align: right; width: 1%; }
+.qt-dubjobs__pill { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.qt-dubjobs__pill.is-done { color: #4ade80; background: rgba(34, 197, 94, 0.12); }
+.qt-dubjobs__pill.is-review { color: #facc15; background: rgba(234, 179, 8, 0.12); }
+.qt-dubjobs__pill.is-error { color: #f87171; background: rgba(239, 68, 68, 0.12); cursor: help; }
+.qt-dubjobs__pill.is-working { color: #fb923c; background: rgba(255, 106, 43, 0.14); }
+.qt-dubjobs__pager { margin: 0; justify-content: center; }
+@media (max-width: 760px) {
+  .qt-dubjobs__table th:nth-child(3), .qt-dubjobs__table td:nth-child(3),
+  .qt-dubjobs__table th:nth-child(4), .qt-dubjobs__table td:nth-child(4) { display: none; }
+}
+.qt-dubjobs__check { width: 1%; padding-right: 0 !important; }
+.qt-dubjobs__check input { width: 16px; height: 16px; accent-color: #ff6a2b; cursor: pointer; }
+.qt-dubjobs__check input:disabled { cursor: not-allowed; opacity: 0.35; }
+.qt-dubjobs__table tbody tr.is-picked { background: rgba(255, 106, 43, 0.07); }
+.qt-dubjobs__btns { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
+.qt-dubjobs__trash { width: 32px; height: 30px; border-radius: 8px; border: 1px solid #3a4050; background: transparent; color: var(--muted);
+  cursor: pointer; font-size: 15px; filter: grayscale(0.2) brightness(1.4); }
+.qt-dubjobs__trash:hover:not(:disabled) { border-color: #ef4444; background: rgba(239, 68, 68, 0.12); color: #fca5a5; }
+.qt-dubjobs__trash:disabled { opacity: 0.3; cursor: not-allowed; }
+.qt-dubjobs__bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255, 106, 43, 0.4); background: rgba(255, 106, 43, 0.07); font-size: 13.5px; }
+.qt-dubjobs__bar > span { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; line-height: 1.45; }
+.qt-dubjobs__bar.is-confirm { border-color: rgba(239, 68, 68, 0.55); background: rgba(239, 68, 68, 0.08); }
+.qt-dubjobs__bar.is-confirm > span { display: block; flex: 1 1 360px; }
+.qt-dubjobs__barbtns { display: flex; gap: 8px; flex: none; }

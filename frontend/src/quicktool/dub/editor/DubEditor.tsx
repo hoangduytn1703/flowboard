@@ -3,8 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { announceRunning } from "../../../components/BackgroundTasks";
 import { detectBands } from "../../../api/clean";
 import {
-  DEFAULT_BLUR, DEFAULT_LAYOUT, dubFilmstripUrl, dubWaveUrl, renderDub, stopDub,
-  type DubJob, type DubLayout, type DubRender, type DubStatus,
+  DEFAULT_BLUR, DEFAULT_LAYOUT, dubFilmstripUrl, dubWaveUrl, normHighlights, pickDubHighlights, renderDub, stopDub,
+  type DubEngine, type DubHighlights, type DubJob, type DubLayout, type DubRender, type DubStatus,
 } from "../../../api/dub";
 import { cleanLook, effectiveLayout, type GeomPatch } from "./cues";
 import { toast } from "../../../store/toast";
@@ -23,6 +23,7 @@ function docFrom(job: DubJob): EditDoc {
     cues: job.segments.map((s) => ({ start: s.start, end: s.end, src: s.src, text: s.text, look: cleanLook(s.look) })),
     layout: { ...DEFAULT_LAYOUT, ...job.layout },
     style: job.style,
+    highlights: normHighlights(job.highlights),
   };
 }
 function outFrom(job: DubJob): OutSettings {
@@ -39,11 +40,25 @@ const isTyping = (el: EventTarget | null) =>
  * "Xuất video", which re-renders on the agent (voice re-read only when lines,
  * timings or the voice changed).
  */
-export function DubEditor({ job, status, onJob, onClose }: {
+/** What "⇪ Áp cho cả loạt" copies to the other clips of a batch: placement, blur, frame, sticker, style, engine. */
+export interface BatchLook {
+  layout: DubLayout;
+  style: string;
+  engine: DubEngine;
+  /** the key-moment settings (each clip picks its own points) */
+  highlights: DubHighlights;
+}
+
+export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch, onApplyAll }: {
   job: DubJob;
   status: DubStatus;
   onJob: (j: DubJob) => void;
   onClose: () => void;
+  /** the other clips dubbed in the same batch (the select on top); includes this one */
+  siblings?: DubJob[];
+  onSwitch?: (jobId: string) => void;
+  /** send this clip's look to every other clip of the batch (re-renders them); resolves with how many were sent */
+  onApplyAll?: (look: BatchLook) => Promise<number>;
 }) {
   const navigate = useNavigate();
   const [doc, setDoc] = useState<EditDoc>(() => docFrom(job));
@@ -70,6 +85,8 @@ export function DubEditor({ job, status, onJob, onClose }: {
   const [audio, setAudio] = useState<AudioMode>(job.voice_url ? "dub" : "orig");
   const [detecting, setDetecting] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [applyingAll, setApplyingAll] = useState(false);
+  const [picking, setPicking] = useState(false);
   const [showResult, setShowResult] = useState(false);
   const stage = useRef<StageHandle>(null);
   const timeline = useRef<TimelineHandle>(null);
@@ -155,6 +172,38 @@ export function DubEditor({ job, status, onJob, onClose }: {
   const clearAllLooks = () => change((d) => ({ ...d, cues: d.cues.map((c) => (c.look ? { ...c, look: null } : c)) }));
   const customCount = doc.cues.filter((c) => c.look).length;
   const setStyle = (s: string) => change((d) => (d.style === s ? d : { ...d, style: s }));
+  // ── "✨ Nhấn chữ quan trọng" ─────────────────────────────────────────────
+  const setHl = (patch: Partial<DubHighlights>, coalesce?: string) =>
+    change((d) => ({ ...d, highlights: normHighlights({ ...d.highlights, ...patch }) }), coalesce);
+  const setPoint = (i: number, patch: { at?: number; words?: string }) =>
+    change((d) => ({ ...d, highlights: normHighlights({ ...d.highlights, picked: "manual",
+      points: d.highlights.points.map((p, k) => (k === i ? { ...p, ...patch } : p)) }) }), patch.words !== undefined ? `hl-words-${i}` : undefined);
+  const removePoint = (i: number) => {
+    change((d) => ({ ...d, highlights: normHighlights({ ...d.highlights, picked: "manual", points: d.highlights.points.filter((_, k) => k !== i) }) }));
+    if (sel?.kind === "hl") setSel({ kind: "hl", i: null });
+  };
+  function addPointAtNow() {
+    const t = Math.round(timeRef.current * 100) / 100;
+    const ci = cueIndexAt(docRef.current.cues, t);
+    const words = (ci !== null ? docRef.current.cues[ci].text : "").split(/\s+/).filter(Boolean).slice(0, 2).join(" ") || "CHỮ";
+    const pts = [...docRef.current.highlights.points, { at: t, words, line: ci }];
+    setHl({ on: true, points: pts, picked: "manual" });
+    const idx = normHighlights({ ...docRef.current.highlights, points: pts }).points.findIndex((p) => Math.abs(p.at - t) < 0.0005);
+    select({ kind: "hl", i: idx >= 0 ? idx : null });
+  }
+  async function pickHl() {
+    setPicking(true);
+    try {
+      const d = docRef.current;
+      const r = await pickDubHighlights(job.job_id, { lines: d.cues.map((c) => c.text), timings: d.cues.map((c) => [c.start, c.end]) });
+      setHl({ on: true, points: r.points, picked: r.picked });
+      toast.success(r.points.length ? `AI chọn ${r.points.length} chỗ nhấn${r.picked === "fallback" ? " (theo số / câu cảm thán — AI không trả lời)" : ""}.` : "AI không tìm thấy chữ nào đáng nhấn.");
+    } catch (e) {
+      toast.error(errMessage(e));
+    } finally {
+      setPicking(false);
+    }
+  }
   const setCueText = (i: number, text: string) =>
     change((d) => (d.cues[i]?.text === text ? d : { ...d, cues: d.cues.map((c, k) => (k === i ? { ...c, text } : c)) }), `text-${i}`);
   function setCueTiming(i: number, start: number, end: number) {
@@ -180,6 +229,7 @@ export function DubEditor({ job, status, onJob, onClose }: {
     if (s.kind === "cue") setTab((t) => (t === "list" ? "list" : "sub"));
     else if (s.kind === "style") setTab("sub");
     else if (s.kind === "blur") setTab("blur");
+    else if (s.kind === "hl") setTab("hl");
     else setTab("decor");
   }
   function selectCue(i: number, seekTo = true) {
@@ -231,6 +281,7 @@ export function DubEditor({ job, status, onJob, onClose }: {
   const lookEdits = doc.cues.filter((c, i) => !sameJson(c.look ?? null, origin[i]?.look ?? null)).length;
   const layoutDirty = !sameJson(doc.layout, { ...DEFAULT_LAYOUT, ...job.layout });
   const styleDirty = doc.style !== job.style;
+  const hlDirty = !sameJson(doc.highlights, normHighlights(job.highlights));
   const voiceDirty = out.voice !== job.voice;
   const otherDirty = out.engine !== (job.engine ?? "ass") || out.keepBgm !== job.keep_bgm || out.name.trim() !== job.name || out.channelId !== job.channel_id;
   const changes = [
@@ -240,6 +291,7 @@ export function DubEditor({ job, status, onJob, onClose }: {
     voiceDirty ? "giọng đọc" : "",
     layoutDirty ? "vị trí / khung / vùng mờ" : "",
     styleDirty ? "kiểu chữ" : "",
+    hlDirty ? "nhấn chữ quan trọng" : "",
     otherDirty ? "cài đặt xuất" : "",
   ].filter(Boolean);
   const dirty = changes.length > 0;
@@ -258,14 +310,16 @@ export function DubEditor({ job, status, onJob, onClose }: {
     setExporting(true);
     try {
       const body: DubRender = {
-        lines: doc.cues.map((c) => c.text), style: doc.style, layout: doc.layout,
+        lines: doc.cues.map((c) => c.text), style: doc.style, layout: doc.layout, highlights: doc.highlights,
         voice: out.voice, engine: out.engine, keep_bgm: out.keepBgm, name: out.name.trim(), channel_id: out.channelId,
       };
       if (timeEdits) body.timings = doc.cues.map((c) => [c.start, c.end]);
       if (lookEdits || customCount) body.looks = doc.cues.map((c) => cleanLook(c.look));
       onJob(await renderDub(job.job_id, body));
       announceRunning();
-      toast.info(needVoice ? "Đang xuất: đọc lại giọng rồi in hình…" : "Đang xuất: chỉ in lại hình, giữ giọng — nhanh thôi.");
+      toast.info(needVoice ? "Đang xuất: đọc lại giọng rồi in hình…"
+        : doc.highlights.on && !doc.highlights.points.length ? "Đang xuất: AI chọn chữ quan trọng rồi in hình (giữ giọng)."
+        : "Đang xuất: chỉ in lại hình, giữ giọng — nhanh thôi.");
     } catch (e) {
       toast.error(errMessage(e));
     } finally {
@@ -275,6 +329,30 @@ export function DubEditor({ job, status, onJob, onClose }: {
   function close() {
     if (dirty && !window.confirm(`Còn ${changes.join(", ")} chưa xuất. Đóng trình chỉnh sửa và bỏ các thay đổi?`)) return;
     onClose();
+  }
+  function switchTo(id: string) {
+    if (id === job.job_id || !onSwitch) return;
+    if (dirty && !window.confirm(`Còn ${changes.join(", ")} chưa xuất ở clip này. Chuyển sang clip khác và bỏ các thay đổi?`)) return;
+    onSwitch(id);
+  }
+  /** This clip's look → every other clip of the batch (and this one is exported first when it has changes). */
+  async function applyAll() {
+    if (!onApplyAll) return;
+    const others = siblings.filter((s) => s.job_id !== job.job_id);
+    if (!others.length) return;
+    const parts = ["vị trí / cỡ / độ rộng phụ đề", "kiểu chữ", doc.layout.blur ? "vùng mờ" : "", doc.layout.frame ? "khung" : "",
+                   doc.layout.mascot?.media_id ? "nhân vật" : "", doc.highlights.on ? "nhấn chữ quan trọng (AI chọn chỗ riêng cho từng clip)" : ""].filter(Boolean).join(", ");
+    if (!window.confirm(`Áp ${parts} của clip này cho ${others.length} clip còn lại của loạt?\nCác clip đó sẽ được in lại (giữ giọng đã đọc). Chữ, giờ và câu chỉnh riêng của từng clip không đổi.`)) return;
+    setApplyingAll(true);
+    try {
+      if (dirty || neverRendered) await exportNow();
+      const n = await onApplyAll({ layout: doc.layout, style: doc.style, engine: out.engine, highlights: { ...doc.highlights, points: [], picked: "" } });
+      toast.success(`Đã gửi kiểu này cho ${n} clip — đang in lại.`);
+    } catch (e) {
+      toast.error(errMessage(e));
+    } finally {
+      setApplyingAll(false);
+    }
   }
 
   async function detectOriginalSubs() {
@@ -311,10 +389,24 @@ export function DubEditor({ job, status, onJob, onClose }: {
     <div className={`dx${landscapeClass(frameW, frameH)}`}>
       <div className="dx__top">
         <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={close} title="Về trang Lồng tiếng">← Danh sách</button>
-        <div className="dx__title">
-          <strong>{out.name || job.name || job.title || "Video lồng tiếng"}</strong>
-          <small>{job.language ? `tiếng gốc ${job.language} · ` : ""}{clock(total, false)} · {doc.cues.length} câu</small>
-        </div>
+        {siblings.length > 1 ? (
+          <label className="dx__pick" title="Clip trong loạt — chọn clip cần chỉnh">
+            <span>Clip {Math.max(1, siblings.findIndex((s) => s.job_id === job.job_id) + 1)}/{siblings.length}</span>
+            <select value={job.job_id} onChange={(e) => switchTo(e.target.value)} disabled={applyingAll}>
+              {siblings.map((s, i) => (
+                <option key={s.job_id} value={s.job_id}>
+                  {i + 1}. {(s.name || s.title || s.url || "Video").slice(0, 48)}{s.status === "error" ? " ⚠ lỗi" : ["queued", "running", "rendering"].includes(s.status) ? " ⏳" : ""}
+                </option>
+              ))}
+            </select>
+            <small>{job.language ? `tiếng gốc ${job.language} · ` : ""}{clock(total, false)} · {doc.cues.length} câu</small>
+          </label>
+        ) : (
+          <div className="dx__title">
+            <strong>{out.name || job.name || job.title || "Video lồng tiếng"}</strong>
+            <small>{job.language ? `tiếng gốc ${job.language} · ` : ""}{clock(total, false)} · {doc.cues.length} câu</small>
+          </div>
+        )}
         <div className="dx__state">
           {working ? (
             <>
@@ -342,6 +434,12 @@ export function DubEditor({ job, status, onJob, onClose }: {
                download={`${(job.name || job.title || "video-long-tieng").replace(/[\\/:*?"<>|]+/g, " ").trim()}.mp4`}>⬇ Tải</a>
           )}
           {job.board_id && <button type="button" className="qt-btn qt-btn--small" onClick={() => navigate(`/clips/${job.board_id}/export`)}>Mở clip →</button>}
+          {siblings.length > 1 && onApplyAll && (
+            <button type="button" className="qt-btn qt-btn--small" disabled={readOnly || applyingAll} onClick={() => void applyAll()}
+                    title="Vị trí / cỡ / độ rộng phụ đề, kiểu chữ, vùng mờ, khung và nhân vật của clip này → mọi clip trong loạt">
+              {applyingAll ? "Đang áp…" : `⇪ Áp cho cả loạt (${siblings.length - 1})`}
+            </button>
+          )}
           <button type="button" className="qt-btn qt-btn--accent" disabled={readOnly || (!dirty && !neverRendered)} onClick={() => void exportNow()}>{exportLabel}</button>
         </div>
       </div>
@@ -359,6 +457,7 @@ export function DubEditor({ job, status, onJob, onClose }: {
             cues={doc.cues}
             layout={doc.layout}
             style={doc.style}
+            highlights={doc.highlights}
             selected={sel}
             readOnly={readOnly}
             audio={audio}
@@ -423,6 +522,10 @@ export function DubEditor({ job, status, onJob, onClose }: {
           onClearAll={clearAllLooks}
           customCount={customCount}
           onPickCue={(i) => { setSel({ kind: "cue", i }); const c = doc.cues[i]; if (c && (timeRef.current < c.start || timeRef.current >= c.end)) stage.current?.seek(c.start + 0.01); }}
+          hl={{
+            value: doc.highlights, set: setHl, pick: () => void pickHl(), picking, addAtNow: addPointAtNow, setPoint, removePoint, now: time,
+            onPickPoint: (i) => { setSel({ kind: "hl", i }); const p = doc.highlights.points[i]; if (p) stage.current?.seek(p.at + 0.01); },
+          }}
         />
       </div>
 
@@ -439,10 +542,12 @@ export function DubEditor({ job, status, onJob, onClose }: {
         hasBlur={!!doc.layout.blur}
         hasFrame={!!doc.layout.frame}
         hasMascot={!!doc.layout.mascot?.media_id}
+        highlights={doc.highlights}
         onSeek={(t) => stage.current?.seek(t)}
         onSelect={select}
         onTiming={setCueTiming}
         onEditCue={(i) => { selectCue(i, false); setFocusText((n) => n + 1); }}
+        onMovePoint={(i, at) => setPoint(i, { at: Math.round(at * 100) / 100 })}
       />
       <div className="dx__keys">
         Phím tắt: <kbd>Space</kbd> phát/dừng · <kbd>←</kbd><kbd>→</kbd> từng khung (Shift = 1 s) · <kbd>↑</kbd><kbd>↓</kbd> câu trước/sau ·

@@ -526,6 +526,25 @@ async def test_gemini_keys() -> dict:
     return {"results": results, **_gemini_keys_payload()}
 
 
+class _FptKeyBody(BaseModel):
+    key: str = Field(default="", max_length=200)
+
+
+@router.get("/fpt-key")
+def get_fpt_key() -> dict:
+    """Whether an FPT.AI TTS key is stored (masked, never echoed)."""
+    key = secrets.get_api_key("fpt") or ""
+    return {"set": bool(key), "masked": f"{key[:4]}…{key[-3:]}" if len(key) > 10 else ("…" if key else "")}
+
+
+@router.put("/fpt-key")
+def put_fpt_key(body: _FptKeyBody) -> dict:
+    """Store (or clear, with an empty key) the FPT.AI TTS key — it rides with the account like the Gemini keys."""
+    secrets.set_api_key("fpt", body.key.strip() or None)
+    logger.info("llm: FPT.AI key %s", "set" if body.key.strip() else "cleared")
+    return get_fpt_key()
+
+
 @router.get("/voices")
 def list_voices() -> dict:
     """Voice-over voices for the export pickers, grouped by provider."""

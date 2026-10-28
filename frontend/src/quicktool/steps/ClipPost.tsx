@@ -8,7 +8,8 @@ import {
 import { brainstormIfDue } from "../../api/channels";
 import { toast } from "../../store/toast";
 import { ChannelPicker, useChannels } from "../channels/ChannelPicker";
-import { createSlot, publishSlot } from "../../api/schedule";
+import { createSlot, publishSlot, type FbFormat } from "../../api/schedule";
+import { FormatPicker } from "../schedule/FormatPicker";
 import { PostEditor } from "../posts/PostEditor";
 import { ScheduleDialog } from "../schedule/ScheduleDialog";
 import "../posts.css";
@@ -34,6 +35,7 @@ export function ClipPost({ boardId, productId, channelId: clipChannel = null }: 
   const [images, setImages] = useState<string[]>([]);
   const [autoMake, setAutoMake] = useState(0);
   const [postId, setPostId] = useState<number | null>(null);
+  const [fbFormat, setFbFormat] = useState<FbFormat>("post");
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [change, setChange] = useState("");
@@ -119,13 +121,14 @@ export function ClipPost({ boardId, productId, channelId: clipChannel = null }: 
    * The scheduler sends a clip's post with the clip as its video. */
   async function publishNow() {
     if (!channel?.fb_connected || !draft) return;
-    if (!window.confirm(`Đăng clip này kèm bài viết lên Page "${channel.fb_page_name || channel.name}" ngay bây giờ?`
+    if (!window.confirm(`Đăng clip này ${fbFormat === "reel" ? "dạng Reel" : "kèm bài viết"} lên Page "${channel.fb_page_name || channel.name}" ngay bây giờ?`
       + (draft.first_comment ? " Bình luận đầu (link) sẽ được thêm sau khi đăng." : ""))) return;
     setPublishing(true);
     try {
       const id = dirty || postId === null ? await save() : postId;
       if (!id) return;
-      const slot = await createSlot({ kind: "post", post_id: id, channel_id: channel.id, at: new Date().toISOString(), note: "Đăng ngay từ Bước 5 (kèm video clip)" });
+      const slot = await createSlot({ kind: "post", post_id: id, channel_id: channel.id, at: new Date().toISOString(),
+                                      note: `Đăng ngay từ Bước 5 (${fbFormat === "reel" ? "Reel" : "kèm video clip"})`, fb_format: fbFormat });
       const out = await publishSlot(slot.id);
       if (out.status === "posted") {
         setPublished({ link: out.result?.permalink ?? "" });
@@ -197,10 +200,11 @@ export function ClipPost({ boardId, productId, channelId: clipChannel = null }: 
                   <button type="button" className="qt-btn qt-btn--small" disabled={!dirty && postId !== null} onClick={() => void save()}>💾 {postId ? "Lưu thay đổi" : "Lưu bài"}</button>
                   <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={() => void openInPosts()}>Mở ở trang Bài viết →</button>
                   <button type="button" className="qt-btn qt-btn--small" onClick={() => setScheduling(true)} title="Lên lịch đăng clip (kèm caption này) lên kênh">📅 Lên lịch đăng clip</button>
+                  {channel?.fb_connected && <FormatPicker compact value={fbFormat} onChange={setFbFormat} target={{ kind: "clip", boardId }} />}
                   {channel?.fb_connected ? (
                     <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={publishing || !draft.body.trim()} onClick={() => void publishNow()}
                             title="Đăng ngay lên Facebook Page: video clip + bài viết này + bình luận đầu">
-                      {publishing ? "Đang đăng…" : published ? "🚀 Đăng lại" : "🚀 Đăng ngay (kèm video)"}
+                      {publishing ? "Đang đăng…" : published ? "🚀 Đăng lại" : fbFormat === "reel" ? "🚀 Đăng Reel ngay" : "🚀 Đăng ngay (kèm video)"}
                     </button>
                   ) : channel ? <small className="qt-card__hint">Kênh chưa kết nối Facebook Page — kết nối ở Kênh của tôi để đăng thẳng.</small> : null}
                   {published?.link && <a className="qt-link" href={published.link} target="_blank" rel="noreferrer">Xem bài ↗</a>}

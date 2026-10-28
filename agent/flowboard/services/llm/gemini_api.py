@@ -6,10 +6,14 @@ images and videos (inline or through the Files API), and optional JSON
 schema output.
 
 Keys come from ``secrets.get_gemini_keys()``. A call tries them in order:
-a key that answers 429 / RESOURCE_EXHAUSTED is parked for a cooldown and
-the next one is used; a key that answers 400/401/403 is parked for longer
-(it is invalid or unauthorised, not merely busy). The pool state lives in
-this process; a restart gives every key another chance.
+a key that answers 429 / RESOURCE_EXHAUSTED is parked **for that model**
+(Google's free-tier quotas are per model: a key out of TTS requests still
+answers text requests) and the next key is used; a key that answers
+400/401/403 is parked as a whole for longer (it is invalid or unauthorised,
+not merely busy). When every key is parked for a short while (a per-minute
+limit) the call waits for the first one to come back instead of failing.
+The pool state lives in this process; a restart gives every key another
+chance.
 """
 from __future__ import annotations
 
@@ -47,11 +51,17 @@ class GeminiAPIError(RuntimeError):
 
 
 class GeminiQuotaError(GeminiAPIError):
-    """429 / RESOURCE_EXHAUSTED: the key is out of quota for now."""
+    """429 / RESOURCE_EXHAUSTED: the key is out of quota for now — for
+    ``model`` when Google names one (the usual case: quotas are per model),
+    ``limit`` = the quota value and ``per_day`` whether it is a daily cap."""
 
-    def __init__(self, message: str, retry_after_s: Optional[float] = None) -> None:
+    def __init__(self, message: str, retry_after_s: Optional[float] = None, *, model: Optional[str] = None,
+                 limit: Optional[str] = None, per_day: bool = False) -> None:
         super().__init__(message)
         self.retry_after_s = retry_after_s
+        self.model = model
+        self.limit = limit
+        self.per_day = per_day
 
 
 class GeminiKeyError(GeminiAPIError):
@@ -99,10 +109,19 @@ class NoKeyAvailable(GeminiAPIError):
 @dataclass
 class KeyState:
     key: str
+    #: the key as a whole (refused / invalid)
     parked_until: float = 0.0
+    #: model → until when that model's quota is out for this key
+    model_parked: dict[str, float] = field(default_factory=dict)
+    #: model → the quota value Google named ("10" a day…), for the message
+    model_limit: dict[str, str] = field(default_factory=dict)
     last_error: Optional[str] = None
     calls: int = 0
     last_ok_at: Optional[float] = None
+
+    def free_at(self, model: Optional[str], now: float) -> float:
+        """When this key can be used for ``model`` (now or earlier = usable)."""
+        return max(self.parked_until, self.model_parked.get(model, 0.0) if model else 0.0)
 
 
 @dataclass
@@ -118,20 +137,35 @@ class KeyPool:
                 del self.states[k]
         return [self.states[k] for k in keys]
 
-    def candidates(self) -> list[KeyState]:
-        """Usable keys in configured order, parked ones last (they are
-        tried only when nothing else is left and their cooldown passed)."""
+    def candidates(self, model: Optional[str] = None) -> list[KeyState]:
+        """Keys usable right now, in configured order: not refused, and not
+        out of quota for ``model`` (any model when None)."""
+        now = time.time()
+        return [s for s in self._sync() if s.free_at(model, now) <= now]
+
+    def next_free_in(self, model: Optional[str] = None) -> Optional[float]:
+        """Seconds until the first parked key comes back for ``model``; None when no key exists."""
         now = time.time()
         states = self._sync()
-        return [s for s in states if s.parked_until <= now]
+        if not states:
+            return None
+        return max(0.0, min(s.free_at(model, now) for s in states) - now)
 
-    def park(self, key: str, seconds: float, reason: str) -> None:
+    def park(self, key: str, seconds: float, reason: str, model: Optional[str] = None, limit: Optional[str] = None) -> None:
+        """Rest ``key`` for ``seconds`` — only for ``model`` when given (quota),
+        else as a whole (refused)."""
         st = self.states.get(key)
         if st is None:
             return
-        st.parked_until = time.time() + max(1.0, seconds)
+        until = time.time() + max(1.0, seconds)
+        if model:
+            st.model_parked[model] = until
+            if limit:
+                st.model_limit[model] = limit
+        else:
+            st.parked_until = until
         st.last_error = reason[:200]
-        logger.warning("gemini_api: key …%s parked %ds: %s", key[-6:], int(seconds), reason[:120])
+        logger.warning("gemini_api: key …%s parked %ds%s: %s", key[-6:], int(seconds), f" for {model}" if model else "", reason[:120])
 
     def note_ok(self, key: str) -> None:
         st = self.states.get(key)
@@ -142,16 +176,20 @@ class KeyPool:
 
     def snapshot(self) -> list[dict[str, Any]]:
         now = time.time()
-        return [
-            {
+        out = []
+        for s in self._sync():
+            models = {m: int(t - now) for m, t in s.model_parked.items() if t > now}
+            out.append({
                 "masked": mask(s.key),
+                # "parked" = the key as a whole is refused (bad key); per-model quota rests are listed separately
                 "parked": s.parked_until > now,
                 "parked_for_s": max(0, int(s.parked_until - now)),
+                "models_parked": models,
+                "model_limits": {m: s.model_limit.get(m, "") for m in models},
                 "last_error": s.last_error,
                 "calls": s.calls,
-            }
-            for s in self._sync()
-        ]
+            })
+        return out
 
 
 pool = KeyPool()
@@ -179,6 +217,37 @@ def _retry_delay(body: Any) -> Optional[float]:
     return None
 
 
+def _quota_violation(body: Any) -> dict[str, str]:
+    """The ``QuotaFailure`` violation Google attaches to a 429: which model,
+    which quota, its value — ``{model, id, value, desc}`` (missing when absent)."""
+    out: dict[str, str] = {}
+    try:
+        for d in body["error"]["details"]:
+            for v in d.get("violations") or []:
+                dims = v.get("quotaDimensions") or {}
+                if dims.get("model"):
+                    out["model"] = str(dims["model"])
+                if v.get("quotaId"):
+                    out["id"] = str(v["quotaId"])
+                if v.get("quotaValue"):
+                    out["value"] = str(v["quotaValue"])
+                if v.get("description"):
+                    out["desc"] = str(v["description"])
+                return out
+    except (KeyError, TypeError, AttributeError):
+        pass
+    return out
+
+
+def _human_wait(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    if seconds >= 3600:
+        return f"{seconds // 3600} giờ {(seconds % 3600) // 60} phút"
+    if seconds >= 60:
+        return f"{seconds // 60} phút"
+    return f"{seconds} giây"
+
+
 def _raise_for(resp: httpx.Response) -> None:
     if resp.status_code < 400:
         return
@@ -190,10 +259,13 @@ def _raise_for(resp: httpx.Response) -> None:
         body, message, status = None, resp.text[:300], ""
     if resp.status_code == 429 or status == "RESOURCE_EXHAUSTED":
         delay = _retry_delay(body)
+        quota = _quota_violation(body)
+        per_day = bool(re.search(r"per day|daily|PerDay", message + quota.get("id", "") + quota.get("desc", "")))
         # A daily limit is worth a long park; a per-minute one a short one.
         if delay is None:
-            delay = QUOTA_COOLDOWN_S if re.search(r"per day|daily|PerDay", message) else 90.0
-        raise GeminiQuotaError(f"quota: {message}", retry_after_s=delay)
+            delay = QUOTA_COOLDOWN_S if per_day else 90.0
+        raise GeminiQuotaError(f"quota: {message}", retry_after_s=delay, model=quota.get("model"),
+                               limit=quota.get("value"), per_day=per_day)
     if resp.status_code == 503 or status == "UNAVAILABLE":
         raise GeminiBusyError(f"HTTP {resp.status_code}: {message}")
     if resp.status_code == 404 and re.search(r"models?/|no longer available|not found", message):
@@ -207,28 +279,78 @@ def _raise_for(resp: httpx.Response) -> None:
     raise GeminiAPIError(f"HTTP {resp.status_code}: {message}")
 
 
-async def with_key(fn: Callable[[str], Awaitable[T]]) -> T:
-    """Run ``fn(key)`` with the first usable key, moving to the next one
-    when a key is out of quota or refused. Other errors propagate."""
-    tried: list[str] = []
-    for st in pool.candidates():
-        key = st.key
-        tried.append(mask(key))
-        try:
-            result = await fn(key)
-        except GeminiQuotaError as exc:
-            pool.park(key, exc.retry_after_s or QUOTA_COOLDOWN_S, str(exc))
-            continue
-        except GeminiKeyError as exc:
-            pool.park(key, INVALID_COOLDOWN_S, str(exc))
-            continue
-        pool.note_ok(key)
-        return result
+#: How long a call may wait for a parked key to come back (per-minute limits) before giving up.
+MAX_WAIT_S = 45.0
+
+
+async def with_key(fn: Callable[[str], Awaitable[T]], *, model: Optional[str] = None,
+                   max_wait_s: float = MAX_WAIT_S) -> T:
+    """Run ``fn(key)`` with the first key usable for ``model``, moving to the
+    next one when a key is out of quota (parked for the model the answer
+    names, or ``model``) or refused (parked as a whole). When every key is
+    parked but one comes back within ``max_wait_s``, wait for it. Other
+    errors propagate."""
     if not secrets.get_gemini_keys():
         raise NoKeyAvailable("Chưa có Gemini API key — thêm trong Settings → Gemini API keys.")
-    raise NoKeyAvailable(
-        f"Mọi Gemini API key đều hết quota hoặc bị từ chối ({len(tried)} key đã thử). Thêm key mới hoặc chờ."
-    )
+    tried: list[str] = []
+    waited = 0.0
+    quota: Optional[GeminiQuotaError] = None
+    rounds = 0
+    while True:
+        rounds += 1
+        if rounds > 50:
+            break
+        for st in pool.candidates(model):
+            key = st.key
+            tried.append(mask(key))
+            try:
+                result = await fn(key)
+            except GeminiQuotaError as exc:
+                quota = exc
+                if model is None and exc.model:
+                    model = exc.model  # the quota Google named is this call's model from here on
+                pool.park(key, exc.retry_after_s or QUOTA_COOLDOWN_S, str(exc), model=exc.model or model, limit=exc.limit)
+                continue
+            except GeminiKeyError as exc:
+                pool.park(key, INVALID_COOLDOWN_S, str(exc))
+                continue
+            pool.note_ok(key)
+            return result
+        wait = pool.next_free_in(model)
+        if wait is not None and wait <= max_wait_s - waited and (wait > 0 or tried):
+            logger.info("gemini_api: every key is resting; waiting %.0fs for the first one (%s)", wait, model or "any model")
+            await asyncio.sleep(wait + 0.5)
+            waited += wait + 0.5
+            continue
+        break
+    raise NoKeyAvailable(_no_key_message(model, tried, quota, pool.next_free_in(model)))
+
+
+def _no_key_message(model: Optional[str], tried: list[str], quota: Optional[GeminiQuotaError],
+                    wait: Optional[float]) -> str:
+    now = time.time()
+    states = pool._sync()
+    refused = [s for s in states if s.parked_until > now]
+    rested = [s for s in states if model and s.model_parked.get(model, 0) > now and s.parked_until <= now]
+    bits = [f"Mọi Gemini API key ({len(states)}) đều hết quota hoặc bị từ chối"]
+    if model:
+        bits[0] += f" cho {model}"
+    detail = []
+    if rested:
+        limit = next((s.model_limit.get(model or "") for s in rested if s.model_limit.get(model or "")), None)
+        per_day = quota.per_day if quota else False
+        detail.append(f"{len(rested)} key hết quota" + (f" ngày — bản miễn phí chỉ {limit} lượt/ngày/key" if per_day and limit
+                                                       else f" — giới hạn {limit} lượt" if limit else ""))
+    if refused:
+        detail.append(f"{len(refused)} key bị từ chối (key sai hoặc chưa bật API)")
+    if tried:
+        detail.append(f"{len(tried)} key vừa thử lần này")
+    if detail:
+        bits.append(" (" + "; ".join(detail) + ")")
+    if wait:
+        bits.append(f". Key sớm nhất dùng lại được sau {_human_wait(wait)}")
+    bits.append(". Thêm key mới, chờ, hoặc đổi giọng Edge (không giới hạn).")
+    return "".join(bits)
 
 
 # ── requests ───────────────────────────────────────────────────────────
@@ -440,11 +562,38 @@ async def _speak(key: str, prompt: str, voice: str, model: str, timeout: float) 
     return data
 
 
+#: A dubbing job has many lines: waiting a few minutes for a per-minute limit beats failing the job.
+TTS_MAX_WAIT_S = 180.0
+
+
 async def speak(prompt: str, voice: str, *, model: str = TTS_MODEL, timeout: float = 120.0) -> bytes:
     """Gemini TTS through the key pool: WAV bytes for ``prompt`` (which
-    carries the style instruction before the text)."""
-    return await with_key(lambda key: with_model_fallback(
-        lambda m: _speak(key, prompt, voice, m, timeout), model))
+    carries the style instruction before the text). Model first, keys
+    second: every key is tried on ``model`` (each has its own daily quota
+    there), then every key on the fallback TTS models — which have their
+    own quotas, so a key out of ``model`` requests still speaks through them."""
+    chain = [model] + [m for m in MODEL_FALLBACKS.get(model, []) if m != model]
+    last: Optional[GeminiAPIError] = None
+    for i, m in enumerate(chain):
+        async def one(key: str, m: str = m) -> bytes:
+            busy: Optional[GeminiBusyError] = None
+            for attempt in range(BUSY_RETRIES + 1):
+                try:
+                    return await _speak(key, prompt, voice, m, timeout)
+                except GeminiBusyError as exc:
+                    busy = exc
+                    if attempt < BUSY_RETRIES:
+                        await asyncio.sleep(BUSY_BACKOFF_S * (attempt + 1))
+            raise busy  # type: ignore[misc]
+
+        try:
+            return await with_key(one, model=m, max_wait_s=TTS_MAX_WAIT_S if i == len(chain) - 1 else 0.0)
+        except (NoKeyAvailable, GeminiBusyError) as exc:
+            last = exc
+            if i + 1 < len(chain):
+                logger.warning("gemini_api: tts %s out of keys / overloaded (%s); trying %s", m, str(exc)[:80], chain[i + 1])
+    assert last is not None
+    raise last
 
 
 async def list_models(key: str, timeout: float = 20.0) -> list[str]:

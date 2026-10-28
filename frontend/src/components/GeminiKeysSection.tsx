@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getGeminiKeys, setGeminiKeys, testGeminiKeys, type GeminiKeyState } from "../api/client";
+import { getFptKey, getGeminiKeys, setFptKey, setGeminiKeys, testGeminiKeys, type GeminiKeyState } from "../api/client";
 import { toast } from "../store/toast";
 
 /**
@@ -7,6 +7,47 @@ import { toast } from "../store/toast";
  * rotates to the next one when a key runs out of quota. Keys are shown
  * masked and never sent back in full.
  */
+function restIn(sec: number): string {
+  return sec >= 3600 ? `${Math.floor(sec / 3600)} giờ ${Math.ceil((sec % 3600) / 60)} phút` : `${Math.ceil(sec / 60)} phút`;
+}
+
+/** Settings → FPT.AI TTS key: the "review phim" voices (Ban Mai…); 100 000 characters a month free at console.fpt.ai. */
+function FptKeySection() {
+  const [state, setState] = useState<{ set: boolean; masked: string } | null>(null);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { void getFptKey().then(setState).catch(() => setState({ set: false, masked: "" })); }, []);
+  async function save(key: string) {
+    setBusy(true);
+    try {
+      setState(await setFptKey(key));
+      setDraft("");
+      toast.success(key ? "Đã lưu key FPT.AI — giọng FPT dùng được ở mọi ô chọn giọng." : "Đã bỏ key FPT.AI.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "lưu thất bại");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="settings-panel__section">
+      <div className="settings-panel__label">FPT.AI — giọng review phim (Ban Mai, Lê Minh…)</div>
+      <div className="settings-panel__hint">
+        Đăng ký miễn phí ở console.fpt.ai → Text to Speech → lấy API key (gói miễn phí 100.000 ký tự/tháng ≈ 15–40 video ngắn).
+        {state?.set ? ` Đang dùng key ${state.masked}.` : " Chưa có key: giọng FPT bị mờ trong ô chọn giọng."}
+      </div>
+      <div className="gemini-keys__actions">
+        <input type="password" className="settings-field__input" value={draft} placeholder={state?.set ? "Dán key mới để thay" : "Dán API key FPT.AI"}
+               onChange={(e) => setDraft(e.target.value)} disabled={busy} style={{ flex: "1 1 220px" }} autoComplete="off" />
+        <button type="button" className="gemini-keys__btn gemini-keys__btn--primary" onClick={() => void save(draft.trim())} disabled={busy || !draft.trim()}>
+          {busy ? "Đang lưu…" : "Lưu key"}
+        </button>
+        {state?.set && <button type="button" className="gemini-keys__btn" onClick={() => void save("")} disabled={busy}>Bỏ key</button>}
+      </div>
+    </div>
+  );
+}
+
 export function GeminiKeysSection() {
   const [keys, setKeys] = useState<GeminiKeyState[] | null>(null);
   const [draft, setDraft] = useState("");
@@ -62,11 +103,13 @@ export function GeminiKeysSection() {
   }
 
   return (
+    <>
     <div className="settings-panel__section">
       <div className="settings-panel__label">Gemini API keys</div>
       <div className="settings-panel__hint">
         Dùng cho phân tích video mẫu, và thay CLI cho auto-prompt / vision / chat khi provider là Gemini.
-        Nhiều key: hết quota key này tự chuyển sang key kế.
+        Nhiều key: hết quota key này tự chuyển sang key kế. Quota miễn phí tính theo <b>từng model</b> — giọng đọc Gemini chỉ
+        được ~10 câu/ngày/key, hết thì tự sang model TTS dự phòng; video dài nên dùng giọng Edge (không giới hạn).
       </div>
       {keys === null ? (
         <div className="settings-panel__hint">Đang tải…</div>
@@ -79,8 +122,10 @@ export function GeminiKeysSection() {
               <code>{k.masked}</code>
               <span className="gemini-keys__state">
                 {results[k.masked]
-                  ?? (k.parked ? `tạm nghỉ ${Math.ceil(k.parked_for_s / 60)} phút${k.last_error ? ` — ${k.last_error.slice(0, 60)}` : ""}`
-                    : k.calls > 0 ? `${k.calls} lần gọi` : "sẵn sàng")}
+                  ?? (k.parked ? `bị từ chối — nghỉ ${Math.ceil(k.parked_for_s / 60)} phút${k.last_error ? ` — ${k.last_error.slice(0, 60)}` : ""}`
+                    : Object.keys(k.models_parked ?? {}).length
+                      ? `hết quota: ${Object.entries(k.models_parked ?? {}).map(([m, sec]) => `${m.replace(/^gemini-/, "")}${k.model_limits?.[m] ? ` (${k.model_limits[m]}/ngày)` : ""} · còn ${restIn(sec)}`).join("; ")}${k.calls > 0 ? ` · ${k.calls} lần gọi` : ""}`
+                      : k.calls > 0 ? `${k.calls} lần gọi` : "sẵn sàng")}
               </span>
             </li>
           ))}
@@ -118,5 +163,7 @@ export function GeminiKeysSection() {
         </div>
       )}
     </div>
+    <FptKeySection />
+    </>
   );
 }

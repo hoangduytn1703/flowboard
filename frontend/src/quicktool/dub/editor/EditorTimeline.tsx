@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState }
 import { Timeline, type TimelineState } from "@xzdarcy/react-timeline-editor";
 import type { TimelineAction, TimelineRow } from "@xzdarcy/timeline-engine";
 import "@xzdarcy/react-timeline-editor/dist/react-timeline-editor.css";
+import { HL_EMPHASIS_S, type DubHighlights } from "../../../api/dub";
 import { clock, readingLoad, type EditCue } from "./cues";
 import type { Sel } from "./EditorStage";
 
@@ -37,13 +38,16 @@ export const EditorTimeline = forwardRef<TimelineHandle, {
   hasBlur: boolean;
   hasFrame: boolean;
   hasMascot: boolean;
+  /** the key moments: a row of blocks (drag one to move its moment) */
+  highlights: DubHighlights;
   onSeek: (t: number) => void;
   onSelect: (s: Sel) => void;
   onTiming: (i: number, start: number, end: number) => void;
   onEditCue: (i: number) => void;
+  onMovePoint: (i: number, at: number) => void;
 }>(function EditorTimeline({
-  duration, cues, origin, selected, activeCue, readOnly, filmstrip, wave, hasBlur, hasFrame, hasMascot,
-  onSeek, onSelect, onTiming, onEditCue,
+  duration, cues, origin, selected, activeCue, readOnly, filmstrip, wave, hasBlur, hasFrame, hasMascot, highlights,
+  onSeek, onSelect, onTiming, onEditCue, onMovePoint,
 }, ref) {
   const tl = useRef<TimelineState>(null);
   const host = useRef<HTMLDivElement>(null);
@@ -89,6 +93,7 @@ export const EditorTimeline = forwardRef<TimelineHandle, {
     { id: "video", label: "Video", icon: "🎞", height: 46 },
     { id: "sub", label: "Phụ đề", icon: "💬", height: 40 },
     ...(wave ? [{ id: "voice", label: "Giọng", icon: "🎙", height: 34 }] : []),
+    ...(highlights.on ? [{ id: "hl", label: "Nhấn", icon: "✨", height: 30 }] : []),
     ...(hasBlur ? [{ id: "blur", label: "Làm mờ", icon: "🌫", height: 26 }] : []),
     ...(hasFrame ? [{ id: "frame", label: "Khung", icon: "🖼", height: 26 }] : []),
     ...(hasMascot ? [{ id: "mascot", label: "Nhân vật", icon: "💃", height: 26 }] : []),
@@ -109,12 +114,22 @@ export const EditorTimeline = forwardRef<TimelineHandle, {
           })),
         };
       }
+      if (tr.id === "hl") {
+        return {
+          id: "hl", rowHeight: tr.height,
+          actions: highlights.points.map((p, i) => ({
+            id: `h${i}`, start: p.at, end: Math.min(dur, p.at + HL_EMPHASIS_S), effectId: "hl",
+            movable: !readOnly, flexible: false, minStart: 0, maxEnd: dur,
+            selected: selected?.kind === "hl" && selected.i === i,
+          })),
+        };
+      }
       const effect = tr.id === "video" ? "film" : tr.id === "voice" ? "wave" : tr.id;
       return { id: tr.id, rowHeight: tr.height, actions: [whole(tr.id, effect)] };
     });
-  }, [cues, dur, readOnly, selected, wave, hasBlur, hasFrame, hasMascot]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cues, dur, readOnly, selected, wave, hasBlur, hasFrame, hasMascot, highlights]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const effects = useMemo(() => Object.fromEntries(["cue", "film", "wave", "blur", "frame", "mascot"].map((id) => [id, { id, name: id }])), []);
+  const effects = useMemo(() => Object.fromEntries(["cue", "film", "wave", "blur", "frame", "mascot", "hl"].map((id) => [id, { id, name: id }])), []);
   const cueIndex = (a: TimelineAction) => Number(a.id.slice(1));
 
   function renderAction(a: TimelineAction) {
@@ -147,6 +162,12 @@ export const EditorTimeline = forwardRef<TimelineHandle, {
     if (a.effectId === "wave") {
       return <div className="dx-tl__wave">{wave && <img src={wave} alt="" draggable={false} />}</div>;
     }
+    if (a.effectId === "hl") {
+      const p = highlights.points[cueIndex(a)];
+      if (!p) return null;
+      const on = selected?.kind === "hl" && selected.i === cueIndex(a);
+      return <div className={`dx-tl__hl${on ? " is-selected" : ""}`} title={`✨ ${p.words} · ${clock(p.at)} — kéo để dời`}>✨ {p.words}</div>;
+    }
     const sel = selected?.kind === a.effectId;
     const label = a.effectId === "blur" ? "🌫 Vùng làm mờ chữ gốc · cả clip" : a.effectId === "frame" ? "🖼 Khung video · cả clip" : "💃 Nhân vật · cả clip";
     return <div className={`dx-tl__layer dx-tl__layer--${a.effectId}${sel ? " is-selected" : ""}`}>{label}</div>;
@@ -174,7 +195,7 @@ export const EditorTimeline = forwardRef<TimelineHandle, {
         <div className="dx-tl__heads" style={{ paddingTop: TIME_AREA }}>
           {tracks.map((t) => (
             <button key={t.id} type="button" className="dx-tl__head" style={{ height: t.height }}
-                    onClick={() => onSelect(t.id === "sub" ? { kind: "style" } : t.id === "blur" ? { kind: "blur" } : t.id === "frame" ? { kind: "frame" } : t.id === "mascot" ? { kind: "mascot" } : null)}>
+                    onClick={() => onSelect(t.id === "sub" ? { kind: "style" } : t.id === "blur" ? { kind: "blur" } : t.id === "frame" ? { kind: "frame" } : t.id === "mascot" ? { kind: "mascot" } : t.id === "hl" ? { kind: "hl", i: null } : null)}>
               <span>{t.icon}</span>{t.label}
             </button>
           ))}
@@ -200,7 +221,10 @@ export const EditorTimeline = forwardRef<TimelineHandle, {
             getActionRender={(a) => renderAction(a)}
             onScroll={(p) => { scrollLeft.current = p.scrollLeft; }}
             onChange={() => false}
-            onActionMoveEnd={({ action, start, end }) => { if (action.effectId === "cue") onTiming(cueIndex(action), start, end); }}
+            onActionMoveEnd={({ action, start, end }) => {
+              if (action.effectId === "cue") onTiming(cueIndex(action), start, end);
+              else if (action.effectId === "hl") onMovePoint(cueIndex(action), start);
+            }}
             onActionResizeEnd={({ action, start, end }) => { if (action.effectId === "cue") onTiming(cueIndex(action), start, end); }}
             onClickActionOnly={(_, { action, time }) => {
               if (action.effectId === "cue") {
@@ -209,6 +233,10 @@ export const EditorTimeline = forwardRef<TimelineHandle, {
                 const c = cues[i];
                 if (c && (time < c.start || time >= c.end)) onSeek(c.start);
                 else onSeek(time);
+              } else if (action.effectId === "hl") {
+                const i = cueIndex(action);
+                onSelect({ kind: "hl", i });
+                onSeek(highlights.points[i]?.at ?? time);
               } else {
                 onSelect(action.effectId === "blur" ? { kind: "blur" } : action.effectId === "frame" ? { kind: "frame" } : action.effectId === "mascot" ? { kind: "mascot" } : null);
                 onSeek(time);

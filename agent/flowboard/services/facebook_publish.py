@@ -51,7 +51,19 @@ GRAPH_VIDEO = "https://graph-video.facebook.com/v21.0"
 TIMEOUT_S = 60.0
 VIDEO_TIMEOUT_S = 600.0
 MAX_PHOTOS = 4
-MAX_VIDEO_BYTES = 1024 * 1024 * 1024  # the non-resumable upload limit
+#: Bigger videos go up in pieces (``upload_phase`` start → transfer → finish): one 152 MB request got
+#: "413 Request Entity Too Large" from graph-video (28/10, a 3:35 dubbed clip).
+CHUNKED_ABOVE = 20 * 1024 * 1024
+MAX_VIDEO_BYTES = int(1.75 * 1024 * 1024 * 1024)  # the chunked upload's limit (and 45 minutes)
+CHUNK_TRIES = 3
+#: Reels through the API (developers.facebook.com/docs/video-api/guides/reels-publishing) say 3–90 s, between 9:16
+#: and 16:9, ≥ 540 px on the short side; a Page publishes ≤ 30 posts a day through the API. The Facebook app takes
+#: far longer Reels (the user posted a 3:00 one by hand, 28/10), so only < 3 s blocks — the rest is a warning and
+#: Facebook decides.
+REEL_MIN_S = 3.0
+REEL_MAX_S = 90.0
+REEL_MIN_SIDE = 540
+REEL_READY_WAIT_S = 120.0
 
 
 class FacebookError(RuntimeError):
@@ -82,6 +94,8 @@ def _error_message(resp: httpx.Response) -> str:
     except ValueError:
         err = {}
     code, msg = err.get("code"), str(err.get("message") or resp.text[:200])
+    if resp.status_code == 413:
+        return "Facebook từ chối: file gửi lên quá lớn cho một lần tải."
     if code == 190 or "access token" in msg.lower():
         return "Token Facebook hết hạn hoặc không hợp lệ — vào Kênh → Kết nối Facebook Page, dán token mới."
     if code in (200, 10) or "permission" in msg.lower():
@@ -137,6 +151,160 @@ async def inspect_token(token: str) -> dict[str, Any]:
                             "chọn quyền pages_show_list + pages_manage_posts + pages_read_engagement.")
 
 
+async def _upload_video_chunked(client: httpx.AsyncClient, page_id: str, token: str, video: Path, message: str) -> str:
+    """A big video in pieces: ``start`` (size) → ``transfer`` the byte range Facebook asks for, again and
+    again → ``finish`` (with the post text). Returns the video id (its post, as with a one-shot upload)."""
+    url = f"{GRAPH_VIDEO}/{page_id}/videos"
+    size = video.stat().st_size
+    start = await _post(client, url, {"upload_phase": "start", "file_size": str(size), "access_token": token})
+    session = str(start.get("upload_session_id") or "")
+    video_id = str(start.get("video_id") or "")
+    if not session:
+        raise FacebookError("Facebook không mở được phiên tải video lên.")
+    a, b = int(start.get("start_offset") or 0), int(start.get("end_offset") or 0)
+    rounds = 0
+    with video.open("rb") as fh:
+        while a < b:
+            rounds += 1
+            if rounds > 5000:
+                raise FacebookError("Tải video lên Facebook không xong (quá nhiều lượt).")
+            fh.seek(a)
+            chunk = fh.read(b - a)
+            for attempt in range(CHUNK_TRIES):
+                try:
+                    out = await _post(client, url, {"upload_phase": "transfer", "upload_session_id": session,
+                                                    "start_offset": str(a), "access_token": token},
+                                      files={"video_file_chunk": (video.name, chunk, "application/octet-stream")})
+                    break
+                except httpx.TransportError as exc:  # a dropped connection: send the same piece again
+                    if attempt == CHUNK_TRIES - 1:
+                        raise FacebookError(f"Mất kết nối khi tải video lên Facebook: {exc}") from exc
+            a, b = int(out.get("start_offset") or b), int(out.get("end_offset") or b)
+    done = await _post(client, url, {"upload_phase": "finish", "upload_session_id": session, "description": message,
+                                     "access_token": token})
+    if done.get("success") is False:
+        raise FacebookError("Facebook không hoàn tất video vừa tải lên.")
+    return video_id or str(done.get("video_id") or done.get("id") or "")
+
+
+def reel_problem(video: Path) -> Optional[str]:
+    """Why this file cannot be a Reel at all (in Vietnamese), or None."""
+    from flowboard.services.video_export import probe_clip
+
+    info = probe_clip(video)
+    if info is None or info.duration <= 0:
+        return "Không đọc được video để kiểm tra làm Reel."
+    if info.duration < REEL_MIN_S:
+        return f"Reel phải dài ít nhất {REEL_MIN_S:g} giây — video này {info.duration:.1f} s."
+    return None
+
+
+def reel_warning(video: Path) -> Optional[str]:
+    """What may make Facebook turn the Reel down (outside what its API documents) — said, not blocked."""
+    from flowboard.services.video_export import probe_clip
+
+    info = probe_clip(video)
+    if info is None:
+        return None
+    notes = []
+    if info.duration > REEL_MAX_S + 0.5:
+        mins = f"{int(info.duration // 60)}:{int(info.duration % 60):02d}"
+        notes.append(f"video dài {mins}, tài liệu API của Facebook ghi Reel tối đa {REEL_MAX_S:g} giây (app Facebook thì cho dài hơn)")
+    if info.width / max(1, info.height) > 16 / 9 + 0.01:
+        notes.append("video ngang hơn 16:9")
+    if min(info.width, info.height) < REEL_MIN_SIDE:
+        notes.append(f"video {info.width}×{info.height} nhỏ hơn chuẩn Reel (cạnh ngắn {REEL_MIN_SIDE} px)")
+    if not notes:
+        return None
+    return "Lưu ý: " + "; ".join(notes) + ". Tool vẫn thử đăng Reel — Facebook từ chối thì đăng lại dạng bài viết."
+
+
+async def _wait_reel(client: httpx.AsyncClient, video_id: str, token: str) -> None:
+    """Facebook processes a Reel after "finish"; wait (bounded) so the first comment lands on a live post."""
+    import asyncio
+
+    loop = asyncio.get_running_loop()
+    end = loop.time() + REEL_READY_WAIT_S
+    while loop.time() < end:
+        try:
+            st = (await _get(client, video_id, fields="status", access_token=token)).get("status") or {}
+        except FacebookError:
+            return
+        live = st.get("video_status") in ("ready", "published")
+        if live or (st.get("publishing_phase") or {}).get("status") == "complete":
+            return
+        if st.get("video_status") in ("error", "upload_failed", "expired"):
+            raise FacebookError("Facebook xử lý Reel bị lỗi — thử đăng lại hoặc đăng dạng bài viết.")
+        await asyncio.sleep(REEL_POLL_S)
+
+
+REEL_POLL_S = 5.0
+
+
+async def publish_reel(channel_id: int, page_id: str, message: str, *, video: Path,
+                       first_comment: str = "") -> dict[str, Any]:
+    """A Reel on the Page: ``video_reels`` start → the file to ``rupload.facebook.com`` → finish
+    (``video_state=PUBLISHED``, the caption as ``description``) → the first comment once it is live."""
+    token = get_token(channel_id)
+    if not token:
+        raise FacebookError("Kênh này chưa kết nối Facebook Page — vào Kênh của tôi → Kết nối Facebook Page.")
+    if not page_id:
+        raise FacebookError("Kênh chưa có Page id — kết nối lại Facebook Page.")
+    if not video.is_file():
+        raise FacebookError("Không thấy file video trên máy này.")
+    why = reel_problem(video)
+    if why is not None:
+        raise FacebookError(why)
+    size = video.stat().st_size
+    async with httpx.AsyncClient(timeout=VIDEO_TIMEOUT_S) as client:
+        start = await _post(client, f"{GRAPH}/{page_id}/video_reels", {"upload_phase": "start", "access_token": token})
+        video_id = str(start.get("video_id") or "")
+        if not video_id:
+            raise FacebookError("Facebook không mở được phiên tải Reel lên.")
+        upload_url = str(start.get("upload_url") or f"https://rupload.facebook.com/video-upload/v21.0/{video_id}")
+        data = video.read_bytes()
+        offset = 0
+        for attempt in range(CHUNK_TRIES):
+            try:
+                resp = await client.post(upload_url, content=data[offset:], headers={
+                    "Authorization": f"OAuth {token}", "offset": str(offset), "file_size": str(size),
+                    "Content-Type": "application/octet-stream"})
+                if resp.status_code >= 400:
+                    raise FacebookError(_error_message(resp))
+                break
+            except httpx.TransportError as exc:  # resume where Facebook says it got to
+                if attempt == CHUNK_TRIES - 1:
+                    raise FacebookError(f"Mất kết nối khi tải Reel lên Facebook: {exc}") from exc
+                try:
+                    st = (await _get(client, video_id, fields="status", access_token=token)).get("status") or {}
+                    offset = int((st.get("uploading_phase") or {}).get("bytes_transfered") or 0)
+                except (FacebookError, ValueError):
+                    offset = 0
+        done = await _post(client, f"{GRAPH}/{page_id}/video_reels", {
+            "upload_phase": "finish", "video_id": video_id, "video_state": "PUBLISHED",
+            "description": (message or "").strip(), "access_token": token})
+        if done.get("success") is False:
+            raise FacebookError("Facebook không đăng được Reel.")
+        await _wait_reel(client, video_id, token)
+        comment_id = ""
+        if first_comment.strip():
+            try:
+                c = await _post(client, f"{GRAPH}/{video_id}/comments", {"message": first_comment.strip(), "access_token": token})
+                comment_id = str(c.get("id") or "")
+            except FacebookError as exc:
+                logger.warning("facebook: first comment failed on reel %s: %s", video_id, exc)
+                comment_id = f"error: {exc}"
+        try:
+            info = await _get(client, video_id, fields="permalink_url", access_token=token)
+            permalink = str(info.get("permalink_url") or "")
+            if permalink.startswith("/"):
+                permalink = "https://www.facebook.com" + permalink
+        except FacebookError:
+            permalink = ""
+    return {"post_id": video_id, "permalink": permalink or f"https://www.facebook.com/reel/{video_id}",
+            "comment_id": comment_id, "format": "reel"}
+
+
 def _guess_mime(path: Path) -> str:
     return mimetypes.guess_type(path.name)[0] or "application/octet-stream"
 
@@ -159,12 +327,15 @@ async def publish_post(channel_id: int, page_id: str, message: str, *, photos: O
             if not video.is_file():
                 raise FacebookError("Không thấy file video của clip trên máy này.")
             if video.stat().st_size > MAX_VIDEO_BYTES:
-                raise FacebookError("Video lớn hơn 1 GB — Facebook không nhận qua cách tải này.")
-            with video.open("rb") as fh:
-                out = await _post(client, f"{GRAPH_VIDEO}/{page_id}/videos",
-                                  {"description": message, "access_token": token},
-                                  files={"source": (video.name, fh, _guess_mime(video))})
-            post_id = str(out.get("id") or "")
+                raise FacebookError("Video lớn hơn 1,75 GB — Facebook không nhận.")
+            if video.stat().st_size > CHUNKED_ABOVE:
+                post_id = await _upload_video_chunked(client, page_id, token, video, message)
+            else:
+                with video.open("rb") as fh:
+                    out = await _post(client, f"{GRAPH_VIDEO}/{page_id}/videos",
+                                      {"description": message, "access_token": token},
+                                      files={"source": (video.name, fh, _guess_mime(video))})
+                post_id = str(out.get("id") or "")
         else:
             attached: list[str] = []
             for p in (photos or [])[:MAX_PHOTOS]:

@@ -51,9 +51,82 @@ GEMINI_VOICES: dict[str, str] = {
 }
 VOICES.update({k: f"{v} · Gemini" for k, v in GEMINI_VOICES.items()})
 
+#: VieNeu-TTS v3 Turbo (pnnbao97, Apache-2.0) — what VieDub uses: 25 Vietnamese
+#: voices of the three regions, free, run on this machine (ONNX, CPU) through
+#: pyvideotrans' venv (``services/dub_runner.py vieneu``). Ids ``vieneu:<Name>``;
+#: the names are the model's presets. Order: the featured ones first.
+VIENEU_VOICES: dict[str, str] = {
+    "vieneu:Ngọc Huyền": "Ngọc Huyền (nữ, Bắc, tự nhiên)",
+    "vieneu:Hải Đăng": "Hải Đăng (nam, Bắc, tự nhiên)",
+    "vieneu:Trúc Ly": "Trúc Ly (nữ, Bắc, tự nhiên)",
+    "vieneu:Mai Anh": "Mai Anh (nữ, Bắc, tin tức)",
+    "vieneu:Thiện Minh": "Thiện Minh (nam, Bắc, kể chuyện)",
+    "vieneu:Thùy Dung": "Thùy Dung (nữ, Nam, tin tức)",
+    "vieneu:Thiền Tâm Đức": "Thiền Tâm Đức (nam, Bắc, kể chuyện)",
+    "vieneu:Quang Sơn": "Quang Sơn (nam, Trung, tự nhiên)",
+    "vieneu:Ngọc Trân": "Ngọc Trân (nữ, Trung, tự nhiên)",
+    "vieneu:Adam bựa": "Adam bựa (nam, Bắc, tự nhiên, tếu)",
+    "vieneu:Minh Đức": "Minh Đức (nam, Bắc, tin tức)",
+    "vieneu:Phạm Tuyên": "Phạm Tuyên (nam, Bắc, tự nhiên)",
+    "vieneu:Thái Sơn": "Thái Sơn (nam, Nam, kể chuyện)",
+    "vieneu:Xuân Vĩnh": "Xuân Vĩnh (nam, Bắc, tự nhiên)",
+    "vieneu:Thanh Bình": "Thanh Bình (nam, Bắc, kể chuyện)",
+    "vieneu:Ngọc Linh": "Ngọc Linh (nữ, Bắc, kể chuyện)",
+    "vieneu:Đoan Trang": "Đoan Trang (nữ, Bắc, tự nhiên)",
+    "vieneu:Thục Đoan": "Thục Đoan (nữ, Nam, kể chuyện)",
+    "vieneu:Minh Triết": "Minh Triết (nam, Nam, tin tức)",
+    "vieneu:Mỹ Duyên": "Mỹ Duyên (nữ, Nam, đọc truyện)",
+    "vieneu:Quỳnh Anh": "Quỳnh Anh (nữ, Bắc, đọc truyện)",
+    "vieneu:Đức Trí": "Đức Trí (nam, Nam, đọc truyện)",
+    "vieneu:Kim Thanh": "Kim Thanh (nữ, Nam, đọc truyện)",
+    "vieneu:Adam": "Adam (nam, Nam, tự nhiên)",
+    "vieneu:Quốc Tuấn": "Quốc Tuấn (nam, Bắc, tự nhiên)",
+}
+VOICES.update({k: f"{v} · VieNeu" for k, v in VIENEU_VOICES.items()})
+
+#: FPT.AI TTS v5 — the "review phim" voices (Ban Mai…); needs the seller's own
+#: key (console.fpt.ai, 100 000 characters a month free), kept as
+#: ``secrets.apiKeys.fpt``. Ids ``fpt:<code>``.
+FPT_VOICES: dict[str, str] = {
+    "fpt:banmai": "Ban Mai (nữ, Bắc, giọng review phim)",
+    "fpt:leminh": "Lê Minh (nam, Bắc)",
+    "fpt:thuminh": "Thu Minh (nữ, Bắc)",
+    "fpt:myan": "Mỹ An (nữ, Trung)",
+    "fpt:giahuy": "Gia Huy (nam, Trung)",
+    "fpt:lannhi": "Lan Nhi (nữ, Nam)",
+    "fpt:linhsan": "Linh San (nữ, Nam)",
+}
+VOICES.update({k: f"{v} · FPT.AI" for k, v in FPT_VOICES.items()})
+FPT_URL = "https://api.fpt.ai/hmi/tts/v5"
+#: FPT answers with a link first; the file appears a few seconds later.
+FPT_POLL_TIMEOUT_S = 120.0
+
 
 def is_gemini_voice(voice: str) -> bool:
     return voice.startswith("gemini:")
+
+
+def voice_kind(voice: str) -> str:
+    """``edge`` | ``gemini`` | ``vieneu`` | ``fpt``."""
+    for kind in ("gemini", "vieneu", "fpt"):
+        if voice.startswith(kind + ":"):
+            return kind
+    return "edge"
+
+
+def vieneu_available() -> tuple[bool, str]:
+    """VieNeu needs pyvideotrans' venv (the ``vieneu`` package lives there)."""
+    from flowboard.services.video_clean import erase_python
+
+    if erase_python() is None:
+        return False, "cần repo pyvideotrans (VieDub) với venv có gói vieneu — như máy nhà"
+    return True, ""
+
+
+def fpt_available() -> tuple[bool, str]:
+    from flowboard.services.llm import secrets
+
+    return (True, "") if secrets.get_api_key("fpt") else (False, "chưa có key FPT.AI (Cài đặt → Gemini key → FPT.AI)")
 
 
 #: One sentence every voice reads for the "Nghe thử" button; cached like
@@ -75,12 +148,20 @@ def voice_groups() -> list[dict]:
     needs an API key in the pool)."""
     from flowboard.services.llm import gemini_api
 
+    vn_ok, vn_why = vieneu_available()
+    fpt_ok, fpt_why = fpt_available()
     return [
-        {"id": "edge", "label": "Microsoft Edge — miễn phí, nhanh",
-         "voices": [{"id": k, "label": v} for k, v in VOICES.items() if not is_gemini_voice(k)]},
-        {"id": "gemini", "label": "Gemini — nhiều giọng, chỉnh được phong cách",
-         "available": gemini_api.configured(),
+        {"id": "edge", "label": "Microsoft Edge — miễn phí, nhanh", "available": True,
+         "voices": [{"id": k, "label": v} for k, v in VOICES.items() if voice_kind(k) == "edge"]},
+        {"id": "vieneu", "label": "VieNeu — miễn phí, chạy trên máy, 25 giọng Việt 3 miền (chậm hơn Edge)",
+         "available": vn_ok, "reason": vn_why,
+         "voices": [{"id": k, "label": v} for k, v in VIENEU_VOICES.items()]},
+        {"id": "gemini", "label": "Gemini — nhiều giọng, chỉnh được phong cách (10 câu/ngày/key miễn phí)",
+         "available": gemini_api.configured(), "reason": "" if gemini_api.configured() else "chưa có Gemini API key",
          "voices": [{"id": k, "label": v} for k, v in VOICES.items() if is_gemini_voice(k)]},
+        {"id": "fpt", "label": "FPT.AI — giọng review phim, cần key (100k ký tự/tháng miễn phí)",
+         "available": fpt_ok, "reason": fpt_why,
+         "voices": [{"id": k, "label": v} for k, v in FPT_VOICES.items()]},
     ]
 
 TTS_DIR = config.STORAGE_DIR / "media" / "tts"
@@ -88,7 +169,9 @@ TTS_DIR = config.STORAGE_DIR / "media" / "tts"
 #: Longest subtitle line, in characters, before the words wrap to a new cue.
 SUBTITLE_MAX_CHARS = 34
 #: Tries per line before giving up on the service.
-ATTEMPTS = 4
+#: Edge refuses 30–60 % of requests at times, at random (measured 28/10: same refusal rate with 0.5 s or growing
+#: waits, 1 or 8 requests at once) — so retry quickly first, longer later
+ATTEMPTS = 10
 
 
 class TTSError(RuntimeError):
@@ -175,6 +258,126 @@ async def _synth_gemini(text: str, voice: str, rate: int, style: Optional[str], 
     out.write_bytes(wav)
 
 
+async def _synth_vieneu_many(items: list[tuple[str, Path]], voice: str) -> None:
+    """VieNeu for several lines in one runner process (the model loads once).
+    ``items`` = ``[(text, out.wav)]``."""
+    import json as _json
+    import tempfile
+
+    from flowboard.services import dub  # the runner helper lives there (lazy: dub imports this module)
+
+    ok, why = vieneu_available()
+    if not ok:
+        raise TTSError(f"VieNeu: {why}")
+    name = voice.split(":", 1)[1]
+    if voice not in VIENEU_VOICES:
+        raise TTSError(f"VieNeu không có giọng {name!r}")
+    TTS_DIR.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", suffix=".json", prefix="vieneu-", dir=str(TTS_DIR), delete=False, encoding="utf-8") as fh:
+        _json.dump([{"text": t, "out": str(p)} for t, p in items], fh, ensure_ascii=False)
+        lines_json = Path(fh.name)
+    try:
+        await asyncio.to_thread(dub._runner, "vieneu", name, str(lines_json), timeout=max(600, 30 * len(items)))
+    except dub.DubError as exc:
+        raise TTSError(f"VieNeu: {exc}") from exc
+    finally:
+        lines_json.unlink(missing_ok=True)
+    for _, p in items:
+        if not p.is_file() or p.stat().st_size < 200:
+            raise TTSError("VieNeu không trả file giọng")
+
+
+async def _synth_fpt(text: str, voice: str, out: Path) -> None:
+    """FPT.AI TTS v5: POST the text, then fetch the file the answer points to."""
+    import httpx
+
+    from flowboard.services.llm import secrets
+
+    key = secrets.get_api_key("fpt")
+    if not key:
+        raise TTSError("chưa có key FPT.AI — dán ở Cài đặt → Gemini key → FPT.AI")
+    code = voice.split(":", 1)[1]
+    body = text if len(text.strip()) >= 3 else text.strip() + " ..."  # FPT wants at least 3 characters
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.post(FPT_URL, content=body.encode("utf-8"),
+                                  headers={"api-key": key, "voice": code, "speed": "", "format": "mp3"})
+            try:
+                j = r.json()
+            except ValueError:
+                j = {}
+            if r.status_code in (401, 403) or str(j.get("error")) == "401":
+                raise TTSError("key FPT.AI không đúng hoặc đã hết hạn")
+            if r.status_code == 429:
+                raise TTSError("FPT.AI báo gọi quá nhanh / hết hạn mức (429)")
+            if r.status_code != 200 or j.get("error") not in (0, "0", None) or not j.get("async"):
+                raise TTSError(f"FPT.AI trả lỗi: {j.get('message') or r.text[:200]}")
+            deadline = asyncio.get_event_loop().time() + FPT_POLL_TIMEOUT_S
+            while asyncio.get_event_loop().time() < deadline:
+                g = await client.get(str(j["async"]))
+                if g.status_code == 200 and len(g.content) > 512 and "text" not in g.headers.get("content-type", ""):
+                    out.write_bytes(g.content)
+                    return
+                await asyncio.sleep(1.5)
+    except httpx.HTTPError as exc:
+        raise TTSError(f"không gọi được FPT.AI ({exc})") from exc
+    raise TTSError(f"FPT.AI chưa trả file giọng sau {FPT_POLL_TIMEOUT_S:.0f} giây")
+
+
+def _audio_name(voice: str, key: str) -> str:
+    kind = voice_kind(voice)
+    return f"{key}.wav" if kind in ("gemini", "vieneu") else f"{key}.mp3"
+
+
+def _cached(text: str, voice: str, key: str) -> Optional[Narration]:
+    audio = TTS_DIR / _audio_name(voice, key)
+    meta = TTS_DIR / f"{key}.json"
+    if not (audio.is_file() and meta.is_file()):
+        return None
+    try:
+        saved = json.loads(meta.read_text(encoding="utf-8"))
+        cached = Narration(audio, float(saved["duration"]), [Word(**w) for w in saved["words"]])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None  # a damaged cache entry is simply regenerated
+    if is_gemini_voice(voice) and gemini_leaked(text, cached.duration):
+        logger.warning("tts: cached Gemini line %s is %.1fs for %d chars — instructions read aloud, re-speaking",
+                       key, cached.duration, len(text))
+        return None
+    return cached
+
+
+def _finish(audio: Path, key: str, words: Optional[list[Word]] = None) -> Narration:
+    """Measure the file, write the sidecar, hand the narration back."""
+    duration = _probe_duration(audio) or 0.0
+    words = words or []
+    narration = Narration(audio, duration, words)
+    (TTS_DIR / f"{key}.json").write_text(json.dumps({"duration": duration, "words": [w.__dict__ for w in words]},
+                                                     ensure_ascii=False), encoding="utf-8")
+    return narration
+
+
+async def synthesize_many(lines: list[str], voice: str = DEFAULT_VOICE, rate: int = 0,
+                          style: Optional[str] = None) -> list[Narration]:
+    """Every line spoken, in order. Local voices (VieNeu) do all the uncached
+    lines in one model load; the others go line by line. Lines are cached
+    one by one, so a later :func:`synthesize` of any of them is a cache hit."""
+    texts = [re.sub(r"\s+", " ", t or "").strip() for t in lines]
+    if voice_kind(voice) == "vieneu":
+        TTS_DIR.mkdir(parents=True, exist_ok=True)
+        todo: list[tuple[str, Path]] = []
+        seen: set[str] = set()
+        for t in texts:
+            key = _cache_key(t, voice, rate, "")
+            if t and key not in seen and _cached(t, voice, key) is None:
+                seen.add(key)
+                todo.append((t, TTS_DIR / _audio_name(voice, key)))
+        if todo:
+            await _synth_vieneu_many(todo, voice)
+            for t, p in todo:
+                _finish(p, _cache_key(t, voice, rate, ""))
+    return [await synthesize(t, voice, rate, style) for t in texts]
+
+
 def _rate_arg(rate: int) -> str:
     rate = max(-50, min(100, int(rate)))
     return f"{rate:+d}%"
@@ -194,21 +397,22 @@ async def synthesize(text: str, voice: str = DEFAULT_VOICE, rate: int = 0,
     if voice not in VOICES:
         raise TTSError(f"unknown voice {voice!r}; choose one of {list(VOICES)}")
     gemini = is_gemini_voice(voice)
+    kind = voice_kind(voice)
     TTS_DIR.mkdir(parents=True, exist_ok=True)
     key = _cache_key(text, voice, rate, style or "" if gemini else "")
-    mp3 = TTS_DIR / (f"{key}.wav" if gemini else f"{key}.mp3")
+    mp3 = TTS_DIR / _audio_name(voice, key)
     meta = TTS_DIR / f"{key}.json"
-    if mp3.is_file() and meta.is_file():
-        try:
-            saved = json.loads(meta.read_text(encoding="utf-8"))
-            cached = Narration(mp3, float(saved["duration"]),
-                               [Word(**w) for w in saved["words"]])
-            if not (gemini and gemini_leaked(text, cached.duration)):
-                return cached
-            logger.warning("tts: cached Gemini line %s is %.1fs for %d chars — instructions read aloud, re-speaking",
-                           key, cached.duration, len(text))
-        except (OSError, ValueError, KeyError, TypeError):
-            pass  # a damaged cache entry is simply regenerated
+    cached = _cached(text, voice, key)
+    if cached is not None:
+        return cached
+
+    if kind == "vieneu":
+        # one line through the runner (a whole video goes through synthesize_many, one model load)
+        await _synth_vieneu_many([(text, mp3)], voice)
+        return _finish(mp3, key)
+    if kind == "fpt":
+        await _synth_fpt(text, voice, mp3)
+        return _finish(mp3, key)
 
     if gemini:
         duration = 0.0
@@ -251,7 +455,8 @@ async def synthesize(text: str, voice: str = DEFAULT_VOICE, rate: int = 0,
         except Exception as exc:  # noqa: BLE001 — network / service errors, reported as one kind
             last_error = exc
         logger.info("tts: attempt %d/%d failed (%s); retrying", attempt + 1, ATTEMPTS, last_error)
-        await asyncio.sleep(1.0 + attempt)
+        if attempt < ATTEMPTS - 1:
+            await asyncio.sleep(0.5 if attempt < 4 else min(5.0, attempt - 2.0))  # ~21 s in all
     if not audio:
         raise TTSError(f"edge-tts failed: {last_error}") from last_error
     mp3.write_bytes(bytes(audio))

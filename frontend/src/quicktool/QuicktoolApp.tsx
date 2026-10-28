@@ -32,6 +32,7 @@ import { PromptsPage } from "./pages/PromptsPage";
 import { PostsPage } from "./pages/PostsPage";
 import { ChannelsPage } from "./pages/ChannelsPage";
 import { DubPage } from "./pages/DubPage";
+import { CapcutPage } from "./pages/CapcutPage";
 import { ClipChannel } from "./steps/ClipChannel";
 import { ClipPost } from "./steps/ClipPost";
 import { SchedulePage } from "./pages/SchedulePage";
@@ -120,6 +121,7 @@ export function QuicktoolApp() {
           <Route path="/schedule" element={<SchedulePage />} />
           <Route path="/swipes" element={<SwipesPage />} />
           <Route path="/tools/dub" element={<DubPage />} />
+          <Route path="/tools/capcut" element={<CapcutPage />} />
           <Route path="/settings" element={<Library templates={templates} />} />
           <Route path="/clips/:id/:step" element={<Wizard templates={templates} />} />
           <Route path="/clips/:id" element={<Wizard templates={templates} />} />
