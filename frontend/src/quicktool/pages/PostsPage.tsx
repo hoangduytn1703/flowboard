@@ -16,9 +16,10 @@ import { createSlot, publishSlot, slotLabel, suggestSlots, type FbFormat } from 
 import { FormatPicker } from "../schedule/FormatPicker";
 import "../posts.css";
 
-/** "Câu chuyện nhiều kỳ" writing (next episode) is hidden for now (29/10): the tool cannot tell which episodes were
- * posted by hand vs. automatically, so the next episode and its thread drift. Saved series still show grouped. */
-const SERIES_WRITING = false;
+/** The one-click "Viết Tập N+1" buttons are hidden for now (29/10): the tool cannot tell which episodes were
+ * posted by hand vs. automatically, so the next episode and its thread drift. "Câu chuyện nhiều kỳ" itself stays
+ * (pick the series, write the episode from the form as any other post). */
+const NEXT_EPISODE_BUTTONS = false;
 
 const EMPTY: PostDraft = { title: "", body: "", hashtags: [], image_prompts: [], first_comment: "" };
 const QUICK_ASKS = ["Ngắn gọn hơn", "Hài hước hơn", "Câu mở đầu giật hơn", "Thêm câu hỏi cuối bài", "Viết lại kiểu khác", "Thêm 1 ảnh minh hoạ"];
@@ -581,7 +582,7 @@ export function PostsPage() {
   const set = (patch: PostBrief) => setBrief((b) => ({ ...b, ...patch }));
   const toggleBoost = (key: string) => set({ boosts: (brief.boosts ?? []).includes(key) ? (brief.boosts ?? []).filter((b) => b !== key) : [...(brief.boosts ?? []), key] });
   const noChannel = !channelId;
-  const seriesWriting = SERIES_WRITING && seriesOn;
+  const seriesWriting = seriesOn;
   const noSeries = seriesWriting && !series.trim();
   const optLabel = (list: { key: string; label: string }[], key: string | undefined, fallback: string) => list.find((o) => o.key === key)?.label ?? fallback;
   const moreSummary = [
@@ -698,7 +699,7 @@ export function PostsPage() {
                     </select>
                     {brief.kind && KIND_HINT[brief.kind] && <small className="qt-card__hint">{KIND_HINT[brief.kind]}</small>}
                   </label>
-                  {SERIES_WRITING && <div className="qt-field">
+                  <div className="qt-field">
                     <span>Câu chuyện nhiều kỳ</span>
                     <div className="qt-posts__yesno" role="radiogroup" aria-label="Câu chuyện nhiều kỳ">
                       <label className={!seriesOn ? "is-on" : ""}>
@@ -713,7 +714,7 @@ export function PostsPage() {
                         Mỗi tập vẫn là kiểu “{options.kinds.find((k) => k.key === brief.kind)?.label ?? "bài viết"}” — AI đọc các tập trước để viết nối tiếp, không lặp lại.
                       </small>
                     )}
-                  </div>}
+                  </div>
                   {seriesWriting && (() => {
                     const known = channelSeries.find((x) => x.name === series.trim());
                     const chName = channels.find((c) => c.id === channelId)?.name ?? "";
@@ -747,7 +748,7 @@ export function PostsPage() {
                         {known ? (
                           <div className="qt-posts__seriesnext">
                             <small className="qt-card__hint">Đã có {known.episodes} tập (mới nhất: Tập {known.last_episode}). AI đọc các tập trước rồi viết tiếp.</small>
-                            {(() => {
+                            {NEXT_EPISODE_BUTTONS && (() => {
                               const g = groupOf(known.name, channelId);
                               return g && (
                                 <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={!!nextBusy || busy} onClick={() => void writeNext(g)}>
@@ -1039,7 +1040,7 @@ export function PostsPage() {
               <summary className="qt-series__head">
                 <span className="qt-series__title">📖 {g.name}</span>
                 <span className="qt-series__meta">{g.eps.length} tập · {channels.find((c) => c.id === g.channelId)?.name ?? "chưa gắn kênh"}</span>
-                {SERIES_WRITING && (
+                {NEXT_EPISODE_BUTTONS && (
                   <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={!!nextBusy || busy}
                           onClick={(e) => { e.preventDefault(); void writeNext(g); }}>
                     {nextBusy === g.key ? "AI đang viết…" : `✍️ Viết Tập ${g.nextEpisode}`}
