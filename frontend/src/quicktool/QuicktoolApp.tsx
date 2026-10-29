@@ -40,7 +40,7 @@ import { SwipesPage } from "./pages/SwipesPage";
 import { useFlowCredits } from "../components/credits";
 import { AccountSwitchBanner } from "../components/AccountSwitchBanner";
 import { BackgroundTasks } from "../components/BackgroundTasks";
-import { useToastOn } from "../store/toast";
+import { toast, useToastOn } from "../store/toast";
 import { PageEmpty, PageLoading } from "./PageState";
 
 /** Wizard steps and their URL slugs: /clips/:id/<slug>. */
@@ -192,8 +192,42 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
   const unfinished = list.filter((b) => !b.summary.exported);
   const pickedList = list.filter((b) => picked.has(b.id));
   const perClip = creditsPerClip(videoModel, videoQuality);
+  // Only the unfinished ones among the ticked clips can be run; any ticked clip can be downloaded / deleted.
+  const pickedRunnable = pickedList.filter((b) => !b.summary.exported);
+  const allPicked = list.length > 0 && pickedList.length === list.length;
+  const deleteBoardById = useBoardStore((s) => s.deleteBoardById);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  function toggleAll() {
+    setConfirmDelete(false);
+    setPicked(allPicked ? new Set() : new Set(list.map((b) => b.id)));
+  }
+
+  async function deletePicked() {
+    if (pickedList.length === 0 || deleting) return;
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      return;
+    }
+    setDeleting(true);
+    const ids = pickedList.map((b) => b.id);
+    let failed = 0;
+    for (const id of ids) {
+      await deleteBoardById(id);
+      // deleteBoardById swallows errors into the store: a board still listed afterwards was not deleted.
+      if (useBoardStore.getState().boards.some((b) => b.id === id)) failed += 1;
+    }
+    setPicked(new Set());
+    setConfirmDelete(false);
+    setDeleting(false);
+    setSummaries(await listBoardSummaries().catch(() => []));
+    if (failed) toast.error(`Không xoá được ${failed}/${ids.length} clip.`);
+    else toast.success(`Đã xoá ${ids.length} clip.`);
+  }
 
   function togglePick(id: number) {
+    setConfirmDelete(false);
     setPicked((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
@@ -247,10 +281,18 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
                     ⬇ Tải {pickedList.filter((b) => b.summary.exported).length} clip đã ghép
                   </a>
                 )}
-                <button type="button" className="qt-btn qt-btn--accent" onClick={() => startQueue(pickedList)}>
-                  ⚡ Chạy {pickedList.length} clip đã chọn
+                {pickedRunnable.length > 0 && (
+                  <button type="button" className="qt-btn qt-btn--accent" disabled={deleting} onClick={() => startQueue(pickedRunnable)}
+                          title="Chỉ chạy các clip chưa ghép xong trong số đã chọn">
+                    ⚡ Chạy {pickedRunnable.length} clip dở
+                  </button>
+                )}
+                <button type="button" className="qt-btn qt-btn--danger" disabled={deleting} onClick={() => void deletePicked()}
+                        title="Xoá clip khỏi thư viện (video đã xuất không bị xoá khỏi máy)">
+                  {deleting ? "Đang xoá…" : confirmDelete ? `Bấm lần nữa để xoá ${pickedList.length} clip` : `🗑 Xoá ${pickedList.length} clip`}
                 </button>
-                <button type="button" className="qt-btn qt-btn--ghost" onClick={() => setPicked(new Set())}>Bỏ chọn</button>
+                <button type="button" className="qt-btn qt-btn--ghost" disabled={deleting}
+                        onClick={() => { setPicked(new Set()); setConfirmDelete(false); }}>Bỏ chọn</button>
               </>
             ) : (
               <>
@@ -271,6 +313,15 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
             Hàng đợi: clip {queue.done.length + Object.keys(queue.failed).length + 1}/{queue.done.length + Object.keys(queue.failed).length + 1 + queue.pending.length}
             {queue.current !== null && ` — ${list.find((b) => b.id === queue.current)?.name ?? `#${queue.current}`}`}
             {autoMessage ? ` · ${autoMessage}` : ""}
+          </div>
+        )}
+        {list.length > 0 && !queue.running && (
+          <div className="qt-clip-bulk">
+            <label className="qt-clip-bulk__all">
+              <input type="checkbox" checked={allPicked} disabled={deleting} onChange={toggleAll} />
+              <span>Chọn tất cả ({list.length})</span>
+            </label>
+            {pickedList.length > 0 && <span className="qt-clip-bulk__count">đã chọn {pickedList.length}</span>}
           </div>
         )}
         {summaries !== null && summaries.length === 0 && (
@@ -298,11 +349,11 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
           )}
           {list.map((b) => {
             const st = cardState(b.id);
-            const pickable = !queue.running && !b.summary.exported;
+            const pickable = !queue.running;
             return (
               <div key={b.id} className={`qt-clip${b.id === boardId ? " qt-clip--active" : ""}${picked.has(b.id) ? " qt-clip--picked" : ""}${st ? ` qt-clip--${st.tone}` : ""}`}>
                 {pickable && (
-                  <label className="qt-clip__pick" title="Chọn để chạy tự động nhiều clip" onClick={(e) => e.stopPropagation()}>
+                  <label className="qt-clip__pick" title="Chọn để chạy, tải hoặc xoá nhiều clip" onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" checked={picked.has(b.id)} onChange={() => togglePick(b.id)} />
                   </label>
                 )}
@@ -430,9 +481,19 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
   // effect re-runs before the fresh list is back: wait for it, don't bounce.
   const refreshedFor = useRef<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  // A clip already loaded in the store may have changed on the agent since (a dub / CapCut export writes the new video
+  // onto it): switchBoard skips the current board, so opening it again reads it fresh — Step 5 used to show (and
+  // download) the video from before the last "Xuất lại" (29/10).
+  const refreshBoardState = useBoardStore((s) => s.refreshBoardState);
+  const freshFor = useRef<number | null>(null);
+  useEffect(() => {
+    if (isNaN(routeId) || routeId !== boardId || freshFor.current === routeId) return;
+    freshFor.current = routeId;
+    void refreshBoardState();
+  }, [routeId, boardId, refreshBoardState]);
   useEffect(() => {
     if (isNaN(routeId) || routeId === boardId || !boardsLoaded || refreshing) return;
-    if (boards.some((b) => b.id === routeId)) { void switchBoard(routeId); return; }
+    if (boards.some((b) => b.id === routeId)) { freshFor.current = routeId; void switchBoard(routeId); return; }
     if (loadingBoard) return;
     if (refreshedFor.current !== routeId) {
       refreshedFor.current = routeId;

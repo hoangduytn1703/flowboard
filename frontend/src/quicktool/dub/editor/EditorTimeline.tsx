@@ -35,7 +35,8 @@ export const EditorTimeline = forwardRef<TimelineHandle, {
   readOnly: boolean;
   filmstrip: string | null;
   wave: string | null;
-  hasBlur: boolean;
+  /** how many blur boxes the clip has (0 = no row) */
+  blurCount: number;
   hasFrame: boolean;
   hasMascot: boolean;
   /** the key moments: a row of blocks (drag one to move its moment) */
@@ -46,7 +47,7 @@ export const EditorTimeline = forwardRef<TimelineHandle, {
   onEditCue: (i: number) => void;
   onMovePoint: (i: number, at: number) => void;
 }>(function EditorTimeline({
-  duration, cues, origin, selected, activeCue, readOnly, filmstrip, wave, hasBlur, hasFrame, hasMascot, highlights,
+  duration, cues, origin, selected, activeCue, readOnly, filmstrip, wave, blurCount, hasFrame, hasMascot, highlights,
   onSeek, onSelect, onTiming, onEditCue, onMovePoint,
 }, ref) {
   const tl = useRef<TimelineState>(null);
@@ -94,7 +95,7 @@ export const EditorTimeline = forwardRef<TimelineHandle, {
     { id: "sub", label: "Phụ đề", icon: "💬", height: 40 },
     ...(wave ? [{ id: "voice", label: "Giọng", icon: "🎙", height: 34 }] : []),
     ...(highlights.on ? [{ id: "hl", label: "Nhấn", icon: "✨", height: 30 }] : []),
-    ...(hasBlur ? [{ id: "blur", label: "Làm mờ", icon: "🌫", height: 26 }] : []),
+    ...(blurCount ? [{ id: "blur", label: blurCount > 1 ? `Làm mờ (${blurCount})` : "Làm mờ", icon: "🌫", height: 26 }] : []),
     ...(hasFrame ? [{ id: "frame", label: "Khung", icon: "🖼", height: 26 }] : []),
     ...(hasMascot ? [{ id: "mascot", label: "Nhân vật", icon: "💃", height: 26 }] : []),
   ];
@@ -127,7 +128,7 @@ export const EditorTimeline = forwardRef<TimelineHandle, {
       const effect = tr.id === "video" ? "film" : tr.id === "voice" ? "wave" : tr.id;
       return { id: tr.id, rowHeight: tr.height, actions: [whole(tr.id, effect)] };
     });
-  }, [cues, dur, readOnly, selected, wave, hasBlur, hasFrame, hasMascot, highlights]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cues, dur, readOnly, selected, wave, blurCount, hasFrame, hasMascot, highlights]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const effects = useMemo(() => Object.fromEntries(["cue", "film", "wave", "blur", "frame", "mascot", "hl"].map((id) => [id, { id, name: id }])), []);
   const cueIndex = (a: TimelineAction) => Number(a.id.slice(1));
@@ -169,7 +170,7 @@ export const EditorTimeline = forwardRef<TimelineHandle, {
       return <div className={`dx-tl__hl${on ? " is-selected" : ""}`} title={`✨ ${p.words} · ${clock(p.at)} — kéo để dời`}>✨ {p.words}</div>;
     }
     const sel = selected?.kind === a.effectId;
-    const label = a.effectId === "blur" ? "🌫 Vùng làm mờ chữ gốc · cả clip" : a.effectId === "frame" ? "🖼 Khung video · cả clip" : "💃 Nhân vật · cả clip";
+    const label = a.effectId === "blur" ? (blurCount > 1 ? `🌫 ${blurCount} vùng làm mờ chữ gốc · cả clip` : "🌫 Vùng làm mờ chữ gốc · cả clip") : a.effectId === "frame" ? "🖼 Khung video · cả clip" : "💃 Nhân vật · cả clip";
     return <div className={`dx-tl__layer dx-tl__layer--${a.effectId}${sel ? " is-selected" : ""}`}>{label}</div>;
   }
 
@@ -195,7 +196,7 @@ export const EditorTimeline = forwardRef<TimelineHandle, {
         <div className="dx-tl__heads" style={{ paddingTop: TIME_AREA }}>
           {tracks.map((t) => (
             <button key={t.id} type="button" className="dx-tl__head" style={{ height: t.height }}
-                    onClick={() => onSelect(t.id === "sub" ? { kind: "style" } : t.id === "blur" ? { kind: "blur" } : t.id === "frame" ? { kind: "frame" } : t.id === "mascot" ? { kind: "mascot" } : t.id === "hl" ? { kind: "hl", i: null } : null)}>
+                    onClick={() => onSelect(t.id === "sub" ? { kind: "style" } : t.id === "blur" ? { kind: "blur", i: 0 } : t.id === "frame" ? { kind: "frame" } : t.id === "mascot" ? { kind: "mascot" } : t.id === "hl" ? { kind: "hl", i: null } : null)}>
               <span>{t.icon}</span>{t.label}
             </button>
           ))}
@@ -238,7 +239,7 @@ export const EditorTimeline = forwardRef<TimelineHandle, {
                 onSelect({ kind: "hl", i });
                 onSeek(highlights.points[i]?.at ?? time);
               } else {
-                onSelect(action.effectId === "blur" ? { kind: "blur" } : action.effectId === "frame" ? { kind: "frame" } : action.effectId === "mascot" ? { kind: "mascot" } : null);
+                onSelect(action.effectId === "blur" ? { kind: "blur", i: 0 } : action.effectId === "frame" ? { kind: "frame" } : action.effectId === "mascot" ? { kind: "mascot" } : null);
                 onSeek(time);
               }
             }}

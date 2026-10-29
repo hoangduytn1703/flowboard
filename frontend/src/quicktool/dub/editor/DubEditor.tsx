@@ -3,9 +3,12 @@ import { useNavigate } from "react-router-dom";
 import { announceRunning } from "../../../components/BackgroundTasks";
 import { detectBands } from "../../../api/clean";
 import {
-  DEFAULT_BLUR, DEFAULT_LAYOUT, dubFilmstripUrl, dubWaveUrl, normHighlights, pickDubHighlights, renderDub, stopDub,
-  type DubEngine, type DubHighlights, type DubJob, type DubLayout, type DubRender, type DubStatus,
+  canvasSize, DEFAULT_BLUR, dubFilmstripUrl, dubWaveUrl, layoutBlurs, MAX_BLURS, normHighlights, normLayout, pickDubHighlights,
+  renderDub, stopDub, withBlurs, type DubEngine, type DubHighlights, type DubJob, type DubLayout, type DubRender, type DubStatus,
 } from "../../../api/dub";
+import { FormatBar, sourceBoxToFrame } from "./FormatBar";
+import { platformOf, type PlatformKey } from "./platforms";
+import { LookPresets } from "./LookPresets";
 import { cleanLook, effectiveLayout, type GeomPatch } from "./cues";
 import { toast } from "../../../store/toast";
 import { clock, cueIndexAt, sameJson, type EditCue, type EditDoc } from "./cues";
@@ -21,7 +24,7 @@ const errMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
 function docFrom(job: DubJob): EditDoc {
   return {
     cues: job.segments.map((s) => ({ start: s.start, end: s.end, src: s.src, text: s.text, look: cleanLook(s.look) })),
-    layout: { ...DEFAULT_LAYOUT, ...job.layout },
+    layout: normLayout(job.layout),
     style: job.style,
     highlights: normHighlights(job.highlights),
   };
@@ -75,6 +78,14 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
   });
   const setScope = (v: "all" | "cue") => { setScopeState(v); try { window.localStorage.setItem("flowboard.dub.scope", v); } catch { /* private mode */ } };
   const [tab, setTab] = useState<InspectorTab>("sub");
+  // "📱 Xem trên": view the frame inside an app's screen (remembered on this browser; never exported)
+  const [platform, setPlatformState] = useState<PlatformKey | null>(() => {
+    try { return platformOf(window.localStorage.getItem("flowboard.dub.platform"))?.key ?? null; } catch { return null; }
+  });
+  const setPlatform = (p: PlatformKey | null) => {
+    setPlatformState(p);
+    try { if (p) window.localStorage.setItem("flowboard.dub.platform", p); else window.localStorage.removeItem("flowboard.dub.platform"); } catch { /* private mode */ }
+  };
   const [focusText, setFocusText] = useState(0);
   const [time, setTime] = useState(0);
   const timeRef = useRef(0);
@@ -279,7 +290,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
   const textEdits = doc.cues.filter((c, i) => c.text !== origin[i]?.text).length;
   const timeEdits = doc.cues.filter((c, i) => origin[i] && (Math.abs(c.start - origin[i].start) > 0.005 || Math.abs(c.end - origin[i].end) > 0.005)).length;
   const lookEdits = doc.cues.filter((c, i) => !sameJson(c.look ?? null, origin[i]?.look ?? null)).length;
-  const layoutDirty = !sameJson(doc.layout, { ...DEFAULT_LAYOUT, ...job.layout });
+  const layoutDirty = !sameJson(doc.layout, normLayout(job.layout));
   const styleDirty = doc.style !== job.style;
   const hlDirty = !sameJson(doc.highlights, normHighlights(job.highlights));
   const voiceDirty = out.voice !== job.voice;
@@ -340,7 +351,9 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
     if (!onApplyAll) return;
     const others = siblings.filter((s) => s.job_id !== job.job_id);
     if (!others.length) return;
-    const parts = ["vị trí / cỡ / độ rộng phụ đề", "kiểu chữ", doc.layout.blur ? "vùng mờ" : "", doc.layout.frame ? "khung" : "",
+    const nBlurs = layoutBlurs(doc.layout).length;
+    const parts = ["vị trí / cỡ / độ rộng phụ đề", "kiểu chữ", nBlurs ? `${nBlurs} vùng mờ` : "",
+                   doc.layout.canvas ? `khung xuất ${doc.layout.canvas.aspect}` : "", doc.layout.frame ? "khung" : "",
                    doc.layout.mascot?.media_id ? "nhân vật" : "", doc.highlights.on ? "nhấn chữ quan trọng (AI chọn chỗ riêng cho từng clip)" : ""].filter(Boolean).join(", ");
     if (!window.confirm(`Áp ${parts} của clip này cho ${others.length} clip còn lại của loạt?\nCác clip đó sẽ được in lại (giữ giọng đã đọc). Chữ, giờ và câu chỉnh riêng của từng clip không đổi.`)) return;
     setApplyingAll(true);
@@ -360,11 +373,21 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
     setDetecting(true);
     try {
       const res = await detectBands(job.source_media_id);
-      const band = res.bands[0];
-      if (!band) { toast.warning("OCR không thấy dải chữ nào trên video gốc — kéo vùng mờ bằng tay nhé."); return; }
+      if (!res.bands.length) { toast.warning("OCR không thấy dải chữ nào trên video gốc — kéo vùng mờ bằng tay nhé."); return; }
       const l = docRef.current.layout;
-      setLayout({ ...l, blur: { ...(l.blur ?? DEFAULT_BLUR), x: 0.05, w: 0.9, y: Math.max(0, band.y0 - 0.01), h: Math.min(0.4, band.y1 - band.y0 + 0.02) } });
-      toast.success(`Thấy chữ gốc ở ${Math.round(band.y0 * 100)}–${Math.round(band.y1 * 100)}% chiều cao — đã đặt vùng mờ.`);
+      const have = layoutBlurs(l);
+      // every text band the OCR found gets its own box (bands are in the source picture: mapped into the output frame),
+      // unless a box already covers most of it
+      const added = res.bands
+        .map((band) => sourceBoxToFrame({ x: 0.05, y: Math.max(0, band.y0 - 0.01), w: 0.9, h: Math.min(0.4, band.y1 - band.y0 + 0.02) },
+                                        srcW, srcH, l))
+        .filter((b) => !have.some((h) => Math.min(h.y + h.h, b.y + b.h) - Math.max(h.y, b.y) > b.h * 0.5))
+        .map((b) => ({ ...DEFAULT_BLUR, ...b }));
+      if (!added.length) { toast.info("Các dải chữ OCR thấy đều đã có vùng mờ."); return; }
+      const next = [...have, ...added].slice(0, MAX_BLURS);
+      setLayout(withBlurs(l, next));
+      setSel({ kind: "blur", i: Math.min(have.length, next.length - 1) });
+      toast.success(`OCR thấy ${res.bands.length} dải chữ gốc — đã thêm ${next.length - have.length} vùng mờ.`);
     } catch (e) {
       toast.error(errMessage(e));
     } finally {
@@ -374,11 +397,13 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
 
   // ── media ────────────────────────────────────────────────────────────────
   const version = job.media_id ?? "0";
-  const frameW = job.width || natural?.w || 0;
-  const frameH = job.height || natural?.h || 0;
+  const srcW = job.width || natural?.w || 0;
+  const srcH = job.height || natural?.h || 0;
+  // "Khung xuất": the preview, the subtitles and every box are on the output picture
+  const { w: frameW, h: frameH } = canvasSize(srcW, srcH, doc.layout.canvas);
   const src = job.source_media_id ? `/media/${job.source_media_id}` : job.media_url ?? "";
   const live = out.engine === "remotion" && job.engine === "remotion" && !!job.nosub_url
-    ? { src: `${job.nosub_url}?v=${version}`, width: job.width || 1080, height: job.height || 1920, durationS: job.duration_s }
+    ? { src: `${job.nosub_url}?v=${version}`, width: frameW || 1080, height: frameH || 1920, durationS: job.duration_s }
     : null;
   const styles = out.engine === "remotion" ? status.remotion_styles ?? [] : status.styles;
   const orientation = frameW && frameH ? (frameW > frameH ? "landscape" : frameW === frameH ? "square" : "portrait") : "portrait";
@@ -434,6 +459,15 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
                download={`${(job.name || job.title || "video-long-tieng").replace(/[\\/:*?"<>|]+/g, " ").trim()}.mp4`}>⬇ Tải</a>
           )}
           {job.board_id && <button type="button" className="qt-btn qt-btn--small" onClick={() => navigate(`/clips/${job.board_id}/export`)}>Mở clip →</button>}
+          <LookPresets readOnly={readOnly}
+                       current={{ layout: doc.layout, style: doc.style, engine: out.engine, highlights: doc.highlights }}
+                       onApply={(d, name) => {
+                         // the whole look in one undo step; this clip's own key-moment points stay
+                         change((x) => ({ ...x, layout: normLayout(d.layout), style: d.style,
+                                          highlights: { ...normHighlights(d.highlights), points: x.highlights.points, picked: x.highlights.picked } }));
+                         setOut((o) => ({ ...o, engine: d.engine }));
+                         toast.success(`Đã áp mẫu "${name}" — xem trước rồi bấm Xuất lại video.`);
+                       }} />
           {siblings.length > 1 && onApplyAll && (
             <button type="button" className="qt-btn qt-btn--small" disabled={readOnly || applyingAll} onClick={() => void applyAll()}
                     title="Vị trí / cỡ / độ rộng phụ đề, kiểu chữ, vùng mờ, khung và nhân vật của clip này → mọi clip trong loạt">
@@ -446,6 +480,8 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
 
       <div className="dx__main">
         <div className="dx__center">
+          <FormatBar layout={doc.layout} srcW={srcW} srcH={srcH} readOnly={readOnly} onLayout={setLayout}
+                     platform={platform} onPlatform={setPlatform} />
           <EditorStage
             ref={stage}
             src={src}
@@ -469,6 +505,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
             onPlaying={setPlaying}
             onDuration={(d) => { if (d) setDuration(d); }}
             onNatural={(w, h) => setNatural({ w, h })}
+            platform={platform}
           />
           <div className="dx__transport">
             <button type="button" className="dx__tbtn" title="Về đầu (Home)" onClick={() => stage.current?.seek(0)}>⏮</button>
@@ -539,7 +576,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
         readOnly={readOnly}
         filmstrip={job.source_media_id || job.media_url ? dubFilmstripUrl(job.job_id) : null}
         wave={job.voice_url ? dubWaveUrl(job.job_id, version) : null}
-        hasBlur={!!doc.layout.blur}
+        blurCount={layoutBlurs(doc.layout).length}
         hasFrame={!!doc.layout.frame}
         hasMascot={!!doc.layout.mascot?.media_id}
         highlights={doc.highlights}

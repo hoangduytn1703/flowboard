@@ -251,3 +251,11 @@ def test_any_kind_of_post_can_run_as_a_series(client, monkeypatch):
     seen.clear()
     client.post("/api/posts/write", json={"brief": {"kind": "story"}, "series": "Chuyện nhà", "channel_id": ch})
     assert "one new development" not in seen[0] and "set the scene and the people" in seen[0] and "Every episode is" not in seen[0]
+
+
+def test_a_reel_post_asks_for_a_short_reel_caption():
+    from flowboard.services import post_writer
+
+    reel = post_writer._brief_block({"kind": "tips", "fb_format": "reel"}, "facebook")
+    assert "REEL CAPTION" in reel and reel.index("REEL CAPTION") < reel.index("Length:")
+    assert "REEL CAPTION" not in post_writer._brief_block({"kind": "tips"}, "facebook")

@@ -3,13 +3,15 @@ import {
   type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent,
 } from "react";
 import { Player, type PlayerRef } from "@remotion/player";
-import { DEFAULT_BLUR, emphasisY, type DubBlur, type DubHighlights, type DubLayout, type SubLook } from "../../../api/dub";
+import { DEFAULT_BLUR, emphasisY, layoutBlurs, withBlurs, type DubBlur, type DubHighlights, type DubLayout, type SubLook } from "../../../api/dub";
 import { mediaUrl } from "../../../api/client";
 import { DUB_FPS, DubSubtitles, emphasisAt, emphasisFont, zoomAt, type DubLayoutSpec, type DubRemotionStyle } from "../../../remotion/DubSubtitles";
 import { chunkAt, effectiveLayout, splitAll, W_MAX, W_MIN, type EditCue } from "./cues";
+import { DeviceChrome } from "./DeviceChrome";
+import { overlaps, platformOf, type PlatformKey, type Rect } from "./platforms";
 
 export type AudioMode = "dub" | "orig" | "off";
-export type Sel = { kind: "cue"; i: number } | { kind: "blur" } | { kind: "mascot" } | { kind: "frame" } | { kind: "style" }
+export type Sel = { kind: "cue"; i: number } | { kind: "blur"; i: number } | { kind: "mascot" } | { kind: "frame" } | { kind: "style" }
   | { kind: "hl"; i: number | null } | null;
 
 export interface StageHandle {
@@ -45,8 +47,8 @@ const hasBox = (style: string) => !["outline", "rm_outline", "rm_karaoke"].inclu
 type Drag =
   | { kind: "sub"; dx: number; dy: number; x0: number; y0: number; moved: boolean; cue: number | null }
   | { kind: "width"; side: 1 | -1; x0: number; w0: number; cue: number | null }
-  | { kind: "blur"; dx: number; dy: number }
-  | { kind: "blur-size"; x0: number; y0: number }
+  | { kind: "blur"; i: number; dx: number; dy: number }
+  | { kind: "blur-size"; i: number; x0: number; y0: number }
   | { kind: "mascot"; dx: number; dy: number };
 
 export const EditorStage = forwardRef<StageHandle, {
@@ -75,14 +77,19 @@ export const EditorStage = forwardRef<StageHandle, {
   onPlaying: (p: boolean) => void;
   onDuration: (d: number) => void;
   onNatural: (w: number, h: number) => void;
+  /** "📱 Xem trên": show the frame inside that app's screen, with its buttons over it (view only) */
+  platform?: PlatformKey | null;
 }>(function EditorStage({
   src, voiceUrl, bgmUrl, player, frameW, frameH, cues, layout, style, highlights, selected, readOnly, audio,
-  onLayout, onSubGeom, onSelect, onEditText, onTime, onPlaying, onDuration, onNatural,
+  onLayout, onSubGeom, onSelect, onEditText, onTime, onPlaying, onDuration, onNatural, platform = null,
 }, ref) {
   const area = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const video = useRef<HTMLVideoElement>(null);
   const bgVideo = useRef<HTMLVideoElement>(null);
+  // "Khung xuất" with a blurred background: the blurred copy behind the picture
+  const canvasBg = useRef<HTMLVideoElement>(null);
+  const sideVideos = () => [bgVideo.current, canvasBg.current].filter((v): v is HTMLVideoElement => !!v);
   const voiceA = useRef<HTMLAudioElement>(null);
   const bgmA = useRef<HTMLAudioElement>(null);
   const playerRef = useRef<PlayerRef>(null);
@@ -93,24 +100,37 @@ export const EditorStage = forwardRef<StageHandle, {
   const stopAt = useRef<number | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   const [editing, setEditing] = useState<{ i: number; text: string } | null>(null);
-  const [box, setBox] = useState({ w: 0, h: 0 });
+  const [areaSz, setAreaSz] = useState({ w: 0, h: 0 });
 
   // ── fit the frame (video aspect) into the free area ──────────────────────
   const ratio = frameW > 0 && frameH > 0 ? frameW / frameH : 9 / 16;
   useEffect(() => {
     const el = area.current;
     if (!el) return;
-    const fit = () => {
-      const W = el.clientWidth, H = el.clientHeight;
-      if (!W || !H) return;
-      const w = Math.min(W, H * ratio);
-      setBox({ w: Math.floor(w), h: Math.floor(w / ratio) });
-    };
-    const ro = new ResizeObserver(fit);
+    const measure = () => { if (el.clientWidth && el.clientHeight) setAreaSz({ w: el.clientWidth, h: el.clientHeight }); };
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
-    fit();
+    measure();
     return () => ro.disconnect();
-  }, [ratio]);
+  }, []);
+  // "📱 Xem trên": the app's screen in the area, the video zone on it, the frame fitted / cropped into that zone
+  const plat = platformOf(platform);
+  const geo = useMemo(() => {
+    const { w: W, h: H } = areaSz;
+    if (!plat) {
+      const w = Math.floor(Math.min(W, H * ratio));
+      return { box: { w, h: Math.floor(w / ratio) }, dev: null, zone: null, fit: "contain" as const, note: undefined, left: 0, top: 0 };
+    }
+    const notesH = 46;  // room for the warnings under the device
+    const dw = Math.floor(Math.min(W - 8, (H - notesH) * plat.screen));
+    const dev = { w: dw, h: Math.floor(dw / plat.screen) };
+    const z = plat.zone(ratio);
+    const zone = { x: z.rect.x * dev.w, y: z.rect.y * dev.h, w: z.rect.w * dev.w, h: z.rect.h * dev.h };
+    const w = Math.floor(z.fit === "cover" ? Math.max(zone.w, zone.h * ratio) : Math.min(zone.w, zone.h * ratio));
+    const h = Math.floor(w / ratio);
+    return { box: { w, h }, dev, zone, zoneRect: z.rect, fit: z.fit, note: z.note, left: (zone.w - w) / 2, top: (zone.h - h) / 2 };
+  }, [areaSz, ratio, plat]);
+  const box = geo.box;
   const stageH = box.h;
 
   // ── the clock ────────────────────────────────────────────────────────────
@@ -118,8 +138,7 @@ export const EditorStage = forwardRef<StageHandle, {
   const audios = () => [voiceA.current, bgmA.current].filter((a): a is HTMLAudioElement => !!a && !!a.getAttribute("src"));
   function syncAudio(time: number, force = false) {
     for (const a of audios()) if (force || Math.abs(a.currentTime - time) > 0.25) { try { a.currentTime = time; } catch { /* not loaded yet */ } }
-    const bg = bgVideo.current;
-    if (bg && (force || Math.abs(bg.currentTime - time) > 0.25)) bg.currentTime = time;
+    for (const bg of sideVideos()) if (force || Math.abs(bg.currentTime - time) > 0.25) bg.currentTime = time;
   }
   function applyAudioMode(isPlaying: boolean) {
     const v = video.current;
@@ -140,7 +159,7 @@ export const EditorStage = forwardRef<StageHandle, {
     if (v.ended || v.currentTime >= (v.duration || 0) - 0.05) v.currentTime = 0;
     syncAudio(v.currentTime, true);
     void v.play().then(() => {
-      void bgVideo.current?.play().catch(() => undefined);
+      for (const bg of sideVideos()) void bg.play().catch(() => undefined);
       applyAudioMode(true);
       setPlay(true);
     }).catch(() => undefined);
@@ -149,7 +168,7 @@ export const EditorStage = forwardRef<StageHandle, {
     stopAt.current = null;
     if (live) { playerRef.current?.pause(); return; }
     video.current?.pause();
-    bgVideo.current?.pause();
+    for (const bg of sideVideos()) bg.pause();
     for (const a of audios()) a.pause();
     setPlay(false);
   }
@@ -224,7 +243,8 @@ export const EditorStage = forwardRef<StageHandle, {
   // the box is drawn with the line's own look on top of the clip-wide layout
   const lay = effectiveLayout(layout, shownCue !== null ? cues[shownCue]?.look : null);
   const subBox = useRef<HTMLDivElement>(null);
-  const blur = layout.blur ?? null;
+  const blurs = layoutBlurs(layout);
+  const canvas = layout.canvas ?? null;
   const frameSpec = layout.frame ?? null;
   const mascot = layout.mascot ?? null;
   const fontPx = stageH ? stageH * 0.036 * lay.scale : 16;
@@ -256,13 +276,13 @@ export const EditorStage = forwardRef<StageHandle, {
     if (patch.w !== undefined) out.w = clamp(patch.w, W_MIN, W_MAX);
     onSubGeom(out, cue, key);
   };
-  const setBlur = (patch: Partial<DubBlur>, key: string) => {
-    const b = { ...(blur ?? DEFAULT_BLUR), ...patch };
+  const setBlur = (i: number, patch: Partial<DubBlur>, key: string) => {
+    const b = { ...(blurs[i] ?? DEFAULT_BLUR), ...patch };
     b.x = clamp(b.x, 0, 0.95);
     b.y = clamp(b.y, 0, 0.97);
     b.w = clamp(b.w, 0.05, 1 - b.x);
     b.h = clamp(b.h, 0.02, 1 - b.y);
-    onLayout({ ...layout, blur: b }, key);
+    onLayout(withBlurs(layout, blurs.map((x, k) => (k === i ? b : x))), `${key}-${i}`);
   };
   function onMove(e: ReactPointerEvent<HTMLDivElement>) {
     if (!drag) return;
@@ -274,8 +294,8 @@ export const EditorStage = forwardRef<StageHandle, {
     } else if (drag.kind === "width") {
       // the box stays centred on x, so each side moves by half the change
       setPos({ w: drag.w0 + drag.side * 2 * (p.x - drag.x0) }, "sub-width", drag.cue);
-    } else if (drag.kind === "blur") setBlur({ x: p.x + drag.dx, y: p.y + drag.dy }, "blur-move");
-    else if (drag.kind === "blur-size") setBlur({ w: p.x - drag.x0, h: p.y - drag.y0 }, "blur-size");
+    } else if (drag.kind === "blur") setBlur(drag.i, { x: p.x + drag.dx, y: p.y + drag.dy }, "blur-move");
+    else if (drag.kind === "blur-size") setBlur(drag.i, { w: p.x - drag.x0, h: p.y - drag.y0 }, "blur-size");
     else if (drag.kind === "mascot" && mascot) {
       onLayout({ ...layout, mascot: { ...mascot, x: clamp(p.x + drag.dx, 0.05, 0.95), y: clamp(p.y + drag.dy, 0.15, 1) } }, "mascot-move");
     }
@@ -312,10 +332,42 @@ export const EditorStage = forwardRef<StageHandle, {
   } : undefined;
   const subSelected = selCue !== null && shownCue === selCue;
 
-  return (
-    <div className="dx-stage" ref={area}>
+  // "📱 Xem trên": what the app's own buttons / text cover, and what its crop cuts off
+  const [deviceNotes, setDeviceNotes] = useState<string[]>([]);
+  useEffect(() => {
+    // (a new [] every render would never settle: keep the same array when there is nothing to say)
+    if (!plat || !geo.dev || !geo.zone || !box.w || !box.h) { setDeviceNotes((prev) => (prev.length ? [] : prev)); return; }
+    const dev = geo.dev, zone = geo.zone;
+    // a rect on the frame (fractions) → on the screen (fractions)
+    const toScreen = (r: Rect): Rect => ({
+      x: (zone.x + geo.left + r.x * box.w) / dev.w, y: (zone.y + geo.top + r.y * box.h) / dev.h,
+      w: (r.w * box.w) / dev.w, h: (r.h * box.h) / dev.h,
+    });
+    const visible: Rect = { x: zone.x / dev.w, y: zone.y / dev.h, w: zone.w / dev.w, h: zone.h / dev.h };
+    const inside = (r: Rect) => r.x >= visible.x - 0.005 && r.y >= visible.y - 0.005 &&
+      r.x + r.w <= visible.x + visible.w + 0.005 && r.y + r.h <= visible.y + visible.h + 0.005;
+    const things: { what: string; rect: Rect }[] = [];
+    const sb = subBox.current;
+    const sw = sb ? sb.offsetWidth / box.w : 0.6, sh = sb ? sb.offsetHeight / box.h : 0.05;
+    things.push({ what: "Phụ đề", rect: toScreen({ x: lay.x - sw / 2, y: lay.y - sh, w: sw, h: sh }) });
+    if (mascot?.media_id) {
+      const mh = mascot.size, mw = mascot.shape === "circle" ? (mascot.size * box.h) / box.w : mh * 0.8 * (box.h / box.w);
+      things.push({ what: "Nhân vật", rect: toScreen({ x: mascot.x - mw / 2, y: mascot.y - mh, w: mw, h: mh }) });
+    }
+    const parts = plat.chrome(geo.zoneRect ?? visible).filter((p) => p.over);
+    const out: string[] = [];
+    if (geo.note) out.push(geo.note);
+    for (const th of things) {
+      if (!inside(th.rect)) out.push(`${th.what} nằm ngoài phần ${plat.label} hiện ra — bị cắt mất. Kéo vào giữa hơn.`);
+      for (const part of parts) if (overlaps(th.rect, part.rect)) out.push(`${th.what} bị ${part.label} của ${plat.label} che — kéo ra chỗ khác.`);
+    }
+    setDeviceNotes((prev) => (JSON.stringify(prev) === JSON.stringify(out) ? prev : out));
+  }); // every render: cheap, and the subtitle box size is only known after it is drawn
+
+  const frameEl = (
       <div className={`dx-stage__frame${drag ? " is-dragging" : ""}`} ref={stage}
-           style={{ width: box.w || undefined, height: box.h || undefined }}
+           style={{ width: box.w || undefined, height: box.h || undefined,
+                    ...(geo.dev ? { position: "absolute", left: geo.left, top: geo.top, borderRadius: 0, boxShadow: "none" } : {}) }}
            onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
            onPointerDown={() => { if (!editing) onSelect(null); }}>
         {live ? (
@@ -344,9 +396,17 @@ export const EditorStage = forwardRef<StageHandle, {
             : undefined}>
             {frameSpec && (frameSpec.bg === "blur" || (frameSpec.bg === "image" && !frameSpec.bg_image)) &&
               <video ref={bgVideo} className="dx-stage__bgvid" src={src} muted playsInline preload="auto" />}
-            <div className="dx-stage__fg" style={{ ...frameStyle, overflow: "hidden" }}>
+            <div className="dx-stage__fg" style={{ ...frameStyle, overflow: "hidden", ...(canvas?.fit === "black" ? { background: "#000" } : {}) }}>
+              {canvas?.fit === "blur" && <video ref={canvasBg} className="dx-stage__bgvid" src={src} muted playsInline preload="auto" />}
               <video ref={video} src={src} muted playsInline preload="auto"
-                     style={zoom > 1 ? { transform: `scale(${zoom.toFixed(4)})`, transformOrigin: "50% 50%" } : undefined}
+                     style={{
+                       position: "relative",
+                       // the output format: the source fitted like the render does it (services/dub.canvas_filter)
+                       ...(canvas ? (canvas.fit === "crop"
+                         ? { objectFit: "cover", objectPosition: `${(canvas.pos * 100).toFixed(1)}% ${(canvas.pos * 100).toFixed(1)}%` }
+                         : { objectFit: "contain" }) : {}),
+                       ...(zoom > 1 ? { transform: `scale(${zoom.toFixed(4)})`, transformOrigin: "50% 50%" } : {}),
+                     }}
                      onLoadedMetadata={(e) => {
                        const v = e.currentTarget;
                        onDuration(v.duration || 0);
@@ -374,18 +434,18 @@ export const EditorStage = forwardRef<StageHandle, {
           </div>
         )}
 
-        {blur && (
-          <div className={`dx-stage__blur${live ? " dx-stage__blur--ghost" : ""}${selected?.kind === "blur" ? " is-selected" : ""}`}
-               role="slider" tabIndex={0} aria-label="Vùng làm mờ chữ gốc — kéo để dời, kéo góc để đổi cỡ"
+        {blurs.map((blur, i) => (
+          <div key={i} className={`dx-stage__blur${live ? " dx-stage__blur--ghost" : ""}${selected?.kind === "blur" && selected.i === i ? " is-selected" : ""}`}
+               role="slider" tabIndex={0} aria-label={`Vùng mờ ${i + 1} — kéo để dời, kéo góc để đổi cỡ`}
                aria-valuetext={`từ ${pct(blur.x)},${pct(blur.y)} rộng ${pct(blur.w)} cao ${pct(blur.h)}`}
                style={{ left: pct(blur.x), top: pct(blur.y), width: pct(blur.w), height: pct(blur.h),
                         backdropFilter: live ? undefined : `blur(${Math.max(1, blur.amount * (stageH / 1280) * 1.6)}px)` }}
-               onPointerDown={(e) => { onSelect({ kind: "blur" }); const p = pointFrom(e); startDrag(e, { kind: "blur", dx: blur.x - p.x, dy: blur.y - p.y }); }}>
-            <span className="dx-stage__tag">vùng mờ</span>
+               onPointerDown={(e) => { onSelect({ kind: "blur", i }); const p = pointFrom(e); startDrag(e, { kind: "blur", i, dx: blur.x - p.x, dy: blur.y - p.y }); }}>
+            <span className="dx-stage__tag">vùng mờ {blurs.length > 1 ? i + 1 : ""}</span>
             <span className="dx-stage__handle" title="Kéo để đổi cỡ"
-                  onPointerDown={(e) => { onSelect({ kind: "blur" }); startDrag(e, { kind: "blur-size", x0: blur.x, y0: blur.y }); }} />
+                  onPointerDown={(e) => { onSelect({ kind: "blur", i }); startDrag(e, { kind: "blur-size", i, x0: blur.x, y0: blur.y }); }} />
           </div>
-        )}
+        ))}
 
         {emph && !live && (
           <div className={`dx-stage__emph${selected?.kind === "hl" ? " is-selected" : ""}`}
@@ -446,6 +506,31 @@ export const EditorStage = forwardRef<StageHandle, {
           </div>
         )}
       </div>
+  );
+
+  return (
+    <div className="dx-stage" ref={area}>
+      {geo.dev && plat && geo.zone ? (
+        <div className="dx-dev">
+          <div className={`dx-dev__screen dx-dev__screen--${plat.screen > 1 ? "desk" : "phone"}`}
+               style={{ width: geo.dev.w, height: geo.dev.h, ["--dev" as string]: `${geo.dev.w}px` }}>
+            <div className="dx-dev__zone" style={{ left: geo.zone.x, top: geo.zone.y, width: geo.zone.w, height: geo.zone.h }}>
+              {frameEl}
+            </div>
+            <DeviceChrome platform={plat.key} parts={plat.chrome(geo.zoneRect ?? { x: 0, y: 0, w: 1, h: 1 })} />
+          </div>
+          <DeviceNotes notes={deviceNotes} />
+        </div>
+      ) : frameEl}
     </div>
   );
 });
+
+function DeviceNotes({ notes }: { notes: string[] }) {
+  if (!notes.length) return <p className="dx-dev__notes dx-dev__notes--ok">✓ Phụ đề và nhân vật không bị giao diện của app che.</p>;
+  return (
+    <ul className="dx-dev__notes">
+      {notes.map((n) => <li key={n}>{n}</li>)}
+    </ul>
+  );
+}

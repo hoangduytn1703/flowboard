@@ -55,6 +55,7 @@ export function PostEditor({
   hideCopy = false,
   onBusyChange,
   video = "",
+  clipVideo = "",
   onVideo,
   autoVideoToken = 0,
 }: {
@@ -75,6 +76,8 @@ export function PostEditor({
    * Without `onVideo` the video tools are hidden. */
   video?: string;
   onVideo?: (mediaId: string) => void;
+  /** The post is a clip's caption: that clip's finished video goes out with it (shown, not editable here). */
+  clipVideo?: string;
   /** Bumped after a write that asked for a video: make the image, then animate it. */
   autoVideoToken?: number;
 }) {
@@ -258,6 +261,12 @@ export function PostEditor({
           }}
           placeholder="#hashtag #khác"
         />
+        {!video && !videoBusy && clipVideo && (
+          <div className="qt-post__video">
+            <video src={mediaUrl(clipVideo)} controls playsInline />
+            <small>🎬 Đăng kèm <b>video của clip</b> — ảnh bên dưới không đăng kèm (Facebook nhận ảnh hoặc một video).</small>
+          </div>
+        )}
         {(video || videoBusy) && (
           <div className="qt-post__video">
             {video ? <video src={mediaUrl(video)} controls playsInline /> : <div className="qt-post__imgpending">🎬 Đang tạo video 8 giây… (1–3 phút)</div>}
@@ -329,7 +338,7 @@ export function PostEditor({
         </div>
       )}
 
-      {onVideo && (videoSource || draft.image_prompts.length > 0 || video) && (
+      {onVideo && !clipVideo && (videoSource || draft.image_prompts.length > 0 || video) && (
         <details className="qt-post__videobox" open={!!video || videoBusy || undefined}>
           <summary>🎬 Video kèm thay ảnh <small>(Flow Omni 8 s, ~12 credit)</small></summary>
           <p className="qt-card__hint">

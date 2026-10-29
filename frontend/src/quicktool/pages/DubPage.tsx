@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type 
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { announceRunning } from "../../components/BackgroundTasks";
 import {
+  getDefaultLook, listLookPresets, type DecorPreset,
   deleteDubJobs, getDubJob, getDubStatus, identifyVideo, linksIn, listDubBatch, listDubJobsBrief, renderDub, startDub, stopDub,
   uploadDubVideo, type DubJob, type DubStatus, type IdentifyResult,
 } from "../../api/dub";
@@ -14,6 +15,7 @@ import { PageEmpty, PageLoading } from "../PageState";
 import { ClipPost } from "../steps/ClipPost";
 import { VoiceField } from "../VoiceField";
 import "../dub.css";
+import { ProgressRing } from "../dub/ProgressRing";
 
 const POLL_MS = 2000;
 const DEFAULT_VOICE = "vi-VN-HoaiMyNeural";
@@ -46,6 +48,13 @@ export function DubPage() {
   const [voice, setVoice] = useState(DEFAULT_VOICE);
   const [style, setStyle] = useState("box_yellow");
   const [engine, setEngine] = useState<DubEngine>("ass");
+  // "★ Mẫu chỉnh sửa": a saved look for the new video (the default one is pre-picked); its style / engine win
+  const [looks, setLooks] = useState<DecorPreset[]>([]);
+  const [lookId, setLookId] = useState<number | null>(null);
+  useEffect(() => {
+    void listLookPresets().then(setLooks).catch(() => setLooks([]));
+    void getDefaultLook().then((d) => setLookId(d.id)).catch(() => undefined);
+  }, []);
   const [keepBgm, setKeepBgm] = useState(true);
   const [review, setReview] = useState(false);
   const [channelId, setChannelId] = useState<number | null>(null);
@@ -187,7 +196,7 @@ export function DubPage() {
       for (const src of sources) {
         started.push(await startDub({
           ...src, voice, keep_bgm: keepBgm, style, engine, channel_id: channelId,
-          name: sources.length > 1 ? "" : name.trim(), auto_render: !review, batch_id: batchId,
+          name: sources.length > 1 ? "" : name.trim(), auto_render: !review, batch_id: batchId, look_preset_id: lookId,
         }));
       }
       if (batchId) {
@@ -433,9 +442,19 @@ export function DubPage() {
               <section className="qt-card">
                 <div className="qt-card__eyebrow">2 · Giọng & phụ đề</div>
                 <VoiceField value={voice} onChange={setVoice} sampleText="Các mẹ bầu bị căng cứng bụng cuối thai kỳ thì nhớ đeo đai nâng bụng ngay nha." disabled={working} />
+                {looks.length > 0 && (
+                  <label className="qt-field">
+                    <span>Mẫu chỉnh sửa <small className="qt-card__hint">(kiểu phụ đề, vùng mờ, khung xuất, khung, nhân vật… đã lưu từ clip trước — lưu / đặt mặc định ở nút ★ Mẫu trong trình chỉnh sửa)</small></span>
+                    <select value={lookId ?? ""} onChange={(e) => setLookId(e.target.value ? Number(e.target.value) : null)} disabled={working}>
+                      <option value="">— Không dùng mẫu, chỉnh tay —</option>
+                      {looks.map((p) => <option key={p.id} value={p.id}>★ {p.name}{p.uses ? ` · dùng ${p.uses} lần` : ""}</option>)}
+                    </select>
+                  </label>
+                )}
+                {lookId !== null && <p className="qt-card__hint">Công nghệ + kiểu phụ đề lấy theo mẫu; ô dưới chỉ dùng khi không chọn mẫu.</p>}
                 <label className="qt-field">
                   <span>Công nghệ phụ đề <small className="qt-card__hint">(ffmpeg = cách cũ · Remotion = font Việt, emoji màu, xem trước đúng y kết quả)</small></span>
-                  <select value={engine} onChange={(e) => pickEngine(e.target.value as DubEngine)} disabled={working}>
+                  <select value={engine} onChange={(e) => pickEngine(e.target.value as DubEngine)} disabled={working || lookId !== null}>
                     <option value="ass">ffmpeg · như hiện tại (nhanh)</option>
                     <option value="remotion" disabled={!status.remotion}>
                       Remotion · mới{status.remotion ? "" : ` — chưa dùng được: ${status.remotion_reason ?? ""}`}
@@ -444,7 +463,7 @@ export function DubPage() {
                 </label>
                 <label className="qt-field">
                   <span>Kiểu phụ đề</span>
-                  <select value={style} onChange={(e) => setStyle(e.target.value)} disabled={working}>
+                  <select value={style} onChange={(e) => setStyle(e.target.value)} disabled={working || lookId !== null}>
                     {styleOptions.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
                   </select>
                 </label>
@@ -514,7 +533,18 @@ export function DubPage() {
               ) : !job ? (
                 <div className="qt-empty qt-dub__placeholder">Tiến độ hiện ở đây. Xong là mở trình chỉnh sửa kiểu CapCut: xem video với giọng Việt, sửa chữ ngay trên hình, kéo câu trên timeline.</div>
               ) : (
-                <>
+                (isWorking(job) || job.status === "error") ? (
+                  <ProgressRing
+                    percent={job.progress}
+                    error={job.status === "error"}
+                    waiting={job.status === "queued"}
+                    title={job.name || job.title || "Video lồng tiếng"}
+                    hint={`${job.language ? `tiếng gốc: ${job.language}` : ""}${job.duration_s ? ` · ${job.duration_s}s` : ""}${job.segments.length ? ` · ${job.segments.length} câu` : ""}`.replace(/^ · /, "")}
+                    phase={job.status === "queued" ? job.phase || "Chờ đến lượt" : `${job.phase}…`}
+                    message={job.error ?? undefined}
+                    onStop={isWorking(job) ? () => void stopDub(job.job_id).then(setJob).catch((e) => toast.error(errMessage(e))) : undefined}
+                  />
+                ) : (
                   <section className="qt-card">
                     <div className="qt-card__head">
                       <div>
@@ -523,16 +553,9 @@ export function DubPage() {
                           {job.language ? `tiếng gốc: ${job.language}` : ""}{job.duration_s ? ` · ${job.duration_s}s` : ""}{job.segments.length ? ` · ${job.segments.length} câu` : ""}
                         </small>
                       </div>
-                      {working && <button type="button" className="qt-btn qt-btn--small qt-btn--danger" onClick={() => void stopDub(job.job_id).then(setJob).catch((e) => toast.error(errMessage(e)))}>Dừng</button>}
                     </div>
-                    {(working || job.status === "error") && (
-                      <div className="qt-dub__progress">
-                        <div className={`qt-dub__bar${job.status === "error" ? " is-error" : ""}`}><span style={{ width: `${job.progress}%` }} /></div>
-                        <span>{job.status === "error" ? `⚠ ${job.error}` : `${job.phase}… ${job.progress}%`}</span>
-                      </div>
-                    )}
                   </section>
-                </>
+                )
               )}
             </div>
           </div>

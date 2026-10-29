@@ -39,6 +39,8 @@ export interface PostBrief {
   image_wish?: string;
   /** "🎬 1 video": make one image, then animate it (Omni 8 s) — posted as a video. */
   with_video?: boolean;
+  /** "Đăng dạng" for a post with a video: "reel" = the AI writes a short Reel caption, publishing picks Reel */
+  fb_format?: "post" | "reel";
 }
 
 export interface PostDraft {

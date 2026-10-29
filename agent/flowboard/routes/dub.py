@@ -35,6 +35,8 @@ class StartBody(BaseModel):
     auto_render: bool = True
     # several links started together share a batch id (client-made); the editor groups them
     batch_id: str = Field(default="", max_length=40)
+    # "★ Mẫu chỉnh sửa": start with that saved look (layout, style, engine, key-moment settings)
+    look_preset_id: Optional[int] = None
 
 
 class RenderBody(BaseModel):
@@ -68,9 +70,11 @@ def get_status() -> dict[str, Any]:
 @router.post("/jobs", status_code=201)
 async def start(body: StartBody) -> dict[str, Any]:
     try:
+        look = _look_preset(body.look_preset_id)
         job = dub.start_job(url=body.url, source_media_id=body.source_media_id, voice=body.voice, keep_bgm=body.keep_bgm,
-                            style=body.style, engine=body.engine, channel_id=body.channel_id, name=body.name,
-                            auto_render=body.auto_render, batch_id=body.batch_id)
+                            style=look["style"] if look else body.style, engine=look["engine"] if look else body.engine, channel_id=body.channel_id, name=body.name,
+                            auto_render=body.auto_render, batch_id=body.batch_id,
+                            layout=look["layout"] if look else None, highlights=look["highlights"] if look else None)
     except dub.DubError as exc:
         raise HTTPException(400, str(exc))
     return job.public()
@@ -285,8 +289,25 @@ async def decor_cutout(body: CutoutBody) -> dict[str, Any]:
     return {"media_id": media_id, "url": f"/media/{media_id}"}
 
 
+def _look_preset(preset_id: Optional[int]) -> Optional[dict[str, Any]]:
+    """The saved look to start a job with (None = the defaults). A missing id is an error, not a silent default."""
+    if not preset_id:
+        return None
+    from flowboard.db import get_session
+    from flowboard.db.models import DecorPreset
+
+    with get_session() as s:
+        p = s.get(DecorPreset, preset_id)
+        if p is None or p.kind != "look":
+            raise HTTPException(404, "Không thấy mẫu chỉnh sửa này (đã xoá?) — chọn mẫu khác hoặc để trống.")
+        p.uses = (p.uses or 0) + 1
+        s.add(p)
+        s.commit()
+        return dub.normalize_look_preset(p.data)
+
+
 class PresetBody(BaseModel):
-    kind: str = Field(pattern="^(frame|mascot)$")
+    kind: str = Field(pattern="^(frame|mascot|look)$")
     name: str = Field(default="", max_length=60)
     data: dict[str, Any]
     thumb: str = Field(default="", max_length=64)
@@ -305,9 +326,47 @@ def list_presets(kind: Optional[str] = None) -> list[dict[str, Any]]:
 
     with get_session() as s:
         q = select(DecorPreset).order_by(DecorPreset.uses.desc(), DecorPreset.id.desc())  # type: ignore[union-attr]
-        if kind in ("frame", "mascot"):
+        if kind in ("frame", "mascot", "look"):
             q = q.where(DecorPreset.kind == kind)
+        else:
+            q = q.where(DecorPreset.kind != "look")  # the decor panel lists frames + stickers only
         return [_preset_row(p) for p in s.exec(q).all()]
+
+
+class DefaultLookBody(BaseModel):
+    id: Optional[int] = None
+
+
+@router.get("/decor/presets/default")
+def get_default_look() -> dict[str, Any]:
+    """The look preset new dubbing jobs start with (``{id}``, None = plain defaults)."""
+    from flowboard.db import get_session
+    from flowboard.db.models import AppSetting, DecorPreset
+
+    with get_session() as s:
+        row = s.get(AppSetting, dub.LOOK_PRESET_KEY)
+        pid = int(row.value) if row and row.value.isdigit() else None
+        p = s.get(DecorPreset, pid) if pid else None
+        return {"id": pid if p is not None and p.kind == "look" else None}
+
+
+@router.put("/decor/presets/default")
+def set_default_look(body: DefaultLookBody) -> dict[str, Any]:
+    from flowboard.db import get_session
+    from flowboard.db.models import AppSetting, DecorPreset
+
+    with get_session() as s:
+        if body.id:
+            p = s.get(DecorPreset, body.id)
+            if p is None or p.kind != "look":
+                raise HTTPException(404, "Không thấy mẫu này")
+        row = s.get(AppSetting, dub.LOOK_PRESET_KEY)
+        if row is None:
+            row = AppSetting(key=dub.LOOK_PRESET_KEY, value="")
+        row.value = str(body.id or "")
+        s.add(row)
+        s.commit()
+    return {"id": body.id or None}
 
 
 @router.post("/decor/presets", status_code=201)
@@ -317,12 +376,17 @@ def save_preset(body: PresetBody) -> dict[str, Any]:
     from flowboard.db.models import DecorPreset
     from flowboard.services import dub_decor
 
-    data = dub_decor.normalize_frame(body.data) if body.kind == "frame" else dub_decor.normalize_mascot(body.data)
-    if not data:
-        raise HTTPException(400, "Chưa có gì để lưu" if body.kind == "frame" else "Nhân vật chưa có ảnh")
-    thumb = body.thumb or (data.get("bg_image") or "" if body.kind == "frame" else data.get("media_id") or "")
+    if body.kind == "look":
+        data = dub.normalize_look_preset(body.data)
+        lay = data["layout"]
+        thumb = body.thumb or ((lay.get("mascot") or {}).get("media_id") or (lay.get("frame") or {}).get("bg_image") or "")
+    else:
+        data = dub_decor.normalize_frame(body.data) if body.kind == "frame" else dub_decor.normalize_mascot(body.data)
+        if not data:
+            raise HTTPException(400, "Chưa có gì để lưu" if body.kind == "frame" else "Nhân vật chưa có ảnh")
+        thumb = body.thumb or (data.get("bg_image") or "" if body.kind == "frame" else data.get("media_id") or "")
     with get_session() as s:
-        p = DecorPreset(kind=body.kind, name=(body.name or ("Khung" if body.kind == "frame" else "Nhân vật")).strip()[:60],
+        p = DecorPreset(kind=body.kind, name=(body.name or {"frame": "Khung", "mascot": "Nhân vật", "look": "Mẫu"}[body.kind]).strip()[:60],
                         data=data, thumb=thumb)
         s.add(p)
         s.commit()

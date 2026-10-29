@@ -49,8 +49,12 @@ export interface DubLayout {
   scale: number;
   /** subtitle box width, fraction of the frame width (null = automatic) */
   w?: number | null;
-  /** a softly blurred rectangle for the whole clip — hides the original hard subs */
+  /** the first blur box (kept for older readers; the boxes are ``blurs``) */
   blur?: DubBlur | null;
+  /** softly blurred rectangles for the whole clip — hide the original hard-coded text (several places) */
+  blurs?: DubBlur[];
+  /** the output format ("Khung xuất"); null = the video's own size */
+  canvas?: DubCanvas | null;
   /** shrink the video onto a background (services/dub_decor) */
   frame?: DubFrame | null;
   /** a bouncing sticker (a saved model, an image or GIF) */
@@ -80,7 +84,55 @@ export interface DubMascot {
   shape: "circle" | "plain";
 }
 
-export const DEFAULT_LAYOUT: DubLayout = { x: 0.5, y: 0.8, scale: 1, blur: null, frame: null, mascot: null };
+export const DEFAULT_LAYOUT: DubLayout = { x: 0.5, y: 0.8, scale: 1, blur: null, blurs: [], canvas: null, frame: null, mascot: null };
+
+export type CanvasAspect = "9:16" | "16:9" | "4:3" | "3:4" | "1:1" | "4:5";
+/** a video of another shape goes into the format: a blurred copy behind it / black bars / cropped to fill */
+export type CanvasFit = "blur" | "black" | "crop";
+export interface DubCanvas {
+  aspect: CanvasAspect;
+  fit: CanvasFit;
+  /** where "crop" cuts along the long axis, 0–1 (0.5 = centre) */
+  pos: number;
+}
+export const CANVAS_ASPECTS: { key: CanvasAspect; w: number; h: number; hint: string }[] = [
+  { key: "9:16", w: 9, h: 16, hint: "TikTok · Reels · Shorts" },
+  { key: "16:9", w: 16, h: 9, hint: "YouTube · màn hình ngang" },
+  { key: "4:3", w: 4, h: 3, hint: "Ngang 4:3" },
+  { key: "3:4", w: 3, h: 4, hint: "Dọc 3:4" },
+  { key: "1:1", w: 1, h: 1, hint: "Vuông · Facebook · Instagram" },
+  { key: "4:5", w: 4, h: 5, hint: "Facebook / Instagram dọc" },
+];
+export const CANVAS_FITS: { key: CanvasFit; label: string }[] = [
+  { key: "blur", label: "Nền mờ" }, { key: "black", label: "Viền đen" }, { key: "crop", label: "Cắt cho đầy" },
+];
+export const MAX_BLURS = 8;
+
+const even = (v: number) => Math.max(2, Math.round(v / 2) * 2);
+/** The output picture size — mirrors services/dub.canvas_size (the long side kept, the format's shape). */
+export function canvasSize(w: number, h: number, canvas: DubCanvas | null | undefined): { w: number; h: number } {
+  const a = canvas ? CANVAS_ASPECTS.find((c) => c.key === canvas.aspect) : undefined;
+  if (!a || w <= 0 || h <= 0) return { w, h };
+  const long = Math.max(w, h);
+  const [cw, ch] = a.w >= a.h ? [even(long), even((long * a.h) / a.w)] : [even((long * a.w) / a.h), even(long)];
+  if (Math.abs(cw / ch - w / h) < 0.01) return { w, h };
+  return { w: cw, h: ch };
+}
+/** Every blur box of a layout (one saved before 29/10 has a single ``blur``). */
+export function layoutBlurs(l: DubLayout): DubBlur[] {
+  return l.blurs ?? (l.blur ? [l.blur] : []);
+}
+export function withBlurs(l: DubLayout, blurs: DubBlur[]): DubLayout {
+  const list = blurs.slice(0, MAX_BLURS);
+  return { ...l, blurs: list, blur: list[0] ?? null };
+}
+/** The editor's layout in one shape (the same keys and order every time, so a doc and a job compare equal). */
+export function normLayout(raw: Partial<DubLayout> | null | undefined): DubLayout {
+  const r = { ...DEFAULT_LAYOUT, ...(raw ?? {}) };
+  const blurs = layoutBlurs(r);
+  return { x: r.x, y: r.y, scale: r.scale, w: r.w ?? null, blur: blurs[0] ?? null, blurs, canvas: r.canvas ?? null,
+           frame: r.frame ?? null, mascot: r.mascot ?? null };
+}
 
 /** One key moment: the key words are said at ``at`` (line ``line`` of the translation, when known). */
 export interface DubHighlightPoint {
@@ -156,11 +208,34 @@ export function decorCutout(mediaId: string): Promise<{ media_id: string; url: s
 
 export interface DecorPreset {
   id: number;
-  kind: "frame" | "mascot";
+  kind: "frame" | "mascot" | "look";
   name: string;
-  data: DubFrame | DubMascot;
+  data: DubFrame | DubMascot | LookPresetData;
   thumb: string;
   uses: number;
+}
+
+/** "★ Mẫu chỉnh sửa": the clip-independent look of a dubbed video (services/dub.normalize_look_preset). */
+export interface LookPresetData {
+  layout: DubLayout;
+  style: string;
+  engine: DubEngine;
+  /** settings only — the points are each clip's own */
+  highlights: DubHighlights;
+}
+
+export function listLookPresets(): Promise<DecorPreset[]> {
+  return api<DecorPreset[]>("/api/dub/decor/presets?kind=look");
+}
+export function saveLookPreset(name: string, data: LookPresetData): Promise<DecorPreset> {
+  return post<DecorPreset>("/api/dub/decor/presets", { kind: "look", name, data: { ...data, highlights: { ...data.highlights, points: [], picked: "" } } });
+}
+/** The look new dubbing jobs start with (null = plain defaults). */
+export function getDefaultLook(): Promise<{ id: number | null }> {
+  return api<{ id: number | null }>("/api/dub/decor/presets/default");
+}
+export function setDefaultLook(id: number | null): Promise<{ id: number | null }> {
+  return api<{ id: number | null }>("/api/dub/decor/presets/default", { method: "PUT", body: JSON.stringify({ id }) });
 }
 
 export function listDecorPresets(): Promise<DecorPreset[]> {
@@ -250,6 +325,8 @@ export interface DubStart {
   name?: string;
   auto_render: boolean;
   batch_id?: string;
+  /** "★ Mẫu chỉnh sửa" to start with (layout, style, engine, key-moment settings) */
+  look_preset_id?: number | null;
 }
 
 export interface DubRender {

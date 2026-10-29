@@ -279,3 +279,87 @@
   .dx-stage { height: 60vh; }
   .dx-insp { max-height: none; }
 }
+
+/* "Khung xuất" (FormatBar.tsx): the output format above the preview */
+.dx-format { flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; padding: 6px 4px 8px; }
+.dx-format__label { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.dx-format__chips, .dx-format__fit { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.dx-format__fit { padding-left: 10px; border-left: 1px solid var(--border); }
+.dx-format__chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 8px; font-size: 13px; font-weight: 600;
+  color: var(--text, #e8eaf0); background: #1c2029; border: 1px solid #333a48; cursor: pointer;
+}
+.dx-format__chip:hover:not(:disabled) { border-color: var(--qt-accent); }
+.dx-format__chip.is-on { background: rgba(255, 106, 43, 0.16); border-color: var(--qt-accent); color: #fff; }
+.dx-format__chip:disabled { opacity: 0.55; cursor: default; }
+.dx-format__chip--sm { padding: 3px 8px; font-size: 12.5px; }
+.dx-format__shape { display: inline-block; border: 1.5px solid currentColor; border-radius: 2px; opacity: 0.85; }
+.dx-format__pos { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.dx-format__pos input { width: 110px; accent-color: var(--qt-accent); }
+.dx-format__size { margin-left: auto; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* "★ Mẫu" (LookPresets.tsx): saved looks, applied in one click */
+.dx-presets { position: relative; }
+.dx-presets .qt-btn.is-on { border-color: var(--qt-accent); }
+.dx-presets__pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; width: 420px; max-width: 90vw; padding: 12px;
+  background: #171a21; border: 1px solid #3a4050; border-radius: 12px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5); display: flex; flex-direction: column; gap: 10px; }
+.dx-presets__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.dx-presets__tip { margin: 0; font-size: 12px; color: var(--muted); line-height: 1.45; }
+.dx-presets__list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow: auto; }
+.dx-presets__list li { display: flex; align-items: center; gap: 6px; padding: 4px; border: 1px solid var(--border); border-radius: 9px; }
+.dx-presets__list li.is-default { border-color: rgba(255, 106, 43, 0.6); }
+.dx-presets__use { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 4px 6px;
+  background: none; border: 0; color: inherit; text-align: left; cursor: pointer; }
+.dx-presets__use:hover:not(:disabled) strong { color: var(--qt-accent); }
+.dx-presets__use small { color: var(--muted); font-size: 12px; }
+
+/* several blur boxes (Inspector tab 🌫 Làm mờ) */
+.dx-insp__blurs { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 5px; }
+.dx-insp__blurs li { display: flex; align-items: center; gap: 6px; padding: 4px; border: 1px solid var(--border); border-radius: 9px; }
+.dx-insp__blurs li.is-on { border-color: #38bdf8; background: rgba(56, 189, 248, 0.08); }
+.dx-insp__blurpick { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  padding: 3px 6px; background: none; border: 0; color: inherit; text-align: left; cursor: pointer; }
+.dx-insp__blurpick small { color: var(--muted); font-size: 12px; }
+.dx-insp__h { margin: 6px 0 0; font-size: 14px; }
+
+/* "📱 Xem trên" (platforms.ts, DeviceChrome.tsx): the frame inside an app's screen */
+.dx-format__view { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; padding: 2px 4px 2px 10px;
+  border-left: 1px solid var(--border); }
+.dx-format__view select { padding: 3px 6px; font-size: 13px; border-radius: 7px; background: #1c2029; color: inherit; border: 1px solid #333a48; }
+.dx-format__view.is-on select { border-color: #38bdf8; color: #fff; }
+.dx-dev { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.dx-dev__screen { position: relative; overflow: hidden; background: #000; container-type: inline-size; }
+.dx-dev__screen--phone { border-radius: calc(var(--dev) * 0.09); box-shadow: 0 0 0 7px #16181d, 0 0 0 8px #3a4050, 0 18px 40px rgba(0, 0, 0, 0.55); }
+.dx-dev__screen--desk { border-radius: 6px; box-shadow: 0 0 0 1px #3a4050, 0 18px 40px rgba(0, 0, 0, 0.55); }
+.dx-dev__zone { position: absolute; overflow: hidden; }
+.dx-dev__part {
+  position: absolute; pointer-events: none; color: #fff; display: flex; font-size: calc(var(--dev) * 0.033); line-height: 1.25;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8); font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.dx-dev__part.is-over { outline: 1px dashed rgba(248, 113, 113, 0.7); outline-offset: -1px; background: rgba(248, 113, 113, 0.07); }
+.dx-dev__part small { display: block; font-size: 0.72em; margin-top: 1px; }
+.dx-dev__part--icons { flex-direction: column; align-items: center; justify-content: flex-end; gap: 6%; font-size: calc(var(--dev) * 0.06); text-align: center; }
+.dx-dev__part--icons small { font-size: calc(var(--dev) * 0.026); }
+.dx-dev__avatar { display: block; width: calc(var(--dev) * 0.1); height: calc(var(--dev) * 0.1); border-radius: 50%; background: #9aa4b5; border: 2px solid #fff; }
+.dx-dev__avatar--sm { width: calc(var(--dev) * 0.075); height: calc(var(--dev) * 0.075); border-width: 1px; }
+.dx-dev__part--caption { flex-direction: column; justify-content: flex-end; gap: 3px; }
+.dx-dev__part--caption span { opacity: 0.92; }
+.dx-dev__sub { font-style: normal; font-weight: 700; margin-left: 6px; padding: 1px 7px; border-radius: 99px; background: #fff; color: #111; text-shadow: none; font-size: 0.85em; }
+.dx-dev__part--tabs, .dx-dev__part--title { align-items: center; justify-content: center; font-weight: 700; }
+.dx-dev__part--tabs b { opacity: 0.65; }
+.dx-dev__part--tabs b.is-on { opacity: 1; border-bottom: 2px solid #fff; }
+.dx-dev__part--nav { align-items: center; justify-content: space-around; background: #000; font-size: calc(var(--dev) * 0.028); text-shadow: none; }
+.dx-dev__part--topbar { background: #fff; color: #1877f2; font-weight: 800; justify-content: space-between; padding: 0 4%; font-size: calc(var(--dev) * 0.045); }
+.dx-dev__part--header { flex-direction: column; justify-content: center; gap: 4px; padding: 0 3%; background: #fff; color: #111; text-shadow: none; }
+.dx-dev__row { display: flex; align-items: center; gap: 6px; justify-content: space-between; }
+.dx-dev__part--header .dx-dev__row { justify-content: flex-start; }
+.dx-dev__part--header small { display: inline; color: #65676b; }
+.dx-dev__part--actions { align-items: center; justify-content: space-around; background: #fff; color: #65676b; text-shadow: none; font-weight: 600; }
+.dx-dev__part--controls { flex-direction: column; justify-content: flex-end; gap: 4px; padding: 0 2% 1%; background: linear-gradient(transparent, rgba(0, 0, 0, 0.7)); }
+.dx-dev__progress { display: block; height: 3px; background: rgba(255, 255, 255, 0.35); }
+.dx-dev__progress i { display: block; height: 100%; width: 6%; background: #f00; }
+.dx-dev__part--title { justify-content: flex-start; padding: 0 2%; background: linear-gradient(rgba(0, 0, 0, 0.6), transparent); }
+.dx-dev__notes { margin: 0; padding: 0; list-style: none; max-width: 560px; font-size: 12.5px; line-height: 1.4; color: #fbbf24; text-align: center; }
+.dx-dev__notes li + li { margin-top: 2px; }
+.dx-dev__notes--ok { color: #4ade80; }
+.dx-dev__part--topbar.dx-dev__part--ig_feed { color: #111; font-family: 'Brush Script MT', cursive; font-weight: 400; }

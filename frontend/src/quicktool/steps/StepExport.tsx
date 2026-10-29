@@ -450,8 +450,12 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
                onClick={() => { if (boardId !== null) patchBoardData(boardId, { quicktool: { downloaded_at: Date.now() } }).catch(() => {}); }}>
               ⬇ Tải về đăng TikTok
             </a>
-            <button type="button" className="qt-btn" style={{ marginLeft: 8 }} onClick={() => setScheduling(true)}
-                    title="Chọn giờ đăng lên kênh; kênh có Facebook Page kết nối thì tự đăng">📅 Lên lịch đăng</button>
+            <div className="qt-result__share">
+              <button type="button" className="qt-btn qt-btn--schedule" onClick={() => setScheduling(true)}
+                      title="Chọn giờ đăng lên kênh; kênh có Facebook Page kết nối thì tự đăng">📅 Lên lịch đăng</button>
+              <button type="button" className="qt-btn qt-btn--publish" disabled={boardId === null} onClick={() => navigate(`/posts?clip=${boardId}`)}
+                      title="Sang trang Bài viết Facebook với video clip gắn sẵn: chọn kiểu bài, AI viết theo lời thoại clip, rồi Đăng ngay (bài viết / Reel) hoặc Lên lịch">✍️ Viết bài &amp; đăng</button>
+            </div>
             {scheduling && boardId !== null && (
               <ScheduleDialog target={{ kind: "clip", boardId, channelId, title: boardName || `Clip #${boardId}` }}
                               onClose={() => setScheduling(false)} onSaved={() => setScheduling(false)} />

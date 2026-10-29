@@ -244,13 +244,44 @@ def _num(raw: dict, key: str, lo: float, hi: float, default: float) -> float:
         return default
 
 
+#: blur boxes per clip (the original video often has text in several places)
+MAX_BLURS = 8
+#: output formats ("Khung xuất"): width:height; "source" (None) keeps the video's own size
+CANVAS_ASPECTS: dict[str, tuple[int, int]] = {"9:16": (9, 16), "16:9": (16, 9), "4:3": (4, 3), "3:4": (3, 4),
+                                              "1:1": (1, 1), "4:5": (4, 5)}
+#: how a video of another shape goes into the format: blurred copy behind it / black bars / cropped to fill
+CANVAS_FITS = ("blur", "black", "crop")
+
+
+def _norm_blur(b: Any) -> Optional[dict[str, float]]:
+    if not isinstance(b, dict) or not b:
+        return None
+    x, y = _num(b, "x", 0.0, 0.95, 0.1), _num(b, "y", 0.0, 0.97, 0.6)
+    return {"x": x, "y": y, "w": _num(b, "w", 0.05, round(1 - x, 3), min(0.8, 1 - x)),
+            "h": _num(b, "h", 0.02, round(1 - y, 3), min(0.08, 1 - y)), "amount": _num(b, "amount", 1, 10, 5)}
+
+
+def normalize_canvas(raw: Any) -> Optional[dict[str, Any]]:
+    """``{aspect, fit, pos}`` — the output format; None = the source video's own size.
+    ``pos`` (0–1) is where a "crop" fit cuts along the long axis (0.5 = centre)."""
+    if not isinstance(raw, dict) or raw.get("aspect") not in CANVAS_ASPECTS:
+        return None
+    return {"aspect": raw["aspect"], "fit": raw.get("fit") if raw.get("fit") in CANVAS_FITS else "blur",
+            "pos": _num(raw, "pos", 0.0, 1.0, 0.5)}
+
+
 def normalize_layout(raw: Any) -> dict[str, Any]:
-    """``{x, y, scale, blur}`` — ``blur`` is an optional rectangle
+    """``{x, y, scale, blurs, canvas, …}`` — ``blurs`` are rectangles
     ``{x, y, w, h, amount}`` (top-left + size as frame fractions, amount
-    1–10) that gets softly blurred for the whole clip: the page's trick for
-    hiding the original hard-coded subtitles under the Vietnamese ones."""
+    1–10) softly blurred for the whole clip: the page's trick for hiding the
+    original hard-coded text under the Vietnamese subtitles. A layout saved
+    before 29/10 has one ``blur``; it reads as a one-item ``blurs`` and
+    ``blur`` stays the first box for older readers. ``canvas`` = the output
+    format (:func:`normalize_canvas`); every other position is a fraction of it."""
     out: dict[str, Any] = dict(DEFAULT_LAYOUT)
     out["blur"] = None
+    out["blurs"] = []
+    out["canvas"] = None
     out["frame"] = None   # services/dub_decor: shrink onto a blurred / coloured background
     out["mascot"] = None  # services/dub_decor: a bouncing sticker
     out["w"] = None       # subtitle box width (fraction of the frame); None = automatic
@@ -262,12 +293,49 @@ def normalize_layout(raw: Any) -> dict[str, Any]:
             out["w"] = _num(raw, "w", W_MIN, W_MAX, 0.8)
         out["frame"] = dub_decor.normalize_frame(raw.get("frame"))
         out["mascot"] = dub_decor.normalize_mascot(raw.get("mascot"))
-        b = raw.get("blur")
-        if isinstance(b, dict) and b:
-            x, y = _num(b, "x", 0.0, 0.95, 0.1), _num(b, "y", 0.0, 0.97, 0.6)
-            out["blur"] = {"x": x, "y": y, "w": _num(b, "w", 0.05, round(1 - x, 3), min(0.8, 1 - x)),
-                           "h": _num(b, "h", 0.02, round(1 - y, 3), min(0.08, 1 - y)), "amount": _num(b, "amount", 1, 10, 5)}
+        out["canvas"] = normalize_canvas(raw.get("canvas"))
+        boxes = raw["blurs"] if isinstance(raw.get("blurs"), list) else [raw.get("blur")]
+        out["blurs"] = [b for b in (_norm_blur(x) for x in boxes) if b][:MAX_BLURS]
+        out["blur"] = out["blurs"][0] if out["blurs"] else None
     return out
+
+
+def _even(v: float) -> int:
+    return max(2, int(round(v / 2)) * 2)
+
+
+def canvas_size(width: int, height: int, layout: Optional[dict]) -> tuple[int, int]:
+    """The output picture size: the source's own, or its long side at the format's shape."""
+    c = normalize_layout(layout)["canvas"]
+    if not c or width <= 0 or height <= 0:
+        return width, height
+    aw, ah = CANVAS_ASPECTS[c["aspect"]]
+    long = max(width, height)
+    w, h = (long, long * ah / aw) if aw >= ah else (long * aw / ah, long)
+    w, h = _even(w), _even(h)
+    if abs(w / h - width / height) < 0.01:
+        return width, height  # already that shape
+    return w, h
+
+
+def canvas_filter(canvas: Optional[dict], src_w: int, src_h: int, width: int, height: int,
+                  src: str = "[0:v]", out: str = "[vc]") -> str:
+    """The source picture into the ``width``×``height`` format: a blurred copy behind it, black bars, or cropped
+    to fill (at ``pos`` along the cut axis). Empty when the format is the source's own size."""
+    if not canvas or (width, height) == (src_w, src_h):
+        return ""
+    fit = canvas.get("fit", "blur")
+    if fit == "crop":
+        pos = canvas.get("pos", 0.5)
+        return (f"{src}scale={width}:{height}:force_original_aspect_ratio=increase,"
+                f"crop={width}:{height}:(iw-{width})*{pos}:(ih-{height})*{pos},setsar=1{out}")
+    fg = f"scale={width}:{height}:force_original_aspect_ratio=decrease:force_divisible_by=2"
+    if fit == "black":
+        return f"{src}{fg},pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1{out}"
+    bw, bh = _even(width / 4), _even(height / 4)  # blur a small copy: fast, and soft enough
+    return (f"{src}split[cv_a][cv_b];[cv_a]scale={bw}:{bh}:force_original_aspect_ratio=increase,crop={bw}:{bh},"
+            f"boxblur=10:2,scale={width}:{height},setsar=1[cv_bg];[cv_b]{fg},setsar=1[cv_fg];"
+            f"[cv_bg][cv_fg]overlay=(W-w)/2:(H-h)/2{out}")
 
 
 #: subtitle box width range (fraction of the frame width)
@@ -415,9 +483,10 @@ def effective_layout(layout: Optional[dict], look: Optional[dict]) -> dict[str, 
     return lay
 
 
-def blur_filter(blur: Optional[dict], width: int, height: int, src: str = "[0:v]", out: str = "[vb]") -> str:
+def blur_filter(blur: Optional[dict], width: int, height: int, src: str = "[0:v]", out: str = "[vb]", tag: str = "") -> str:
     """ffmpeg graph that blurs the ``blur`` rectangle of ``src`` into ``out``
-    (crop → boxblur → overlay). Empty when there is nothing to blur."""
+    (crop → boxblur → overlay). Empty when there is nothing to blur. ``tag`` keeps
+    the inner labels apart when several boxes are chained."""
     if not blur:
         return ""
     x, y = int(width * blur["x"]) // 2 * 2, int(height * blur["y"]) // 2 * 2
@@ -425,29 +494,37 @@ def blur_filter(blur: Optional[dict], width: int, height: int, src: str = "[0:v]
     h = max(8, min(height - y, int(height * blur["h"]) // 2 * 2))
     # boxblur refuses a radius above half the plane; chroma planes are half the crop.
     radius = max(2, min(min(w, h) // 4 - 1, round(h * blur["amount"] / 60)))
-    return (f"{src}split[vb_base][vb_t];[vb_t]crop={w}:{h}:{x}:{y},boxblur={radius}:2:{max(1, radius // 2)}:2[vb_b];"
-            f"[vb_base][vb_b]overlay={x}:{y}{out}")
+    return (f"{src}split[vb{tag}_base][vb{tag}_t];[vb{tag}_t]crop={w}:{h}:{x}:{y},boxblur={radius}:2:{max(1, radius // 2)}:2[vb{tag}_b];"
+            f"[vb{tag}_base][vb{tag}_b]overlay={x}:{y}{out}")
 
 
 def video_filter(ass: Path, width: int, height: int, layout: Optional[dict],
                  mascot_index: Optional[int] = None, mascot_animated: bool = False,
-                 frame_bg_index: Optional[int] = None, zoom: str = "") -> str:
-    """The whole ``-filter_complex`` video part → ``[v]``: zoom (key moments), frame, blur band,
+                 frame_bg_index: Optional[int] = None, zoom: str = "",
+                 source: Optional[tuple[int, int]] = None) -> str:
+    """The whole ``-filter_complex`` video part → ``[v]``: zoom (key moments, on the source), the output
+    format (``source`` size → ``width``×``height``, :func:`canvas_filter`), frame, blur boxes,
     mascot (input ``mascot_index``, prepared by ``dub_decor.prepare_mascot``),
-    then subtitles. Each step is optional."""
+    then subtitles. Each step is optional; everything after the format is in its pixels."""
     lay = normalize_layout(layout)
     parts: list[str] = []
     src = "[0:v]"
     if zoom:
         parts.append(f"{src}{zoom}[vz]")
         src = "[vz]"
+    if source is not None:
+        fit = canvas_filter(lay["canvas"], source[0], source[1], width, height, src, "[vc]")
+        if fit:
+            parts.append(fit)
+            src = "[vc]"
     if lay.get("frame"):
         parts.append(dub_decor.frame_filter(lay["frame"], width, height, src, "[vf]", frame_bg_index))
         src = "[vf]"
-    blur = blur_filter(lay["blur"], width, height, src, "[vb]")
-    if blur:
-        parts.append(blur)
-        src = "[vb]"
+    many = len(lay["blurs"]) > 1
+    for i, box in enumerate(lay["blurs"]):
+        out = f"[vb{i}]" if many else "[vb]"
+        parts.append(blur_filter(box, width, height, src, out, str(i) if many else ""))
+        src = out
     if lay.get("mascot") and mascot_index is not None:
         parts.append(dub_decor.mascot_filter(lay["mascot"], mascot_index, width, height, src, "[vm]", mascot_animated))
         src = "[vm]"
@@ -752,6 +829,7 @@ def _prepare(job: Job) -> None:
     _set(job, "Đang dịch sang tiếng Việt", 52)
     asyncio.run(_translate(job))
     _set(job, "Đã dịch xong", 60)
+    persist(job)  # the translation survives an agent restart from here on (see _job_from_dict)
 
 
 #: a line Edge keeps refusing gets this many rounds (each = tts.ATTEMPTS tries), VOICE_ROUND_WAIT_S apart
@@ -860,10 +938,42 @@ def _voice_pieces(job: Job) -> list[tuple[float, Path, float]]:
     return pieces
 
 
+#: pieces per ffmpeg call when laying out the track: every piece is an ``-i <path>`` plus a filter chain, and
+#: Windows caps a command line at 32 767 characters (29/10: a 332-line video failed with WinError 206)
+TIMELINE_CHUNK = 48
+
+
 def _timeline_wav(ffmpeg: str, pieces: list[tuple[float, Path, float]], total_s: float, out: Path) -> list[tuple[float, float]]:
     """The voice pieces at their start times on one silent track. A piece
     that overruns its slot pushes the next one later (never overlaps).
-    Returns where each piece really landed: ``[(start, duration)]``."""
+    Returns where each piece really landed: ``[(start, duration)]``.
+    Long videos are laid out TIMELINE_CHUNK pieces at a time into part files, then the parts are joined."""
+    if len(pieces) <= TIMELINE_CHUNK:
+        return _timeline_part(ffmpeg, pieces, total_s, out)
+    placed: list[tuple[float, float]] = []
+    cursor = 0.0
+    for start, _wav, dur in pieces:
+        cursor = max(cursor, start) if start - cursor > 0.02 else cursor
+        placed.append((round(cursor, 3), dur))
+        cursor += dur
+    groups = [list(range(i, min(i + TIMELINE_CHUNK, len(pieces)))) for i in range(0, len(pieces), TIMELINE_CHUNK)]
+    parts: list[tuple[float, Path, float]] = []
+    for g, idx in enumerate(groups):
+        g_start = 0.0 if g == 0 else placed[idx[0]][0]
+        g_end = placed[groups[g + 1][0]][0] if g + 1 < len(groups) else max(total_s, cursor)
+        part = out.with_name(f"{out.stem}.part{g}.wav")
+        # already resolved: each piece goes exactly where it landed, relative to the part's start
+        _timeline_part(ffmpeg, [(placed[i][0] - g_start, pieces[i][1], pieces[i][2]) for i in idx], g_end - g_start, part)
+        parts.append((g_start, part, g_end - g_start))
+    try:
+        _timeline_part(ffmpeg, parts, total_s, out)
+    finally:
+        for _s, part, _d in parts:
+            part.unlink(missing_ok=True)
+    return placed
+
+
+def _timeline_part(ffmpeg: str, pieces: list[tuple[float, Path, float]], total_s: float, out: Path) -> list[tuple[float, float]]:
     placed: list[tuple[float, float]] = []
     inputs: list[str] = []
     chains: list[str] = []
@@ -1021,6 +1131,7 @@ def _render(job: Job) -> None:
     if info is None:
         raise DubError("Không đọc được video")
     job.width, job.height = info.width, info.height
+    out_w, out_h = canvas_size(info.width, info.height, job.layout)  # "Khung xuất": the picture every overlay is placed on
     voice = job.work / "voice.wav"
     _upgrade_voice_key(job)
     key = voice_key(job)
@@ -1076,12 +1187,12 @@ def _render(job: Job) -> None:
     cues: list[tuple[float, float, str]] = []
     for s in job.segments:
         own = effective_layout(job.layout, s.look)
-        for a, b, t in split_cue(s.start, s.end, s.text, sub_max_chars(info.width, info.height, own)):
+        for a, b, t in split_cue(s.start, s.end, s.text, sub_max_chars(out_w, out_h, own)):
             cues.append((a, b, t, s.look) if s.look else (a, b, t))
     if job.engine == "remotion":
         _render_remotion(job, ffmpeg, src, voice, bgm, info, cues, hl, sfx_pieces)
         return
-    ass = write_sub_ass(cues, job.work / "subs.ass", width=info.width, height=info.height, style=job.style, layout=job.layout,
+    ass = write_sub_ass(cues, job.work / "subs.ass", width=out_w, height=out_h, style=job.style, layout=job.layout,
                         emphasis=emphasis_events(hl, job.layout, info.duration))
     media_id = uuid.uuid4().hex
     dst = media_service.MEDIA_CACHE_DIR / f"{media_id}.mp4"
@@ -1100,13 +1211,13 @@ def _render(job: Job) -> None:
         frame_bg_index = next_index
         next_index += 1
         cmd += ["-loop", "1", "-framerate", "30", "-i", str(frame_bg)]
-    mascot = dub_decor.prepare_mascot(normalize_layout(job.layout).get("mascot"), info.height, job.work)
+    mascot = dub_decor.prepare_mascot(normalize_layout(job.layout).get("mascot"), out_h, job.work)
     mascot_index = None
     if mascot is not None:
         mascot_index = next_index
         cmd += dub_decor.mascot_input_args(*mascot)
-    vgraph = video_filter(ass, info.width, info.height, job.layout, mascot_index, bool(mascot and mascot[1]), frame_bg_index,
-                          zoom=zoom_filter(hl, info.width, info.height, probe_fps(src)))
+    vgraph = video_filter(ass, out_w, out_h, job.layout, mascot_index, bool(mascot and mascot[1]), frame_bg_index,
+                          zoom=zoom_filter(hl, info.width, info.height, probe_fps(src)), source=(info.width, info.height))
     agraph, amap = audio_mix(bgm is not None, sfx_index)
     if agraph:
         cmd += ["-filter_complex", f"{vgraph};{agraph}", "-map", "[v]", "-map", amap]
@@ -1145,7 +1256,7 @@ def audio_mix(with_bgm: bool, sfx_index: Optional[int]) -> tuple[str, str]:
 
 def has_picture_layers(job: Job) -> bool:
     lay = normalize_layout(job.layout)
-    return bool(lay.get("frame") or lay.get("blur") or lay.get("mascot"))
+    return bool(lay.get("frame") or lay.get("blurs") or lay.get("mascot") or lay.get("canvas"))
 
 
 def render_clean_video(job: Job, dst: Path) -> Path:
@@ -1167,7 +1278,8 @@ def render_clean_video(job: Job, dst: Path) -> Path:
         raise DubError("Không đọc được video")
     work = job.work if job.work is not None else dst.parent
     lay = normalize_layout(job.layout)
-    ass = write_sub_ass([], work / "capcut_nosub.ass", width=info.width, height=info.height, style=job.style, layout=job.layout)
+    out_w, out_h = canvas_size(info.width, info.height, job.layout)
+    ass = write_sub_ass([], work / "capcut_nosub.ass", width=out_w, height=out_h, style=job.style, layout=job.layout)
     cmd = [ffmpeg, "-y", "-v", "error", "-i", str(src)]
     next_index = 1
     frame_bg = dub_decor.frame_bg_path(lay.get("frame"))
@@ -1176,12 +1288,13 @@ def render_clean_video(job: Job, dst: Path) -> Path:
         frame_bg_index = next_index
         next_index += 1
         cmd += ["-loop", "1", "-framerate", "30", "-i", str(frame_bg)]
-    mascot = dub_decor.prepare_mascot(lay.get("mascot"), info.height, work)
+    mascot = dub_decor.prepare_mascot(lay.get("mascot"), out_h, work)
     mascot_index = None
     if mascot is not None:
         mascot_index = next_index
         cmd += dub_decor.mascot_input_args(*mascot)
-    vgraph = video_filter(ass, info.width, info.height, job.layout, mascot_index, bool(mascot and mascot[1]), frame_bg_index)
+    vgraph = video_filter(ass, out_w, out_h, job.layout, mascot_index, bool(mascot and mascot[1]), frame_bg_index,
+                          source=(info.width, info.height))
     cmd += ["-filter_complex", vgraph, "-map", "[v]", "-an", "-t", f"{info.duration:.3f}", *_encode_args(ffmpeg),
             "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(dst)]
     err = _run(cmd, ENCODE_TIMEOUT_S)
@@ -1220,8 +1333,9 @@ def _render_remotion(job: Job, ffmpeg: str, src: Path, voice: Path, bgm: Optiona
     media_id = uuid.uuid4().hex
     dst = media_service.MEDIA_CACHE_DIR / f"{media_id}.mp4"
     hl = normalize_highlights(hl if hl is not None else job.highlights)
+    out_w, out_h = canvas_size(info.width, info.height, job.layout)
     spec = dub_remotion.build_spec(src=nosub, out=dst, cues=cues, layout=normalize_layout(job.layout), style=job.style,
-                                   width=info.width, height=info.height, duration_s=info.duration,
+                                   width=out_w, height=out_h, duration_s=info.duration,
                                    highlights=({"words": hl["words"], "zoom": hl["zoom"], "y": emphasis_y(job.layout, hl),
                                                 "points": [{"at": p["at"], "words": p["words"]} for p in hl["points"]]}
                                                if hl["on"] and hl["points"] else None),
@@ -1395,7 +1509,10 @@ def _job_from_dict(d: dict, work: Path, fallback_time: float) -> Job:
                             normalize_look(s.get("look")))
                     for s in d.get("segments") or []]
     if job.status in ("queued", "running", "rendering"):
-        job.status, job.error = "error", "Agent khởi động lại giữa chừng — làm lại từ link"
+        job.status = "error"
+        job.error = ("Agent khởi động lại giữa chừng — bản dịch vẫn còn, bấm \"Xuất lại video\" để làm tiếp "
+                     "(câu đã đọc lấy lại từ bộ nhớ đệm)" if job.segments else
+                     "Agent khởi động lại giữa chừng — làm lại từ link")
     src = media_service.cached_path(job.source_media_id or "") if job.source_media_id else None
     job.src_path = Path(src) if src else None
     if (work / "voice.wav").is_file():
@@ -1403,8 +1520,23 @@ def _job_from_dict(d: dict, work: Path, fallback_time: float) -> Job:
     return job
 
 
+#: "★ Mẫu chỉnh sửa" (DecorPreset kind "look"): the clip-independent look — layout (subtitle place / size / width,
+#: blur boxes, output format, frame, sticker), style, engine, key-moment settings (never the points: each clip's own)
+LOOK_PRESET_KEY = "dub_default_look"
+
+
+def normalize_look_preset(raw: Any) -> dict[str, Any]:
+    d = raw if isinstance(raw, dict) else {}
+    engine = _check_engine(str(d.get("engine") or "ass"))
+    hl = normalize_highlights(d.get("highlights"))
+    hl["points"], hl["picked"] = [], ""
+    return {"layout": normalize_layout(d.get("layout")), "style": _style_for(engine, str(d.get("style") or "box_yellow")),
+            "engine": engine, "highlights": hl}
+
+
 def start_job(*, url: Optional[str], source_media_id: Optional[str], voice: str, keep_bgm: bool, style: str,
-              channel_id: Optional[int], name: str, auto_render: bool, engine: str = "ass", batch_id: str = "") -> Job:
+              channel_id: Optional[int], name: str, auto_render: bool, engine: str = "ass", batch_id: str = "",
+              layout: Optional[dict] = None, highlights: Optional[dict] = None) -> Job:
     st = status()
     if not st["available"]:
         raise DubError(st.get("reason", "Lồng tiếng chưa dùng được trên máy này"))
@@ -1419,6 +1551,11 @@ def start_job(*, url: Optional[str], source_media_id: Optional[str], voice: str,
     job = Job(id=uuid.uuid4().hex[:12], url=url or None, source_media_id=source_media_id or None, voice=voice,
               keep_bgm=keep_bgm, style=style, engine=engine, channel_id=channel_id, name=(name or "").strip(),
               auto_render=auto_render, batch_id=(batch_id or "").strip()[:40])
+    if layout is not None:  # a look preset: the clip starts with that look (points are picked for this clip when on)
+        job.layout = normalize_layout(layout)
+    if highlights is not None:
+        job.highlights = normalize_highlights(highlights)
+        job.highlights["points"], job.highlights["picked"] = [], ""
     JOBS[job.id] = job
     cutoff = time.time() - 6 * 3600
     for jid in [j.id for j in JOBS.values() if j.status in ("done", "error") and j.started_at < cutoff]:

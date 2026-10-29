@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { listProducts, mediaUrl, type Product } from "../../api/client";
+import { listBoardSummaries, listProducts, mediaUrl, type Product } from "../../api/client";
 import {
   deletePost, getPostOptions, listPosts, listSeries, savePost, splitTags, updatePost, writePost, writePostBatch,
   type ChatTurn, type PostBrief, type PostDraft, type PostOptions, type PostSchedule, type PostSeries, type SavedPost, type WritePostResult,
@@ -15,6 +15,10 @@ import { ScheduleDialog, type ScheduleTarget } from "../schedule/ScheduleDialog"
 import { createSlot, publishSlot, slotLabel, suggestSlots, type FbFormat } from "../../api/schedule";
 import { FormatPicker } from "../schedule/FormatPicker";
 import "../posts.css";
+
+/** "Câu chuyện nhiều kỳ" writing (next episode) is hidden for now (29/10): the tool cannot tell which episodes were
+ * posted by hand vs. automatically, so the next episode and its thread drift. Saved series still show grouped. */
+const SERIES_WRITING = false;
 
 const EMPTY: PostDraft = { title: "", body: "", hashtags: [], image_prompts: [], first_comment: "" };
 const QUICK_ASKS = ["Ngắn gọn hơn", "Hài hước hơn", "Câu mở đầu giật hơn", "Thêm câu hỏi cuối bài", "Viết lại kiểu khác", "Thêm 1 ảnh minh hoạ"];
@@ -113,12 +117,16 @@ export function PostsPage() {
   const [video, setVideo] = useState("");
   // A post written for a clip goes out with that clip's video (services/scheduler).
   const [clipVideo, setClipVideo] = useState("");
+  const [clipName, setClipName] = useState("");
   const [autoVideo, setAutoVideo] = useState(0);
   // bumped after a fresh write that asked for images → PostEditor renders them at once
   const [autoMake, setAutoMake] = useState(0);
   const [postId, setPostId] = useState<number | null>(null);
-  const [fbFormat, setFbFormat] = useState<FbFormat>("post");
-  useEffect(() => { setFbFormat("post"); }, [postId]);
+  // "Đăng dạng": lives in the brief (saved with the post) — picked once in block ① of the form, nowhere else,
+  // so publishing / saving can never flip it back (it did, 29/10: a Reel went out, the page then said "Bài viết").
+  const hasVideo = !!video || boardId !== null;
+  const fbFormat: FbFormat = hasVideo && brief.fb_format === "reel" ? "reel" : "post";
+  const setFbFormat = (f: FbFormat) => { set({ fb_format: f }); setDirty(true); };
   const [dirty, setDirty] = useState(false);
   const [chat, setChat] = useState<ChatTurn[]>([]);
   const [message, setMessage] = useState("");
@@ -150,7 +158,7 @@ export function PostsPage() {
   const [slots, setSlots] = useState<Record<number, string>>({});
   const [batchBusy, setBatchBusy] = useState(false);
   // Published from this page in this session (link to the live post).
-  const [published, setPublished] = useState<{ at: string; link: string } | null>(null);
+  const [published, setPublished] = useState<{ at: string; link: string; reel: boolean } | null>(null);
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const [channels] = useChannels();
@@ -174,6 +182,38 @@ export function PostsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wanted, saved.length]);
 
+  // /posts?clip=38 — step 5 "✍️ Viết bài & đăng": a post for that clip, its finished video going with it (the AI
+  // reads the clip's lines; channel + product come from the clip). The clip's latest saved post opens instead.
+  const wantedClip = Number(params.get("clip")) || null;
+  useEffect(() => {
+    if (!wantedClip) return;
+    let live = true;
+    void (async () => {
+      const [boards, posts] = await Promise.all([listBoardSummaries().catch(() => []), listPosts(wantedClip).catch(() => [])]);
+      if (!live) return;
+      const b = boards.find((x) => x.id === wantedClip);
+      const last = posts.filter((p) => p.kind !== "tiktok_caption").sort((x, y) => y.id - x.id)[0];
+      const name = b?.name || `Clip #${wantedClip}`;
+      if (last) {
+        open(last);
+        toast.info(`Mở bài đã viết cho clip "${name}" — sửa rồi đăng, hoặc "＋ Bài mới" để viết bài khác cho clip này.`);
+      } else {
+        startNew();
+        setBoardId(wantedClip);
+        setClipVideo(b?.summary.export_media ?? "");
+        const qt = ((b?.data ?? {}) as { quicktool?: { channel_id?: number | null; product_id?: number | null } }).quicktool ?? {};
+        if (qt.channel_id) setChannelId(qt.channel_id);
+        if (qt.product_id) setProductId(qt.product_id);
+        setBrief((x) => ({ ...x, images: 0, with_video: false }));  // the clip's video goes out: no AI pictures to make
+        toast.info(`Viết bài cho clip "${name}" — video clip đăng kèm. Chọn kiểu bài rồi bấm Viết bài.`);
+      }
+      setClipName(name);
+      setParams({}, { replace: true });
+    })();
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantedClip]);
+
   // Came back while (or after) the AI wrote a post asked for on this page: pick
   // it up instead of losing it — the agent keeps it 15 minutes
   // (services/op_tracker). The page's own write claims its result while the
@@ -181,7 +221,7 @@ export function PostsPage() {
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => {
-    if (params.get("post")) return;
+    if (params.get("post") || params.get("clip")) return;
     let live = true;
     let timer: number | undefined;
     const check = async () => {
@@ -226,6 +266,7 @@ export function PostsPage() {
     setImages(p.images);
     setVideo(p.video ?? "");
     setClipVideo(p.clip_video ?? "");
+    if (p.board_id !== boardId) setClipName("");
     setAutoVideo(0);
     setAutoMake(0); // a saved post: never auto-render its prompts
     setPostId(p.id);
@@ -248,6 +289,7 @@ export function PostsPage() {
     setImages([]);
     setVideo("");
     setClipVideo("");
+    setClipName("");
     setAutoVideo(0);
     setAutoMake(0);
     setPostId(null);
@@ -267,7 +309,7 @@ export function PostsPage() {
     if (text) setChat((c) => [...c, { role: "user", text }]);
     try {
       const res = await writePost({
-        brief, product_id: productId, board_id: boardId, channel_id: channelId, series: seriesOn ? series.trim() || null : null,
+        brief, product_id: productId, board_id: boardId, channel_id: channelId, series: seriesWriting ? series.trim() || null : null,
         current: text && hasDraft ? draft : null,
         message: text || undefined,
         history: text ? history : [],
@@ -305,7 +347,7 @@ export function PostsPage() {
     try {
       const res = await writePostBatch({
         brief, n: count, product_id: productId, board_id: boardId, channel_id: channelId,
-        series: seriesOn ? series.trim() || null : null,
+        series: seriesWriting ? series.trim() || null : null,
       });
       setSaved((list) => [...res.posts, ...list.filter((p) => !res.posts.some((x) => x.id === p.id))]);
       setBatch(res.posts.map((p) => p.id));
@@ -459,8 +501,8 @@ export function PostsPage() {
       const out = await publishSlot(slot.id);
       reloadSaved();
       if (out.status === "posted") {
-        setPublished({ at: out.posted_at ?? new Date().toISOString(), link: out.result?.permalink ?? "" });
-        toast.success(`Đã đăng lên Page "${ch.fb_page_name || ch.name}".`, { duration: 9000 });
+        setPublished({ at: out.posted_at ?? new Date().toISOString(), link: out.result?.permalink ?? "", reel: out.fb_format === "reel" });
+        toast.success(`Đã đăng ${out.fb_format === "reel" ? "Reel" : "bài"} lên Page "${ch.fb_page_name || ch.name}".`, { duration: 9000 });
       } else {
         toast.error(out.result?.error ?? "Đăng không được.");
       }
@@ -539,7 +581,8 @@ export function PostsPage() {
   const set = (patch: PostBrief) => setBrief((b) => ({ ...b, ...patch }));
   const toggleBoost = (key: string) => set({ boosts: (brief.boosts ?? []).includes(key) ? (brief.boosts ?? []).filter((b) => b !== key) : [...(brief.boosts ?? []), key] });
   const noChannel = !channelId;
-  const noSeries = seriesOn && !series.trim();
+  const seriesWriting = SERIES_WRITING && seriesOn;
+  const noSeries = seriesWriting && !series.trim();
   const optLabel = (list: { key: string; label: string }[], key: string | undefined, fallback: string) => list.find((o) => o.key === key)?.label ?? fallback;
   const moreSummary = [
     optLabel(options.tones, brief.tone, "Thân thiện").split(",")[0],
@@ -636,7 +679,12 @@ export function PostsPage() {
                   <span>AI chỉ dùng thông tin đã lưu của sản phẩm (giá, điểm nổi bật, mô tả){product.aff_link ? " — link aff vào bình luận đầu" : ""}.</span>
                 </div>
               )}
-              {boardId && <p className="qt-card__hint">Bài này đi kèm clip #{boardId} — AI đọc lời thoại của clip. <button type="button" className="qt-link" onClick={() => setBoardId(null)}>Bỏ gắn clip</button></p>}
+              {boardId && <p className="qt-card__hint">🎬 Bài này đi kèm clip <strong>{clipName || `#${boardId}`}</strong> — video clip đăng kèm, AI đọc lời thoại của clip.{" "}
+                <button type="button" className="qt-link" onClick={() => { setBoardId(null); setClipVideo(""); setClipName(""); }}>Bỏ gắn clip</button></p>}
+              {(hasVideo || brief.with_video) && (
+                <FormatPicker value={fbFormat} onChange={setFbFormat}
+                              target={postId ? { kind: "post", postId } : boardId !== null ? { kind: "clip", boardId } : null} />
+              )}
             </div>
 
             {tab === "form" ? (
@@ -650,7 +698,7 @@ export function PostsPage() {
                     </select>
                     {brief.kind && KIND_HINT[brief.kind] && <small className="qt-card__hint">{KIND_HINT[brief.kind]}</small>}
                   </label>
-                  <div className="qt-field">
+                  {SERIES_WRITING && <div className="qt-field">
                     <span>Câu chuyện nhiều kỳ</span>
                     <div className="qt-posts__yesno" role="radiogroup" aria-label="Câu chuyện nhiều kỳ">
                       <label className={!seriesOn ? "is-on" : ""}>
@@ -665,8 +713,8 @@ export function PostsPage() {
                         Mỗi tập vẫn là kiểu “{options.kinds.find((k) => k.key === brief.kind)?.label ?? "bài viết"}” — AI đọc các tập trước để viết nối tiếp, không lặp lại.
                       </small>
                     )}
-                  </div>
-                  {seriesOn && (() => {
+                  </div>}
+                  {seriesWriting && (() => {
                     const known = channelSeries.find((x) => x.name === series.trim());
                     const chName = channels.find((c) => c.id === channelId)?.name ?? "";
                     return (
@@ -724,12 +772,12 @@ export function PostsPage() {
                     <label className="qt-field">
                       <span>Số bài</span>
                       <select value={count} onChange={(e) => setCount(Number(e.target.value))}>
-                        {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n === 1 ? (seriesOn ? "1 tập" : "1 bài") : seriesOn ? `${n} tập nối tiếp` : `${n} bài khác nhau`}</option>)}
+                        {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n === 1 ? (seriesWriting ? "1 tập" : "1 bài") : seriesWriting ? `${n} tập nối tiếp` : `${n} bài khác nhau`}</option>)}
                       </select>
                     </label>
-                    <label className="qt-field">
-                      <span>Kèm theo</span>
-                      <select value={brief.with_video ? "video" : String(brief.images ?? 0)}
+                    <label className="qt-field" title={boardId !== null ? "Bài gắn clip: đăng kèm video của clip — ảnh / video AI ở đây không được đăng" : undefined}>
+                      <span>Kèm theo {boardId !== null && <small>(đã có video clip)</small>}</span>
+                      <select value={boardId !== null ? "0" : brief.with_video ? "video" : String(brief.images ?? 0)} disabled={boardId !== null}
                               onChange={(e) => (e.target.value === "video" ? set({ with_video: true, images: 1 }) : set({ with_video: false, images: Number(e.target.value) }))}>
                         <option value="0">Không cần ảnh</option>
                         {Array.from({ length: options.max_images }, (_, i) => i + 1).map((n) => <option key={n} value={String(n)}>{n} ảnh (AI tạo)</option>)}
@@ -824,9 +872,9 @@ export function PostsPage() {
                 <div className="qt-posts__go">
                   <button type="button" className="qt-btn qt-btn--accent qt-btn--big" disabled={busy || noChannel || noSeries} onClick={() => void run()}
                           title={noChannel ? "Chọn kênh / page trước" : noSeries ? "Chọn loạt truyện hoặc đặt tên loạt mới" : undefined}>
-                    {busy ? (count > 1 ? `AI đang viết ${count} ${seriesOn ? "tập" : "bài"}…` : "AI đang viết…")
-                      : count > 1 ? `✍️ Viết ${count} ${seriesOn ? "tập" : "bài"}`
-                        : seriesOn ? "✍️ Viết tập tiếp theo" : hasDraft ? "✍️ Viết lại bài mới" : "✍️ Viết bài"}
+                    {busy ? (count > 1 ? `AI đang viết ${count} ${seriesWriting ? "tập" : "bài"}…` : "AI đang viết…")
+                      : count > 1 ? `✍️ Viết ${count} ${seriesWriting ? "tập" : "bài"}`
+                        : seriesWriting ? "✍️ Viết tập tiếp theo" : hasDraft ? "✍️ Viết lại bài mới" : "✍️ Viết bài"}
                   </button>
                   {noChannel && <small className="qt-posts__need">Chọn <strong>Kênh / page</strong> ở bước 1 trước — AI viết theo giọng của page đó.</small>}
                   {!noChannel && noSeries && <small className="qt-posts__need">Đang chọn <strong>Câu chuyện nhiều kỳ</strong> — chọn loạt truyện hoặc đặt tên loạt mới.</small>}
@@ -868,7 +916,7 @@ export function PostsPage() {
               <div className="qt-posts__titlebox">
                 <h3 className="qt-card__title">{postId ? `Bài #${postId}` : "Bài viết mới"}</h3>
                 {hasDraft && (
-                  published ? <span className="qt-posts__status qt-posts__status--live">● Đã đăng</span>
+                  published ? <span className="qt-posts__status qt-posts__status--live">● Đã đăng{published.reel ? " Reel" : ""}</span>
                     : dirty || postId === null ? <span className="qt-posts__status qt-posts__status--dirty">● Chưa lưu</span>
                       : <span className="qt-posts__status qt-posts__status--saved">✓ Đã lưu</span>
                 )}
@@ -923,45 +971,53 @@ export function PostsPage() {
                             images={images} onImages={(ids) => void changeImages(ids)}
                             productMedia={product?.media_ids ?? []} autoMakeToken={autoMake}
                             hookContext={{ channelId, productId }} hideCopy onBusyChange={setImagesBusy}
-                            video={video} onVideo={(id) => void changeVideo(id)} autoVideoToken={autoVideo} />
+                            video={video} onVideo={(id) => void changeVideo(id)} autoVideoToken={autoVideo}
+                            clipVideo={boardId !== null ? clipVideo : ""} />
                 <div className="qt-posts__publish">
                   <div className="qt-posts__publishwhere">
-                    {channel ? (
+                    {published ? (
+                      <>✓ Đã đăng {published.reel ? "Reel" : "bài"} lên <strong>{channel?.fb_page_name || channel?.name}</strong> lúc{" "}
+                        {new Date(published.at).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}.</>
+                    ) : channel ? (
                       channel.fb_connected
-                        ? <>Đăng lên <strong>{channel.fb_page_name || channel.name}</strong> <span className="qt-posts__fbok">⚡ tự đăng được</span></>
+                        ? <>Đăng lên <strong>{channel.fb_page_name || channel.name}</strong>
+                            {hasVideo && <> dạng <strong>{fbFormat === "reel" ? "🎬 Reel" : "📰 Bài viết"}</strong></>}
+                            {video ? <> · kèm video</> : boardId !== null ? (clipVideo ? <> · kèm video của clip</> : null) : images.length > 0 && <> · kèm {images.length} ảnh</>}
+                            {hasVideo && <> · <button type="button" className="qt-link" onClick={() => document.querySelector(".qt-fbformat")?.scrollIntoView({ behavior: "smooth", block: "center" })}>đổi dạng</button></>}
+                          </>
                         : <>Kênh <strong>{channel.name}</strong> chưa kết nối Page — copy rồi đăng tay, hoặc <button type="button" className="qt-link" onClick={() => navigate(`/channels?id=${channel.id}`)}>kết nối Page</button></>
-                    ) : <>Chọn kênh ở bước 1 để đăng.</>}
-                    {video ? <> · kèm <strong>video</strong></>
-                      : boardId !== null
-                        ? (clipVideo
-                          ? <> · kèm <strong>video của clip</strong></>
-                          : <span className="qt-posts__wait"> · ⚠ bài này viết cho clip nhưng clip chưa ghép xong — ghép ở Bước 5 rồi đăng</span>)
-                        : images.length > 0 && <> · kèm <strong>{images.length} ảnh</strong></>}
+                    ) : <>Chọn kênh ở bước ① để đăng.</>}
+                    {boardId !== null && !video && !clipVideo && <span className="qt-posts__wait"> · ⚠ clip chưa ghép xong — ghép ở Bước 5 rồi đăng</span>}
                     {imagesBusy && <span className="qt-posts__wait"> · 🎨 đang tạo ảnh — đợi xong rồi đăng</span>}
-                    {published && <> · đã đăng {new Date(published.at).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}{published.link && <> — <a href={published.link} target="_blank" rel="noreferrer">xem bài ↗</a></>}</>}
                   </div>
                   <div className="qt-posts__publishbtns">
-                    <button type="button" className="qt-btn" disabled={!draft.body.trim()} onClick={() => void copyPost(draft)}>📋 Copy</button>
+                    {published?.link && <a className="qt-btn qt-btn--accent" href={published.link} target="_blank" rel="noreferrer">Xem {published.reel ? "Reel" : "bài"} trên Facebook ↗</a>}
+                    <button type="button" className="qt-btn qt-btn--ghost" disabled={!draft.body.trim()} onClick={() => void copyPost(draft)}>📋 Copy</button>
                     <button type="button" className="qt-btn" disabled={!channel || publishing || imagesBusy}
                             title={imagesBusy ? "Đợi ảnh tạo xong rồi lên lịch" : undefined}
-                            onClick={async () => { const id = dirty || postId === null ? await save(true) : postId; if (id) setSchedule({ kind: "post", postId: id, channelId, title: draft.title || draft.body.split("\n")[0] }); }}>📅 Lên lịch</button>
-                    {channel?.fb_connected && (video || boardId !== null) && (
-                      <FormatPicker compact value={fbFormat} onChange={setFbFormat} target={postId ? { kind: "post", postId } : null} />
-                    )}
+                            onClick={async () => { const id = dirty || postId === null ? await save(true) : postId; if (id) setSchedule({ kind: "post", postId: id, channelId, title: draft.title || draft.body.split("\n")[0], fbFormat }); }}>📅 Lên lịch</button>
                     {channel?.fb_connected && (
-                      <button type="button" className="qt-btn qt-btn--accent"
+                      <button type="button" className={`qt-btn ${published ? "qt-btn--ghost" : "qt-btn--accent"}`}
                               disabled={publishing || imagesBusy || !draft.body.trim() || (boardId !== null && !video && !clipVideo)}
                               onClick={() => void publishNow()}
-                              title={imagesBusy ? "Đợi ảnh tạo xong rồi đăng" : boardId !== null && !video && !clipVideo ? "Clip của bài chưa ghép xong" : undefined}>
-                        {publishing ? "Đang đăng…" : imagesBusy ? "⏳ Đợi ảnh…" : published ? "🚀 Đăng lại"
-                          : fbFormat === "reel" && (video || boardId !== null) ? "🚀 Đăng Reel ngay" : "🚀 Đăng ngay"}
+                              title={imagesBusy ? "Đợi ảnh tạo xong rồi đăng" : boardId !== null && !video && !clipVideo ? "Clip của bài chưa ghép xong" : published ? "Đăng thêm một lần nữa lên Page (bài mới trên Facebook)" : undefined}>
+                        {publishing ? "Đang đăng…" : imagesBusy ? "⏳ Đợi ảnh…" : published ? "Đăng lại" : fbFormat === "reel" ? "🚀 Đăng Reel ngay" : "🚀 Đăng ngay"}
                       </button>
                     )}
                   </div>
                 </div>
               </>
             ) : (
-              <PageEmptyHint />
+              <>
+                {boardId !== null && clipVideo && (
+                  <div className="qt-posts__clipvid">
+                    <video src={mediaUrl(clipVideo)} controls playsInline />
+                    <small>🎬 Video của clip <strong>{clipName || `#${boardId}`}</strong> — đăng kèm bài bạn viết. Chọn kiểu bài, ý chính bên trái rồi bấm <strong>Viết bài</strong>;
+                      viết xong thì <strong>Đăng ngay</strong> (bài viết hoặc Reel) hoặc <strong>Lên lịch</strong> ở thanh dưới bài.</small>
+                  </div>
+                )}
+                <PageEmptyHint />
+              </>
             )}
           </section>
         </div>
@@ -983,10 +1039,12 @@ export function PostsPage() {
               <summary className="qt-series__head">
                 <span className="qt-series__title">📖 {g.name}</span>
                 <span className="qt-series__meta">{g.eps.length} tập · {channels.find((c) => c.id === g.channelId)?.name ?? "chưa gắn kênh"}</span>
-                <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={!!nextBusy || busy}
-                        onClick={(e) => { e.preventDefault(); void writeNext(g); }}>
-                  {nextBusy === g.key ? "AI đang viết…" : `✍️ Viết Tập ${g.nextEpisode}`}
-                </button>
+                {SERIES_WRITING && (
+                  <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={!!nextBusy || busy}
+                          onClick={(e) => { e.preventDefault(); void writeNext(g); }}>
+                    {nextBusy === g.key ? "AI đang viết…" : `✍️ Viết Tập ${g.nextEpisode}`}
+                  </button>
+                )}
               </summary>
               {view === "grid" ? (
                 <div className="qt-posts__savedgrid">{g.eps.map(savedCard)}</div>

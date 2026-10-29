@@ -117,6 +117,9 @@ def _decorate(items: list[Schedule]) -> list[dict[str, Any]]:
                     thumbs[bid] = d["mediaId"]
         if channel_ids:
             channels = {c.id: c for c in s.exec(select(Channel).where(Channel.id.in_(channel_ids))).all()}  # type: ignore[union-attr]
+    # The Page token lives in the central store (Neon, ~0.15 s a read): once per channel, not once per slot
+    # (13 slots made every calendar call ~2 s, 29/10).
+    connected = {cid: bool(c.fb_page_id and facebook_publish.get_token(cid)) for cid, c in channels.items()}
     out = []
     for sc in items:
         title, thumb = "", None
@@ -132,7 +135,7 @@ def _decorate(items: list[Schedule]) -> list[dict[str, Any]]:
         ch = channels.get(sc.channel_id) if sc.channel_id else None
         out.append(row(sc, title=title, thumb=thumb, channel=ch.name if ch else "",
                        platforms=list(ch.platforms or []) if ch else [],
-                       fb_connected=bool(ch and ch.fb_page_id and facebook_publish.get_token(ch.id))))
+                       fb_connected=bool(ch and connected.get(ch.id))))
     return out
 
 

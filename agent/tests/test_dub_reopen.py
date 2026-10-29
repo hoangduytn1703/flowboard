@@ -170,3 +170,12 @@ def test_deleting_from_the_list_keeps_the_video_and_the_clip(client, media_dir):
         assert s.get(Board, job.board_id) is not None
     # …and the project still comes back when it is asked for (dropping the video in, the clip's step-5 link)
     assert dub.find_job(job.id) is not None
+
+
+def test_a_job_cut_off_by_a_restart_keeps_its_translation(tmp_path):
+    """Translated, then the agent restarted mid-voice: the job opens for "Xuất lại" instead of "start over"."""
+    seg = {"start": 0.0, "end": 2.0, "src": "你好", "text": "Xin chào"}
+    job = dub._job_from_dict({"job_id": "abc", "status": "rendering", "segments": [seg]}, tmp_path, 0)
+    assert job.status == "error" and "bản dịch vẫn còn" in job.error and len(job.segments) == 1
+    bare = dub._job_from_dict({"job_id": "abd", "status": "running"}, tmp_path, 0)
+    assert "làm lại từ link" in bare.error

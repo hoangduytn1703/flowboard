@@ -49,9 +49,10 @@ export function FormatPicker({ value, onChange, target, compact = false }: {
                 title={checking ? "Đang kiểm tra video…" : reelOff ? chk?.reason ?? "" : "Reel: hiện ở mục Reels của page"}>🎬 Reel</button>
       </div>
       {reelOff && chk?.reason && <small className="qt-fbformat__why">{chk.reason}</small>}
-      {!reelOff && value === "reel" && chk?.warning && <small className="qt-fbformat__why">{chk.warning}</small>}
-      {!compact && !reelOff && value === "reel" && !chk?.warning && (
-        <small className="qt-fbformat__hint">Reel hiện ở mục Reels của page (nên dùng video dọc). Caption + hashtag thành mô tả Reel.</small>
+      {!compact && !reelOff && (
+        <small className="qt-fbformat__hint">{value === "reel"
+          ? "Reel: video toàn màn hình ở mục Reels của page — chữ bài là chú thích ngắn (AI viết 1–3 dòng), hashtag giữ nguyên."
+          : "Bài viết: bài đăng thường trên trang, video nằm dưới nội dung bài."}</small>
       )}
     </div>
   );

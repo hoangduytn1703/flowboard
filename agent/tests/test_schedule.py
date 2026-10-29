@@ -394,7 +394,7 @@ def test_what_can_be_a_reel(tmp_path):
     assert "ít nhất 3 giây" in facebook_publish.reel_problem(make("short.mp4", "540x960", 1))
     # the Facebook app takes long Reels (a 3:00 one posted by hand): longer than the API's 90 s only warns
     long = make("long.mp4", "540x960", 95)
-    assert facebook_publish.reel_problem(long) is None and "tối đa 90 giây" in facebook_publish.reel_warning(long)
+    assert facebook_publish.reel_problem(long) is None and facebook_publish.reel_warning(long) is None  # long Reels are accepted
     assert "ngang hơn 16:9" in facebook_publish.reel_warning(make("wide.mp4", "1280x480", 4))
     assert "nhỏ hơn chuẩn Reel" in facebook_publish.reel_warning(make("tiny.mp4", "360x640", 4))
 

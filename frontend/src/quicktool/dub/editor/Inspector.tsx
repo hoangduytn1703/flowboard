@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import {
-  DEFAULT_BLUR, DEFAULT_LAYOUT, emphasisY, HL_Y_MAX, HL_Y_MIN,
+  DEFAULT_BLUR, DEFAULT_LAYOUT, emphasisY, HL_Y_MAX, HL_Y_MIN, layoutBlurs, MAX_BLURS, withBlurs,
   type DubBlur, type DubEngine, type DubHighlights, type DubLayout, type DubStatus,
 } from "../../../api/dub";
 import { ChannelPicker } from "../../channels/ChannelPicker";
@@ -110,16 +110,31 @@ export function Inspector({
     if (patch.w !== undefined) out.w = patch.w === null ? null : clamp(patch.w, W_MIN, W_MAX);
     onGeom(out, key);
   };
-  const blur = layout.blur ?? null;
-  const setBlur = (patch: Partial<DubBlur> | null, key: string) => {
-    if (patch === null) { onLayout({ ...layout, blur: null }); return; }
-    const b = { ...(blur ?? DEFAULT_BLUR), ...patch };
+  // several blur boxes: the panel edits the one selected on the picture (the first one otherwise)
+  const blurs = layoutBlurs(layout);
+  const bi = selected?.kind === "blur" ? Math.min(selected.i, blurs.length - 1) : 0;
+  const blur = blurs[bi] ?? null;
+  const setBlur = (patch: Partial<DubBlur>, key: string) => {
+    if (!blur) return;
+    const b = { ...blur, ...patch };
     b.x = clamp(b.x, 0, 0.95);
     b.y = clamp(b.y, 0, 0.97);
     b.w = clamp(b.w, 0.05, 1 - b.x);
     b.h = clamp(b.h, 0.02, 1 - b.y);
     b.amount = clamp(Math.round(b.amount), 1, 10);
-    onLayout({ ...layout, blur: b }, key);
+    onLayout(withBlurs(layout, blurs.map((x, k) => (k === bi ? b : x))), key ? `${key}-${bi}` : undefined);
+  };
+  const addBlur = () => {
+    if (blurs.length >= MAX_BLURS) return;
+    // a new box under the last one (or at the top when there is no room), same width and blur
+    const last = blurs[blurs.length - 1];
+    const nb = last ? { ...last, y: last.y + last.h + 0.03 + last.h <= 0.97 ? last.y + last.h + 0.03 : 0.08 } : { ...DEFAULT_BLUR };
+    onLayout(withBlurs(layout, [...blurs, nb]));
+    onSelect({ kind: "blur", i: blurs.length });
+  };
+  const removeBlur = (i: number) => {
+    onLayout(withBlurs(layout, blurs.filter((_, k) => k !== i)));
+    onSelect(blurs.length > 1 ? { kind: "blur", i: Math.max(0, i - 1) } : null);
   };
   const engineStyles = out.engine === "remotion" ? status.remotion_styles ?? [] : status.styles;
 
@@ -252,31 +267,62 @@ export function Inspector({
 
         {tab === "blur" && (
           <section className="dx-insp__sec">
-            <label className="qt-check">
-              <input type="checkbox" checked={!!blur} disabled={readOnly} onChange={(e) => setBlur(e.target.checked ? {} : null, "")} /> Làm mờ nhẹ chữ gốc in sẵn trên video
-            </label>
-            <p className="dx-insp__tip">Vùng mờ là ô viền xanh trên video: kéo để dời, kéo góc dưới phải để đổi cỡ. Áp cho cả clip.</p>
+            <p className="dx-insp__tip">Mỗi vùng mờ là một ô viền xanh trên video: kéo để dời, kéo góc dưới phải để đổi cỡ. Video gốc có chữ ở nhiều chỗ
+              thì thêm nhiều vùng (tối đa {MAX_BLURS}). Vùng mờ áp cho cả clip.</p>
+            {blurs.length > 0 ? (
+              <ol className="dx-insp__blurs">
+                {blurs.map((b, k) => (
+                  <li key={k} className={k === bi && blur ? "is-on" : ""}>
+                    <button type="button" className="dx-insp__blurpick" onClick={() => onSelect({ kind: "blur", i: k })}>
+                      <strong>Vùng {k + 1}</strong>
+                      <small>dọc {pct(b.y)}–{pct(Math.min(1, b.y + b.h))} · rộng {pct(b.w)} · mờ {b.amount}/10</small>
+                    </button>
+                    <button type="button" className="qt-btn qt-btn--small qt-btn--danger" disabled={readOnly} title={`Bỏ vùng ${k + 1}`}
+                            onClick={() => removeBlur(k)}>🗑</button>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="dx-insp__empty">Chưa có vùng mờ nào.</p>
+            )}
+            <div className="qt-post__actions">
+              <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={readOnly || blurs.length >= MAX_BLURS} onClick={addBlur}>
+                ＋ Thêm vùng mờ
+              </button>
+              {onDetect && (
+                <button type="button" className="qt-btn qt-btn--small" disabled={detecting || readOnly || blurs.length >= MAX_BLURS} onClick={onDetect}
+                        title="Đọc chữ trên video gốc (OCR) và đặt một vùng mờ cho mỗi dải chữ tìm thấy">
+                  {detecting ? "Đang tìm chữ gốc…" : "🔍 Tự tìm chữ gốc (OCR)"}
+                </button>
+              )}
+              {blurs.length > 1 && (
+                <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" disabled={readOnly}
+                        onClick={() => { onLayout(withBlurs(layout, [])); onSelect(null); }}>Bỏ hết</button>
+              )}
+            </div>
             {blur && (
               <>
+                <h4 className="dx-insp__h">Vùng {bi + 1}</h4>
                 <div className="dx-insp__row2">
                   <label className="qt-field"><span>Cao <small>{pct(blur.h)}</small></span>
                     <input type="range" min={0.02} max={0.4} step={0.005} value={blur.h} disabled={readOnly} onChange={(e) => setBlur({ h: Number(e.target.value) }, "blur-h")} /></label>
                   <label className="qt-field"><span>Rộng <small>{pct(blur.w)}</small></span>
-                    <input type="range" min={0.1} max={1} step={0.01} value={blur.w} disabled={readOnly} onChange={(e) => setBlur({ w: Number(e.target.value) }, "blur-w")} /></label>
+                    <input type="range" min={0.05} max={1} step={0.01} value={blur.w} disabled={readOnly} onChange={(e) => setBlur({ w: Number(e.target.value) }, "blur-w")} /></label>
                   <label className="qt-field"><span>Vị trí dọc <small>{pct(blur.y)}</small></span>
                     <input type="range" min={0} max={0.97} step={0.005} value={blur.y} disabled={readOnly} onChange={(e) => setBlur({ y: Number(e.target.value) }, "blur-y")} /></label>
+                  <label className="qt-field"><span>Vị trí ngang <small>{pct(blur.x)}</small></span>
+                    <input type="range" min={0} max={0.95} step={0.005} value={blur.x} disabled={readOnly} onChange={(e) => setBlur({ x: Number(e.target.value) }, "blur-x")} /></label>
                   <label className="qt-field"><span>Độ mờ <small>{blur.amount}/10</small></span>
                     <input type="range" min={1} max={10} step={1} value={blur.amount} disabled={readOnly} onChange={(e) => setBlur({ amount: Number(e.target.value) }, "blur-a")} /></label>
                 </div>
                 <div className="qt-post__actions">
-                  {onDetect && (
-                    <button type="button" className="qt-btn qt-btn--small" disabled={detecting || readOnly} onClick={onDetect}>
-                      {detecting ? "Đang tìm chữ gốc…" : "🔍 Tự tìm chữ gốc (OCR)"}
-                    </button>
-                  )}
                   <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" disabled={readOnly} onClick={() => setBlur({ x: 0.05, w: 0.9 }, "")}>Rộng gần hết khung</button>
                   <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" disabled={readOnly}
                           onClick={() => setBlur({ y: Math.max(0, layout.y - blur.h - 0.09) }, "")}>Đặt ngay trên phụ đề</button>
+                  {blurs.length > 1 && (
+                    <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" disabled={readOnly}
+                            onClick={() => onLayout(withBlurs(layout, blurs.map((x) => ({ ...x, amount: blur.amount }))))}>Độ mờ này cho mọi vùng</button>
+                  )}
                 </div>
               </>
             )}

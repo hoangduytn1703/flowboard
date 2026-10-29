@@ -28,6 +28,14 @@ export interface DubBlurSpec {
   amount: number;
 }
 
+/** "Khung xuất": the output format the source is fitted into (services/dub.canvas_filter). The composition's
+ * width / height are already the format's; this says how the source fills it. */
+export interface DubCanvasSpec {
+  aspect: string;
+  fit: "blur" | "black" | "crop";
+  pos: number;
+}
+
 export interface DubFrameSpec {
   scale: number;
   bg: "blur" | "color" | "image";
@@ -65,6 +73,9 @@ export interface DubLayoutSpec {
   /** subtitle box width, fraction of the frame width (null = automatic, up to 88 %) */
   w?: number | null;
   blur?: DubBlurSpec | null;
+  /** several boxes (a layout saved before 29/10 has only ``blur``) */
+  blurs?: DubBlurSpec[];
+  canvas?: DubCanvasSpec | null;
   frame?: DubFrameSpec | null;
   mascot?: DubMascotSpec | null;
 }
@@ -184,7 +195,22 @@ export const DubSubtitles: React.FC<DubSubtitlesProps> = ({ src, width, height, 
   const zoomCss: React.CSSProperties = zoom > 1 ? { transform: `scale(${zoom.toFixed(4)})`, transformOrigin: "50% 50%" } : {};
   const lay = cue?.look ? { ...layout, ...cue.look } : layout;
   const fontPx = height * 0.036 * (lay.scale || 1);
-  const blur = layout.blur ?? null;
+  const blurs = layout.blurs ?? (layout.blur ? [layout.blur] : []);
+  const canvas = layout.canvas ?? null;
+  // the source in the output format: cropped to fill, or whole (contain) over black bars / a blurred copy of itself
+  const fitCss: React.CSSProperties = canvas
+    ? (canvas.fit === "crop" ? { objectFit: "cover", objectPosition: `${canvas.pos * 100}% ${canvas.pos * 100}%` } : { objectFit: "contain" })
+    : {};
+  const picture = (fill: "contain" | "fill") => (
+    <>
+      {canvas?.fit === "blur" && (
+        <OffthreadVideo src={src} muted style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover",
+                                                filter: `blur(${Math.round(Math.min(width, height) / 30)}px)`, transform: "scale(1.08)" }} />
+      )}
+      <OffthreadVideo src={src} muted={muted}
+                      style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: fill, ...fitCss, ...zoomCss }} />
+    </>
+  );
 
   // a short fade so the box does not pop
   // (a cue shorter than 0.2 s would put the fade points out of order — interpolate throws; seen 28/10)
@@ -208,13 +234,15 @@ export const DubSubtitles: React.FC<DubSubtitlesProps> = ({ src, width, height, 
             position: "absolute", left: `${(1 - layout.frame.scale) * 50}%`, top: `${(1 - layout.frame.scale) * 50}%`,
             width: `${layout.frame.scale * 100}%`, height: `${layout.frame.scale * 100}%`, overflow: "hidden",
             boxShadow: layout.frame.border > 0 ? `0 0 0 ${Math.round(height * layout.frame.border)}px ${layout.frame.border_color}` : undefined,
+            background: canvas?.fit === "black" ? "#000" : undefined,
           }}>
-            <OffthreadVideo src={src} muted={muted} style={{ width: "100%", height: "100%", objectFit: "fill", ...zoomCss }} />
+            {picture("fill")}
           </div>
         </>
-      ) : <OffthreadVideo src={src} muted={muted} style={{ width: "100%", height: "100%", objectFit: "contain", ...zoomCss }} />}
-      {blur && (
+      ) : picture("contain")}
+      {blurs.map((blur, i) => (
         <div
+          key={i}
           style={{
             position: "absolute", left: `${blur.x * 100}%`, top: `${blur.y * 100}%`, width: `${blur.w * 100}%`, height: `${blur.h * 100}%`,
             backdropFilter: `blur(${Math.max(1, blur.amount * (height / 1280) * 1.6)}px)`,
@@ -222,7 +250,7 @@ export const DubSubtitles: React.FC<DubSubtitlesProps> = ({ src, width, height, 
             borderRadius: height * 0.008,
           }}
         />
-      )}
+      ))}
       {layout.mascot && mascotSrc && (() => {
         const m = layout.mascot;
         const px = Math.round(height * m.size);

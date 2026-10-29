@@ -174,6 +174,11 @@ SUBTITLE_MAX_CHARS = 34
 ATTEMPTS = 10
 
 
+def edge_attempt_timeout(text: str) -> float:
+    """How long one Edge call may take before it counts as hung: a normal line streams in 1–3 s."""
+    return min(60.0, 20.0 + len(text) / 20)
+
+
 class TTSError(RuntimeError):
     pass
 
@@ -441,7 +446,7 @@ async def synthesize(text: str, voice: str = DEFAULT_VOICE, rate: int = 0,
     for attempt in range(ATTEMPTS):
         audio.clear()
         words.clear()
-        try:
+        async def read() -> None:
             communicate = edge_tts.Communicate(text, voice, rate=_rate_arg(rate), boundary="WordBoundary")
             async for chunk in communicate.stream():
                 if chunk["type"] == "audio":
@@ -449,9 +454,16 @@ async def synthesize(text: str, voice: str = DEFAULT_VOICE, rate: int = 0,
                 elif chunk["type"] == "WordBoundary":
                     start = chunk["offset"] / 1e7
                     words.append(Word(start, start + chunk["duration"] / 1e7, chunk["text"]))
+
+        try:
+            # A dropped connection can leave the stream waiting forever (seen 29/10: 8 lines hung for good
+            # at 71 % of a dub job) — each attempt gets a deadline and counts as a failed try past it.
+            await asyncio.wait_for(read(), timeout=edge_attempt_timeout(text))
             if audio:
                 break
             last_error = TTSError("edge-tts returned no audio")
+        except asyncio.TimeoutError:
+            last_error = TTSError(f"edge-tts không trả lời sau {edge_attempt_timeout(text):.0f} s")
         except Exception as exc:  # noqa: BLE001 — network / service errors, reported as one kind
             last_error = exc
         logger.info("tts: attempt %d/%d failed (%s); retrying", attempt + 1, ATTEMPTS, last_error)

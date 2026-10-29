@@ -85,7 +85,10 @@ def build_spec(*, src: Path, out: Path, cues: list[tuple], layout: dict[str, Any
             "cues": [_cue(c) for c in cues if c[2].strip()],
             "layout": {"x": layout.get("x", 0.5), "y": layout.get("y", 0.8), "scale": layout.get("scale", 1.0), "w": layout.get("w"),
                        "blur": layout.get("blur") or None, "frame": layout.get("frame") or None,
-                       "mascot": layout.get("mascot") or None},
+                       "mascot": layout.get("mascot") or None,
+                       # several blur boxes + the output format (width / height above are already the format's)
+                       "blurs": list(layout.get("blurs") or ([layout["blur"]] if layout.get("blur") else [])),
+                       "canvas": layout.get("canvas") or None},
             "style": style,
             "muted": False,
             "highlights": highlights,

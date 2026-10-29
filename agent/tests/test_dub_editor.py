@@ -230,3 +230,25 @@ def test_voice_pieces_lose_the_silence_edge_pads_them_with(tmp_path, monkeypatch
     job.voice = next(v for v in tts.VOICES if tts.voice_kind(v) == "gemini")
     pieces = dub._voice_pieces(job)
     assert all(0.95 < d < 1.05 for _, _, d in pieces), pieces
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg")
+def test_a_long_video_lays_out_its_voice_in_parts_with_the_same_timing(tmp_path, monkeypatch):
+    """Hundreds of lines in one ffmpeg call overflow the Windows command line (WinError 206, 29/10):
+    the track is built TIMELINE_CHUNK pieces at a time and must land every piece where one call would."""
+    ffmpeg = shutil.which("ffmpeg")
+    pieces = []
+    for i in range(20):
+        wav = tmp_path / f"p{i}.wav"
+        subprocess.run([ffmpeg, "-y", "-v", "error", "-f", "lavfi", "-i", f"sine=frequency={300 + 20 * i}:duration=0.4",
+                        "-ar", "48000", "-ac", "1", "-c:a", "pcm_s16le", str(wav)], check=True)
+        # every 4th line runs long and pushes the next one later
+        pieces.append((i * 0.5, wav, 0.4 if i % 4 else 0.7))
+    pieces = [(s, w, 0.4) if d == 0.4 else (s, w, d) for s, w, d in pieces]
+    whole = dub._timeline_wav(ffmpeg, pieces, 11.0, tmp_path / "whole.wav")
+    monkeypatch.setattr(dub, "TIMELINE_CHUNK", 6)
+    parted = dub._timeline_wav(ffmpeg, pieces, 11.0, tmp_path / "parted.wav")
+    assert parted == whole
+    assert not list(tmp_path.glob("parted.part*.wav"))  # part files cleaned up
+    from flowboard.services import tts
+    assert abs(tts._probe_duration(tmp_path / "parted.wav") - tts._probe_duration(tmp_path / "whole.wav")) < 0.05

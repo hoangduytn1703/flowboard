@@ -198,10 +198,20 @@ def _series_block(series: Optional[dict], kind: Optional[str] = None) -> str:
     return "\n".join(lines)
 
 
+#: "Đăng dạng: 🎬 Reel" — the text is a Reel caption, not a feed post (wins over Length / Layout)
+REEL_CAPTION = ("REEL CAPTION (wins over Length and Layout below): this text is the caption of a Facebook REEL — shown in two lines "
+                "over a full-screen vertical video, the rest behind \"…xem thêm\". Write 1–3 short lines (under ~220 characters in all): "
+                "a first line that makes people keep watching / tap \"xem thêm\", one line of the key point, then the call to action if "
+                "one is asked; no headings, no lists, no long story — the video tells it. Hashtags as usual (3–6). The title stays short.")
+
+
 def _brief_block(brief: dict, platform: str) -> str:
     kind = brief.get("kind") if brief.get("kind") in POST_TYPES else "discussion"
     out = [f"POST TYPE: {POST_TYPES[kind][0]} — {POST_TYPES[kind][1]}",
            f"PLATFORM FORMAT (wins over the length below when they conflict): {platform_style(platform)}"]
+    if brief.get("fb_format") == "reel":
+        # the post goes out as a Facebook Reel: its text is the Reel's caption, read under a full-screen video
+        out.append(REEL_CAPTION)
     if brief.get("topic"):
         out.append(f"Main idea from the seller: {str(brief['topic'])[:600]}")
     if brief.get("audience"):

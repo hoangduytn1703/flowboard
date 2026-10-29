@@ -206,10 +206,8 @@ def reel_warning(video: Path) -> Optional[str]:
     info = probe_clip(video)
     if info is None:
         return None
+    # Length is not checked: the API docs say 90 s, but a 10:51 Reel was accepted on 29/10 — Facebook decides.
     notes = []
-    if info.duration > REEL_MAX_S + 0.5:
-        mins = f"{int(info.duration // 60)}:{int(info.duration % 60):02d}"
-        notes.append(f"video dài {mins}, tài liệu API của Facebook ghi Reel tối đa {REEL_MAX_S:g} giây (app Facebook thì cho dài hơn)")
     if info.width / max(1, info.height) > 16 / 9 + 0.01:
         notes.append("video ngang hơn 16:9")
     if min(info.width, info.height) < REEL_MIN_SIDE:

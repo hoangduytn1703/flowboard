@@ -112,3 +112,8 @@
 .qt-fbformat__hint { line-height: 1.45; }
 .qt-fbformat--compact { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 6px; }
 .qt-fbformat--compact .qt-fbformat__why { flex-basis: 100%; }
+
+/* "🚀 Đăng ngay" (ScheduleDialog mode="now") */
+.qt-sched-dialog__caption { margin: 4px 0 0; padding: 8px 10px; max-height: 150px; overflow: auto; white-space: pre-wrap; font-size: 13.5px; line-height: 1.45;
+  border: 1px solid var(--border); border-radius: 8px; background: rgba(255, 255, 255, 0.03); }
+.qt-sched-dialog__done { margin: 0; color: #4ade80; font-weight: 600; }
