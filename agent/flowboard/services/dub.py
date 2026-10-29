@@ -1567,6 +1567,8 @@ def start_job(*, url: Optional[str], source_media_id: Optional[str], voice: str,
 # ── queue: one video at a time (Whisper / spleeter share the GPU), up to MAX_QUEUE waiting
 MAX_QUEUE = 5
 _LOOP: Optional[asyncio.AbstractEventLoop] = None
+#: called when nobody waits in the queue (the link library's feeder, services/dub_links) — it may start a job
+FEEDER: Optional[Callable[[], None]] = None
 
 
 def queued_jobs() -> list[Job]:
@@ -1585,6 +1587,8 @@ def _pump() -> None:
         _LOOP = asyncio.get_running_loop()
     except RuntimeError:
         pass  # worker thread: reuse the loop remembered from the request
+    if FEEDER is not None and not queued_jobs():
+        FEEDER()  # may start_job → _pump again (re-entrant: the queue is no longer empty, so no loop)
     waiting = queued_jobs()
     if running_job() is not None or not waiting:
         for i, j in enumerate(waiting):

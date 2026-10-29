@@ -15,6 +15,7 @@ In-page operations (an AI write, a link read, a page review…) come from
 
 Sources:
 - dubbing jobs (``services/dub``: queued / running / rendering) → ``/tools/dub?job=<id>``
+- links waiting in the dubbing link library (``services/dub_links``) → ``/tools/dub?links=1``
 - AI subtitle-erase jobs (``services/video_clean``) → ``/tools/clean?job=<id>``
 - Edit auto CapCut jobs (``services/capcut_auto``) → ``/tools/capcut?job=<id>``
 - Flow work in the request queue (images, videos, joins), grouped per clip
@@ -77,6 +78,17 @@ def _dub_items() -> list[dict[str, Any]]:
             "link": f"/tools/dub?job={j.id}" + (f"&batch={j.batch_id}" if j.batch_id else ""),
         })
     return out
+
+
+def _dub_link_items() -> list[dict[str, Any]]:
+    """Links waiting in the dubbing link library (they start one by one as the dub queue frees up)."""
+    from flowboard.services import dub_links
+
+    n = dub_links.waiting_count()
+    if not n:
+        return []
+    return [{"key": "dublinks:queue", "kind": "dub", "title": "Thư viện link lồng tiếng",
+             "detail": f"{n} link chờ đến lượt", "progress": None, "started_at": None, "link": "/tools/dub?links=1"}]
 
 
 def _clean_items() -> list[dict[str, Any]]:
@@ -158,7 +170,7 @@ def _flow_items() -> list[dict[str, Any]]:
 @router.get("")
 def running() -> dict[str, Any]:
     items: list[dict[str, Any]] = []
-    for source in (_dub_items, _clean_items, _capcut_items, _flow_items, _op_items):
+    for source in (_dub_items, _dub_link_items, _clean_items, _capcut_items, _flow_items, _op_items):
         try:
             items += source()
         except Exception:  # noqa: BLE001 — one broken source must not hide the others
@@ -192,6 +204,8 @@ def outcome(key: str = Query(..., max_length=80)) -> dict[str, Any]:
         if j.status == "review":
             return {"ok": True, "message": "Đã dịch xong — chờ bạn xem lại rồi render"}
         return {"ok": True, "message": "Đã xong — bấm để xem kết quả"}
+    if kind == "dublinks":
+        return {"ok": True, "message": "Đã đưa hết link trong thư viện vào lồng tiếng"}
     if kind == "clean":
         from flowboard.services import video_clean
 

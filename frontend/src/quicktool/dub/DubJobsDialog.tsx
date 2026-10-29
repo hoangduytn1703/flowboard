@@ -63,7 +63,7 @@ function StatePill({ j }: { j: DubJob }) {
 }
 
 /** Page numbers with gaps: 1 … 4 5 6 … 12. */
-function pageList(current: number, pages: number): (number | "gap")[] {
+export function pageList(current: number, pages: number): (number | "gap")[] {
   if (pages <= 7) return Array.from({ length: pages }, (_, i) => i + 1);
   const keep = new Set([1, pages, current - 1, current, current + 1]);
   const out: (number | "gap")[] = [];

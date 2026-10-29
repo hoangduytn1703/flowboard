@@ -438,3 +438,82 @@ export function fmtClock(s: number): string {
   const r = s - m * 60;
   return `${m}:${r.toFixed(1).padStart(4, "0")}`;
 }
+
+// ── "📚 Thư viện link": links imported from .txt / .md files, queued for dubbing ──
+
+/** new = never dubbed · waiting = in the library queue · running = its dub job works · review / done / error = that job's state ·
+ * other = not a link the dub download takes (listed only) */
+export type DubLinkStatus = "new" | "waiting" | "running" | "review" | "done" | "error" | "other";
+
+export interface DubLinkJob {
+  job_id: string | null;
+  status: string;
+  phase: string;
+  progress: number;
+  title: string;
+  board_id: number | null;
+  error: string | null;
+}
+
+export interface DubLink {
+  id: number;
+  url: string;
+  /** markdown link text or the rest of the line (a Douyin share's title) */
+  label: string;
+  /** the file it came from */
+  source: string;
+  /** a site the dub download takes (TikTok / Douyin / YouTube / Instagram / Facebook / X); others are listed only */
+  video: boolean;
+  status: DubLinkStatus;
+  queued: boolean;
+  imported_at: string | null;
+  /** the dub job / dubbed clip of this video that tells the status */
+  job: DubLinkJob | null;
+  /** how many times this video was dubbed */
+  done_count: number;
+  error: string | null;
+}
+
+export interface DubLinkLibrary {
+  links: DubLink[];
+  counts: Partial<Record<DubLinkStatus, number>>;
+  total: number;
+}
+
+export function listDubLinks(): Promise<DubLinkLibrary> {
+  return api<DubLinkLibrary>("/api/dub/links");
+}
+
+export function importDubLinks(files: { name: string; text: string }[]): Promise<{
+  found: number; added: number[]; existing: number[]; files: { name: string; links: number }[];
+}> {
+  return post("/api/dub/links/import", { files });
+}
+
+export interface DubLinkQueue {
+  ids: number[];
+  voice: string;
+  keep_bgm: boolean;
+  style: string;
+  engine: DubEngine;
+  channel_id: number | null;
+  auto_render: boolean;
+  look_preset_id: number | null;
+}
+
+export function queueDubLinks(body: DubLinkQueue): Promise<{ queued: number; skipped: { id: number; reason: string }[]; started: string | null }> {
+  return post("/api/dub/links/queue", body);
+}
+
+export function unqueueDubLinks(ids: number[]): Promise<{ unqueued: number }> {
+  return post("/api/dub/links/unqueue", { ids });
+}
+
+export function deleteDubLinks(ids: number[]): Promise<{ deleted: number }> {
+  return post("/api/dub/links/delete", { ids });
+}
+
+/** .txt / .md (or any plain text file) — the library only reads links out of them */
+export function isTextFile(f: File): boolean {
+  return /\.(txt|md|markdown|text|csv)$/i.test(f.name) || f.type.startsWith("text/");
+}

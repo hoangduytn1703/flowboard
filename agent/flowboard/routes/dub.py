@@ -17,7 +17,7 @@ from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from flowboard.services import dub, dub_remotion, tts
+from flowboard.services import dub, dub_links, dub_remotion, tts
 
 router = APIRouter(prefix="/api/dub", tags=["dub"])
 
@@ -497,3 +497,70 @@ def stop(job_id: str) -> dict[str, Any]:
     if job.status in ("queued", "running", "rendering"):
         job.stop = True
     return job.public()
+
+
+# ── "📚 Thư viện link": links imported from .txt / .md files, queued for dubbing (services/dub_links) ──
+
+class LinkFile(BaseModel):
+    name: str = Field(default="", max_length=200)
+    text: str = Field(default="", max_length=dub_links.MAX_TEXT_CHARS)
+
+
+class LinkImportBody(BaseModel):
+    files: list[LinkFile] = Field(min_length=1, max_length=dub_links.MAX_FILES)
+
+
+class LinkIdsBody(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=2000)
+
+
+class LinkQueueBody(LinkIdsBody):
+    voice: str = tts.DEFAULT_VOICE
+    keep_bgm: bool = False
+    style: str = "box_yellow"
+    engine: str = "ass"
+    channel_id: Optional[int] = None
+    auto_render: bool = True
+    look_preset_id: Optional[int] = None
+
+
+@router.get("/links")
+def list_links() -> dict[str, Any]:
+    """Every library link with what it has become (new / waiting / running / review / done / error)."""
+    dub_links.feed_quietly()  # after a restart the queue picks up again as soon as the library is looked at
+    return dub_links.library()
+
+
+@router.post("/links/import")
+def import_links(body: LinkImportBody) -> dict[str, Any]:
+    try:
+        return dub_links.import_texts([f.model_dump() for f in body.files])
+    except dub_links.LinkError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/links/queue")
+def queue_links(body: LinkQueueBody) -> dict[str, Any]:
+    """Queue links for dubbing with these options; they start one after another (one waits while one runs)."""
+    look = _look_preset(body.look_preset_id)
+    try:
+        engine = dub._check_engine(look["engine"] if look else body.engine)
+        options: dict[str, Any] = {"voice": body.voice, "keep_bgm": body.keep_bgm, "engine": engine,
+                                   "style": dub._style_for(engine, look["style"] if look else body.style),
+                                   "channel_id": body.channel_id, "auto_render": body.auto_render}
+        if look:
+            options["layout"], options["highlights"] = look["layout"], look["highlights"]
+        return dub_links.queue(body.ids, options)
+    except (dub_links.LinkError, dub.DubError) as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/links/unqueue")
+def unqueue_links(body: LinkIdsBody) -> dict[str, Any]:
+    return {"unqueued": dub_links.unqueue(body.ids)}
+
+
+@router.post("/links/delete")
+def delete_links(body: LinkIdsBody) -> dict[str, Any]:
+    """Out of the library only — the dubbed videos and clips made from these links stay."""
+    return {"deleted": dub_links.delete(body.ids)}

@@ -3,11 +3,13 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { announceRunning } from "../../components/BackgroundTasks";
 import {
   getDefaultLook, listLookPresets, type DecorPreset,
-  deleteDubJobs, getDubJob, getDubStatus, identifyVideo, linksIn, listDubBatch, listDubJobsBrief, renderDub, startDub, stopDub,
+  deleteDubJobs, getDubJob, getDubStatus, identifyVideo, isTextFile, linksIn, listDubBatch, listDubJobsBrief, listDubLinks, renderDub, startDub, stopDub,
   uploadDubVideo, type DubJob, type DubStatus, type IdentifyResult,
 } from "../../api/dub";
 import { DubEditor, type BatchLook } from "../dub/editor/DubEditor";
 import { DubJobsDialog, jobTitle } from "../dub/DubJobsDialog";
+import { DubLinksDialog } from "../dub/DubLinksDialog";
+import { VOICES } from "../../api/client";
 import type { DubEngine } from "../../api/dub";
 import { toast } from "../../store/toast";
 import { ChannelPicker } from "../channels/ChannelPicker";
@@ -65,6 +67,11 @@ export function DubPage() {
   // every saved job, brief (no lines), newest first: the card shows RECENT_SHOWN, "Xem tất cả" the rest in a dialog
   const [recent, setRecent] = useState<DubJob[]>([]);
   const [allOpen, setAllOpen] = useState(false);
+  // "📚 Thư viện link": links read out of .txt / .md files, each one dubbed or not yet; queued from the dialog
+  const [linksOpen, setLinksOpen] = useState(false);
+  const [linkFiles, setLinkFiles] = useState<File[] | null>(null);
+  const [linksTodo, setLinksTodo] = useState(0);
+  const refreshLinkCount = () => void listDubLinks().then((l) => setLinksTodo(l.counts.new ?? 0)).catch(() => undefined);
   const fileInput = useRef<HTMLInputElement>(null);
   // 📂 reopen a video this tool made: drop it on the page or pick it in the box
   const reopenInput = useRef<HTMLInputElement>(null);
@@ -79,7 +86,19 @@ export function DubPage() {
     void getDubStatus().then((s) => { setStatus(s); if (!s.separate) setKeepBgm(false); })
       .catch((e) => { toast.error(errMessage(e)); setStatus({ available: false, reason: errMessage(e), root: "", ytdlp: false, whisper: false, separate: false, styles: [], max_minutes: 30, remotion: false }); });
   }, []);
-  useEffect(() => { refreshRecent(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { refreshRecent(); refreshLinkCount(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // /tools/dub?links=1 (the "đang chạy" badge for links waiting in the library) opens the library
+  useEffect(() => { if (searchParams.get("links")) setLinksOpen(true); }, [searchParams]);
+  function closeLinks() {
+    setLinksOpen(false);
+    setLinkFiles(null);
+    refreshLinkCount();
+    if (searchParams.get("links")) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("links");
+      setSearchParams(next, { replace: true });
+    }
+  }
 
   // Keep "Gần đây" fresh while any job there still works (the queue advances on its own).
   const anyWorking = recent.some((j) => ["queued", "running", "rendering"].includes(j.status));
@@ -250,7 +269,11 @@ export function DubPage() {
     if (!e.dataTransfer.types.includes("Files")) return;
     e.preventDefault();
     setDragOver(false);
-    const f = e.dataTransfer.files?.[0];
+    const files = [...(e.dataTransfer.files ?? [])];
+    // .txt / .md → their links go into the library; a video → reopen its project
+    const texts = files.filter(isTextFile);
+    if (texts.length) { setLinkFiles(texts); setLinksOpen(true); return; }
+    const f = files[0];
     if (f) void reopenFromFile(f);
   }
 
@@ -351,6 +374,16 @@ export function DubPage() {
   const editing = !!job && canEdit(job) && !batchWorking;
   const batchJobs = batch?.jobs ?? [];
   const batchDone = batchJobs.filter((j) => j.status === "done").length;
+  // what a link queued from the library is dubbed with: this form, summed up in one line
+  const lookName = looks.find((p) => p.id === lookId)?.name;
+  const styleName = styleOptions.find((o) => o.key === style)?.label ?? style;
+  const linkSettings = [
+    (VOICES[voice] ?? voice).split(" · ").filter((x, i, a) => a.indexOf(x) === i).join(" · "),
+    status.separate ? (keepBgm ? "giữ nhạc nền" : "bỏ nhạc nền") : "",
+    lookName ? `mẫu “${lookName}”` : `phụ đề ${styleName}`,
+    review ? "dừng ở bản dịch để xem lại" : "tự xuất video",
+    channelId ? "gắn kênh đã chọn" : "",
+  ].filter(Boolean).join(" · ");
 
   return (
     <>
@@ -362,7 +395,7 @@ export function DubPage() {
            onDragLeave={(e) => { if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false); }}
            onDrop={(e) => { if (!editing) onDropPage(e); }}>
         {dragOver && !editing && (
-          <div className="qt-dub__dropmask"><div>📂 Thả video vào để mở lại và chỉnh tiếp</div></div>
+          <div className="qt-dub__dropmask"><div>📂 Thả video vào để mở lại và chỉnh tiếp<small>hoặc file .txt / .md để lấy link vào thư viện</small></div></div>
         )}
         {editing && job ? (
           <>
@@ -413,9 +446,15 @@ export function DubPage() {
                         {links.length > 1 && <button type="button" className="qt-dub__linkx" title="Bỏ link này" onClick={() => removeRow(i)}>×</button>}
                       </div>
                     ))}
-                    {links.length < MAX_LINKS && (
-                      <button type="button" className="qt-btn qt-btn--small qt-btn--ghost qt-dub__addlink" disabled={starting} onClick={() => addRow()}>＋ Thêm link</button>
-                    )}
+                    <div className="qt-dub__linktools">
+                      {links.length < MAX_LINKS && (
+                        <button type="button" className="qt-btn qt-btn--small qt-btn--ghost qt-dub__addlink" disabled={starting} onClick={() => addRow()}>＋ Thêm link</button>
+                      )}
+                      <button type="button" className="qt-btn qt-btn--small qt-dub__libbtn" disabled={starting} onClick={() => setLinksOpen(true)}
+                              title="Thư viện link: nhập file .txt / .md có link, xem link nào đã lồng tiếng, đưa link chưa làm vào hàng đợi">
+                        📚 Import từ thư viện{linksTodo > 0 && <span className="qt-dub__libcount">{linksTodo} chưa làm</span>}
+                      </button>
+                    </div>
                   </div>
                   {linkList.length > 1 && <small className="qt-card__hint">{linkList.length} video sẽ chạy lần lượt thành một loạt; xong cả loạt mới mở trình chỉnh sửa (chọn clip ở trên, áp kiểu cho cả loạt).</small>}
                 </div>
@@ -562,6 +601,16 @@ export function DubPage() {
         )}
       </div>
       {allOpen && <DubJobsDialog jobs={recent} onOpen={openJobById} onClose={() => setAllOpen(false)} onDelete={removeFromList} />}
+      {linksOpen && (
+        <DubLinksDialog
+          settings={{ voice, keep_bgm: keepBgm && !!status.separate, style, engine, channel_id: channelId, auto_render: !review, look_preset_id: lookId }}
+          settingsLabel={linkSettings} importFiles={linkFiles}
+          onOpenJob={(id) => { closeLinks(); openJobById(id); }}
+          onOpenClip={(boardId) => { closeLinks(); navigate(`/clips/${boardId}/export`); }}
+          onQueued={() => { announceRunning(); refreshRecent(); }}
+          onClose={closeLinks}
+        />
+      )}
     </>
   );
 }

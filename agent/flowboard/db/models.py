@@ -286,6 +286,27 @@ class DecorPreset(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_utcnow)
 
 
+class DubLink(SQLModel, table=True):
+    """A link in the dubbing link library ("📚 Thư viện link"): every link found
+    in a .txt / .md file the seller imported (services/dub_links). ``key`` is
+    the canonical form (``douyin:<id>``, ``youtube:<id>``… or host + path) that
+    matches it to dub jobs made from the same video, however it was written.
+    ``queued`` = waiting in the library queue with the dub ``options`` picked
+    when it was queued; the feeder starts it when the dub queue has room and
+    keeps the ``job_id``. ``create_all`` adds the table."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    url: str
+    key: str = Field(index=True)
+    label: str = ""
+    source: str = ""
+    position: int = 0
+    queued: bool = False
+    queued_at: Optional[datetime] = None
+    options: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    job_id: Optional[str] = None
+    error: Optional[str] = None
+    created_at: datetime = Field(default_factory=_utcnow)
+
 class Swipe(SQLModel, table=True):
     """A post or video that did well somewhere ("Mẫu đang hot"), kept with
     the LLM's breakdown of why — hook, structure, triggers — so the seller

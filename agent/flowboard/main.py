@@ -141,6 +141,11 @@ async def lifespan(app: FastAPI):
         accounts.after_activate.append(_prepare_account_data)
     if account_pool.after_login not in accounts.after_activate:
         accounts.after_activate.append(account_pool.after_login)
+    # "📚 Thư viện link": queued library links start whenever the dub queue has nobody waiting
+    from flowboard.services import dub as dub_service, dub_links
+    dub_service.FEEDER = dub_links.feed_quietly
+    if dub_links.after_login not in accounts.after_activate:
+        accounts.after_activate.append(dub_links.after_login)
     accounts.startup()
     from flowboard.services import file_store
     file_store.install_hooks()
