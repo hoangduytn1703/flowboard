@@ -1,0 +1,3 @@
+# Skills get pasted in on Windows (CRLF): keep them LF in the repo, so a re-paste of an
+# unchanged file never shows up as a whole-file change.
+.claude/skills/** text=auto eol=lf

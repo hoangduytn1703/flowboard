@@ -33,9 +33,24 @@ def main():
 
     if shutil.which("ffmpeg"):
         print("ffmpeg: ✅")
-    else:
-        print("ffmpeg: ❌ chưa có (cần cho kiem_tra.py). Cài bằng: winget install Gyan.FFmpeg  (rồi mở lại cửa sổ dòng lệnh)")
+    elif cai and shutil.which("winget"):
+        print("ffmpeg: đang cài bằng winget…")
+        subprocess.run(["winget", "install", "-e", "--id", "Gyan.FFmpeg", "--accept-source-agreements", "--accept-package-agreements"], check=False)
+        print("ffmpeg: đã cài xong — hãy MỞ LẠI cửa sổ Claude rồi làm tiếp (để máy nhận ffmpeg mới).")
         ok = False
+    else:
+        print("ffmpeg: ❌ chưa có. Chạy: python cai_dat.py --cai  (hoặc: winget install Gyan.FFmpeg), rồi mở lại cửa sổ Claude")
+        ok = False
+
+    for mod, pk in (("PIL", "pillow"), ("numpy", "numpy")):
+        if importlib.util.find_spec(mod):
+            print(f"{pk}: ✅")
+        elif cai:
+            print(f"{pk}: đang cài…")
+            subprocess.run([sys.executable, "-m", "pip", "install", pk], check=False)
+        else:
+            print(f"{pk}: ❌ chưa có (cần cho motion graphic). Chạy: python cai_dat.py --cai")
+            ok = False
 
     if importlib.util.find_spec("faster_whisper"):
         print("faster-whisper: ✅")
