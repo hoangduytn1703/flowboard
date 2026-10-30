@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearch
 import {
   exportsZipUrl,
   getTemplates,
+  clipThumbUrl,
   listBoardSummaries,
   mediaUrl,
   type BoardSummary,
@@ -40,6 +41,7 @@ import { SwipesPage } from "./pages/SwipesPage";
 import { useFlowCredits } from "../components/credits";
 import { AccountSwitchBanner } from "../components/AccountSwitchBanner";
 import { BackgroundTasks } from "../components/BackgroundTasks";
+import { AssistantWidget } from "../components/AssistantWidget";
 import { toast, useToastOn } from "../store/toast";
 import { PageEmpty, PageLoading } from "./PageState";
 
@@ -64,7 +66,7 @@ function stepOf(slug: string | undefined): number | null {
 function useTitle(title: string) {
   useEffect(() => {
     const prev = document.title;
-    document.title = `${title} · Flowboard`;
+    document.title = `${title} · DFlow`;
     return () => { document.title = prev; };
   }, [title]);
 }
@@ -105,6 +107,7 @@ export function QuicktoolApp() {
       <div className="qt-content">
         <AccountSwitchBanner />
         <BackgroundTasks />
+        <AssistantWidget />
         <Routes>
           {/* Static paths first so "new" / "from-video" are never read as a clip id. */}
           <Route path="/clips" element={<Library templates={templates} />} />
@@ -153,6 +156,24 @@ function ProductsPage() {
 }
 
 /** /clips with the dialog routes layered over the clip grid. */
+/** Columns the auto-fill grid shows right now (kept up to date when the window is resized). */
+function useGridColumns(ref: React.RefObject<HTMLElement>): number {
+  const [cols, setCols] = useState(4);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => setCols(Math.max(1, getComputedStyle(el).gridTemplateColumns.split(" ").filter(Boolean).length));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref]);
+  return cols;
+}
+
+/** "Clip của tôi": at most this many rows of cards a page ("Clip mới" counts as one card). */
+const LIBRARY_ROWS = 3;
+
 function Library({ templates }: { templates: BoardTemplate[] }) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
@@ -188,6 +209,14 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
   const productParam = params.get("product");
 
   const list = (summaries ?? []).slice().reverse();
+  // Paged, three rows a page whatever the width: the "Clip mới" card opens every page.
+  const gridRef = useRef<HTMLDivElement>(null);
+  const cols = useGridColumns(gridRef);
+  const perPage = Math.max(1, cols * LIBRARY_ROWS - 1);
+  const [page, setPage] = useState(1);
+  const pages = Math.max(1, Math.ceil(list.length / perPage));
+  const current = Math.min(page, pages);
+  const shown = list.slice((current - 1) * perPage, current * perPage);
   // Clips that still have something to make: what "run all" would pick.
   const unfinished = list.filter((b) => !b.summary.exported);
   const pickedList = list.filter((b) => picked.has(b.id));
@@ -333,7 +362,7 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
             Bấm <strong>+ Clip mới</strong>, chọn kiểu clip và dán ảnh sản phẩm — AI viết kịch bản, tạo ảnh, tạo video và ghép lại có giọng đọc tiếng Việt.
           </PageEmpty>
         )}
-        <div className="qt-home__grid">
+        <div className="qt-home__grid" ref={gridRef}>
           {summaries === null && Array.from({ length: 6 }, (_, i) => (
             <div key={`sk-${i}`} className="qt-clip qt-clip--skeleton" aria-hidden="true">
               <span className="qt-clip__thumb qt-skeleton" />
@@ -347,7 +376,7 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
               <span>Clip mới</span>
             </button>
           )}
-          {list.map((b) => {
+          {shown.map((b) => {
             const st = cardState(b.id);
             const pickable = !queue.running;
             return (
@@ -359,8 +388,8 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
                 )}
                 <button type="button" className="qt-clip__open" disabled={queue.running && queue.current !== b.id}
                         onClick={() => navigate(`/clips/${b.id}`)}>
-                  {b.summary.thumbnail ? (
-                    <img className="qt-clip__thumb" src={mediaUrl(b.summary.thumbnail)} alt="" />
+                  {clipThumbUrl(b.summary) ? (
+                    <img className="qt-clip__thumb" src={clipThumbUrl(b.summary)!} alt="" loading="lazy" />
                   ) : (
                     <span className="qt-clip__thumb qt-clip__thumb--empty">🎬</span>
                   )}
@@ -376,6 +405,17 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
             );
           })}
         </div>
+        {pages > 1 && (
+          <nav className="qt-pager qt-home__pager" aria-label="Phân trang clip">
+            <button type="button" className="qt-btn qt-btn--ghost qt-btn--small" disabled={current <= 1} onClick={() => setPage(current - 1)}>← Trước</button>
+            {Array.from({ length: pages }, (_, i) => i + 1).map((n) => (
+              <button key={n} type="button" aria-current={n === current ? "page" : undefined}
+                      className={`qt-pager__num${n === current ? " qt-pager__num--active" : ""}`} onClick={() => setPage(n)}>{n}</button>
+            ))}
+            <button type="button" className="qt-btn qt-btn--ghost qt-btn--small" disabled={current >= pages} onClick={() => setPage(current + 1)}>Sau →</button>
+            <span className="qt-pager__info">{(current - 1) * perPage + 1}–{Math.min(current * perPage, list.length)} / {list.length} clip</span>
+          </nav>
+        )}
       </div>
 
       {(dialog === "new" || dialog === "reference") && (

@@ -271,6 +271,59 @@ class Schedule(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=_utcnow)
 
 
+class FbPost(SQLModel, table=True):
+    """A post on a connected Facebook Page, read back by "🔄 Đồng bộ từ
+    Facebook" (services/fb_sync). ``slot_id`` = the tool published it (a
+    Schedule slot) — never listed twice; otherwise it went up by hand and
+    shows on "Lịch đăng" as such. ``post_id`` = the saved post (Bài đã lưu)
+    whose text it carries. ``create_all`` adds the table."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    channel_id: int = Field(index=True)
+    fb_id: str = Field(index=True)  # "<page>_<post>"
+    media_id: str = ""  # attachments.target.id: a Reel's / video's id, a photo's id
+    created_time: datetime = Field(index=True)  # UTC, when it went out
+    kind: str = ""  # status_type: added_photos | added_video | mobile_status_update…
+    reel: bool = False
+    message: str = ""
+    permalink: str = ""
+    picture: str = ""  # full_picture (a Facebook CDN URL; refreshed by every sync)
+    slot_id: Optional[int] = None
+    post_id: Optional[int] = Field(default=None, index=True)
+    # read back each sync: views, viewers, clicks, reactions, comments, shares; a Reel adds plays, replays,
+    # avg_watch_s, watch_time_s, followers, length_s, retention (41 points, % still watching over the video)
+    stats: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+    synced_at: datetime = Field(default_factory=_utcnow)
+    __table_args__ = (UniqueConstraint("channel_id", "fb_id", name="uq_fbpost_channel_fb"),)
+
+
+class AssistantMessage(SQLModel, table=True):
+    """One message of the "🤖 Trợ lý AI" chat (services/assistant): the
+    person's or the assistant's. ``data`` = what a reply shows besides its
+    text (the task it started, a picture, a link). ``create_all`` adds it."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    role: str  # "user" | "assistant"
+    text: str = ""
+    data: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+    task_id: Optional[int] = Field(default=None, index=True)
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class AssistantTask(SQLModel, table=True):
+    """Work the assistant runs in the background after a chat message
+    ("create_model" today — whole clips are Phase A's next steps).
+    ``state`` = how far it got (step, Flow request id, media / saved ids)
+    so it carries on after the agent restarts."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    kind: str
+    status: str = Field(default="running", index=True)  # running | done | error
+    title: str = ""
+    args: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+    state: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+    error: Optional[str] = None
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
 class DecorPreset(SQLModel, table=True):
     """A frame or a dancing sticker the seller kept ("★ Lưu") for the dubbing
     editor (services/dub_decor): ``kind`` "frame" | "mascot", ``data`` the

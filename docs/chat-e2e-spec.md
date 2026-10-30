@@ -1,6 +1,6 @@
 # Chat E2E Spec — bottom dock, Muse-compatible agentic video builder
 
-Decisions (Cris, 2026-09-30):
+Decisions (2026-09-30):
 - ChatDock docked at the bottom is the chat UI. `ChatSidebar` is already
   unmounted in `App.tsx` (commented out) — leave it as is.
 - **Auto-run**: sending a message immediately runs the agent E2E. No

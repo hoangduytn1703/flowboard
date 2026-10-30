@@ -18,8 +18,8 @@ export function AppLoading() {
   return (
     <div className="app-loading" role="status" aria-live="polite">
       <div className="app-loading__brand">
-        <span className="app-loading__logo" aria-hidden="true">⚡</span>
-        <span className="app-loading__name">Flowboard</span>
+        <img className="app-loading__logo app-loading__logo--img" src="/dflow-logo.png" alt="" aria-hidden="true" />
+        <span className="app-loading__name dflow-wordmark" aria-label="DFlow"><span className="dflow-wordmark__d">D</span>FLOW</span>
       </div>
       <div className="app-loading__spinner" aria-hidden="true" />
       <p className="app-loading__text">Đang khởi động…</p>

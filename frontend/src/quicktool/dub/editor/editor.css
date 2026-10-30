@@ -3,7 +3,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  height: calc(100vh - 104px);
+  height: calc(100vh - 116px); /* the page header (~58 px: 18px title on a 1.6 line, 30/10) + gaps */
   min-height: 620px;
 }
 

@@ -82,7 +82,7 @@ export function DubPage() {
   const refreshRecent = () => void listDubJobsBrief().then(setRecent).catch(() => undefined);
 
   useEffect(() => {
-    document.title = "Lồng tiếng video · Flowboard";
+    document.title = "Lồng tiếng video · DFlow";
     void getDubStatus().then((s) => { setStatus(s); if (!s.separate) setKeepBgm(false); })
       .catch((e) => { toast.error(errMessage(e)); setStatus({ available: false, reason: errMessage(e), root: "", ytdlp: false, whisper: false, separate: false, styles: [], max_minutes: 30, remotion: false }); });
   }, []);

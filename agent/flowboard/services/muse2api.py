@@ -1,6 +1,6 @@
 """muse2api gateway client — the Muse provider's direct transport.
 
-muse2api (https://github.com/crisng95/muse2api) is a separate service that
+muse2api is a separate service that
 exposes the muse.ai web app as an OpenAI-compatible API, with its own
 account pool, failover and video task manager. When
 ``FLOWBOARD_MUSE2API_BASE`` is set, the Muse provider talks to it directly

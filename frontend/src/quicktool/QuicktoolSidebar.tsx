@@ -23,9 +23,8 @@ export function QuicktoolSidebar() {
   return (
     <aside className="qt-sidebar">
       <div className="qt-brand">
-        <span className="qt-brand__logo">⚡</span>
-        <span className="qt-brand__name">Flowboard</span>
-        <span className="qt-brand__badge">Quicktool</span>
+        <img className="qt-brand__logo" src="/dflow-logo.png" alt="" />
+        <span className="qt-brand__name dflow-wordmark" aria-label="DFlow"><span className="dflow-wordmark__d">D</span>FLOW</span>
       </div>
 
       <nav className="qt-nav">
@@ -55,7 +54,9 @@ export function QuicktoolSidebar() {
         </button>
         <button type="button" className={`qt-nav__item${is("/posts") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/posts")}
                 title="Viết bài đăng Facebook kiếm tương tác: điền mẫu hoặc chat với AI, tạo ảnh kèm">
-          <span className="qt-nav__icon">✍️</span> Bài viết Facebook
+          <span className="qt-nav__icon qt-nav__icon--fb" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M13.5 21v-7.5h2.5l.4-3h-2.9V8.6c0-.9.3-1.4 1.5-1.4h1.5V4.5c-.3 0-1.2-.1-2.2-.1-2.2 0-3.7 1.3-3.7 3.8v2.3H8.1v3h2.5V21h2.9z" /></svg>
+          </span> Bài viết Facebook
         </button>
         <button type="button" className={`qt-nav__item${is("/swipes") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/swipes")}
                 title="Dán link bài / video đang hot → AI chỉ ra vì sao nó chạy, rồi viết bài / clip của bạn theo cấu trúc đó">
@@ -100,9 +101,12 @@ export function QuicktoolSidebar() {
         </button>
       </nav>
 
-      <div className="qt-sidebar__credit"><CreditBadge /></div>
-      <UserChip />
-      <AccountPanel />
+      {/* the footer: credit + who is signed in, the Flow account, then © + version as one block */}
+      <div className="qt-sidebar__foot">
+        <div className="qt-sidebar__credit"><CreditBadge /></div>
+        <UserChip />
+        <AccountPanel />
+      </div>
     </aside>
   );
 }

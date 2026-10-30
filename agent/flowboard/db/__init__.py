@@ -10,7 +10,7 @@ __all__ = ["engine", "get_session", "init_db", "current_engine", "set_engine", "
            "ensure_reference_meta_column", "ensure_product_gender_column", "ensure_reference_media_id_not_unique",
            "ensure_post_channel_column", "ensure_post_series_columns", "ensure_channel_link_columns",
            "ensure_channel_categories_column", "ensure_product_aff_columns", "ensure_channel_facebook_columns", "ensure_post_video_column",
-           "ensure_schedule_format_column"]
+           "ensure_schedule_format_column", "ensure_fbpost_stats_column"]
 
 
 def ensure_reference_meta_column(db_engine: Engine | None = None) -> bool:
@@ -219,6 +219,21 @@ def ensure_product_aff_columns(db_engine: Engine | None = None) -> bool:
     return added
 
 
+def ensure_fbpost_stats_column(db_engine: Engine | None = None) -> bool:
+    """Add ``fbpost.stats`` (views, reactions… read back from Facebook) to a table made before it."""
+    db_engine = db_engine or current_engine()
+    with db_engine.connect() as conn:
+        insp = inspect(conn)
+        if not insp.has_table("fbpost"):
+            return False
+        if "stats" in {c["name"] for c in insp.get_columns("fbpost")}:
+            return False
+        json_type = "JSONB" if conn.dialect.name == "postgresql" else "JSON"
+        conn.exec_driver_sql(f"ALTER TABLE fbpost ADD COLUMN stats {json_type}")
+        conn.commit()
+        return True
+
+
 def init_db(target: Engine | None = None) -> None:
     """Create tables and apply the lightweight column migrations on
     ``target`` (default: the current account's engine)."""
@@ -235,3 +250,4 @@ def init_db(target: Engine | None = None) -> None:
     ensure_channel_facebook_columns(target)
     ensure_post_video_column(target)
     ensure_schedule_format_column(target)
+    ensure_fbpost_stats_column(target)

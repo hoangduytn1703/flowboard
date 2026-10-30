@@ -93,7 +93,7 @@ async def scrape(max_items: int = 100, tab_id: Optional[int] = None) -> dict[str
         have = client.extension_version or "cũ"
         raise TikTokImportError(
             f"Extension Chrome đang chạy bản {have}, chưa biết lệnh đọc TikTok. Mở chrome://extensions, bấm "
-            "↻ Reload ở Flowboard extension (bản 0.2.0 trở lên), rồi bấm nhập lại."
+            "↻ Reload ở DFlow extension (bản 0.2.0 trở lên), rồi bấm nhập lại."
         )
     resp = await client._send(
         "scrape_page", {"maxItems": max_items, "scrolls": 14, **({"tabId": tab_id} if tab_id else {})},

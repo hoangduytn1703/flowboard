@@ -50,7 +50,7 @@ export function ModelsPage() {
   useEffect(() => { void load(true); }, [load]);
   useEffect(() => {
     const prev = document.title;
-    document.title = "Người mẫu đã lưu · Flowboard";
+    document.title = "Người mẫu đã lưu · DFlow";
     return () => { document.title = prev; };
   }, []);
 

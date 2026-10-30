@@ -48,7 +48,7 @@ export function Toolbar() {
       >
         ⚡ Quicktool
       </button>
-      <span className="toolbar-wordmark">Flowboard</span>
+      <span className="toolbar-wordmark">DFlow</span>
       <span className="toolbar-sep" aria-hidden="true">/</span>
       {editing ? (
         <input
@@ -75,7 +75,6 @@ export function Toolbar() {
         <ClearMediaButton />
         <ActivityBell />
         <AiProviderBadge />
-        {/* <SponsorButton /> */}
       </div>
     </div>
   );

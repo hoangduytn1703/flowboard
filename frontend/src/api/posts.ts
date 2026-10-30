@@ -2,6 +2,7 @@
 // writes / revises a post from a brief or a chat message; saved posts live
 // in the account's library.
 import { api, extractErrorMessage } from "./client";
+import type { FbStats } from "./schedule";
 
 export interface PostOption {
   key: string;
@@ -89,6 +90,10 @@ export interface SavedPost {
   brief: PostBrief;
   /** its place on "Lịch đăng": the next planned slot, else when it went out, else the last failed try */
   schedule?: PostSchedule | null;
+  /** its text went up BY HAND on a connected Facebook Page (read back by "Đồng bộ từ Facebook") — shown read-only */
+  fb_manual?: { at: string; link: string; reel: boolean; channel: string; fb_id: string; count: number } | null;
+  /** its numbers on Facebook, the latest time it went up (by the tool or by hand) */
+  fb_stats?: (FbStats & { reel: boolean; link: string; posted_at: string }) | null;
   created_at: string | null;
   updated_at: string | null;
 }
@@ -106,7 +111,7 @@ export interface PostSchedule {
   planned: number;
 }
 
-export type SavedPostInput = Partial<Omit<SavedPost, "id" | "created_at" | "updated_at" | "schedule" | "clip_video">>;
+export type SavedPostInput = Partial<Omit<SavedPost, "id" | "created_at" | "updated_at" | "schedule" | "clip_video" | "fb_manual" | "fb_stats">>;
 
 let optionsCache: Promise<PostOptions> | null = null;
 

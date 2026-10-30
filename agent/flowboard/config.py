@@ -113,7 +113,7 @@ MUSE_WORKER_PRESENCE_TTL_S = float(os.getenv("FLOWBOARD_MUSE_WORKER_TTL_S", "300
 
 # ── muse2api gateway (optional Muse transport) ───────────────────────────
 #
-# Base URL of a muse2api service (https://github.com/crisng95/muse2api), e.g.
+# Base URL of a muse2api service, e.g.
 # http://127.0.0.1:18610. When set, the Muse provider calls muse2api's
 # OpenAI-compatible API directly for LLM and media instead of publishing to
 # the provider-job queue, so no Pax worker is needed. Empty keeps the queue.

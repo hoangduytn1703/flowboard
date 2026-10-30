@@ -36,7 +36,7 @@ const LIVE_POLL_MS = 5000;
 function useTitle(title: string) {
   useEffect(() => {
     const prev = document.title;
-    document.title = `${title} · Flowboard`;
+    document.title = `${title} · DFlow`;
     return () => { document.title = prev; };
   }, [title]);
 }

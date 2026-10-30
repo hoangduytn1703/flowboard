@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { exportsZipUrl, listBoardSummaries, mediaUrl, type BoardSummary } from "../../api/client";
+import { clipThumbUrl, exportsZipUrl, listBoardSummaries, mediaUrl, type BoardSummary } from "../../api/client";
 import { listPosts, splitTags, type SavedPost } from "../../api/posts";
-import { deleteSlot, listSchedule, publishSlot, slotLabel, updateSlot, type Slot } from "../../api/schedule";
+import {
+  deleteSlot, listFacebookPosts, listSchedule, publishSlot, slotLabel, syncFacebook, updateSlot,
+  type FbHandPost, type FbSyncResult, type FbSyncState, type Slot,
+} from "../../api/schedule";
 import { toast } from "../../store/toast";
 import { useChannels } from "../channels/ChannelPicker";
 import { PageLoading } from "../PageState";
 import { copyPost, copyText } from "../posts/PostEditor";
 import { ScheduleDialog, type ScheduleTarget } from "../schedule/ScheduleDialog";
 import { DropTimeDialog } from "../schedule/DropTimeDialog";
+import { StatsLine, StatsPanel } from "../schedule/FbStats";
 import "../schedule.css";
 import "../today.css";
 
@@ -55,31 +59,71 @@ export function SchedulePage() {
   const [drop, setDrop] = useState<{ day: Date; target: ScheduleTarget | null; slot: Slot | null } | null>(null);
   // Every planned / posted slot (any date): what is already on the calendar is not "unscheduled".
   const [taken, setTaken] = useState<Slot[]>([]);
+  // Posts that went up by hand on a connected Page ("🔄 Đồng bộ từ Facebook"): shown, never moved / published.
+  const [fbPosts, setFbPosts] = useState<FbHandPost[]>([]);
+  const [fbState, setFbState] = useState<FbSyncState[]>([]);
+  const [openFbId, setOpenFbId] = useState<number | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   const load = useCallback(async () => {
     const from = new Date(week.getTime() - 7 * DAY_MS);
     const to = new Date(week.getTime() + 21 * DAY_MS);
-    const [s, p, b, t] = await Promise.allSettled([
+    const [s, p, b, t, f] = await Promise.allSettled([
       listSchedule({ from, to }), listPosts(), listBoardSummaries(),
       listSchedule({ from: new Date(0), to: new Date(Date.now() + 400 * DAY_MS) }),
+      listFacebookPosts({ from, to }),
     ]);
     if (t.status === "fulfilled") setTaken(t.value);
+    if (f.status === "fulfilled") { setFbPosts(f.value.items); setFbState(f.value.channels); }
     if (s.status === "fulfilled") setSlots(s.value);
     else toast.error(`Không tải được lịch: ${s.reason instanceof Error ? s.reason.message : s.reason}`);
     if (p.status === "fulfilled") setPosts(p.value);
     if (b.status === "fulfilled") setBoards(b.value);
   }, [week]);
 
-  useEffect(() => { document.title = "Lịch đăng · Flowboard"; void load(); }, [load]);
+  useEffect(() => { document.title = "Lịch đăng · DFlow"; void load(); }, [load]);
+  // Opening the page reads the Pages back when the last sync is older than 10 minutes (the agent also does it every 30).
+  useEffect(() => {
+    void syncFacebook({ maxAge: 600 }).then((r) => { if (r.channels.length) { reportSync(r, true); void load(); } }).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     const t = setInterval(() => void load(), 60_000);
     return () => clearInterval(t);
   }, [load]);
 
+  /** Toast what a sync found; `quiet` = only when it changed something worth saying. */
+  function reportSync(r: FbSyncResult, quiet = false) {
+    const errs = r.channels.filter((c) => c.error);
+    for (const c of errs) toast.error(`Facebook "${c.channel}": ${c.error}`);
+    const skipped = r.channels.reduce((n, c) => n + (c.skipped_slots ?? 0), 0);
+    if (skipped) toast.warning(`${skipped} lịch đã bỏ qua: bài đó đã được đăng tay trên Facebook, tool không đăng lại.`, { duration: 9000 });
+    if (quiet) return;
+    if (r.busy) { toast.info("Đang đồng bộ rồi — chờ chút."); return; }
+    if (!r.channels.length) { toast.info("Chưa có kênh nào kết nối Facebook Page."); return; }
+    const ok = r.channels.filter((c) => !c.error);
+    if (ok.length) toast.success(`Đã đồng bộ ${ok.map((c) => `"${c.channel}": ${c.manual ?? 0} bài đăng tay`).join(", ")} (30 ngày gần nhất).`);
+  }
+  async function syncNow() {
+    setSyncing(true);
+    try {
+      const r = await syncFacebook();
+      reportSync(r);
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   const all = slots ?? [];
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => new Date(week.getTime() + i * DAY_MS)), [week]);
   const due = useMemo(() => all.filter((s) => s.due), [all]);
   const open = all.find((s) => s.id === openId) ?? null;
+  const openFb = fbPosts.find((f) => f.id === openFbId) ?? null;
+  const lastSync = fbState.map((c) => c.at).filter(Boolean).sort().pop() ?? null;
+  const syncError = fbState.find((c) => c.error);
   // Planned or already posted (incl. the ones on this page) — anything else still needs a slot.
   const onCalendar = useMemo(() => {
     const live = [...taken, ...all].filter((s) => s.status === "planned" || s.status === "posted");
@@ -170,17 +214,33 @@ export function SchedulePage() {
               <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={() => setWeek(startOfWeek(new Date()))}>Tuần này</button>
               <button type="button" className="qt-btn qt-btn--small" onClick={() => setWeek(new Date(week.getTime() + 7 * DAY_MS))}>Tuần sau →</button>
               <strong>{days[0].toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" })} – {days[6].toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" })}</strong>
+              <span className="qt-sched__fbsync">
+                <button type="button" className="qt-btn qt-btn--small" disabled={syncing} onClick={() => void syncNow()}
+                        title="Đọc lại các bài trên Facebook Page đã kết nối (30 ngày gần nhất): bài bạn đăng tay hiện trên lịch">
+                  {syncing ? "Đang đồng bộ…" : "🔄 Đồng bộ từ Facebook"}
+                </button>
+                {syncError ? <small className="is-err" title={syncError.error ?? ""}>⚠ {syncError.channel}: lỗi đọc Page</small>
+                  : lastSync && <small>lần cuối {new Date(lastSync).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}</small>}
+                {!syncError && fbState.find((c) => c.stats_error) && (
+                  <small className="is-err" title={fbState.find((c) => c.stats_error)?.stats_error ?? ""}>⚠ chưa đọc được lượt xem</small>
+                )}
+              </span>
               <span className="qt-sched__legend">
                 <span><i style={{ background: "#93c5fd" }} />bài viết</span>
                 <span><i style={{ background: "#c4b5fd" }} />clip</span>
                 <span><i style={{ background: "#fbbf24" }} />đến giờ</span>
                 <span><i style={{ background: "#86efac" }} />đã đăng</span>
                 <span><i style={{ background: "#f87171" }} />lỗi</span>
+                <span><i style={{ background: "#2dd4bf" }} />🌐 đăng tay trên FB</span>
               </span>
             </div>
             <div className="qt-sched__week" style={{ marginTop: 10 }}>
               {days.map((d) => {
                 const items = all.filter((s) => sameDay(new Date(s.scheduled_at), d)).sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at));
+                const handPosts = fbPosts.filter((f) => sameDay(new Date(f.at), d));
+                // the day's cards in time order: the tool's slots and the posts made by hand on Facebook
+                const cards = [...items.map((s) => ({ at: s.scheduled_at, slot: s, fb: null as FbHandPost | null })),
+                               ...handPosts.map((f) => ({ at: f.at, slot: null as Slot | null, fb: f }))].sort((a, b) => a.at.localeCompare(b.at));
                 const isPast = d.getTime() + DAY_MS < today.getTime();
                 return (
                   <div key={d.toISOString()}
@@ -196,11 +256,22 @@ export function SchedulePage() {
                          setDragging(null);
                        }}>
                     <div className="qt-sched__dayhead"><strong>{WD[(d.getDay() + 6) % 7]}</strong><span>{d.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" })}</span></div>
-                    {items.length === 0 && <div className="qt-sched__empty">{dragging ? (dayOpen(d) ? "thả vào đây" : "ngày đã qua") : "trống"}</div>}
-                    {items.map((s) => {
+                    {cards.length === 0 && <div className="qt-sched__empty">{dragging ? (dayOpen(d) ? "thả vào đây" : "ngày đã qua") : "trống"}</div>}
+                    {cards.map(({ slot: s, fb }) => {
+                      if (fb) return (
+                        <button key={`fb${fb.id}`} type="button" className={`qt-sched__slot qt-sched__slot--fb${fb.id === openFbId ? " is-open" : ""}`}
+                                onClick={() => { setOpenFbId(fb.id); setOpenId(null); }} title="Đăng tay trên Facebook — chỉ xem">
+                          {fb.picture && <img src={fb.picture} alt="" loading="lazy" referrerPolicy="no-referrer" />}
+                          <time>{new Date(fb.at).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}{fb.reel ? " 🎬 Reel" : ""}</time>
+                          <span className="t">🌐 {fb.title}</span>
+                          <small>{fb.channel} · đăng tay trên FB{fb.post_id ? " · có trong Bài đã lưu" : ""}</small>
+                          <StatsLine s={fb.stats} dense />
+                        </button>
+                      );
+                      if (!s) return null;
                       const st = statusOf(s);
                       return (
-                        <button key={s.id} type="button" className={`qt-sched__slot qt-sched__slot--${s.kind} qt-sched__slot--${st.key}${s.id === openId ? " is-open" : ""}`} onClick={() => setOpenId(s.id)}
+                        <button key={s.id} type="button" className={`qt-sched__slot qt-sched__slot--${s.kind} qt-sched__slot--${st.key}${s.id === openId ? " is-open" : ""}`} onClick={() => { setOpenId(s.id); setOpenFbId(null); }}
                                 draggable={s.status !== "posted"} title={s.status !== "posted" ? "Kéo sang ngày khác để dời lịch" : undefined}
                                 onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", `slot:${s.id}`); setDragging({ slot: s }); }}
                                 onDragEnd={() => { setDragging(null); setOverDay(null); }}>
@@ -208,6 +279,7 @@ export function SchedulePage() {
                           <time>{new Date(s.scheduled_at).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}{s.auto ? " ⚡" : ""}{s.fb_format === "reel" ? " 🎬 Reel" : ""}</time>
                           <span className="t">{s.kind === "clip" ? "🎬 " : "📝 "}{s.title}</span>
                           <small>{s.channel} · {st.label}</small>
+                          {s.status === "posted" && <StatsLine s={s.stats} dense />}
                         </button>
                       );
                     })}
@@ -225,14 +297,14 @@ export function SchedulePage() {
                 <p className="qt-card__hint">Mọi bài đã lưu và clip đã ghép đều có lịch. Viết thêm ở <button type="button" className="qt-link" onClick={() => navigate("/posts")}>Bài viết</button>.</p>
               ) : (
                 <div className="qt-sched__pool">
-                  {[...unscheduledPosts.map((p) => ({ key: `p${p.id}`, target: postTarget(p), thumb: p.images[0] ?? null, icon: p.video ? "🎬" : "📝",
+                  {[...unscheduledPosts.map((p) => ({ key: `p${p.id}`, target: postTarget(p), thumb: p.images[0] ? mediaUrl(p.images[0]) : null, icon: p.video ? "🎬" : "📝",
                                                       meta: channels.find((c) => c.id === p.channel_id)?.name ?? "chưa gắn kênh", sub: p.series ? `${p.series} · Tập ${p.episode}` : "" })),
-                    ...unscheduledClips.map((b) => ({ key: `b${b.id}`, target: clipTarget(b), thumb: b.summary.thumbnail, icon: "🎬", meta: "clip đã ghép", sub: "" }))].map((it) => (
+                    ...unscheduledClips.map((b) => ({ key: `b${b.id}`, target: clipTarget(b), thumb: clipThumbUrl(b.summary), icon: "🎬", meta: "clip đã ghép", sub: "" }))].map((it) => (
                     <article key={it.key} className={`qt-sched__card${dragging?.target === it.target ? " is-dragging" : ""}`} draggable
                              title="Kéo thả vào một ngày trên lịch"
                              onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", it.key); setDragging({ target: it.target }); }}
                              onDragEnd={() => { setDragging(null); setOverDay(null); }}>
-                      <div className="qt-sched__cardthumb">{it.thumb ? <img src={mediaUrl(it.thumb)} alt="" loading="lazy" draggable={false} /> : <span>{it.icon}</span>}</div>
+                      <div className="qt-sched__cardthumb">{it.thumb ? <img src={it.thumb} alt="" loading="lazy" draggable={false} /> : <span>{it.icon}</span>}</div>
                       <div className="qt-sched__cardbody">
                         <strong title={it.target.title}>{it.icon} {it.target.title}</strong>
                         <small>{it.sub ? `${it.sub} · ` : ""}{it.meta}</small>
@@ -246,7 +318,31 @@ export function SchedulePage() {
           </div>
 
           <aside className="qt-card qt-sched__detail">
-            {!open ? (
+            {openFb && !open ? (
+              <div className="qt-channels__detail">
+                <div className="qt-card__head">
+                  <h3 className="qt-card__title">🌐 {openFb.title}</h3>
+                  <span className="qt-sched__status qt-sched__status--fb">đăng tay trên FB</span>
+                </div>
+                {openFb.picture && <img src={openFb.picture} alt="" referrerPolicy="no-referrer" />}
+                <dl className="qt-sched__kv">
+                  <dt>Đăng lúc</dt><dd>{slotLabel(openFb.at)}</dd>
+                  <dt>Kênh</dt><dd>{openFb.channel || "—"}</dd>
+                  <dt>Dạng</dt><dd>{openFb.reel ? "🎬 Reel" : openFb.kind === "added_video" ? "🎬 Video" : openFb.kind === "added_photos" ? "🖼 Bài có ảnh" : "📰 Bài viết"}</dd>
+                  <dt>Trong tool</dt>
+                  <dd>{openFb.post_id
+                    ? <button type="button" className="qt-link" onClick={() => navigate(`/posts?post=${openFb.post_id}`)}>Bài #{openFb.post_id} {openFb.post_title && `“${openFb.post_title}”`}</button>
+                    : "không có — bài viết thẳng trên Facebook"}</dd>
+                </dl>
+                <StatsPanel s={openFb.stats} />
+                <p className="qt-card__hint">Bài này đăng thẳng trên Facebook, không qua tool — chỉ xem ở đây; muốn sửa thì sửa trên Facebook.</p>
+                {openFb.message && <div className="qt-sched__fbmsg">{openFb.message}</div>}
+                <div className="qt-post__actions">
+                  {openFb.permalink && <a className="qt-btn qt-btn--accent" href={openFb.permalink} target="_blank" rel="noreferrer">Mở trên Facebook ↗</a>}
+                  {openFb.message && <button type="button" className="qt-btn" onClick={() => void copyText(openFb.message, "Đã copy nội dung bài.")}>📋 Copy nội dung</button>}
+                </div>
+              </div>
+            ) : !open ? (
               <p className="qt-card__hint">Bấm một ô trên lịch để xem chi tiết, đổi giờ, đánh dấu đã đăng, hoặc đăng ngay.</p>
             ) : (() => {
               const st = statusOf(open);
@@ -266,6 +362,7 @@ export function SchedulePage() {
                     {open.posted_at && <><dt>Đã đăng</dt><dd>{slotLabel(open.posted_at)}{open.result?.permalink && <> · <a href={open.result.permalink} target="_blank" rel="noreferrer">xem bài ↗</a></>}</dd></>}
                   </dl>
                   {open.status === "failed" && open.result?.error && <div className="qt-sched__err">✗ {open.result.error}</div>}
+                  {open.status === "posted" && open.result?.by === "facebook" && <StatsPanel s={open.stats} />}
                   <div className="qt-post__actions">
                     {open.status !== "posted" && open.fb_connected && (
                       <button type="button" className="qt-btn qt-btn--accent" disabled={busy} onClick={() => void publish(open)}>⚡ Đăng ngay lên Page</button>

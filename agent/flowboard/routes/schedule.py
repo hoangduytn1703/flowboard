@@ -8,6 +8,9 @@
   DELETE /api/schedule/{id}
   POST   /api/schedule/{id}/publish                     publish now through the channel's Facebook Page
   GET    /api/schedule/hours                            the golden hours per platform (for the picker)
+  GET    /api/schedule/facebook?from=&to=&channel_id=   posts that went up by hand on a connected Page (services/fb_sync)
+  GET    /api/schedule/facebook/status                  when each connected Page was last read back
+  POST   /api/schedule/facebook/sync {channel_id?, max_age?}   read the Pages' posts back now
 """
 from __future__ import annotations
 
@@ -17,7 +20,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from flowboard.services import scheduler
+from flowboard.services import fb_sync, scheduler
 
 router = APIRouter(prefix="/api/schedule", tags=["schedule"])
 
@@ -84,6 +87,35 @@ def suggest(channel_id: int, limit: int = Query(6, ge=1, le=30), days: int = Que
         return {"items": scheduler.suggest_slots(channel_id, days=days, limit=limit)}
     except scheduler.ScheduleError as exc:
         raise HTTPException(400, str(exc))
+
+
+class FbSyncBody(BaseModel):
+    channel_id: Optional[int] = None
+    # only Pages read longer ago than this (seconds) — what opening a page asks for
+    max_age: Optional[float] = Field(default=None, ge=0)
+
+
+@router.get("/facebook")
+def facebook_posts(from_: Optional[str] = Query(None, alias="from"), to: Optional[str] = Query(None),
+                   channel_id: Optional[int] = None) -> dict[str, Any]:
+    start = _when(from_) or scheduler._now() - timedelta(days=7)
+    end = _when(to) or scheduler._now() + timedelta(days=28)
+    return {"items": fb_sync.list_manual(start, end, channel_id=channel_id), **fb_sync.status()}
+
+
+@router.get("/facebook/status")
+def facebook_status() -> dict[str, Any]:
+    return fb_sync.status()
+
+
+@router.post("/facebook/sync")
+async def facebook_sync(body: FbSyncBody) -> dict[str, Any]:
+    if body.channel_id is not None:
+        try:
+            return {"busy": False, "channels": [await fb_sync.sync_channel(body.channel_id)]}
+        except fb_sync.SyncError as exc:
+            raise HTTPException(400, str(exc))
+    return await fb_sync.sync_all(max_age=body.max_age)
 
 
 @router.post("", status_code=201)

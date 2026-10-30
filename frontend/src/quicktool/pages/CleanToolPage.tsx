@@ -51,7 +51,7 @@ export function CleanToolPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
     const prev = document.title;
-    document.title = "Xoá chữ / logo · Flowboard";
+    document.title = "Xoá chữ / logo · DFlow";
     return () => { document.title = prev; };
   }, []);
 
@@ -546,7 +546,7 @@ export function CleanToolPage() {
               </button>
             </div>
             <p className="qt-card__hint">
-              Kết quả cũng là một media của Flowboard, dùng được ở chỗ khác (ví dụ chèn vào bước Ghép):{" "}
+              Kết quả cũng là một media của DFlow, dùng được ở chỗ khác (ví dụ chèn vào bước Ghép):{" "}
               <code>{result.url}</code>
             </p>
           </section>

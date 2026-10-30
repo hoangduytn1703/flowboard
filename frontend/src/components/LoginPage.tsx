@@ -27,8 +27,8 @@ export function LoginPage({ onLoggedIn }: { onLoggedIn: (me: AccountMe) => void 
     <div className="login">
       <form className="login__card" onSubmit={submit}>
         <div className="login__brand">
-          <span className="qt-brand__logo">⚡</span>
-          <span>Flowboard</span>
+          <img className="qt-brand__logo" src="/dflow-logo.png" alt="" />
+          <span className="dflow-wordmark" aria-label="DFlow"><span className="dflow-wordmark__d">D</span>FLOW</span>
         </div>
         <h1 className="login__title">Đăng nhập</h1>
         <p className="login__hint">Clip, sản phẩm, người mẫu và prompt của bạn đi theo tài khoản này.</p>

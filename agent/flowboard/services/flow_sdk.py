@@ -81,7 +81,7 @@ _CAPTURE_HINT = (
 )
 NO_FLOW_PROJECT = (
     "NO_FLOW_PROJECT: Flow's project.createProject endpoint went with the "
-    "September 2026 migration, so Flowboard cannot create a Flow project any "
+    "September 2026 migration, so DFlow cannot create a Flow project any "
     "more. Make one in the Flow UI, then pin its uuid as "
     "FLOWBOARD_FLOW_PROJECT_ID or pass flow_project_id explicitly."
 )

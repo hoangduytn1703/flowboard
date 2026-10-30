@@ -25,6 +25,28 @@ export interface Slot {
   platforms: string[];
   /** the channel can auto-publish (Facebook Page connected) */
   fb_connected: boolean;
+  /** once published: its numbers on Facebook (read back by "Đồng bộ từ Facebook") */
+  stats?: FbStats | null;
+}
+
+/** A post's numbers on Facebook, read back by "Đồng bộ từ Facebook". Views need the token's read_insights;
+ * a Reel adds plays, watch time and `retention` (41 points: share still watching from 0 to 100 % of the video). */
+export interface FbStats {
+  views?: number;
+  viewers?: number;
+  clicks?: number;
+  reactions?: number;
+  comments?: number;
+  shares?: number;
+  plays?: number;
+  replays?: number;
+  avg_watch_s?: number;
+  watch_time_s?: number;
+  followers?: number;
+  length_s?: number;
+  retention?: number[];
+  /** ISO UTC: when they were read */
+  at?: string;
 }
 
 export type FbFormat = "post" | "reel";
@@ -100,4 +122,56 @@ export function slotLabel(iso: string): string {
 export function toLocalInput(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** A post that went up BY HAND on a connected Facebook Page (read back from the Graph API). */
+export interface FbHandPost {
+  id: number;
+  channel_id: number;
+  channel: string;
+  fb_id: string;
+  /** ISO UTC: when it went out */
+  at: string;
+  kind: string;
+  reel: boolean;
+  title: string;
+  message: string;
+  permalink: string;
+  /** a Facebook CDN picture URL ("" = none) */
+  picture: string;
+  /** the saved post (Bài đã lưu) whose text it carries */
+  post_id: number | null;
+  post_title: string;
+  stats: FbStats | null;
+}
+
+/** When each connected Page was last read back. */
+export interface FbSyncState {
+  channel_id: number;
+  channel: string;
+  at: string | null;
+  error: string | null;
+  manual?: number | null;
+  fetched?: number | null;
+  /** the posts were read but their numbers were not (e.g. no read_insights) */
+  stats_error?: string | null;
+}
+
+export function listFacebookPosts(opts: { from: Date; to: Date; channelId?: number | null }): Promise<{ items: FbHandPost[]; channels: FbSyncState[] }> {
+  const p = new URLSearchParams({ from: opts.from.toISOString(), to: opts.to.toISOString() });
+  if (opts.channelId) p.set("channel_id", String(opts.channelId));
+  return api(`/api/schedule/facebook?${p}`);
+}
+
+export interface FbSyncResult {
+  busy: boolean;
+  channels: (FbSyncState & { matched?: number; added?: number; removed?: number; skipped_slots?: number })[];
+}
+
+/** Read the connected Pages back now; `maxAge` (s) = only the ones read longer ago than that. */
+export function syncFacebook(opts: { channelId?: number; maxAge?: number } = {}): Promise<FbSyncResult> {
+  return api<FbSyncResult>("/api/schedule/facebook/sync", {
+    method: "POST",
+    body: JSON.stringify({ channel_id: opts.channelId ?? null, max_age: opts.maxAge ?? null }),
+  });
 }

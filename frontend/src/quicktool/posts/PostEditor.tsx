@@ -58,6 +58,7 @@ export function PostEditor({
   clipVideo = "",
   onVideo,
   autoVideoToken = 0,
+  readOnly = false,
 }: {
   draft: PostDraft;
   onChange: (d: PostDraft) => void;
@@ -80,6 +81,8 @@ export function PostEditor({
   clipVideo?: string;
   /** Bumped after a write that asked for a video: make the image, then animate it. */
   autoVideoToken?: number;
+  /** Already live on Facebook (posted by hand): shown, not edited — no AI tools, no picture changes. */
+  readOnly?: boolean;
 }) {
   // "✨ Câu mở đầu khác": variants from the AI; applying one keeps the old opening for undo.
   const [hooks, setHooks] = useState<HookVariant[] | null>(null);
@@ -246,6 +249,7 @@ export function PostEditor({
         </div>
         <textarea
           className="qt-post__body"
+          readOnly={readOnly}
           value={draft.body}
           onChange={(e) => onChange({ ...draft, body: e.target.value })}
           placeholder="Nội dung bài viết…"
@@ -253,6 +257,7 @@ export function PostEditor({
         <textarea
           className="qt-post__tags"
           rows={1}
+          readOnly={readOnly}
           value={tagText ?? draft.hashtags.join(" ")}
           onChange={(e) => setTagText(e.target.value)}
           onBlur={() => {
@@ -280,7 +285,7 @@ export function PostEditor({
                 <img src={mediaUrl(id)} alt="" />
                 <div className="qt-post__imgtools">
                   <a href={mediaUrl(id)} download={`anh-bai-viet-${i + 1}.jpg`} title="Tải ảnh">⬇</a>
-                  <button type="button" title="Bỏ ảnh này" onClick={() => onImages(images.filter((_, j) => j !== i))}>×</button>
+                  {!readOnly && <button type="button" title="Bỏ ảnh này" onClick={() => onImages(images.filter((_, j) => j !== i))}>×</button>}
                 </div>
               </figure>
             ))}
@@ -300,12 +305,12 @@ export function PostEditor({
             <small>đăng bài xong, dán cái này vào bình luận đầu — link để đây, không để trong bài</small>
             <button type="button" className="qt-btn qt-btn--small" onClick={() => void copyText(draft.first_comment ?? "", "Đã copy bình luận đầu tiên.")}>📋 Copy</button>
           </div>
-          <textarea className="qt-textarea" value={draft.first_comment ?? ""} rows={2}
+          <textarea className="qt-textarea" value={draft.first_comment ?? ""} rows={2} readOnly={readOnly}
                     onChange={(e) => onChange({ ...draft, first_comment: e.target.value })} />
         </div>
       )}
 
-      <div className="qt-post__actions">
+      {!readOnly && <div className="qt-post__actions">
         {!hideCopy && <button type="button" className="qt-btn qt-btn--accent" disabled={!draft.body.trim()} onClick={() => void copyPost(draft)}>📋 Copy bài</button>}
         <button type="button" className="qt-btn" disabled={hooksBusy || draft.body.trim().length < 20} onClick={() => void loadHooks()}
                 title="AI viết 5 câu mở đầu theo 5 kiểu khác nhau — chọn một, hoặc lưu bản sao để đăng thử A/B">
@@ -317,9 +322,9 @@ export function PostEditor({
         {productMedia[0] && !images.includes(productMedia[0]) && (
           <button type="button" className="qt-btn qt-btn--small" onClick={() => onImages([...images, productMedia[0]])}>+ Ảnh sản phẩm</button>
         )}
-      </div>
+      </div>}
 
-      {hooks && (
+      {hooks && !readOnly && (
         <div className="qt-hooks">
           <div className="qt-hooks__head">
             <strong>✨ Câu mở đầu khác</strong>
@@ -338,7 +343,7 @@ export function PostEditor({
         </div>
       )}
 
-      {onVideo && !clipVideo && (videoSource || draft.image_prompts.length > 0 || video) && (
+      {onVideo && !clipVideo && !readOnly && (videoSource || draft.image_prompts.length > 0 || video) && (
         <details className="qt-post__videobox" open={!!video || videoBusy || undefined}>
           <summary>🎬 Video kèm thay ảnh <small>(Flow Omni 8 s, ~12 credit)</small></summary>
           <p className="qt-card__hint">
@@ -358,7 +363,7 @@ export function PostEditor({
         </details>
       )}
 
-      {draft.image_prompts.length > 0 && (
+      {draft.image_prompts.length > 0 && !readOnly && (
         <div className="qt-post__prompts">
           <div className="qt-post__prompthead">
             <strong>Ảnh AI của bài</strong>

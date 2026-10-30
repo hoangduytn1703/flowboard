@@ -71,7 +71,7 @@ export function AiProviderDialog({ open, onClose, force = false }: AiProviderDia
         </div>
         {force && (
           <div className="ai-provider-dialog__force-banner" role="alert">
-            Flowboard cần một provider cho mỗi mục Auto-prompt, Vision và
+            DFlow cần một provider cho mỗi mục Auto-prompt, Vision và
             Planner thì mới chạy được. Chọn một provider cho mỗi dòng — model
             và effort không bắt buộc — rồi bấm Áp dụng để tiếp tục.
           </div>

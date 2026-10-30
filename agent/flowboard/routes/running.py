@@ -18,6 +18,7 @@ Sources:
 - links waiting in the dubbing link library (``services/dub_links``) → ``/tools/dub?links=1``
 - AI subtitle-erase jobs (``services/video_clean``) → ``/tools/clean?job=<id>``
 - Edit auto CapCut jobs (``services/capcut_auto``) → ``/tools/capcut?job=<id>``
+- 🤖 Trợ lý AI background tasks (``services/assistant``) → the page of what it makes, chat opened (``?assistant=1``)
 - Flow work in the request queue (images, videos, joins), grouped per clip
   → the clip's wizard step; work with no clip (a post's or a model's image)
   → ``/history``.
@@ -121,6 +122,17 @@ def _capcut_items() -> list[dict[str, Any]]:
     return out
 
 
+def _assistant_items() -> list[dict[str, Any]]:
+    from flowboard.services import assistant
+
+    def back(link: str) -> str:  # the page of what it makes, with the chat open
+        return f"{link}{'&' if '?' in link else '?'}assistant=1"
+
+    return [{"key": f"assistant:{t['id']}", "kind": "assistant", "title": f"Trợ lý AI · {t['title']}", "detail": t["step"],
+             "progress": None, "started_at": t["started_at"], "link": back(t.get("link") or "/today")}
+            for t in assistant.running_tasks()]
+
+
 def _op_items() -> list[dict[str, Any]]:
     from flowboard.services import op_tracker
 
@@ -148,6 +160,8 @@ def _flow_items() -> list[dict[str, Any]]:
         boards = {b.id: b.name for b in s.exec(select(Board).where(Board.id.in_(board_ids))).all()} if board_ids else {}  # type: ignore[union-attr]
     groups: dict[Optional[int], dict[str, Any]] = {}
     for r in rows:
+        if (r.params or {}).get("origin") == "assistant":
+            continue  # the assistant's own row (_assistant_items) says it, with a link back to the chat
         bid = node_board.get(r.node_id) if r.node_id else None
         g = groups.setdefault(bid, {"kinds": {}, "first": r.created_at, "running": 0})
         label = FLOW_TYPES[r.type]
@@ -170,7 +184,7 @@ def _flow_items() -> list[dict[str, Any]]:
 @router.get("")
 def running() -> dict[str, Any]:
     items: list[dict[str, Any]] = []
-    for source in (_dub_items, _dub_link_items, _clean_items, _capcut_items, _flow_items, _op_items):
+    for source in (_dub_items, _dub_link_items, _clean_items, _capcut_items, _assistant_items, _flow_items, _op_items):
         try:
             items += source()
         except Exception:  # noqa: BLE001 — one broken source must not hide the others
@@ -204,6 +218,13 @@ def outcome(key: str = Query(..., max_length=80)) -> dict[str, Any]:
         if j.status == "review":
             return {"ok": True, "message": "Đã dịch xong — chờ bạn xem lại rồi render"}
         return {"ok": True, "message": "Đã xong — bấm để xem kết quả"}
+    if kind == "assistant" and ident.isdigit():
+        from flowboard.services import assistant
+
+        t = assistant.task_outcome(int(ident))
+        if t and t["status"] == "error":
+            return {"ok": False, "message": t["error"] or "Trợ lý gặp lỗi"}
+        return {"ok": True, "message": f"{t['title']} — xong" if t else "Đã xong"}
     if kind == "dublinks":
         return {"ok": True, "message": "Đã đưa hết link trong thư viện vào lồng tiếng"}
     if kind == "clean":

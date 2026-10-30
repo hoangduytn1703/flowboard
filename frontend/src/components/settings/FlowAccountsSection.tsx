@@ -13,7 +13,7 @@ function credits(n: number | null): string {
 }
 
 /**
- * Settings → Tài khoản Flow. Each Chrome profile that runs the Flowboard
+ * Settings → Tài khoản Flow. Each Chrome profile that runs the DFlow
  * extension shows up here with the e-mail, plan and credits read from its
  * Flow tab; one of them is the account generation uses. Switching re-pins
  * the Flow project that account used last, because projects (and the media
@@ -78,7 +78,7 @@ export function FlowAccountsSection({ onProjectChange }: { onProjectChange?: () 
       {data === null ? (
         <div className="settings-panel__hint">Đang tải…</div>
       ) : accounts.length === 0 ? (
-        <div className="settings-panel__hint">Chưa có extension nào kết nối. Mở Chrome có cài Flowboard extension và một tab flow.google.com.</div>
+        <div className="settings-panel__hint">Chưa có extension nào kết nối. Mở Chrome có cài DFlow extension và một tab flow.google.com.</div>
       ) : (
         <div className="flow-accounts">
           {accounts.map((a) => {

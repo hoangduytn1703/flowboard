@@ -44,7 +44,7 @@ def _client():
     if product_link._version_tuple(client.extension_version) < MIN_EXTENSION_VERSION:
         raise TabImportError(
             f"Extension đang là bản {client.extension_version or 'cũ'}, chưa biết đọc nhiều tab. Mở "
-            "chrome://extensions, bấm ↻ Reload ở Flowboard extension (bản 0.5.0 trở lên), rồi bấm lại."
+            "chrome://extensions, bấm ↻ Reload ở DFlow extension (bản 0.5.0 trở lên), rồi bấm lại."
         )
     return client
 

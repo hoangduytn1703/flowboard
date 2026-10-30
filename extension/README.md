@@ -1,6 +1,6 @@
-# Flowboard Bridge (Chrome MV3)
+# DFlow Bridge (Chrome MV3)
 
-Local extension that proxies Flowboard agent requests to authenticated labs.google sessions.
+Local extension that proxies DFlow agent requests to authenticated labs.google sessions.
 
 ## Install
 

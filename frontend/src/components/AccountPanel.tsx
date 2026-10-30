@@ -188,7 +188,7 @@ export function AccountPanel({
       ? new Intl.NumberFormat("en-US").format(credits)
       : null;
 
-  // Google Flow plan tiers — both are paid (Flowboard's hard
+  // Google Flow plan tiers — both are paid (DFlow's hard
   // requirement). TIER_TWO = Ultra (higher tier), TIER_ONE = Pro.
   const tierLabel = tier === "PAYGATE_TIER_TWO"
     ? "Ultra"
@@ -282,7 +282,7 @@ export function AccountPanel({
                   ⚠ Không phát hiện extension
                 </span>
                 <span className="account-panel__scan-hint-text">
-                  Tải lại tab Flow, rồi tải lại extension Flowboard.
+                  Tải lại tab Flow, rồi tải lại extension DFlow.
                 </span>
                 <button
                   type="button"
@@ -319,9 +319,14 @@ export function AccountPanel({
         )}
       </div>
       {!collapsed && (
+        <div className="account-panel__copyright" title="DFlow — phát triển bởi DuyNH">
+          © {new Date().getFullYear()} DFlow · Dev <strong>DuyNH</strong>
+        </div>
+      )}
+      {!collapsed && (
         <div className="account-panel__version-row">
           <span className="account-panel__version-label">
-            Flowboard <code>v{APP_VERSION}</code>
+            DFlow <code>v{APP_VERSION}</code>
           </span>
           {updateAvailable && latestRelease && (
             <a

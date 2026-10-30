@@ -697,7 +697,7 @@ def _build(job: Job) -> None:
         if opts.get("sfx", True):
             b.add_sfx(p["at"], volume=SFX_VOLUME)
     cover = _cover(mat.video, min(1.0, mat.duration / 3), work / "cover.jpg")
-    name = (opts.get("name") or mat.title or "Flowboard").strip()
+    name = (opts.get("name") or mat.title or "DFlow").strip()
     res = cc.create_project(root, name, b, base, cover)
     res.update(source={**job.source, "title": mat.title}, board_id=mat.board_id, points=points[:MAX_POINTS],
                subtitles=b.counts["text"] - (len(points) if use_emphasis else 0),

@@ -29,7 +29,7 @@ export function SwipesPage() {
   const [q, setQ] = useState("");
 
   useEffect(() => {
-    document.title = "Mẫu đang hot · Flowboard";
+    document.title = "Mẫu đang hot · DFlow";
     void listSwipes().then((rows) => { setItems(rows); setOpenId(rows[0]?.id ?? null); }).catch((e) => { setItems([]); toast.error(`Không tải được: ${e instanceof Error ? e.message : e}`); });
   }, []);
   useEffect(() => {

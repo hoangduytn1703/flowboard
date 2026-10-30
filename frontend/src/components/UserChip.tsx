@@ -3,7 +3,7 @@ import { logoutAccount } from "../api/account";
 import { useAccountStore } from "../store/account";
 import { toast } from "../store/toast";
 
-/** Sidebar row: who is logged in to Flowboard + sign out. Hidden when the
+/** Sidebar row: who is logged in to DFlow + sign out. Hidden when the
  * agent runs without login (FLOWBOARD_AUTH=off). */
 export function UserChip() {
   const me = useAccountStore((s) => s.me);
@@ -25,7 +25,7 @@ export function UserChip() {
   }
 
   return (
-    <div className="user-chip" title="Tài khoản Flowboard (dữ liệu clip / sản phẩm / người mẫu đi theo tài khoản này)">
+    <div className="user-chip" title="Tài khoản DFlow (dữ liệu clip / sản phẩm / người mẫu đi theo tài khoản này)">
       <span className="user-chip__name">👤 {me.username}</span>
       <button type="button" className="qt-link" onClick={() => void logout()} disabled={busy}>
         {busy ? "…" : "Đăng xuất"}

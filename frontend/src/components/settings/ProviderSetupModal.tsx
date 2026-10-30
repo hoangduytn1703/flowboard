@@ -119,7 +119,7 @@ function ClaudeContent() {
   return (
     <div className="setup-modal__body">
       <p>
-        Flowboard dùng gói Claude bạn đang có thông qua CLI chính thức —
+        DFlow dùng gói Claude bạn đang có thông qua CLI chính thức —
         không cần API key.
       </p>
       <ol className="setup-modal__steps">
@@ -151,7 +151,7 @@ function GeminiContent() {
   return (
     <div className="setup-modal__body">
       <p>
-        Flowboard dùng gói Gemini bạn đang có thông qua CLI chính thức —
+        DFlow dùng gói Gemini bạn đang có thông qua CLI chính thức —
         không cần API key.
       </p>
       <ol className="setup-modal__steps">
@@ -267,7 +267,7 @@ function MuseContent() {
         Muse không cần CLI và không cần nhập key trong hộp thoại này. Chọn
         một cách kết nối: cổng <strong>muse2api</strong> (muse.ai dưới dạng
         API tương thích OpenAI), hoặc <strong>Pax worker</strong> lấy việc
-        từ hàng đợi của Flowboard.
+        từ hàng đợi của DFlow.
       </p>
       <ol className="setup-modal__steps">
         <li>

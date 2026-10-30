@@ -22,7 +22,7 @@ function humanizeBackendError(token: string): string | null {
   const t = token.toLowerCase();
   if (t.startsWith("paygate_tier_invalid")) {
     return (
-      "Flowboard doesn't recognise the configured Google Flow plan. Set "
+      "DFlow doesn't recognise the configured Google Flow plan. Set "
       + "FLOWBOARD_PAYGATE_TIER to PAYGATE_TIER_TWO (Ultra) or "
       + "PAYGATE_TIER_ONE (Pro) and restart the agent. It refuses to "
       + "dispatch in this state rather than guessing, because the plan "
@@ -34,7 +34,7 @@ function humanizeBackendError(token: string): string | null {
     // generation — the exact moment to name the field that fixes it, rather
     // than the .env-and-restart workflow that no longer has to be used.
     return (
-      "Flow no longer lets Flowboard create projects — that endpoint went "
+      "Flow no longer lets DFlow create projects — that endpoint went "
       + "with Google's September 2026 migration. Open a project at "
       + "flow.google.com, copy its address, and paste it into Settings → "
       + "Google Flow project."
@@ -58,7 +58,7 @@ function humanizeBackendError(token: string): string | null {
   }
   if (t.includes("no_flow_tab") || t.includes("flow_tab_discarded")) {
     return (
-      "Flowboard needs one signed-in https://flow.google.com/ tab left "
+      "DFlow needs one signed-in https://flow.google.com/ tab left "
       + "open — only the page itself can sign a Flow request, so nothing "
       + "works headless. Open it and retry."
     );
@@ -76,7 +76,7 @@ function humanizeBackendError(token: string): string | null {
     return (
       "Chrome has no open windows for the extension to attach a Flow tab to. "
       + "Open any Chrome window (or click the extension's '⋯ → Open Flow') "
-      + "and retry — Flowboard will reuse the existing window automatically."
+      + "and retry — DFlow will reuse the existing window automatically."
     );
   }
   if (t.startsWith("captcha_failed:")) {
@@ -216,6 +216,14 @@ export interface BoardSummary extends Board {
     downloaded_at: number | null;
     thumbnail: string | null;
   };
+}
+
+/** The picture of a clip card: its first scene image, else a still taken from its finished video
+ * (`/api/media/{id}/poster` — a dubbed / uploaded / CapCut clip has no scene images), else none. */
+export function clipThumbUrl(s: BoardSummary["summary"]): string | null {
+  if (s.thumbnail) return mediaUrl(s.thumbnail);
+  if (s.export_media) return `/api/media/${encodeURIComponent(s.export_media.replace(/^media\//, ""))}/poster`;
+  return null;
 }
 
 /** One .zip with the finished clips of these boards (marks them downloaded). */

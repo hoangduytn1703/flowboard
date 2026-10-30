@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { exportsZipUrl, listBoardSummaries, mediaUrl, type BoardSummary } from "../../api/client";
+import { clipThumbUrl, exportsZipUrl, listBoardSummaries, type BoardSummary } from "../../api/client";
 import { getHistorySummary, listHistory, type HistoryRow, type HistorySummary } from "../../api/history";
 import { useFlowCredits } from "../../components/credits";
 import { PageLoading } from "../PageState";
@@ -145,7 +145,7 @@ export function TodayPage() {
   }
 
   useEffect(() => {
-    document.title = "Hôm nay · Flowboard";
+    document.title = "Hôm nay · DFlow";
     void load();
   }, [load]);
   // Refresh while something runs (10 s), otherwise every minute.
@@ -228,7 +228,7 @@ export function TodayPage() {
               <ul className="qt-today__list">
                 {failed.map((b) => (
                   <li key={b.id}>
-                    {b.summary.thumbnail && <img className="qt-today__thumb" src={mediaUrl(b.summary.thumbnail)} alt="" loading="lazy" />}
+                    {clipThumbUrl(b.summary) && <img className="qt-today__thumb" src={clipThumbUrl(b.summary)!} alt="" loading="lazy" />}
                     <div className="td-row__main">
                       <span className="qt-today__what">{b.name}</span>
                       <span className="qt-today__meta qt-today__meta--bad">
@@ -247,7 +247,7 @@ export function TodayPage() {
               <ul className="qt-today__list">
                 {unfinished.slice(0, 8).map((b) => (
                   <li key={b.id}>
-                    {b.summary.thumbnail && <img className="qt-today__thumb" src={mediaUrl(b.summary.thumbnail)} alt="" loading="lazy" />}
+                    {clipThumbUrl(b.summary) && <img className="qt-today__thumb" src={clipThumbUrl(b.summary)!} alt="" loading="lazy" />}
                     <div className="td-row__main">
                       <span className="qt-today__what">{b.name}</span>
                       <span className="qt-today__meta">{b.summary.scenes_done}/{b.summary.scenes} ảnh · {b.summary.clips_done}/{b.summary.clips} video</span>
@@ -282,7 +282,7 @@ export function TodayPage() {
               <ul className="qt-today__list">
                 {toDownload.map((b) => (
                   <li key={b.id}>
-                    {b.summary.thumbnail && <img className="qt-today__thumb" src={mediaUrl(b.summary.thumbnail)} alt="" loading="lazy" />}
+                    {clipThumbUrl(b.summary) && <img className="qt-today__thumb" src={clipThumbUrl(b.summary)!} alt="" loading="lazy" />}
                     <div className="td-row__main"><span className="qt-today__what">{b.name}</span></div>
                     <a className="qt-btn qt-btn--small td-btn-icon" href={exportsZipUrl([b.id])} onClick={() => setTimeout(() => void load(), 3000)}><Icon name="download" size={14} /> Tải</a>
                     <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={() => navigate(`/clips/${b.id}/export`)}>Mở</button>

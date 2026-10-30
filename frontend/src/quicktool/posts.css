@@ -354,3 +354,8 @@
 .qt-posts__clipvid { display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 4px auto 14px; max-width: 520px; text-align: center; }
 .qt-posts__clipvid video { width: 100%; max-height: 340px; border-radius: 10px; background: #000; }
 .qt-posts__clipvid small { color: var(--muted); font-size: 13px; line-height: 1.5; }
+
+/* "🌐 Đăng tay trên FB": the post's text went up by hand on Facebook — read-only in the editor */
+.qt-posts__sched--hand { color: #042f2e; background: #2dd4bf; border-color: #5eead4; text-decoration: none; }
+.qt-posts__handposted { border-color: rgba(45, 212, 191, 0.55); background: rgba(45, 212, 191, 0.07); }
+.qt-post__body[readonly], .qt-post__tags[readonly] { cursor: default; }

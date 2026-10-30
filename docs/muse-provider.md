@@ -21,7 +21,7 @@ FLOWBOARD_MUSE2API_BASE unset  Flowboard ──provider-job queue──▶ Pax w
 
 ## muse2api gateway
 
-[muse2api](https://github.com/crisng95/muse2api) exposes muse.ai as an
+muse2api exposes muse.ai as an
 OpenAI-compatible API with its own account pool, failover and video task
 manager. Point Flowboard at it in `.env` at the repo root and restart the
 agent:

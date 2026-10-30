@@ -334,7 +334,7 @@ export function ResultViewer() {
   if (status === null) {
     hintText = "Đang tải…";
   } else if (!status.has_url) {
-    hintText = "Mở project trên flow.google.com để Flowboard lấy được đường dẫn ảnh.";
+    hintText = "Mở project trên flow.google.com để DFlow lấy được đường dẫn ảnh.";
   } else {
     hintText = "Đang tải dữ liệu từ Google…";
   }

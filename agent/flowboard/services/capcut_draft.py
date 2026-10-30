@@ -536,7 +536,7 @@ _BAD_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
 
 def safe_name(name: str) -> str:
     n = _BAD_NAME.sub(" ", name or "").strip().strip(".")
-    return re.sub(r"\s+", " ", n)[:60] or "Flowboard"
+    return re.sub(r"\s+", " ", n)[:60] or "DFlow"
 
 
 def unique_name(root: Path, name: str) -> str:

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Flowboard Bridge",
+  "name": "DFlow Bridge",
   "version": "0.6.0",
-  "description": "Local bridge for Google Flow — runs batchexecute RPCs inside a signed-in flow.google.com tab and mints reCAPTCHA for Flowboard.",
+  "description": "Local bridge for Google Flow — runs batchexecute RPCs inside a signed-in flow.google.com tab and mints reCAPTCHA for DFlow.",
   "permissions": [
     "storage",
     "alarms",
@@ -34,7 +34,7 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "Flowboard Bridge",
+    "default_title": "DFlow Bridge",
     "default_popup": "popup.html"
   },
   "content_scripts": [

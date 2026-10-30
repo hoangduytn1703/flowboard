@@ -111,7 +111,7 @@ async def read_page(url: str) -> dict[str, Any]:
             ext_error = "trang chưa hiện nội dung"
     elif client.connected:
         ext_error = (f"extension đang là bản {client.extension_version or 'cũ'} — mở chrome://extensions, bấm ↻ Reload ở "
-                     "Flowboard extension (cần bản 0.6.0)")
+                     "DFlow extension (cần bản 0.6.0)")
     else:
         ext_error = "extension chưa kết nối"
     # Public pages (YouTube, TikTok…) can still be read without the browser.

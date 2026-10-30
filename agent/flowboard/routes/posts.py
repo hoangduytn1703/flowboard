@@ -21,7 +21,7 @@ from flowboard.db import get_session
 from flowboard.db.models import Board, Node, Post, Schedule
 from flowboard.routes.channels import get_channel
 from flowboard.services import hooks as hooks_svc
-from flowboard.services import post_writer
+from flowboard.services import fb_sync, post_writer
 from flowboard.services.products import get_product
 from flowboard.timestamps import utc_iso
 
@@ -158,17 +158,26 @@ def _post_schedules(posts: list[Post]) -> dict[int, dict[str, Any]]:
     return out
 
 
-def _row(p: Post, clip_video: Optional[str] = None, schedule: Any = ...) -> dict[str, Any]:
+def _row(p: Post, clip_video: Optional[str] = None, schedule: Any = ..., fb_manual: Any = ..., fb_stats: Any = ...) -> dict[str, Any]:
     """``clip_video``: the joined clip of ``p.board_id`` — what publishing sends
     when the post has no video of its own (services/scheduler). ``schedule``:
-    its place on the calendar (:func:`_post_schedules`), looked up when not given."""
+    its place on the calendar (:func:`_post_schedules`); ``fb_manual``: when
+    its text went up by hand on a connected Page (services/fb_sync) — the
+    editor shows it read-only. Both looked up when not given."""
     if clip_video is None and p.board_id:
         clip_video = _clip_videos({p.board_id}).get(p.board_id)
     if schedule is ...:
         schedule = _post_schedules([p]).get(p.id or 0)
+    if fb_manual is ...:
+        fb_manual = fb_sync.manual_for_posts({p.id}).get(p.id or 0) if p.id else None
+    if fb_stats is ...:
+        fb_stats = fb_sync.stats_for_posts({p.id}).get(p.id or 0) if p.id else None
     return {
         "clip_video": clip_video or "",
         "schedule": schedule,
+        "fb_manual": fb_manual,
+        # its numbers on Facebook (latest time it went up, by the tool or by hand)
+        "fb_stats": fb_stats,
         "id": p.id, "kind": p.kind, "title": p.title, "body": p.body, "hashtags": p.hashtags,
         "first_comment": p.first_comment or "",
         "product_id": p.product_id, "board_id": p.board_id, "channel_id": p.channel_id, "series": p.series or "",
@@ -374,7 +383,9 @@ def list_posts(board_id: Optional[int] = Query(None), channel_id: Optional[int] 
         rows = s.exec(q).all()
     videos = _clip_videos({p.board_id for p in rows if p.board_id})  # one query, not one per post
     slots = _post_schedules(list(rows))
-    return [_row(p, videos.get(p.board_id) or "", slots.get(p.id or 0)) for p in rows]
+    ids = {p.id for p in rows if p.id}
+    by_hand, numbers = fb_sync.manual_for_posts(ids), fb_sync.stats_for_posts(ids)
+    return [_row(p, videos.get(p.board_id) or "", slots.get(p.id or 0), by_hand.get(p.id or 0), numbers.get(p.id or 0)) for p in rows]
 
 
 @router.post("", status_code=201)

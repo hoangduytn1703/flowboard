@@ -83,7 +83,7 @@ def parse_when(value: str) -> datetime:
 
 
 def row(sc: Schedule, *, title: str = "", thumb: Optional[str] = None, channel: str = "",
-        platforms: Optional[list[str]] = None, fb_connected: bool = False) -> dict[str, Any]:
+        platforms: Optional[list[str]] = None, fb_connected: bool = False, stats: Optional[dict] = None) -> dict[str, Any]:
     when = _aware(sc.scheduled_at)
     due = sc.status == "planned" and when is not None and when <= _now()
     return {
@@ -94,6 +94,8 @@ def row(sc: Schedule, *, title: str = "", thumb: Optional[str] = None, channel: 
         "created_at": utc_iso(_aware(sc.created_at)),
         "title": title, "thumbnail": thumb, "channel": channel, "platforms": platforms or [],
         "fb_connected": fb_connected,
+        # what it did on Facebook once published (read back by services/fb_sync): views, ❤, 💬, ↗, Reel plays…
+        "stats": stats,
     }
 
 
@@ -120,6 +122,9 @@ def _decorate(items: list[Schedule]) -> list[dict[str, Any]]:
     # The Page token lives in the central store (Neon, ~0.15 s a read): once per channel, not once per slot
     # (13 slots made every calendar call ~2 s, 29/10).
     connected = {cid: bool(c.fb_page_id and facebook_publish.get_token(cid)) for cid, c in channels.items()}
+    from flowboard.services import fb_sync
+
+    numbers = fb_sync.stats_for_slots({i.id for i in items if i.id and i.status == "posted"})
     out = []
     for sc in items:
         title, thumb = "", None
@@ -135,7 +140,7 @@ def _decorate(items: list[Schedule]) -> list[dict[str, Any]]:
         ch = channels.get(sc.channel_id) if sc.channel_id else None
         out.append(row(sc, title=title, thumb=thumb, channel=ch.name if ch else "",
                        platforms=list(ch.platforms or []) if ch else [],
-                       fb_connected=bool(ch and connected.get(ch.id))))
+                       fb_connected=bool(ch and connected.get(ch.id)), stats=numbers.get(sc.id)))
     return out
 
 

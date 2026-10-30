@@ -4,7 +4,7 @@ import {
   brainstormChannel, createChannel, deleteChannel, getChannelOptions, listChannels, reviewChannelPage, updateChannel,
   type Channel, type ChannelInput, type ChannelOptions,
 } from "../../api/channels";
-import { listBoardSummaries, mediaUrl, type BoardSummary } from "../../api/client";
+import { clipThumbUrl, listBoardSummaries, mediaUrl, type BoardSummary } from "../../api/client";
 import { listPosts, type SavedPost } from "../../api/posts";
 import { toast } from "../../store/toast";
 import { invalidateChannels } from "../channels/ChannelPicker";
@@ -276,7 +276,7 @@ export function ChannelsPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
-    document.title = "Kênh của tôi · Flowboard";
+    document.title = "Kênh của tôi · DFlow";
     void getChannelOptions().then(setOptions).catch((e) => toast.error(`Không tải được tuỳ chọn: ${e instanceof Error ? e.message : e}`));
     void listChannels().then(setChannels).catch(() => setChannels([]));
     void listBoardSummaries().then(setBoards).catch(() => undefined);
@@ -434,7 +434,7 @@ export function ChannelsPage() {
                     <ul className="qt-today__list">
                       {clips.map((b) => (
                         <li key={b.id}>
-                          {b.summary.thumbnail && <img className="qt-today__thumb" src={mediaUrl(b.summary.thumbnail)} alt="" loading="lazy" />}
+                          {clipThumbUrl(b.summary) && <img className="qt-today__thumb" src={clipThumbUrl(b.summary)!} alt="" loading="lazy" />}
                           <span className="qt-today__what">{b.name}</span>
                           <span className="qt-today__meta">{b.summary.exported ? "đã ghép" : `${b.summary.clips_done}/${b.summary.clips} video`}</span>
                           <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={() => navigate(`/clips/${b.id}`)}>Mở</button>

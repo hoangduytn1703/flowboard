@@ -1,6 +1,6 @@
 """Bridge to the Chrome MV3 extension over WebSocket.
 
-Ported + trimmed from flowkit (https://github.com/crisng95/flowkit).
+Ported + trimmed from flowkit.
 
 Control flow:
 1. Extension opens WS to the agent (``EXTENSION_WS_PORT``, default 8355).

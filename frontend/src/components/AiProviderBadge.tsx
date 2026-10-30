@@ -9,8 +9,8 @@ import { AiProviderDialog } from "./AiProviderDialog";
 import { getLlmConfigCached, getLlmProvidersCached, LLM_CONFIG_POLL_MS } from "./llmConfigCache";
 
 /**
- * Compact toolbar entry point for the AI Provider stack. Sits to the
- * left of the Sponsor button. Click opens the AiProviderDialog.
+ * Compact toolbar entry point for the AI Provider stack. Click opens the
+ * AiProviderDialog.
  *
  * Three render states:
  *  1. Not configured — `config.configured === false` (at least one

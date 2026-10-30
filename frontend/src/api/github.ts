@@ -7,7 +7,8 @@
  * what we already learned instead of burning quota.
  */
 
-const REPO = "crisng95/flowboard";
+// This fork's releases (a private repo answers 404 → no "new version" badge).
+const REPO = "hoangduytn1703/flowboard";
 const RELEASE_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
 const CACHE_KEY = "flowboard.github.latestRelease.v1";
 // 1 hour — long enough that idle tabs don't hammer the API, short

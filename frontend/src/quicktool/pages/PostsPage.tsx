@@ -12,7 +12,8 @@ import { ChannelPicker, useChannels } from "../channels/ChannelPicker";
 import { PageLoading } from "../PageState";
 import { copyPost, PostEditor } from "../posts/PostEditor";
 import { ScheduleDialog, type ScheduleTarget } from "../schedule/ScheduleDialog";
-import { createSlot, publishSlot, slotLabel, suggestSlots, type FbFormat } from "../../api/schedule";
+import { StatsLine } from "../schedule/FbStats";
+import { createSlot, publishSlot, slotLabel, suggestSlots, syncFacebook, type FbFormat } from "../../api/schedule";
 import { FormatPicker } from "../schedule/FormatPicker";
 import "../posts.css";
 
@@ -166,11 +167,15 @@ export function PostsPage() {
   const chatEnd = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    document.title = "Bài viết Facebook · Flowboard";
+    document.title = "Bài viết Facebook · DFlow";
     void getPostOptions().then(setOptions).catch((e) => toast.error(`Không tải được tuỳ chọn: ${e instanceof Error ? e.message : e}`));
     void listProducts().then(setProducts).catch(() => setProducts([]));
     void listPosts().then(setSaved).catch(() => setSaved([]));
     void listSeries().then(setAllSeries).catch(() => setAllSeries([]));
+    // posts that went up by hand on a connected Page → their saved copy shows "🌐 Đã đăng tay trên FB"
+    void syncFacebook({ maxAge: 600 }).then((r) => {
+      if (r.channels.some((c) => !c.error)) void listPosts().then(setSaved).catch(() => undefined);
+    }).catch(() => undefined);
   }, []);
 
   // /posts?post=12 opens a saved post (step 5 links here).
@@ -304,6 +309,9 @@ export function PostsPage() {
     const text = msg?.trim();
     // A post is always for a page: without one the AI writes off-topic and spends tokens for nothing.
     if (busy || !channelId) return;
+    const live = postId !== null && !!saved.find((p) => p.id === postId)?.fb_manual;
+    if (live && text) { toast.info("Bài này đã đăng tay trên Facebook — chỉ xem. Bấm ⧉ Bản sao để sửa trên một bài mới."); return; }
+    if (live) { setPostId(null); setBoardId(null); }
     if (!text && count > 1) { await runBatch(); return; }
     setBusy(true);
     const history = chat;
@@ -595,6 +603,8 @@ export function PostsPage() {
   ].filter(Boolean).join(" · ");
   const channel = channels.find((c) => c.id === channelId) ?? null;
   const openSchedule = postId !== null ? saved.find((p) => p.id === postId)?.schedule ?? null : null;
+  // Its text went up by hand on Facebook: read-only here (edit it on Facebook, or work on a ⧉ copy).
+  const handPosted = postId !== null ? saved.find((p) => p.id === postId)?.fb_manual ?? null : null;
   const loose = saved.filter((p) => !p.series);
   const perPage = view === "grid" ? GRID_PER_PAGE : LIST_PER_PAGE;
   const pages = Math.max(1, Math.ceil(loose.length / perPage));
@@ -617,7 +627,8 @@ export function PostsPage() {
   ));
   const savedCard = (p: SavedPost) => (
     <article key={p.id} className={`qt-posts__card${p.id === postId ? " is-open" : ""}`}>
-      {p.schedule && <ScheduleBadge s={p.schedule} corner onClick={() => navigate("/schedule")} />}
+      {p.fb_manual ? <HandPostedBadge at={p.fb_manual.at} link={p.fb_manual.link} corner />
+        : p.schedule && <ScheduleBadge s={p.schedule} corner onClick={() => navigate("/schedule")} />}
       <button type="button" className="qt-posts__cardthumb" onClick={() => open(p)} title="Mở bài này">
         {p.images[0] ? <img src={mediaUrl(p.images[0])} alt="" loading="lazy" /> : <span>{p.video ? "🎬" : "📝"}</span>}
         {p.series && <em className="qt-posts__ep">Tập {p.episode}</em>}
@@ -626,6 +637,7 @@ export function PostsPage() {
       <div className="qt-posts__cardbody">
         <strong title={titleOf(p)}>{titleOf(p)}</strong>
         <small>{metaOf(p)}</small>
+        {p.fb_stats && <StatsLine s={p.fb_stats} />}
         <p>{p.body}</p>
       </div>
       <div className="qt-posts__cardactions">
@@ -642,8 +654,10 @@ export function PostsPage() {
       <div className="qt-posts__savedtext">
         <strong>{titleOf(p)}</strong>
         <small>{metaOf(p)}</small>
+        {p.fb_stats && <StatsLine s={p.fb_stats} />}
       </div>
-      {p.schedule && <ScheduleBadge s={p.schedule} onClick={() => navigate("/schedule")} />}
+      {p.fb_manual ? <HandPostedBadge at={p.fb_manual.at} link={p.fb_manual.link} />
+        : p.schedule && <ScheduleBadge s={p.schedule} onClick={() => navigate("/schedule")} />}
       <button type="button" className="qt-btn qt-btn--small" onClick={() => void copyPost(draftOf(p))}>📋 Copy</button>
       <button type="button" className="qt-btn qt-btn--small" title={scheduleTip(p)} onClick={() => setSchedule({ kind: "post", postId: p.id, channelId: p.channel_id, title: titleOf(p) })}>📅</button>
       <button type="button" className="qt-btn qt-btn--small qt-btn--accent" onClick={() => open(p)}>Mở</button>
@@ -898,13 +912,13 @@ export function PostsPage() {
                 </div>
                 {hasDraft && (
                   <div className="qt-posts__chips">
-                    {QUICK_ASKS.map((q) => <button key={q} type="button" className="qt-chip" disabled={busy || noChannel} onClick={() => void run(q)}>{q}</button>)}
+                    {QUICK_ASKS.map((q) => <button key={q} type="button" className="qt-chip" disabled={busy || noChannel || !!handPosted} onClick={() => void run(q)}>{q}</button>)}
                   </div>
                 )}
                 <form className="qt-posts__send" onSubmit={(e) => { e.preventDefault(); if (message.trim()) void run(message); }}>
                   <textarea className="qt-textarea" value={message} onChange={(e) => setMessage(e.target.value)} placeholder={hasDraft ? "Muốn sửa gì? VD: thêm ý freeship, bỏ emoji" : "Cần bài viết gì?"}
                             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (message.trim()) void run(message); } }} />
-                  <button type="submit" className="qt-btn qt-btn--accent" disabled={busy || noChannel || !message.trim()}
+                  <button type="submit" className="qt-btn qt-btn--accent" disabled={busy || noChannel || !message.trim() || !!handPosted}
                           title={noChannel ? "Chọn kênh / page trước" : undefined}>Gửi</button>
                 </form>
                 {noChannel && <small className="qt-posts__need">Chọn <strong>Kênh / page</strong> ở trên trước khi chat với AI.</small>}
@@ -921,7 +935,8 @@ export function PostsPage() {
                     : dirty || postId === null ? <span className="qt-posts__status qt-posts__status--dirty">● Chưa lưu</span>
                       : <span className="qt-posts__status qt-posts__status--saved">✓ Đã lưu</span>
                 )}
-                {openSchedule && !published && <ScheduleBadge s={openSchedule} onClick={() => navigate("/schedule")} />}
+                {handPosted ? <HandPostedBadge at={handPosted.at} link={handPosted.link} />
+                  : openSchedule && !published && <ScheduleBadge s={openSchedule} onClick={() => navigate("/schedule")} />}
               </div>
               {hasDraft && (
                 <div className="qt-posts__headbtns">
@@ -929,7 +944,7 @@ export function PostsPage() {
                   {postId !== null && (
                     <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" title="Lưu nội dung đang hiện thành một bài mới (bản A/B), bài gốc giữ nguyên" onClick={() => void saveAsCopy()}>⧉ Bản sao</button>
                   )}
-                  <button type="button" className="qt-btn qt-btn--small" disabled={!dirty && postId !== null} onClick={() => void save()}>💾 Lưu</button>
+                  {!handPosted && <button type="button" className="qt-btn qt-btn--small" disabled={!dirty && postId !== null} onClick={() => void save()}>💾 Lưu</button>}
                 </div>
               )}
             </div>
@@ -973,7 +988,21 @@ export function PostsPage() {
                             productMedia={product?.media_ids ?? []} autoMakeToken={autoMake}
                             hookContext={{ channelId, productId }} hideCopy onBusyChange={setImagesBusy}
                             video={video} onVideo={(id) => void changeVideo(id)} autoVideoToken={autoVideo}
-                            clipVideo={boardId !== null ? clipVideo : ""} />
+                            clipVideo={boardId !== null ? clipVideo : ""} readOnly={!!handPosted} />
+                {handPosted ? (
+                  <div className="qt-posts__publish qt-posts__handposted">
+                    <div className="qt-posts__publishwhere">
+                      🌐 Bài này đã <strong>đăng tay trên Facebook</strong>{handPosted.channel && <> (page <strong>{handPosted.channel}</strong>)</>} lúc {slotLabel(handPosted.at)}
+                      {handPosted.count > 1 ? ` (${handPosted.count} lần)` : ""} — không qua tool, nên ở đây <strong>chỉ xem, không sửa</strong>.
+                      Muốn đổi nội dung thì sửa trên Facebook; muốn viết lại thì bấm ⧉ Bản sao.
+                    </div>
+                    <div className="qt-posts__publishbtns">
+                      <button type="button" className="qt-btn" onClick={() => void copyPost(draft)}>📋 Copy</button>
+                      <button type="button" className="qt-btn" onClick={() => void saveAsCopy()}>⧉ Bản sao để sửa</button>
+                      {handPosted.link && <a className="qt-btn qt-btn--accent" href={handPosted.link} target="_blank" rel="noreferrer">Mở trên Facebook ↗</a>}
+                    </div>
+                  </div>
+                ) : (
                 <div className="qt-posts__publish">
                   <div className="qt-posts__publishwhere">
                     {published ? (
@@ -1007,6 +1036,7 @@ export function PostsPage() {
                     )}
                   </div>
                 </div>
+                )}
               </>
             ) : (
               <>
@@ -1082,6 +1112,16 @@ export function PostsPage() {
                                    onSaved={(slot) => { if (slot.post_id) setSlots((m) => ({ ...m, [slot.post_id!]: slotLabel(slot.scheduled_at) })); setSchedule(null); reloadSaved(); }} />}
     </>
   );
+}
+
+/** The post's text went up by hand on Facebook (read back by "Đồng bộ từ Facebook"): it is live, read-only here. */
+function HandPostedBadge({ at, link, corner = false }: { at: string; link: string; corner?: boolean }) {
+  const day = slotLabel(at).split(" · ")[0].replace(/^\S+ /, "");
+  const tip = `Đã đăng tay trên Facebook lúc ${slotLabel(at)} (không qua tool) — chỉ xem, không sửa ở đây.${link ? " Bấm để mở bài trên Facebook." : ""}`;
+  const cls = `qt-posts__sched qt-posts__sched--hand${corner ? " qt-posts__sched--corner" : ""}`;
+  return link
+    ? <a className={cls} href={link} target="_blank" rel="noreferrer" title={tip} onClick={(e) => e.stopPropagation()}>🌐 Đăng tay trên FB {day}</a>
+    : <span className={cls} title={tip}>🌐 Đăng tay trên FB {day}</span>;
 }
 
 /** Where a saved post stands on "Lịch đăng" — so a scheduled post is not scheduled again. */

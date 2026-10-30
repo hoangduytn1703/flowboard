@@ -50,7 +50,7 @@ export function PromptsPage() {
   useEffect(() => { setPage(1); }, [kind, tag, industry, scene, items === null]);
   useEffect(() => {
     const prev = document.title;
-    document.title = "Prompt đã lưu · Flowboard";
+    document.title = "Prompt đã lưu · DFlow";
     return () => { document.title = prev; };
   }, []);
 

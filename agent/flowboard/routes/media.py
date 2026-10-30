@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from flowboard.services import media as media_service
-from flowboard.services import face_check, watermark
+from flowboard.services import face_check, poster, watermark
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +71,18 @@ def set_clean_marks(body: CleanMarksBody) -> dict:
 async def run_clean_marks() -> dict:
     """Strip the sparkle from every cached generated image that still carries it."""
     return await asyncio.to_thread(watermark.clean_cached_images)
+
+
+@api_router.get("/{media_id}/poster")
+async def get_media_poster(media_id: str):
+    """A still of a video (services/poster) — the card picture of a clip that has only its finished video."""
+    media_id = media_service.normalize_media_id(media_id)
+    if not media_service.is_valid_media_id(media_id):
+        raise HTTPException(status_code=400, detail="invalid media_id")
+    path = await poster.poster_for(media_id)
+    if path is None:
+        raise HTTPException(status_code=404, detail="no video to take a picture from")
+    return FileResponse(path=str(path), media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
 
 
 @api_router.get("/{media_id}/faces")

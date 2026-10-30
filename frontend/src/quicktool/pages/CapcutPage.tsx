@@ -615,7 +615,7 @@ export function CapcutPage() {
 
   useEffect(() => {
     const prev = document.title;
-    document.title = "Edit auto CapCut · Flowboard";
+    document.title = "Edit auto CapCut · DFlow";
     return () => { document.title = prev; };
   }, []);
 
@@ -786,7 +786,7 @@ export function CapcutPage() {
       </header>
       <div className="qt-home cc-page">
         <p className="cc-lead">
-          Biến video làm ở Flowboard (hoặc video bạn tự quay) thành <strong>một dự án CapCut</strong>: phụ đề theo kiểu chữ của bạn,
+          Biến video làm ở DFlow (hoặc video bạn tự quay) thành <strong>một dự án CapCut</strong>: phụ đề theo kiểu chữ của bạn,
           chữ nhấn mạnh + zoom + âm thanh ở chữ quan trọng — mở CapCut là chỉnh tiếp, xuất xong đưa về clip để đăng.
         </p>
         {!st ? <PageLoading text="Đang kiểm tra máy…" /> : (

@@ -192,7 +192,7 @@ async def read_via_extension(url: str) -> dict[str, Any]:
         have = client.extension_version or "cũ"
         raise ProductLinkError(
             f"Extension đang là bản {have}, chưa biết đọc Shopee. Mở chrome://extensions, bấm ↻ Reload ở "
-            "Flowboard extension (bản 0.4.0 trở lên), rồi thử lại."
+            "DFlow extension (bản 0.4.0 trở lên), rồi thử lại."
         )
     resp = await client._send("read_page", {"url": url.strip()}, timeout=READ_PAGE_TIMEOUT_S)
     err = resp.get("error")
