@@ -42,6 +42,8 @@ export interface PostBrief {
   with_video?: boolean;
   /** "Đăng dạng" for a post with a video: "reel" = the AI writes a short Reel caption, publishing picks Reel */
   fb_format?: "post" | "reel";
+  /** "📲 Thêm vào tin" picked for this post (the publish bar / schedule dialog remember it) */
+  fb_story?: boolean;
 }
 
 export interface PostDraft {

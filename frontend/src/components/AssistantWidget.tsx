@@ -20,8 +20,8 @@ const SUGGESTIONS = [
   "Thêm sản phẩm từ link này rồi tạo clip quảng cáo: ",
 ];
 
-// "?assistant=1" asks for the chat open. The app is mounted again right after sign-in (AppInner's key goes
-// from "local" to the username), so the ask is kept here a few seconds for the new mount to pick up.
+// "?assistant=1" asks for the chat open. Kept a few seconds at module level too, in case the app mounts again
+// right after loading (it did until 30/10: App mounted the pages before the first board load, then again after).
 let openAskedUntil = 0;
 
 type Pos = { x: number; y: number };

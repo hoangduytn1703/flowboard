@@ -60,11 +60,15 @@ function AppInner() {
   const boardId = useBoardStore((s) => s.boardId);
   const uiMode = useSettingsStore((s) => s.uiMode);
   const ran = useRef(false);
+  // The pages mount once, after the first board load: the store starts with loading=false, so the routes used to
+  // mount, get swapped for <AppLoading> when the load began, and mount again — a page lost what it had just read
+  // from its URL (?post=, ?assistant=, ?job=) and whatever was clicked in between (30/10).
+  const [booted, setBooted] = useState(false);
 
   useEffect(() => {
     if (ran.current) return;
     ran.current = true;
-    loadInitialBoard();
+    void loadInitialBoard().finally(() => setBooted(true));
     // Fire-and-forget: panel renders the loading state inline and the
     // app stays usable even if references fail to hydrate.
     void loadReferences();
@@ -74,7 +78,7 @@ function AppInner() {
     }
   }, [loadInitialBoard, loadReferences]);
 
-  if (loading && boardId === null) {
+  if (!booted || (loading && boardId === null)) {
     return <AppLoading />;
   }
 

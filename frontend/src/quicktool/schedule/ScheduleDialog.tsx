@@ -3,7 +3,7 @@ import { createSlot, publishSlot, slotLabel, suggestSlots, toLocalInput, updateS
 import { listPosts } from "../../api/posts";
 import { toast } from "../../store/toast";
 import { ChannelPicker, useChannels } from "../channels/ChannelPicker";
-import { FormatPicker } from "./FormatPicker";
+import { FormatPicker, StoryToggle } from "./FormatPicker";
 import "../schedule.css";
 
 export interface ScheduleTarget {
@@ -16,6 +16,8 @@ export interface ScheduleTarget {
   slot?: Slot | null;
   /** the format the item was written for ("Đăng dạng" on the post page) */
   fbFormat?: FbFormat;
+  /** "📲 Thêm vào tin" already picked where it came from */
+  fbStory?: boolean;
 }
 
 /**
@@ -37,6 +39,7 @@ export function ScheduleDialog({ target, onClose, onSaved, mode = "schedule" }: 
   const [auto, setAuto] = useState(target.slot?.auto ?? false);
   const [note, setNote] = useState(target.slot?.note ?? "");
   const [fbFormat, setFbFormat] = useState<FbFormat>(target.slot?.fb_format ?? target.fbFormat ?? "post");
+  const [fbStory, setFbStory] = useState<boolean>(target.slot?.fb_story ?? target.fbStory ?? false);
   const [suggestions, setSuggestions] = useState<SlotSuggestion[]>([]);
   const [busy, setBusy] = useState(false);
   // "Đăng ngay": what goes with the clip (its latest post, else its name) and the published link
@@ -69,6 +72,8 @@ export function ScheduleDialog({ target, onClose, onSaved, mode = "schedule" }: 
     return () => { alive = false; };
   }, [channelId]);
   useEffect(() => { if (!canAuto) setAuto(false); }, [canAuto]);
+  // "📲 Thêm vào tin" picked before opening: a story only goes out when the tool posts, so auto-post comes on with it
+  useEffect(() => { if (canAuto && !target.slot && target.fbStory) setAuto(true); }, [canAuto, target.slot, target.fbStory]);
 
   async function publishNow() {
     if (!channelId || !channel?.fb_connected) return;
@@ -76,11 +81,13 @@ export function ScheduleDialog({ target, onClose, onSaved, mode = "schedule" }: 
     try {
       // auto stays off: this call publishes it — the background loop must not pick the same slot up
       const slot = await createSlot({ kind: target.kind, post_id: target.postId ?? null, board_id: target.boardId ?? null, channel_id: channelId,
-                                      at: new Date().toISOString(), note: `Đăng ngay${fbFormat === "reel" ? " (Reel)" : ""}`, fb_format: fbFormat });
+                                      at: new Date().toISOString(), note: `Đăng ngay${fbFormat === "reel" ? " (Reel)" : ""}`, fb_format: fbFormat,
+                                      fb_story: fbStory });
       const out = await publishSlot(slot.id);
       if (out.status === "posted") {
         setPosted(out);
-        toast.success(`Đã đăng lên Page "${channel.fb_page_name || channel.name}"${out.fb_format === "reel" ? " dạng Reel" : ""}.`, { duration: 9000 });
+        toast.success(`Đã đăng lên Page "${channel.fb_page_name || channel.name}"${out.fb_format === "reel" ? " dạng Reel" : ""}${out.result?.story ? " + đã thêm vào tin" : ""}.`, { duration: 9000 });
+        if (out.result?.story_error) toast.warning(`Bài đã đăng, nhưng chưa thêm vào tin được: ${out.result.story_error}`, { duration: 10000 });
         onSaved(out);
       } else {
         toast.error(out.result?.error ?? "Facebook không nhận bài — xem lỗi ở Lịch đăng.");
@@ -100,9 +107,9 @@ export function ScheduleDialog({ target, onClose, onSaved, mode = "schedule" }: 
     setBusy(true);
     try {
       const slot = target.slot
-        ? await updateSlot(target.slot.id, { at: when.toISOString(), channel_id: channelId, auto, note, fb_format: fbFormat })
-        : await createSlot({ kind: target.kind, post_id: target.postId ?? null, board_id: target.boardId ?? null, channel_id: channelId, at: when.toISOString(), auto, note, fb_format: fbFormat });
-      toast.success(`${target.slot ? "Đã đổi lịch" : "Đã lên lịch"}: ${slotLabel(slot.scheduled_at)}${slot.fb_format === "reel" ? " · dạng Reel" : ""}${slot.auto ? " · tự đăng lên Facebook Page" : " · tool sẽ nhắc ở Hôm nay"}.`);
+        ? await updateSlot(target.slot.id, { at: when.toISOString(), channel_id: channelId, auto, note, fb_format: fbFormat, fb_story: fbStory && auto })
+        : await createSlot({ kind: target.kind, post_id: target.postId ?? null, board_id: target.boardId ?? null, channel_id: channelId, at: when.toISOString(), auto, note, fb_format: fbFormat, fb_story: fbStory && auto });
+      toast.success(`${target.slot ? "Đã đổi lịch" : "Đã lên lịch"}: ${slotLabel(slot.scheduled_at)}${slot.fb_format === "reel" ? " · dạng Reel" : ""}${slot.auto ? " · tự đăng lên Facebook Page" : " · tool sẽ nhắc ở Hôm nay"}${slot.fb_story ? " · 📲 thêm vào tin" : ""}.`);
       onSaved(slot);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -119,6 +126,7 @@ export function ScheduleDialog({ target, onClose, onSaved, mode = "schedule" }: 
         <ChannelPicker value={channelId} onChange={setChannelId} required label="Đăng lên kênh / page" />
         <FormatPicker value={fbFormat} onChange={setFbFormat}
                       target={{ kind: target.kind, postId: target.postId ?? target.slot?.post_id, boardId: target.boardId ?? target.slot?.board_id }} />
+        {now && <StoryToggle value={fbStory} onChange={setFbStory} enabled={canAuto} why="Kênh chưa kết nối Facebook Page — không thêm vào tin được." />}
         {now && (
           <>
             {channel && !channel.fb_connected && (
@@ -181,6 +189,8 @@ export function ScheduleDialog({ target, onClose, onSaved, mode = "schedule" }: 
                 : "Chọn kênh trước."}</small>
           </span>
         </label>
+        <StoryToggle value={fbStory} onChange={setFbStory} enabled={canAuto && auto}
+                     why={!canAuto ? "Kênh chưa kết nối Facebook Page — không thêm vào tin được." : "Chỉ thêm vào tin khi tool tự đăng lên Page (bật “Tự đăng” ở trên)."} />
         <label className="qt-field">
           <span>Ghi chú <small>(không bắt buộc — VD: đăng thêm vào nhóm X)</small></span>
           <input value={note} maxLength={300} onChange={(e) => setNote(e.target.value)} />

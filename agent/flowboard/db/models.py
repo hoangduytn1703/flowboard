@@ -263,6 +263,8 @@ class Schedule(SQLModel, table=True):
     auto: bool = False
     # How a video goes out on Facebook: "post" (a feed post with the video) | "reel" (Reels, 3–90 s vertical).
     fb_format: str = Field(default="post")
+    # "📲 Thêm vào tin": also put it on the Page's Story when it goes out (the video — its first 60 s — or the first photo)
+    fb_story: bool = False
     note: str = ""
     # What publishing produced: the Facebook post id / permalink, or the error.
     result: Optional[dict] = Field(default=None, sa_column=Column(JSON))

@@ -276,7 +276,7 @@ export function SchedulePage() {
                                 onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", `slot:${s.id}`); setDragging({ slot: s }); }}
                                 onDragEnd={() => { setDragging(null); setOverDay(null); }}>
                           {s.thumbnail && <img src={mediaUrl(s.thumbnail)} alt="" loading="lazy" />}
-                          <time>{new Date(s.scheduled_at).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}{s.auto ? " ⚡" : ""}{s.fb_format === "reel" ? " 🎬 Reel" : ""}</time>
+                          <time>{new Date(s.scheduled_at).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}{s.auto ? " ⚡" : ""}{s.fb_format === "reel" ? " 🎬 Reel" : ""}{s.fb_story ? " 📲" : ""}</time>
                           <span className="t">{s.kind === "clip" ? "🎬 " : "📝 "}{s.title}</span>
                           <small>{s.channel} · {st.label}</small>
                           {s.status === "posted" && <StatsLine s={s.stats} dense />}
@@ -358,6 +358,11 @@ export function SchedulePage() {
                     <dt>Kênh</dt><dd>{open.channel || "—"}{open.platforms.length ? ` (${open.platforms.join(", ")})` : ""}</dd>
                     <dt>Cách đăng</dt><dd>{open.auto ? "⚡ tự đăng lên Facebook Page" : open.fb_connected ? "tay (có thể Đăng ngay)" : "tay — copy rồi đăng"}</dd>
                     <dt>Dạng</dt><dd>{open.fb_format === "reel" ? "🎬 Reel" : "📰 Bài viết"}</dd>
+                    {(open.fb_story || open.result?.story || open.result?.story_error) && (
+                      <><dt>Tin</dt><dd>{open.result?.story ? `📲 đã thêm vào tin (${open.result.story.kind === "video" ? "video" : "ảnh"}${open.result.story.note ? ` — ${open.result.story.note}` : ""})`
+                        : open.result?.story_error ? `⚠ chưa thêm được: ${open.result.story_error}`
+                          : "📲 sẽ thêm vào tin khi đăng"}</dd></>
+                    )}
                     {open.note && <><dt>Ghi chú</dt><dd>{open.note}</dd></>}
                     {open.posted_at && <><dt>Đã đăng</dt><dd>{slotLabel(open.posted_at)}{open.result?.permalink && <> · <a href={open.result.permalink} target="_blank" rel="noreferrer">xem bài ↗</a></>}</dd></>}
                   </dl>

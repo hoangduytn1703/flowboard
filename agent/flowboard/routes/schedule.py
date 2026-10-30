@@ -34,6 +34,7 @@ class SlotCreate(BaseModel):
     auto: bool = False
     note: Optional[str] = Field(default=None, max_length=300)
     fb_format: str = "post"
+    fb_story: bool = False
 
 
 class SlotPatch(BaseModel):
@@ -43,6 +44,7 @@ class SlotPatch(BaseModel):
     note: Optional[str] = Field(default=None, max_length=300)
     status: Optional[str] = None
     fb_format: Optional[str] = None
+    fb_story: Optional[bool] = None
 
 
 def _when(value: Optional[str]):
@@ -123,7 +125,8 @@ def create_slot(body: SlotCreate) -> dict[str, Any]:
     when = _when(body.at)
     try:
         return scheduler.create(body.kind, when, post_id=body.post_id, board_id=body.board_id,
-                                channel_id=body.channel_id, auto=body.auto, note=body.note or "", fb_format=body.fb_format)
+                                channel_id=body.channel_id, auto=body.auto, note=body.note or "", fb_format=body.fb_format,
+                                fb_story=body.fb_story)
     except scheduler.ScheduleError as exc:
         raise HTTPException(400, str(exc))
 

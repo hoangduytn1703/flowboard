@@ -15,8 +15,16 @@ export interface Slot {
   auto: boolean;
   /** how a video goes out on Facebook: a feed post or a Reel */
   fb_format: FbFormat;
+  /** "📲 Thêm vào tin": also put it on the Page's Story when it goes out */
+  fb_story: boolean;
   note: string;
-  result: { by?: string; post_id?: string; permalink?: string; comment_id?: string; error?: string } | null;
+  result: {
+    by?: string; post_id?: string; permalink?: string; comment_id?: string; error?: string;
+    /** the Story it added (kind photo | video; note e.g. "tin lấy 60 giây đầu") */
+    story?: { post_id: string; kind: string; note?: string };
+    /** the post went out but the Story did not */
+    story_error?: string;
+  } | null;
   posted_at: string | null;
   created_at: string | null;
   title: string;
@@ -92,13 +100,14 @@ export function suggestSlots(channelId: number, limit = 6): Promise<SlotSuggesti
 
 export function createSlot(input: {
   kind: "post" | "clip"; post_id?: number | null; board_id?: number | null; channel_id?: number | null;
-  at: string; auto?: boolean; note?: string; fb_format?: FbFormat;
+  at: string; auto?: boolean; note?: string; fb_format?: FbFormat; fb_story?: boolean;
 }): Promise<Slot> {
   return api<Slot>("/api/schedule", { method: "POST", body: JSON.stringify(input) });
 }
 
 export function updateSlot(id: number, patch: {
   at?: string; channel_id?: number | null; auto?: boolean; note?: string; status?: Slot["status"]; fb_format?: FbFormat;
+  fb_story?: boolean;
 }): Promise<Slot> {
   return api<Slot>(`/api/schedule/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
 }

@@ -207,12 +207,12 @@ async def test_a_plan_that_posts_by_itself_waits_for_ok(client, monkeypatch, wri
     async def fake_llm(feature, prompt, *, system_prompt=None, timeout=0):
         return json.dumps({"reply": "Ok.", "actions": [
             {"tool": "write_post", "args": {"channel_id": ch, "series": "những thú vị về hệ mặt trời"}},
-            {"tool": "schedule_post", "args": {"post": "previous", "at": at}}]}, ensure_ascii=False)
+            {"tool": "schedule_post", "args": {"post": "previous", "at": at, "story": True}}]}, ensure_ascii=False)
 
     monkeypatch.setattr(assistant, "run_llm", fake_llm)
-    out = await assistant.chat("viết tập tiếp cho kênh chúng ta hay tò mò rồi tự đăng 12h mai")
+    out = await assistant.chat("viết tập tiếp cho kênh chúng ta hay tò mò rồi tự đăng 12h mai, thêm vào tin luôn")
     assert out["task"]["status"] == "pending" and out["messages"][1]["data"]["confirm"] == out["task"]["id"]
-    assert "tự đăng công khai" in out["messages"][1]["text"]
+    assert "tự đăng công khai" in out["messages"][1]["text"] and "thêm vào tin" in out["messages"][1]["text"]
     await asyncio.sleep(0.1)
     assert writer["writes"] == [] and all(p["episode"] != 3 for p in client.get("/api/posts").json())  # nothing ran yet
     done = await assistant.chat("ok")  # the go-ahead, without asking the AI again
@@ -220,6 +220,11 @@ async def test_a_plan_that_posts_by_itself_waits_for_ok(client, monkeypatch, wri
     assert await _until(lambda: assistant.task_outcome(out["task"]["id"])["status"] != "running")
     new = next(p for p in client.get("/api/posts").json() if p["episode"] == 3)
     assert new["schedule"]["auto"] is True
+    from flowboard.db import get_session
+    from flowboard.db.models import Schedule
+
+    with get_session() as s:
+        assert s.get(Schedule, new["schedule"]["slot_id"]).fb_story is True
     # "thôi" drops a waiting plan
     out2 = await assistant.chat("viết tập tiếp cho kênh chúng ta hay tò mò rồi tự đăng 12h mai")
     assert out2["task"]["status"] == "pending"

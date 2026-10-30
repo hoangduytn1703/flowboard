@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api/client";
 import { createSlot, slotLabel, updateSlot, type FbFormat, type Slot } from "../../api/schedule";
-import { FormatPicker } from "./FormatPicker";
+import { FormatPicker, StoryToggle } from "./FormatPicker";
 import { toast } from "../../store/toast";
 import { ChannelPicker, useChannels } from "../channels/ChannelPicker";
 import type { ScheduleTarget } from "./ScheduleDialog";
@@ -52,6 +52,7 @@ export function DropTimeDialog({ day, target, slot, onClose, onSaved }: {
   const [time, setTime] = useState(firstFree);
   const [auto, setAuto] = useState(slot?.auto ?? false);
   const [fbFormat, setFbFormat] = useState<FbFormat>(slot?.fb_format ?? "post");
+  const [fbStory, setFbStory] = useState<boolean>(slot?.fb_story ?? false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -77,9 +78,9 @@ export function DropTimeDialog({ day, target, slot, onClose, onSaved }: {
     setBusy(true);
     try {
       const out = slot
-        ? await updateSlot(slot.id, { at: when.toISOString(), auto, fb_format: fbFormat })
-        : await createSlot({ kind: target!.kind, post_id: target!.postId ?? null, board_id: target!.boardId ?? null, channel_id: channelId, at: when.toISOString(), auto, fb_format: fbFormat });
-      toast.success(`${slot ? "Đã dời lịch" : "Đã lên lịch"}: ${slotLabel(out.scheduled_at)}${out.auto ? " · tự đăng lên Page" : ""}.`);
+        ? await updateSlot(slot.id, { at: when.toISOString(), auto, fb_format: fbFormat, fb_story: fbStory && auto })
+        : await createSlot({ kind: target!.kind, post_id: target!.postId ?? null, board_id: target!.boardId ?? null, channel_id: channelId, at: when.toISOString(), auto, fb_format: fbFormat, fb_story: fbStory && auto });
+      toast.success(`${slot ? "Đã dời lịch" : "Đã lên lịch"}: ${slotLabel(out.scheduled_at)}${out.auto ? " · tự đăng lên Page" : ""}${out.fb_story ? " · 📲 thêm vào tin" : ""}.`);
       onSaved(out);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -117,6 +118,10 @@ export function DropTimeDialog({ day, target, slot, onClose, onSaved }: {
             <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
             <span><strong>Tự đăng lên Page "{channel.fb_page_name}" đúng giờ</strong><small>Agent phải đang chạy lúc đó.</small></span>
           </label>
+        )}
+        {channel?.fb_connected && (
+          <StoryToggle value={fbStory} onChange={setFbStory} enabled={auto}
+                       why="Chỉ thêm vào tin khi tool tự đăng lên Page (bật “Tự đăng” ở trên)." />
         )}
         <div className="qt-post__actions">
           <button type="button" className="qt-btn qt-btn--accent" disabled={busy || past || !channelId} onClick={() => void save()}>

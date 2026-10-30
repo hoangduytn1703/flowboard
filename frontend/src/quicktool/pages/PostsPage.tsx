@@ -14,7 +14,7 @@ import { copyPost, PostEditor } from "../posts/PostEditor";
 import { ScheduleDialog, type ScheduleTarget } from "../schedule/ScheduleDialog";
 import { StatsLine } from "../schedule/FbStats";
 import { createSlot, publishSlot, slotLabel, suggestSlots, syncFacebook, type FbFormat } from "../../api/schedule";
-import { FormatPicker } from "../schedule/FormatPicker";
+import { FormatPicker, StoryToggle } from "../schedule/FormatPicker";
 import "../posts.css";
 
 /** The one-click "Viết Tập N+1" buttons are hidden for now (29/10): the tool cannot tell which episodes were
@@ -129,6 +129,9 @@ export function PostsPage() {
   const hasVideo = !!video || boardId !== null;
   const fbFormat: FbFormat = hasVideo && brief.fb_format === "reel" ? "reel" : "post";
   const setFbFormat = (f: FbFormat) => { set({ fb_format: f }); setDirty(true); };
+  // "📲 Thêm vào tin": kept on the post's brief like the format, used by "Đăng ngay" and "Lên lịch"
+  const fbStory = !!brief.fb_story;
+  const setFbStory = (v: boolean) => { set({ fb_story: v }); setDirty(true); };
   const [dirty, setDirty] = useState(false);
   const [chat, setChat] = useState<ChatTurn[]>([]);
   const [message, setMessage] = useState("");
@@ -506,12 +509,13 @@ export function PostsPage() {
       const id = dirty || postId === null ? await save(true) : postId;
       if (!id) return;
       const slot = await createSlot({ kind: "post", post_id: id, channel_id: ch.id, at: new Date().toISOString(), note: "Đăng ngay từ trang Bài viết",
-                                      fb_format: (video || boardId !== null) ? fbFormat : "post" });
+                                      fb_format: (video || boardId !== null) ? fbFormat : "post", fb_story: fbStory });
       const out = await publishSlot(slot.id);
       reloadSaved();
       if (out.status === "posted") {
         setPublished({ at: out.posted_at ?? new Date().toISOString(), link: out.result?.permalink ?? "", reel: out.fb_format === "reel" });
-        toast.success(`Đã đăng ${out.fb_format === "reel" ? "Reel" : "bài"} lên Page "${ch.fb_page_name || ch.name}".`, { duration: 9000 });
+        toast.success(`Đã đăng ${out.fb_format === "reel" ? "Reel" : "bài"} lên Page "${ch.fb_page_name || ch.name}"${out.result?.story ? " + đã thêm vào tin" : ""}.`, { duration: 9000 });
+        if (out.result?.story_error) toast.warning(`Bài đã đăng, nhưng chưa thêm vào tin được: ${out.result.story_error}`, { duration: 10000 });
       } else {
         toast.error(out.result?.error ?? "Đăng không được.");
       }
@@ -1021,11 +1025,16 @@ export function PostsPage() {
                     {imagesBusy && <span className="qt-posts__wait"> · 🎨 đang tạo ảnh — đợi xong rồi đăng</span>}
                   </div>
                   <div className="qt-posts__publishbtns">
+                    {channel?.fb_connected && !published && (
+                      <StoryToggle compact value={fbStory} onChange={setFbStory}
+                                   enabled={!!video || clipVideo !== "" || images.length > 0 || !!draft.body.trim()}
+                                   why="Bài chưa có nội dung." />
+                    )}
                     {published?.link && <a className="qt-btn qt-btn--accent" href={published.link} target="_blank" rel="noreferrer">Xem {published.reel ? "Reel" : "bài"} trên Facebook ↗</a>}
                     <button type="button" className="qt-btn qt-btn--ghost" disabled={!draft.body.trim()} onClick={() => void copyPost(draft)}>📋 Copy</button>
                     <button type="button" className="qt-btn" disabled={!channel || publishing || imagesBusy}
                             title={imagesBusy ? "Đợi ảnh tạo xong rồi lên lịch" : undefined}
-                            onClick={async () => { const id = dirty || postId === null ? await save(true) : postId; if (id) setSchedule({ kind: "post", postId: id, channelId, title: draft.title || draft.body.split("\n")[0], fbFormat }); }}>📅 Lên lịch</button>
+                            onClick={async () => { const id = dirty || postId === null ? await save(true) : postId; if (id) setSchedule({ kind: "post", postId: id, channelId, title: draft.title || draft.body.split("\n")[0], fbFormat, fbStory }); }}>📅 Lên lịch</button>
                     {channel?.fb_connected && (
                       <button type="button" className={`qt-btn ${published ? "qt-btn--ghost" : "qt-btn--accent"}`}
                               disabled={publishing || imagesBusy || !draft.body.trim() || (boardId !== null && !video && !clipVideo)}

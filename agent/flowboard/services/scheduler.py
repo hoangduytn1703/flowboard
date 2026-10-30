@@ -21,7 +21,7 @@ from sqlmodel import select
 
 from flowboard.db import get_session, has_engine
 from flowboard.db.models import Board, Channel, Node, Post, Schedule
-from flowboard.services import facebook_publish
+from flowboard.services import facebook_publish, story_card
 from flowboard.timestamps import utc_iso
 
 logger = logging.getLogger(__name__)
@@ -90,6 +90,7 @@ def row(sc: Schedule, *, title: str = "", thumb: Optional[str] = None, channel: 
         "id": sc.id, "kind": sc.kind, "post_id": sc.post_id, "board_id": sc.board_id, "channel_id": sc.channel_id,
         "scheduled_at": utc_iso(when), "status": sc.status, "due": due, "auto": bool(sc.auto), "note": sc.note or "",
         "fb_format": sc.fb_format or "post",
+        "fb_story": bool(sc.fb_story),
         "result": dict(sc.result) if sc.result else None, "posted_at": utc_iso(_aware(sc.posted_at)),
         "created_at": utc_iso(_aware(sc.created_at)),
         "title": title, "thumbnail": thumb, "channel": channel, "platforms": platforms or [],
@@ -224,7 +225,8 @@ def _check_format(kind: str, post_id: Optional[int], board_id: Optional[int], fb
 
 
 def create(kind: str, when: datetime, *, post_id: Optional[int] = None, board_id: Optional[int] = None,
-           channel_id: Optional[int] = None, auto: bool = False, note: str = "", fb_format: str = "post") -> dict[str, Any]:
+           channel_id: Optional[int] = None, auto: bool = False, note: str = "", fb_format: str = "post",
+           fb_story: bool = False) -> dict[str, Any]:
     check_future(when)
     channel_id = _check_target(kind, post_id, board_id, channel_id)
     _check_format(kind, post_id, board_id, fb_format)
@@ -232,7 +234,8 @@ def create(kind: str, when: datetime, *, post_id: Optional[int] = None, board_id
         raise ScheduleError("Kênh này chưa kết nối Facebook Page nên không tự đăng được — bỏ chọn \"Tự đăng\" hoặc kết nối Page trước.")
     with get_session() as s:
         sc = Schedule(kind=kind, post_id=post_id if kind == "post" else None, board_id=board_id if kind == "clip" else None,
-                      channel_id=channel_id, scheduled_at=when, auto=auto, note=(note or "").strip()[:300], fb_format=fb_format)
+                      channel_id=channel_id, scheduled_at=when, auto=auto, note=(note or "").strip()[:300], fb_format=fb_format,
+                      fb_story=bool(fb_story))
         s.add(sc)
         s.commit()
         s.refresh(sc)
@@ -266,6 +269,10 @@ def update(slot_id: int, **fields: Any) -> dict[str, Any]:
                 raise ScheduleError("Bài này đã đăng rồi, không đổi dạng đăng được.")
             _check_format(sc.kind, sc.post_id, sc.board_id, fields["fb_format"])
             sc.fb_format = fields["fb_format"]
+        if fields.get("fb_story") is not None:
+            if sc.status == "posted" and bool(fields["fb_story"]) != bool(sc.fb_story):
+                raise ScheduleError("Bài này đã đăng rồi, không đổi được phần thêm vào tin.")
+            sc.fb_story = bool(fields["fb_story"])
         if "status" in fields and fields["status"]:
             if fields["status"] not in STATUSES:
                 raise ScheduleError("Trạng thái không hợp lệ.")
@@ -397,6 +404,26 @@ def _payload(sc: Schedule) -> tuple[str, list[Path], Optional[Path], str]:
         return b.name, [], video, ""
 
 
+async def _story(channel_id: int, page_id: str, *, video: Optional[Path], photos: list[Path],
+                 message: str = "", page_name: str = "") -> dict[str, Any]:
+    """"📲 Thêm vào tin" once the post is up: the video (its first 60 s), else the first photo, else — words only —
+    a picture of its opening drawn by :mod:`story_card` (the API has no text stories). A story that fails never
+    undoes the post — it is reported as ``story_error`` on the slot."""
+    try:
+        photo, note = (photos[0] if photos else None), ""
+        if video is None and photo is None and story_card.card_text(message):
+            photo, note = story_card.render_temp(message, page_name=page_name), "bài chỉ có chữ nên tin là ảnh chữ của đoạn mở đầu"
+        story = await facebook_publish.publish_story(channel_id, page_id, video=video, photo=None if video else photo)
+        if note and not story.get("note"):
+            story["note"] = note
+        return {"story": story}
+    except facebook_publish.FacebookError as exc:
+        return {"story_error": str(exc)}
+    except Exception as exc:  # noqa: BLE001 — the post is out; only the story failed
+        logger.exception("scheduler: story failed")
+        return {"story_error": f"Lỗi khi thêm vào tin: {exc}"}
+
+
 async def publish(slot_id: int) -> dict[str, Any]:
     """Publish one slot now through its channel's Facebook Page; the slot
     records the outcome either way."""
@@ -409,7 +436,7 @@ async def publish(slot_id: int) -> dict[str, Any]:
         ch = s.get(Channel, sc.channel_id or 0)
         if ch is None:
             raise ScheduleError("Kênh của lịch này không còn.")
-        page_id, channel_id = ch.fb_page_id, ch.id
+        page_id, channel_id, page_name = ch.fb_page_id, ch.id, ch.fb_page_name or ch.name
     try:
         message, photos, video, first_comment = _payload(sc)
         if (sc.fb_format or "post") == "reel":
@@ -420,6 +447,8 @@ async def publish(slot_id: int) -> dict[str, Any]:
             out = await facebook_publish.publish_post(channel_id, page_id, message, photos=photos, video=video,
                                                       first_comment=first_comment)
         status, result = "posted", {"by": "facebook", **out}
+        if sc.fb_story:
+            result.update(await _story(channel_id, page_id, video=video, photos=photos, message=message, page_name=page_name))
     except (ScheduleError, facebook_publish.FacebookError) as exc:
         status, result = "failed", {"by": "facebook", "error": str(exc)}
     except Exception as exc:  # noqa: BLE001 — recorded on the slot, never crashes the loop

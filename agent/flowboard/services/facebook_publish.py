@@ -303,6 +303,85 @@ async def publish_reel(channel_id: int, page_id: str, message: str, *, video: Pa
             "comment_id": comment_id, "format": "reel"}
 
 
+#: Page Stories: a video story is at most 60 s (Meta, Page Stories API); a longer clip goes up as its first part.
+STORY_MAX_VIDEO_S = 60.0
+STORY_CUT_S = 59.5
+STORY_MAX_PHOTO_BYTES = 10 * 1024 * 1024
+
+
+def story_video(video: Path) -> tuple[Path, str]:
+    """The file a video story uses, and a note: a clip over 60 s is cut to its first 59.5 s (stream copy, next to it)."""
+    from flowboard.services.video_export import probe_clip
+
+    info = probe_clip(video)
+    if info is None or info.duration <= STORY_MAX_VIDEO_S:
+        return video, ""
+    import shutil
+    import subprocess
+    import tempfile
+
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        raise FacebookError("Video dài hơn 60 giây mà máy không có ffmpeg để cắt — tin trên Page tối đa 60 giây.")
+    out = Path(tempfile.gettempdir()) / f"story-{video.stem}.mp4"
+    try:
+        subprocess.run([ffmpeg, "-v", "error", "-y", "-i", str(video), "-t", str(STORY_CUT_S), "-c", "copy",
+                        "-movflags", "+faststart", str(out)], capture_output=True, timeout=180, check=True)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise FacebookError(f"Không cắt được video cho tin: {exc}") from exc
+    return out, f"video dài {round(info.duration)} giây nên tin lấy 60 giây đầu"
+
+
+async def publish_story(channel_id: int, page_id: str, *, photo: Optional[Path] = None,
+                        video: Optional[Path] = None) -> dict[str, Any]:
+    """"📲 Thêm vào tin": a Page Story with ``video`` (``video_stories`` start → file to rupload → finish) or else
+    ``photo`` (uploaded again unpublished — a photo of a published post cannot be reused — then ``photo_stories``).
+    Returns ``{post_id, kind, note}``."""
+    token = get_token(channel_id)
+    if not token:
+        raise FacebookError("Kênh này chưa kết nối Facebook Page.")
+    if not page_id:
+        raise FacebookError("Kênh chưa có Page id — kết nối lại Facebook Page.")
+    if video is None and photo is None:
+        raise FacebookError("Tin cần ảnh hoặc video — bài này không có chữ, ảnh hay video nào.")
+    async with httpx.AsyncClient(timeout=VIDEO_TIMEOUT_S if video else TIMEOUT_S) as client:
+        if video is not None:
+            if not video.is_file():
+                raise FacebookError("Không thấy file video cho tin trên máy này.")
+            path, note = story_video(video)
+            start = await _post(client, f"{GRAPH}/{page_id}/video_stories", {"upload_phase": "start", "access_token": token})
+            video_id = str(start.get("video_id") or "")
+            if not video_id:
+                raise FacebookError("Facebook không mở được phiên tải tin lên.")
+            upload_url = str(start.get("upload_url") or f"https://rupload.facebook.com/video-upload/v21.0/{video_id}")
+            data = path.read_bytes()
+            resp = await client.post(upload_url, content=data, headers={
+                "Authorization": f"OAuth {token}", "offset": "0", "file_size": str(len(data)),
+                "Content-Type": "application/octet-stream"})
+            if resp.status_code >= 400:
+                raise FacebookError(_error_message(resp))
+            done = await _post(client, f"{GRAPH}/{page_id}/video_stories",
+                               {"upload_phase": "finish", "video_id": video_id, "access_token": token})
+            if done.get("success") is False:
+                raise FacebookError("Facebook không đăng được tin video.")
+            return {"post_id": str(done.get("post_id") or video_id), "kind": "video", "note": note}
+        assert photo is not None
+        if not photo.is_file():
+            raise FacebookError("Không thấy file ảnh cho tin trên máy này.")
+        if photo.stat().st_size > STORY_MAX_PHOTO_BYTES:
+            raise FacebookError("Ảnh lớn hơn 10 MB — tin trên Page không nhận.")
+        with photo.open("rb") as fh:
+            up = await _post(client, f"{GRAPH}/{page_id}/photos", {"published": "false", "access_token": token},
+                             files={"source": (photo.name, fh, _guess_mime(photo))})
+        photo_id = str(up.get("id") or "")
+        if not photo_id:
+            raise FacebookError("Facebook không nhận ảnh cho tin.")
+        done = await _post(client, f"{GRAPH}/{page_id}/photo_stories", {"photo_id": photo_id, "access_token": token})
+        if done.get("success") is False:
+            raise FacebookError("Facebook không đăng được tin ảnh.")
+        return {"post_id": str(done.get("post_id") or photo_id), "kind": "photo", "note": ""}
+
+
 def _guess_mime(path: Path) -> str:
     return mimetypes.guess_type(path.name)[0] or "application/octet-stream"
 

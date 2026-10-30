@@ -1,6 +1,37 @@
 import { useEffect, useState } from "react";
 import { reelCheck, type FbFormat, type ReelCheck } from "../../api/schedule";
 
+/**
+ * "📲 Thêm vào tin": also put the item on the Page's Story when it goes out — its video (the first 60 s; Page
+ * stories are at most a minute), its first picture, or for words only a picture of the opening drawn by the agent
+ * (the API has no text stories). Only through the Page (auto / "Đăng ngay"): `enabled` false greys it out with `why`.
+ * `compact` = a chip for a toolbar.
+ */
+export function StoryToggle({ value, onChange, enabled = true, why = "", compact = false }: {
+  value: boolean;
+  onChange: (v: boolean) => void;
+  enabled?: boolean;
+  why?: string;
+  compact?: boolean;
+}) {
+  const on = value && enabled;
+  const tip = enabled ? "Đăng thêm lên Tin của Page (hiện 24 giờ): video — 60 giây đầu —, ảnh đầu của bài, hoặc bài chỉ có chữ thì ảnh chữ trên nền màu." : why;
+  if (compact) {
+    return (
+      <button type="button" className={`qt-chip qt-chip--sm qt-story-chip${on ? " qt-chip--on" : ""}`} aria-pressed={on}
+              disabled={!enabled} title={tip} onClick={() => onChange(!value)}>
+        📲 {on ? "✓ " : ""}Thêm vào tin
+      </button>
+    );
+  }
+  return (
+    <label className={`qt-sched-dialog__auto qt-story${enabled ? "" : " is-off"}`} title={tip}>
+      <input type="checkbox" checked={on} disabled={!enabled} onChange={(e) => onChange(e.target.checked)} />
+      <span><strong>📲 Thêm vào tin</strong><small>{enabled ? "Đăng thêm lên Tin của Page, hiện 24 giờ — video (60 giây đầu), ảnh đầu, hoặc ảnh chữ nếu bài chỉ có chữ." : why}</small></span>
+    </label>
+  );
+}
+
 export interface FormatTarget {
   kind: "post" | "clip";
   postId?: number | null;

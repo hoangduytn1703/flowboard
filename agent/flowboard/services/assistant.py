@@ -83,7 +83,8 @@ match them to the closest catalog entry, e.g. "chú ta hay tò mò" = "Chúng ta
    in Vietnamese (optional). images 0-4 (AI pictures, default 0, a series keeps its own). count 1-5 posts (default 1).
    product_id = a catalog product id, or "previous" (from add_product).
 4. schedule_post {post: "previous" | <post id>, at: "YYYY-MM-DDTHH:MM" (VIETNAM local time, absolute), auto?: bool,
-   format?: "post"|"reel"} — put the post(s) on "Lịch đăng". "previous" = the posts written in the step before (several →
+   format?: "post"|"reel", story?: bool} — put the post(s) on "Lịch đăng". story = also put it on the Page's Story
+   ("thêm vào tin", "đăng tin", "lên story": true; default false) — its video, picture, or for words only a picture of the opening. "previous" = the posts written in the step before (several →
    one per day from `at`). auto = publish by itself on the channel's Facebook Page (only when the catalog says the channel is
    connected; default true then, false otherwise). Work out `at` from NOW: "12h hôm nay" = today 12:00, "tối nay" = today
    20:00, "sáng mai" = tomorrow 08:00. If that time has already passed, ask instead of planning.
@@ -397,7 +398,7 @@ def _clean_args(tool: str, a: dict[str, Any], cat: dict[str, Any]) -> tuple[Opti
         post = a.get("post", "previous")
         fmt = str(a.get("format") or "post").lower()
         return {"post": "previous" if post in (None, "", "previous") else _int(post), "at": utc_iso(when),
-                "auto": a.get("auto"), "format": fmt if fmt in ("post", "reel") else "post"}, None
+                "auto": a.get("auto"), "format": fmt if fmt in ("post", "reel") else "post", "story": bool(a.get("story"))}, None
     if tool == "create_clip":
         pid = _product_id(a.get("product_id") or a.get("product"), cat)
         if pid is None:
@@ -468,7 +469,8 @@ def _plan_summary(actions: list[dict[str, Any]], cat: dict[str, Any]) -> list[st
         elif a["tool"] == "schedule_post":
             local = datetime.fromisoformat(g["at"].replace("Z", "+00:00")).astimezone(VN).strftime("%H:%M %d/%m")
             auto = g.get("auto") is not False and channel in {c["id"] for c in cat["channels"] if c.get("fb_connected")}
-            lines.append(f"{i}. Lên lịch {local}" + (" — ⚡ tự đăng lên Facebook Page" if auto else " — nhắc đăng tay"))
+            lines.append(f"{i}. Lên lịch {local}" + (" — ⚡ tự đăng lên Facebook Page" if auto else " — nhắc đăng tay")
+                         + (" + 📲 thêm vào tin" if g.get("story") and auto else ""))
         elif a["tool"] == "create_clip":
             prod = products.get(g["product_id"]) if isinstance(g["product_id"], int) else "sản phẩm vừa thêm"
             lines.append(f"{i}. Tạo clip quảng cáo cho “{prod}” (kịch bản theo sản phẩm)")
@@ -919,13 +921,14 @@ async def _do_schedule_post(task_id: int, i: int, args: dict[str, Any], ctx: dic
             continue
         try:
             slot = scheduler.create("post", first + timedelta(days=j), post_id=pid, channel_id=channel_id, auto=auto,
-                                    note="Trợ lý AI lên lịch", fb_format=args.get("format") or "post")
+                                    note="Trợ lý AI lên lịch", fb_format=args.get("format") or "post",
+                                    fb_story=bool(args.get("story")) and auto)
         except scheduler.ScheduleError as exc:
             raise AssistantError(f"Không lên lịch được: {exc}")
         done.append(slot["id"])
         _save(task_id, **{f"s{i}_slots": done})
     local = first.astimezone(VN).strftime("%H:%M %d/%m")
-    how = "⚡ tự đăng lên Facebook Page" if auto else "tool nhắc ở Hôm nay để bạn đăng tay"
+    how = ("⚡ tự đăng lên Facebook Page" + (" + 📲 thêm vào tin" if args.get("story") else "")) if auto else "tool nhắc ở Hôm nay để bạn đăng tay"
     many = f" ({len(post_ids)} bài, mỗi ngày 1 bài)" if len(post_ids) > 1 else ""
     return {"line": f"📅 Đã lên lịch **{local}**{many} — {how}.", "links": [{"label": "Mở Lịch đăng", "href": "/schedule"}],
             "link": "/schedule", "ctx": {"slot_ids": done}}

@@ -462,3 +462,106 @@ def test_a_video_post_can_go_out_as_a_reel(client, monkeypatch, tmp_path):
     slot2 = client.post("/api/schedule", json={"kind": "post", "post_id": post["id"], "fb_format": "reel",
                                                "at": _iso(datetime.now(timezone.utc) + timedelta(hours=3))}).json()
     assert client.patch(f"/api/schedule/{slot2['id']}", json={"fb_format": "post"}).json()["fb_format"] == "post"
+
+
+class _StoryGraph(_Graph):
+    """The fake Graph API plus Page Stories (photo_stories, video_stories start / rupload / finish)."""
+
+    def __init__(self, *a, story_fail=False, **k):
+        super().__init__(*a, **k)
+        self.story_fail = story_fail
+
+    async def handler(self, request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/photo_stories") or path.endswith("/video_stories") or "video-upload" in path:
+            body = request.content.decode(errors="ignore") if "video-upload" not in path else f"<{len(request.content)} bytes>"
+            self.calls.append((request.method, path, body))
+            if self.story_fail:
+                return httpx.Response(400, json={"error": {"message": "Stories are not available for this Page", "code": 100}})
+            if "video-upload" in path:
+                assert request.headers["offset"] == "0" and request.headers["authorization"].startswith("OAuth ")
+                return httpx.Response(200, json={"success": True})
+            if path.endswith("/photo_stories"):
+                return httpx.Response(200, json={"success": True, "post_id": "story_p1"})
+            if "upload_phase=start" in body:
+                return httpx.Response(200, json={"video_id": "vs1", "upload_url": "https://rupload.facebook.com/video-upload/v21.0/vs1"})
+            return httpx.Response(200, json={"success": True, "post_id": "story_v1"})
+        return await super().handler(request)
+
+
+def test_add_to_story_posts_the_picture_or_the_video_and_never_undoes_the_post(client, graph, monkeypatch, tmp_path):
+    g = graph(_StoryGraph(pages=[{"id": "page9", "name": "P", "access_token": "PAGE_TOKEN_xxxxxxxxxxxx"}]))
+    ch = _channel(client)
+    client.post(f"/api/channels/{ch['id']}/facebook", json={"token": "USER_TOKEN_yyyyyyyyyyyyyy"})
+    pic, vid = tmp_path / "a.jpg", tmp_path / "v.mp4"
+    pic.write_bytes(b"\xff\xd8\xff\xe0jpg")
+    vid.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    monkeypatch.setattr(scheduler, "_media_file", lambda m: {"m1": pic, "vid1": vid}.get(m))
+    monkeypatch.setattr(facebook_publish, "story_video", lambda v: (v, ""))
+    now = _iso(datetime.now(timezone.utc))
+    # a post with a picture → the post, then the picture uploaded again unpublished, then a photo story
+    post = _post(client, ch["id"], images=["m1"])
+    slot = client.post("/api/schedule", json={"kind": "post", "post_id": post["id"], "at": now, "fb_story": True}).json()
+    assert slot["fb_story"] is True
+    out = client.post(f"/api/schedule/{slot['id']}/publish").json()
+    assert out["status"] == "posted" and out["result"]["story"] == {"post_id": "story_p1", "kind": "photo", "note": ""}
+    assert sum(1 for c in g.calls if c[1].endswith("/photos")) == 2  # one for the post, a fresh one for the story
+    assert "photo_id=" in next(c for c in g.calls if c[1].endswith("/photo_stories"))[2]
+    # a post with a video → a video story (start → rupload → finish)
+    vpost = _post(client, ch["id"], video="vid1")
+    vslot = client.post("/api/schedule", json={"kind": "post", "post_id": vpost["id"], "at": now, "fb_story": True}).json()
+    out = client.post(f"/api/schedule/{vslot['id']}/publish").json()
+    assert out["result"]["story"]["kind"] == "video" and out["result"]["story"]["post_id"] == "story_v1"
+    assert any("video-upload" in c[1] for c in g.calls)
+    # only words → the post goes out, then a picture of its opening (the API has no text stories) as a photo story
+    tpost = _post(client, ch["id"])
+    photos_before = sum(1 for c in g.calls if c[1].endswith("/photos"))
+    tslot = client.post("/api/schedule", json={"kind": "post", "post_id": tpost["id"], "at": now, "fb_story": True}).json()
+    out = client.post(f"/api/schedule/{tslot['id']}/publish").json()
+    assert out["status"] == "posted" and "story_error" not in out["result"]
+    assert out["result"]["story"]["kind"] == "photo" and "ảnh chữ" in out["result"]["story"]["note"]
+    assert sum(1 for c in g.calls if c[1].endswith("/photos")) == photos_before + 1  # the drawn card
+    # Facebook refusing the story never undoes the post
+    g.story_fail = True
+    post2 = _post(client, ch["id"], images=["m1"])
+    s2 = client.post("/api/schedule", json={"kind": "post", "post_id": post2["id"], "at": now, "fb_story": True}).json()
+    out = client.post(f"/api/schedule/{s2['id']}/publish").json()
+    assert out["status"] == "posted" and "Stories are not available" in out["result"]["story_error"]
+    # the option can be changed until it is posted
+    later = client.post("/api/schedule", json={"kind": "post", "post_id": post2["id"], "at": _iso(datetime.now(timezone.utc) + timedelta(hours=3))}).json()
+    assert client.patch(f"/api/schedule/{later['id']}", json={"fb_story": True}).json()["fb_story"] is True
+    assert client.patch(f"/api/schedule/{s2['id']}", json={"fb_story": False}).status_code == 400
+
+
+@pytest.mark.skipif(__import__("shutil").which("ffmpeg") is None, reason="needs ffmpeg")
+def test_a_words_only_post_gets_a_story_card_of_its_opening(tmp_path):
+    from PIL import Image
+
+    from flowboard.services import story_card
+
+    msg = "Bạn có biết trên Sao Kim một ngày còn dài hơn một năm? 🪐\n\nĐoạn thứ hai dài hơn nhiều, kể tiếp câu chuyện. " * 3 + "\n\n#vutru https://x.vn/a"
+    text = story_card.card_text(msg)
+    assert text.startswith("Bạn có biết trên Sao Kim") and "🪐" not in text and "#vutru" not in text and "https" not in text
+    assert len(text) <= story_card.MAX_CHARS + 1
+    short = story_card.card_text("Ngắn thôi.\n\nĐoạn hai cũng được lấy vì đoạn một quá ngắn để đọc.\n\nĐoạn ba thì không.")
+    assert "Đoạn hai" in short and "Đoạn ba" not in short
+    assert story_card.card_text("🥰 #tag https://a.b") == ""
+    out = story_card.render(msg, tmp_path / "tin.jpg", page_name="Chúng ta hay tò mò")
+    with Image.open(out) as im:
+        assert im.size == (1080, 1920) and im.format == "JPEG"
+
+
+def test_a_story_video_longer_than_a_minute_is_cut_to_its_first_part(tmp_path):
+    import subprocess
+
+    from flowboard.services.video_export import probe_clip
+
+    long = tmp_path / "long.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=180x320:rate=5:duration=70",
+                    "-pix_fmt", "yuv420p", str(long)], check=True, timeout=120)
+    path, note = facebook_publish.story_video(long)
+    assert path != long and "70 giây" in note and probe_clip(path).duration <= 60
+    short = tmp_path / "short.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=180x320:rate=5:duration=5",
+                    "-pix_fmt", "yuv420p", str(short)], check=True, timeout=60)
+    assert facebook_publish.story_video(short) == (short, "")

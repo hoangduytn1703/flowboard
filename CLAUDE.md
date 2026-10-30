@@ -4,6 +4,8 @@ Công cụ **local, một người dùng** tạo clip quảng cáo (ảnh → vi
 Tạo ảnh/video đi qua Google Flow (cần gói Pro/Ultra) bằng extension Chrome; LLM dùng Gemini API key (nhập trong Cài đặt).
 
 ## Quy ước làm việc với người dùng
+- **Tính năng mới nào hợp thì dạy luôn cho 🤖 Trợ lý AI** (người dùng dặn 30/10, không cần nhắc lại): thêm / sửa kỹ năng trong
+  `services/assistant.py` (`_SYSTEM`, `_clean_args`, `_plan_summary`, `_HANDLERS`) + test `test_assistant.py`, để người dùng nói một câu là trợ lý làm được.
 - **Tên sản phẩm là DFlow** (đổi 30/10; logo chữ D cam `frontend/public/dflow-logo.png`, favicon, chữ "DFLOW" `.dflow-wordmark`, "© năm DFlow · Dev DuyNH" ở cuối
   sidebar). Chỉ đổi chữ người dùng nhìn thấy; **trong code vẫn là `flowboard`** (package Python, thư mục, biến `FLOWBOARD_*`, khoá localStorage
   `flowboard.*`, tên kiểu `FlowboardNodeData`, log `[Flowboard]` của extension) — đừng đổi (hỏng `.env`, dữ liệu, extension). Đã gỡ hết dấu vết tác giả
@@ -222,6 +224,11 @@ của người dùng (console.neon.tech, secure.backblaze.com).
 - **Chữ in hoa tiếng Việt bị cắt dấu khi phần tử có `overflow: hidden` + `line-height` thấp** (30/10, tiêu đề trang "BÀI VIẾT" hiện "BÀI VIÊT",
   "LỒNG" hiện "LÔNG"): dấu chồng (Ế, Ồ, Ẫ…) cao hơn dòng 1.3 nên bị cắt — không phải lỗi font (font hệ thống có đủ dấu). Chữ in hoa cần
   `line-height` ≥ 1.5 (+ đệm trên) khi bị `overflow` cắt (ví dụ để có "…"). Dò nhanh bằng Playwright: phần tử có chữ dấu chồng, overflow ≠ visible, lh/size < 1.45.
+- **App dựng các trang hai lần lúc khởi động** (tìm ra 30/10): store board khởi đầu `loading: false` nên `AppInner` render các trang ngay, rồi
+  `loadInitialBoard` bật `loading` → thay bằng `<AppLoading>` (gỡ trang) → tải xong dựng lại từ đầu: trang mất tham số URL vừa đọc rồi xoá (`?post=`,
+  `?assistant=`, `?job=`) và mọi thứ bấm trong lúc đó. Giờ `AppInner` có `booted` — chỉ render trang sau lần tải board đầu. (Trước đó tưởng nhầm do `key`
+  của `AppInner`.) **Bẫy test UI**: bấm một lựa chọn rồi bấm nút có lưu bài (vd "📅 Lên lịch" lưu bài trước) → lựa chọn được lưu vào bài, lần chạy sau
+  bấm là TẮT nó — kết quả xen kẽ đúng / sai, không phải lỗi.
 - **TikTok lúc có lúc không trả trang "Security Check"** thay cho trang sản phẩm (thấy thật 21/10): `product_link.fetch_page` nhận diện trang chặn (`_looks_blocked`), thử lại 1 lần sau 3 s rồi báo lỗi — trước đó đã lưu một sản phẩm tên "Security Check".
 - **Vite có lúc giữ bản biên dịch RỖNG của một file vừa sửa** (21/10: `AccountPanel.tsx` trả 0 byte → cả app trắng, lỗi "does not provide an export named …" dù `tsc` sạch). Kiểm tra `curl -s -o /dev/null -w '%{size_download}' localhost:5174/src/<file>`; sửa bằng `touch <file>`.
 - **Gemini chậm/treo không hẳn do key rẻ, mà do model**: đo cùng một câu hỏi, `gemini-3.1-flash-lite` ~4 s, `3.5-flash` ~21 s (nhiều thinking token), `3.7`/`3.8-flash` quá 40 s. Việc đọc sản phẩm từ link dùng `product_link.EXTRACT_MODEL` (lite, ~13 s cả quy trình). Kịch bản clip (`analyze`) vẫn dùng model mặc định, có thể chậm; chưa đổi vì chưa so chất lượng. Fallback chỉ xử lý 503, không xử lý treo/timeout.
@@ -1194,8 +1201,7 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   cửa sổ vẫn đúng chỗ; mặc định cao hơn nút "việc đang chạy" một hàng), **không bao giờ đè nút "việc đang chạy"** (`.bgt`: mỗi giây + lúc thả, chồng lên
   thì tự dời lên trên nó). Bấm (không kéo) mở khung chat cạnh nút, phía còn chỗ; đầu khung kéo được; ▶ gợi ý, Enter gửi, "đang trả lời…", 🗑 xoá cuộc
   trò chuyện (2 bấm), vòng quay quanh nút khi có việc nền, chấm xanh + toast khi việc xong lúc khung đang đóng, `?assistant=1` mở khung (link từ nút "việc
-  đang chạy"; giữ yêu cầu mở 3 s ở cấp module vì `AppInner` gắn lại khi tải xong tài khoản — **bẫy: state của component trong app bị mất một lần ngay
-  sau đăng nhập**). Backend `services/assistant.py` + `routes/assistant.py` (`GET /api/assistant`, `POST /chat {message}`, `DELETE`), bảng
+  đang chạy"; giữ yêu cầu mở 3 s ở cấp module — xem bẫy "App dựng các trang hai lần lúc khởi động"). Backend `services/assistant.py` + `routes/assistant.py` (`GET /api/assistant`, `POST /chat {message}`, `DELETE`), bảng
   **`AssistantMessage`** (role, text, data {media_id, reference_id, link, link_label, error}, task_id) + **`AssistantTask`** (kind, status running/done/error,
   title, args, state {step, request_id, prompt, started, media_id, reference_id}, error). Một lượt chat: `run_llm("auto_prompt")` với `_SYSTEM` (khả năng hiện
   có, "sắp có" cho clip / bài / lịch, **luật không vẽ mặt người thật** — hỏi "giống <người nổi tiếng>" thì tạo người mới cùng phong cách và nói lý do) +
@@ -1229,6 +1235,19 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   trang của bước đang làm (`task.state.link` + `?assistant=1`). Test `test_assistant.py` (9). Thử thật câu của người dùng "tạo 1 bài viết cho kênh **chú ta**
   hay tò mò, tập 7 trong series những thú vị về hệ mặt trời, xong set lịch post vào 12h hôm nay" → 8 s, hiểu đúng kênh / loạt / Tập 7 / 12:00 30/10 tự đăng,
   dừng chờ "✅ Làm luôn" (**chưa bấm** — task #2 để người dùng tự quyết).
+- **📲 Thêm vào tin (Story của Page)** (30/10): token Page có đủ quyền Meta yêu cầu (`pages_manage_posts`, `pages_read_engagement`,
+  `pages_show_list`). `Schedule.fb_story` (migration `db.ensure_schedule_story_column`), `scheduler.create(fb_story=)`, PATCH `fb_story` (đã đăng thì không đổi),
+  row có `fb_story`. Khi slot đăng xong (tự đăng / Đăng ngay): `scheduler._story` → `facebook_publish.publish_story(video= | photo=)` — **video** (bài có video,
+  Reel, clip): `video_stories` start → file lên rupload (`offset 0`, `file_size`, `Authorization: OAuth`) → finish; dài > 60 s thì `story_video` cắt 59,5 s đầu
+  (ffmpeg stream copy, ghi `note`); **ảnh**: ảnh đầu **tải lên lại** `published=false` (Meta cấm dùng lại ảnh / video của bài đã đăng) → `photo_stories`;
+  **bài chỉ có chữ** → API không có tin chữ (chỉ `photo_stories` / `video_stories`) nên `services/story_card.py` vẽ ảnh 1080×1920 (nền gradient
+  kiểu tin chữ Facebook, chọn theo nội dung; đoạn mở đầu ≥ 60 ký tự, ≤ 220, bỏ hashtag / link / emoji; tên Page nhỏ ở đáy; font hệ thống: Segoe UI /
+  Arial trên Windows, Noto Sans / DejaVu trên Linux, `FLOWBOARD_STORY_FONT` để đổi) rồi đăng như tin ảnh, `note` "ảnh chữ của đoạn mở đầu". Kết quả `result.story {post_id, kind, note}` hoặc **`result.story_error`** — tin lỗi **không bao giờ** làm bài chính thành lỗi.
+  UI: `StoryToggle` (`schedule/FormatPicker.tsx`): ô trong hộp Lên lịch (ngay dưới "Tự đăng"; chọn sẵn từ trang Bài viết thì tự bật "Tự đăng") và hộp kéo
+  thả lịch (chỉ khi tự đăng), hộp "Đăng ngay"; chip "📲 Thêm vào tin" trên thanh đăng trang Bài viết (nhớ trong `brief.fb_story`);
+  toast báo "+ đã thêm vào tin" hoặc cảnh báo lỗi tin; Lịch đăng: "📲" trên thẻ + dòng "Tin" trong chi tiết. Trợ lý AI: `schedule_post` có `story`
+  ("thêm vào tin", "đăng tin", "lên story"), chỉ khi tự đăng. Test `test_schedule.py` (+2: ảnh / video / chữ / Facebook từ chối / đổi lựa chọn; cắt video 70 s
+  bằng ffmpeg thật), `test_assistant.py`. **Chưa đăng tin thật lên Page.**
 - **Đăng xuất Flow phải bấm 2 lần** (21/10, `SettingsPanel.tsx`): lần đầu nút đổi thành "Bấm lần nữa để đăng xuất…" + "Huỷ",
   tự quay lại sau 5 s / khi đóng hộp; xong có toast (`AccountPanel.handleLogout`). Nút chỉ có ở hộp Cài đặt mở từ ⚙ cạnh tài khoản.
 
@@ -1502,3 +1521,5 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
 - **30/10** — Trợ lý AI: chặn câu ngoài lề / chào hỏi bằng code trước khi gọi AI (không tốn token) + dặn AI chỉ đáp một câu với câu lọt qua. `assistant.quick_reply`. Test assistant 6 + running 7 pass. Commit + push 30/10.
 - **30/10** — Trợ lý AI thêm kỹ năng + kế hoạch nhiều bước: thêm sản phẩm từ link, viết bài / tập tiếp của loạt (kèm ảnh AI), lên lịch / tự đăng, tạo clip có kịch bản, tạo người mẫu; hiểu tên kênh / loạt / sản phẩm gõ sai; hỏi lại khi thiếu / giờ đã qua; việc tự đăng công khai chờ "✅ Làm luôn". `services/assistant.py` (viết lại), `routes/assistant.py` (confirm / cancel), `routes/running.py`, `AssistantWidget.tsx`, `api/assistant.ts`, `assistant.css`. Test assistant 9 + running / posts / schedule / fb_sync / products 48 pass, `tsc` sạch. Thử thật bằng câu của người dùng (không bấm xác nhận). Commit + push 30/10.
 - **30/10** — Trợ lý AI: nút ở tin nhắn kết quả (Mở bài viết / Mở Lịch đăng…) nằm một hàng dưới ảnh, nhỏ (12,5px, bo tròn), xen màu cam / xanh (`.dfa-link--a|b`), bỏ mũi tên. Người dùng đã bấm "✅ Làm luôn" cho kế hoạch #2: Tập 7 "Hành tinh lăn nghiêng trên quỹ đạo" đã viết (kèm ảnh) + lên lịch 12:00 30/10 tự đăng. `AssistantWidget.tsx`, `assistant.css`. Commit + push 30/10.
+- **30/10** — **📲 Thêm vào tin** khi đăng bài / Reel / clip lên Page (tin ảnh hoặc video, video dài tự cắt 60 giây đầu, tin lỗi không ảnh hưởng bài), lựa chọn ở hộp Lên lịch, hộp kéo thả, Đăng ngay, thanh đăng trang Bài viết; trợ lý AI hiểu "thêm vào tin". Sửa lỗi app dựng các trang hai lần lúc khởi động (mất `?post=`, `?assistant=`… và thao tác vừa bấm). Quy ước mới: tính năng hợp thì dạy luôn cho trợ lý. `facebook_publish.publish_story`, `scheduler._story`, `Schedule.fb_story` + migration, `routes/schedule.py`, `assistant.py`, `FormatPicker.tsx` (`StoryToggle`), `ScheduleDialog.tsx`, `DropTimeDialog.tsx`, `PostsPage.tsx`, `SchedulePage.tsx`, `App.tsx`. Test schedule / assistant / fb_sync / posts / running / channels 59 pass, `tsc` sạch; Playwright: chip + hộp lên lịch (không đăng thật). Commit + push 30/10.
+- **30/10** — Tin cho bài chỉ có chữ (người dùng hỏi: Facebook cho đăng tin chữ mà): API Page không có tin chữ nên tool vẽ ảnh tin 9:16 từ đoạn mở đầu (`services/story_card.py`, `scheduler._story(message, page_name)`), mở khoá chip ở trang Bài viết. Test `test_schedule.py` (+1, sửa 1) + assistant 27 pass, `tsc` sạch; xem 2 ảnh mẫu (dấu tiếng Việt đúng). Chưa đăng thật. Commit + push 30/10.

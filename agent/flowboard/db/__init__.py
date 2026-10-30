@@ -10,7 +10,7 @@ __all__ = ["engine", "get_session", "init_db", "current_engine", "set_engine", "
            "ensure_reference_meta_column", "ensure_product_gender_column", "ensure_reference_media_id_not_unique",
            "ensure_post_channel_column", "ensure_post_series_columns", "ensure_channel_link_columns",
            "ensure_channel_categories_column", "ensure_product_aff_columns", "ensure_channel_facebook_columns", "ensure_post_video_column",
-           "ensure_schedule_format_column", "ensure_fbpost_stats_column"]
+           "ensure_schedule_format_column", "ensure_fbpost_stats_column", "ensure_schedule_story_column"]
 
 
 def ensure_reference_meta_column(db_engine: Engine | None = None) -> bool:
@@ -181,6 +181,21 @@ def ensure_schedule_format_column(db_engine: Engine | None = None) -> bool:
         return True
 
 
+def ensure_schedule_story_column(db_engine: Engine | None = None) -> bool:
+    """Add ``schedule.fb_story`` ("📲 Thêm vào tin": also post it to the Page's Story)."""
+    db_engine = db_engine or current_engine()
+    with db_engine.connect() as conn:
+        insp = inspect(conn)
+        if not insp.has_table("schedule"):
+            return False
+        if "fb_story" in {c["name"] for c in insp.get_columns("schedule")}:
+            return False
+        default = "FALSE" if conn.dialect.name == "postgresql" else "0"
+        conn.exec_driver_sql(f"ALTER TABLE schedule ADD COLUMN fb_story BOOLEAN DEFAULT {default}")
+        conn.commit()
+        return True
+
+
 def ensure_channel_facebook_columns(db_engine: Engine | None = None) -> bool:
     """Add ``channel.fb_page_id`` / ``channel.fb_page_name`` (connected Facebook Page)."""
     db_engine = db_engine or current_engine()
@@ -251,3 +266,4 @@ def init_db(target: Engine | None = None) -> None:
     ensure_post_video_column(target)
     ensure_schedule_format_column(target)
     ensure_fbpost_stats_column(target)
+    ensure_schedule_story_column(target)
