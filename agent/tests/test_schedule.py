@@ -143,6 +143,7 @@ def graph(monkeypatch):
 
 
 def test_connect_page_and_publish_post_with_photos(client, graph, monkeypatch, tmp_path):
+    monkeypatch.setattr(scheduler, "_check_picture", lambda p: None)  # the fake bytes are not a whole JPEG
     g = graph(_Graph(pages=[{"id": "page9", "name": "Mẹ bầu page", "access_token": "PAGE_TOKEN_xxxxxxxxxxxx"}]))
     ch = _channel(client)
     info = client.post("/api/channels/facebook/inspect", json={"token": "USER_TOKEN_yyyyyyyyyyyyyy"}).json()
@@ -490,6 +491,7 @@ class _StoryGraph(_Graph):
 
 
 def test_add_to_story_posts_the_picture_or_the_video_and_never_undoes_the_post(client, graph, monkeypatch, tmp_path):
+    monkeypatch.setattr(scheduler, "_check_picture", lambda p: None)  # the fake bytes are not a whole JPEG
     g = graph(_StoryGraph(pages=[{"id": "page9", "name": "P", "access_token": "PAGE_TOKEN_xxxxxxxxxxxx"}]))
     ch = _channel(client)
     client.post(f"/api/channels/{ch['id']}/facebook", json={"token": "USER_TOKEN_yyyyyyyyyyyyyy"})

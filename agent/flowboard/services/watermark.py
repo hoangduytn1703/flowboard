@@ -260,7 +260,7 @@ def clean_if_generated(path: Path, kind: Optional[str], mime: Optional[str]) -> 
     try:
         if not enabled():
             return False
-        return remove_from_file(path)
+        return remove_from_file(path)  # the caller registers the file afterwards, which queues the upload
     except Exception as exc:  # noqa: BLE001 — never let the stamp break serving the image
         logger.warning("watermark: cleaning %s failed: %s", Path(path).name, exc)
         return False
@@ -289,6 +289,8 @@ def clean_cached_images() -> dict[str, int]:
         try:
             if remove_from_file(p):
                 cleaned += 1
+                from flowboard.services import file_store
+                file_store.requeue(p)  # the bucket still holds the copy with the mark
         except Exception as exc:  # noqa: BLE001
             logger.warning("watermark: %s skipped: %s", p.name, exc)
     return {"checked": checked, "cleaned": cleaned}

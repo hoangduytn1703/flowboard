@@ -32,6 +32,7 @@ const WD = ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "C
 export function statusOf(s: Slot): { key: string; label: string } {
   if (s.status === "posted") return { key: "posted", label: s.result?.by === "facebook" ? "đã tự đăng" : "đã đăng" };
   if (s.status === "failed") return { key: "failed", label: "đăng lỗi" };
+  if (s.status === "posting") return { key: "due", label: "đang đăng…" };
   if (s.status === "skipped") return { key: "skipped", label: "bỏ qua" };
   if (s.due) return { key: "due", label: "đến giờ" };
   return { key: "planned", label: s.auto ? "sẽ tự đăng" : "đã lên lịch" };

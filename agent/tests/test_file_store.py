@@ -43,7 +43,7 @@ def test_not_configured_is_a_no_op(monkeypatch, tmp_path):
     file_store.reset()
     assert not file_store.enabled()
     assert file_store.ensure_local(str(tmp_path / "missing.mp4")) is None
-    assert file_store.reconcile() == {"queued": 0, "downloaded": 0}
+    assert file_store.reconcile() == {"queued": 0, "downloaded": 0, "repaired": 0, "reuploaded": 0}
 
 
 def test_region_from_endpoint():

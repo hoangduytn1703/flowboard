@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import update as sa_update
 from sqlmodel import select
 
 from flowboard.db import get_session, has_engine
@@ -29,6 +30,11 @@ logger = logging.getLogger(__name__)
 TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 KINDS = ("post", "clip")
 STATUSES = ("planned", "posted", "failed", "skipped")
+#: A slot taken by one publisher (this loop, "Đăng ngay", or another machine's loop on the same database): only the
+#: one whose UPDATE … WHERE status IN (…) changed the row posts it — two agents never post the same slot twice.
+POSTING = "posting"
+#: A slot still "posting" after this long was cut off (agent closed mid-upload): it is marked failed.
+POSTING_STALE = timedelta(minutes=60)
 #: How often the loop looks for due auto slots.
 TICK_S = 60.0
 #: A due auto slot older than this is not published any more (the agent was
@@ -359,6 +365,74 @@ def _media_file(media_id: Optional[str]) -> Optional[Path]:
         return None
 
 
+def _check_picture(path: Path) -> None:
+    """A picture cut short (bucket copies once were, 30/10) is fetched again from the bucket; still broken → the slot
+    fails with a clear reason instead of posting half a picture."""
+    from flowboard.services import file_store
+    from flowboard.services.media import image_ok
+
+    if image_ok(path):
+        return
+    key = file_store.key_for(path)
+    tmp = path.with_name(path.name + ".check")
+    if key and file_store.download(key, tmp) and image_ok(tmp.read_bytes()):
+        import os
+        os.replace(tmp, path)
+        return
+    try:
+        tmp.unlink()
+    except OSError:
+        pass
+    raise ScheduleError(f"Ảnh {path.stem[:8]}… của bài bị hỏng (file thiếu một đoạn) — tạo lại ảnh đó hoặc bỏ nó khỏi bài rồi đăng lại.")
+
+
+def _same_item(sc: Schedule):
+    """Condition for the other slots of the same post / clip on the same channel."""
+    cond = [Schedule.id != sc.id, Schedule.kind == sc.kind, Schedule.channel_id == sc.channel_id]
+    cond.append(Schedule.post_id == sc.post_id if sc.kind == "post" else Schedule.board_id == sc.board_id)
+    return cond
+
+
+def _claim(slot_id: int) -> None:
+    """Take the slot for publishing, atomically (see :data:`POSTING`)."""
+    with get_session() as s:
+        res = s.execute(sa_update(Schedule)
+                        .where(Schedule.id == slot_id, Schedule.status.in_(("planned", "failed", "skipped")))  # type: ignore[union-attr]
+                        .values(status=POSTING, updated_at=_now()))
+        s.commit()
+        if res.rowcount == 1:
+            return
+        sc = s.get(Schedule, slot_id)
+    if sc is None:
+        raise ScheduleError("Không thấy lịch này.")
+    if sc.status == "posted":
+        raise ScheduleError("Lịch này đã đăng rồi.")
+    raise ScheduleError("Lịch này đang được đăng (ở lượt khác hoặc máy khác) — đợi một lát rồi xem lại.")
+
+
+def _already_posted(sc: Schedule) -> Optional[Schedule]:
+    """An earlier slot that already put the same post / clip on the same Page."""
+    with get_session() as s:
+        return s.exec(select(Schedule).where(*_same_item(sc), Schedule.status == "posted")
+                      .order_by(Schedule.posted_at.desc())).first()  # type: ignore[union-attr]
+
+
+def _skip_twins(sc: Schedule, posted_at: datetime) -> int:
+    """Once the item is up, its other planned slots on the same Page would post it again: they are skipped (moving
+    one to a new time plans it again)."""
+    at = _aware(posted_at).astimezone(TZ)
+    n = 0
+    with get_session() as s:
+        for other in s.exec(select(Schedule).where(*_same_item(sc), Schedule.status == "planned")).all():
+            other.status, other.updated_at = "skipped", _now()
+            note = f"Bỏ qua: bài này đã đăng lên Page lúc {at:%H:%M %d/%m} (lịch #{sc.id}) — đổi giờ nếu muốn đăng lại."
+            other.note = (f"{other.note} · {note}" if other.note else note)[:300]
+            s.add(other)
+            n += 1
+        s.commit()
+    return n
+
+
 def _payload(sc: Schedule) -> tuple[str, list[Path], Optional[Path], str]:
     """``(message, photos, video, first_comment)`` for the slot's item."""
     from flowboard.routes.exports import _final_media
@@ -387,6 +461,8 @@ def _payload(sc: Schedule) -> tuple[str, list[Path], Optional[Path], str]:
                     raise ScheduleError("Không thấy file clip đã ghép trên máy này (tải về từ cloud hoặc ghép lại).")
                 return post_text_of(p.body, p.hashtags), [], video, p.first_comment or ""
             photos = [f for f in (_media_file(m) for m in (p.images or [])[:facebook_publish.MAX_PHOTOS]) if f]
+            for f in photos:
+                _check_picture(f)
             return post_text_of(p.body, p.hashtags), photos, None, p.first_comment or ""
         b = s.get(Board, sc.board_id or 0)
         if b is None:
@@ -424,9 +500,10 @@ async def _story(channel_id: int, page_id: str, *, video: Optional[Path], photos
         return {"story_error": f"Lỗi khi thêm vào tin: {exc}"}
 
 
-async def publish(slot_id: int) -> dict[str, Any]:
-    """Publish one slot now through its channel's Facebook Page; the slot
-    records the outcome either way."""
+async def publish(slot_id: int, *, auto: bool = False) -> dict[str, Any]:
+    """Publish one slot now through its channel's Facebook Page; the slot records the outcome either way. ``auto``
+    (the loop) never posts an item the Page already got from another slot — the person pressing "Đăng ngay" was
+    warned and may."""
     with get_session() as s:
         sc = s.get(Schedule, slot_id)
         if sc is None:
@@ -437,6 +514,19 @@ async def publish(slot_id: int) -> dict[str, Any]:
         if ch is None:
             raise ScheduleError("Kênh của lịch này không còn.")
         page_id, channel_id, page_name = ch.fb_page_id, ch.id, ch.fb_page_name or ch.name
+    _claim(slot_id)
+    if auto and (twin := _already_posted(sc)) is not None:
+        at = _aware(twin.posted_at or twin.scheduled_at).astimezone(TZ)
+        with get_session() as s:
+            row = s.get(Schedule, slot_id)
+            if row is not None:
+                row.status, row.updated_at = "skipped", _now()
+                note = f"Bỏ qua: bài này đã đăng lên Page lúc {at:%H:%M %d/%m} (lịch #{twin.id}) — không tự đăng lại."
+                row.note = (f"{row.note} · {note}" if row.note else note)[:300]
+                s.add(row)
+                s.commit()
+                s.refresh(row)
+                return _decorate([row])[0]
     try:
         message, photos, video, first_comment = _payload(sc)
         if (sc.fb_format or "post") == "reel":
@@ -455,15 +545,21 @@ async def publish(slot_id: int) -> dict[str, Any]:
         logger.exception("scheduler: publishing slot %s failed", slot_id)
         status, result = "failed", {"by": "facebook", "error": f"Lỗi khi đăng: {exc}"}
     with get_session() as s:
-        sc = s.get(Schedule, slot_id)
-        if sc is not None:
-            sc.status, sc.result, sc.updated_at = status, result, _now()
-            sc.posted_at = _now() if status == "posted" else None
-            s.add(sc)
+        row = s.get(Schedule, slot_id)
+        if row is not None:
+            row.status, row.result, row.updated_at = status, result, _now()
+            row.posted_at = _now() if status == "posted" else None
+            s.add(row)
             s.commit()
-            s.refresh(sc)
-            return _decorate([sc])[0]
-    raise ScheduleError("Không thấy lịch này.")
+            s.refresh(row)
+            posted_at = row.posted_at
+    if row is None:
+        raise ScheduleError("Không thấy lịch này.")
+    if status == "posted":
+        _skip_twins(sc, posted_at or _now())
+    with get_session() as s:
+        row = s.get(Schedule, slot_id)
+        return _decorate([row])[0]
 
 
 async def tick() -> int:
@@ -472,6 +568,12 @@ async def tick() -> int:
         return 0
     now = _now()
     with get_session() as s:
+        # cut off mid-publish (agent closed): say so instead of leaving it "posting" forever
+        for stale in s.exec(select(Schedule).where(Schedule.status == POSTING, Schedule.updated_at < now - POSTING_STALE)).all():
+            stale.status, stale.updated_at = "failed", now
+            stale.result = {"by": "facebook", "error": "Đang đăng thì bị ngắt (agent tắt giữa chừng?) — xem trên Page đã có bài chưa rồi mới đăng lại."}
+            s.add(stale)
+        s.commit()
         due = s.exec(select(Schedule).where(Schedule.status == "planned", Schedule.auto == True,  # noqa: E712
                                             Schedule.scheduled_at <= now).order_by(Schedule.scheduled_at)).all()
         ids = [(sc.id, _aware(sc.scheduled_at)) for sc in due]
@@ -486,7 +588,11 @@ async def tick() -> int:
                     s.add(sc)
                     s.commit()
             continue
-        await publish(slot_id)
+        try:
+            await publish(slot_id, auto=True)
+        except ScheduleError as exc:  # taken by another machine's loop meanwhile, or gone
+            logger.info("scheduler: slot %s not published here: %s", slot_id, exc)
+            continue
         n += 1
     return n
 

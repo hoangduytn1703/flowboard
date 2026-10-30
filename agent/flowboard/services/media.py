@@ -12,6 +12,7 @@ from __future__ import annotations
 import time
 
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any, Optional
@@ -102,6 +103,43 @@ def forget_miss(media_id: str) -> None:
     _recent_misses.pop(media_id, None)
 
 
+_IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp", ".gif")
+
+
+def write_atomic(path: Path, data: bytes) -> None:
+    """Write through a ``.part`` file and swap it in, so nobody (the bucket upload, a page being served) ever
+    reads half a file."""
+    tmp = path.with_name(path.name + ".part")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
+
+
+def image_ok(source: Path | bytes) -> bool:
+    """False for a picture that does not decode to the end (a file cut short — the bucket once got such copies,
+    see ``file_store.repair_images``). Anything that is not a picture counts as fine."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    if isinstance(source, Path):
+        if source.suffix.lower() not in _IMAGE_SUFFIXES:
+            return True
+        try:
+            data = source.read_bytes()
+        except OSError:
+            return False
+    else:
+        data = source
+    if not (data[:2] == b"\xff\xd8" or data[:4] == b"\x89PNG" or (data[:4] == b"RIFF" and data[8:12] == b"WEBP")):
+        return True  # not a JPEG / PNG / WEBP we can judge
+    try:
+        with Image.open(BytesIO(data)) as im:
+            im.load()
+        return True
+    except Exception:  # noqa: BLE001 — truncated, or not a picture at all
+        return False
+
+
 def cached_path(media_id: str) -> Optional[Path]:
     found = _cache_glob(media_id)
     if found is not None:
@@ -173,10 +211,13 @@ def ingest_inline_bytes(
     ext = _EXT_BY_MIME.get(mime, ".mp4")
     path = MEDIA_CACHE_DIR / f"{media_id}{ext}"
     try:
-        path.write_bytes(data)
+        write_atomic(path, data)
     except OSError as exc:
         logger.error("failed to write inline cache %s: %s", path, exc)
         return False
+    # Clean before the row update queues the bucket upload (see fetch_and_cache).
+    from flowboard.services import watermark
+    watermark.clean_if_generated(path, kind, mime)
     with get_session() as s:
         row = s.exec(
             select(Asset).where(Asset.uuid_media_id == media_id)
@@ -190,8 +231,6 @@ def ingest_inline_bytes(
         s.add(row)
         s.commit()
     logger.info("media: ingested %d inline bytes for %s", len(data), media_id)
-    from flowboard.services import watermark
-    watermark.clean_if_generated(path, kind, mime)
     return True
 
 
@@ -211,6 +250,7 @@ async def fetch_and_cache(media_id: str) -> Optional[tuple[bytes, str, Path]]:
         if row is None or not row.url:
             return None
         url = row.url
+        kind = row.kind
 
     if not _url_allowed(url):
         logger.warning("refusing to fetch non-allowed URL: %s", url[:60])
@@ -233,30 +273,34 @@ async def fetch_and_cache(media_id: str) -> Optional[tuple[bytes, str, Path]]:
     if not (mime.startswith("image/") or mime.startswith("video/")):
         logger.warning("refusing non-media mime from GCS: %s (media_id=%s)", mime, media_id)
         return None
+    if mime.startswith("image/") and not image_ok(resp.content):
+        logger.warning("GCS fetch %s gave a picture cut short (%d bytes) — not cached", media_id, len(resp.content))
+        return None
     ext = _EXT_BY_MIME.get(mime, ".bin")
     path = MEDIA_CACHE_DIR / f"{media_id}{ext}"
     try:
-        path.write_bytes(resp.content)
+        write_atomic(path, resp.content)
     except OSError as exc:
         logger.error("failed to write cache %s: %s", path, exc)
         return None
+
+    # A freshly generated image: take Flow's sparkle off before anyone sees it — and BEFORE the Asset row
+    # learns the path: that update queues the bucket upload, which once read the old size and the new bytes
+    # and stored pictures cut short (30/10).
+    content = resp.content
+    from flowboard.services import watermark
+    if watermark.clean_if_generated(path, kind, mime):
+        content = path.read_bytes()
 
     with get_session() as s:
         row = s.exec(
             select(Asset).where(Asset.uuid_media_id == media_id)
         ).first()
-        kind = row.kind if row is not None else None
         if row is not None:
             row.local_path = str(path)
             row.mime = mime
             s.add(row)
             s.commit()
-
-    # A freshly generated image: take Flow's sparkle off before anyone sees it.
-    content = resp.content
-    from flowboard.services import watermark
-    if watermark.clean_if_generated(path, kind, mime):
-        content = path.read_bytes()
 
     return content, mime, path
 

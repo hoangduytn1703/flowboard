@@ -270,6 +270,8 @@ export function PostsPage() {
 
   /** Open a saved post in the editor; `keepForm` leaves the form on the left as it is (browsing a batch). */
   function open(p: SavedPost, keepForm = false) {
+    // the post opens at the top of the page: bring it into view (the browser keeps the clicked card in place otherwise)
+    requestAnimationFrame(() => document.querySelector(".qt-content")?.scrollTo({ top: 0, behavior: "smooth" }));
     setPublished(null);
     setDraft(draftOf(p));
     setImages(p.images);

@@ -146,6 +146,9 @@ def test_media_bytes_rejects_path_traversal(client):
     assert r.status_code in (400, 404)
 
 
+_PNG = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x02\x00\x00\x00\x02\x08\x02\x00\x00\x00\xfd\xd4\x9as\x00\x00\x00\x16IDATx\x9cc<!'\xc7\xc0\xc0\xc0\xc4\xc0\xc0\xc0\xc0\xc0\x00\x00\r\x04\x01\x08}q\xcaf\x00\x00\x00\x00IEND\xaeB`\x82"  # a real (whole) picture: cut-short ones are refused
+
+
 def test_media_bytes_fetches_and_caches_on_miss(client, tmp_path, monkeypatch):
     # Ingest a URL.
     mid = "cac1abad"
@@ -165,7 +168,7 @@ def test_media_bytes_fetches_and_caches_on_miss(client, tmp_path, monkeypatch):
     # Mock httpx AsyncClient.get to return png bytes.
     class _Resp:
         status_code = 200
-        content = b"\x89PNG\r\n\x1a\n" + b"\x00" * 40
+        content = _PNG
         headers = {"content-type": "image/png"}
 
     class _Client:

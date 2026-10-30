@@ -40,7 +40,12 @@ _queue: "queue.Queue[tuple[str, str]]" = queue.Queue()
 _worker: Optional[threading.Thread] = None
 #: Keys known to be in the bucket for the active account (listing / uploads).
 _remote_keys: set[str] = set()
-_stats = {"uploaded": 0, "downloaded": 0, "upload_errors": 0, "download_errors": 0, "last_error": None}
+#: Their sizes, from the last listing (used to spot a copy that differs from the file on this machine).
+_remote_sizes: dict[str, int] = {}
+_stats = {"uploaded": 0, "downloaded": 0, "upload_errors": 0, "download_errors": 0, "last_error": None,
+          "broken_skipped": 0}
+#: Files up to this size go up from one read of their bytes (size and content always agree); bigger ones stream.
+READ_WHOLE_MAX = 64 * 1024 * 1024
 
 
 def config() -> Optional[dict[str, str]]:
@@ -97,6 +102,7 @@ def reset() -> None:
         _client = None
         _client_cfg = None
     _remote_keys.clear()
+    _remote_sizes.clear()
 
 
 def make_client(cfg: dict):
@@ -143,13 +149,26 @@ def local_for(key: str) -> Path:
 # ── upload ──────────────────────────────────────────────────────────────────
 
 def upload_now(local_path: str | Path) -> bool:
+    from flowboard.services.media import _IMAGE_SUFFIXES, image_ok
+
     c = client()
     key = key_for(local_path)
     p = Path(local_path)
     if c is None or key is None or not p.is_file():
         return False
     try:
-        c.upload_file(str(p), _bucket(), key)
+        if p.stat().st_size <= READ_WHOLE_MAX:
+            # One read: a file swapped in place mid-upload (the Gemini-mark cleaner) can no longer go up as the
+            # old length of the new bytes — that stored pictures cut short (30/10).
+            data = p.read_bytes()
+            if p.suffix.lower() in _IMAGE_SUFFIXES and not image_ok(data):
+                _stats["broken_skipped"] += 1
+                logger.warning("file_store: %s is a picture cut short — not uploaded", key)
+                return False
+            c.put_object(Bucket=_bucket(), Key=key, Body=data)
+            _remote_sizes[key] = len(data)
+        else:
+            c.upload_file(str(p), _bucket(), key)
         _remote_keys.add(key)
         _stats["uploaded"] += 1
         return True
@@ -158,6 +177,14 @@ def upload_now(local_path: str | Path) -> bool:
         _stats["last_error"] = f"upload {key}: {exc}"[:300]
         logger.warning("file_store: upload %s failed: %s", key, exc)
         return False
+
+
+def requeue(local_path: str | Path) -> None:
+    """Upload again a file that was rewritten in place (the bucket holds the old bytes)."""
+    key = key_for(local_path)
+    if key is not None:
+        _remote_keys.discard(key)
+    queue_upload(local_path)
 
 
 def queue_upload(local_path: str | Path) -> None:
@@ -254,6 +281,7 @@ def list_keys() -> set[str]:
         resp = c.list_objects_v2(**kw)
         for obj in resp.get("Contents", []) or []:
             keys.add(obj["Key"])
+            _remote_sizes[obj["Key"]] = int(obj.get("Size") or 0)
         if not resp.get("IsTruncated"):
             break
         token = resp.get("NextContinuationToken")
@@ -301,16 +329,87 @@ def pull_missing(limit: Optional[int] = None) -> int:
     return n
 
 
+def _memo_path() -> Path:
+    return Path(app_config.STORAGE_DIR) / "media_checked.json"
+
+
+def _load_memo() -> dict[str, str]:
+    import json
+
+    try:
+        return json.loads(_memo_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_memo(memo: dict[str, str]) -> None:
+    import json
+
+    try:
+        _memo_path().write_text(json.dumps(memo), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def repair_images() -> dict[str, Any]:
+    """Pictures cut short (an upload once read the old size and the new bytes, 30/10): a broken file here is fetched
+    again when the bucket's copy is whole; a whole file here whose bucket copy has another size goes up again (the
+    bucket copy may be the broken one — or the one still wearing the Gemini mark). Each (file, size) is handled once
+    per machine (``media_checked.json``), so two machines with different copies do not trade uploads forever."""
+    from flowboard.services.media import _IMAGE_SUFFIXES, image_ok
+
+    out: dict[str, Any] = {"checked": 0, "fixed_here": 0, "uploaded": 0, "broken": []}
+    if not enabled():
+        return out
+    remote = _remote_keys or list_keys()
+    memo = _load_memo()
+    for path in _asset_paths():
+        p = Path(path)
+        if p.suffix.lower() not in _IMAGE_SUFFIXES or not p.is_file():
+            continue
+        key = key_for(p)
+        if key is None:
+            continue
+        out["checked"] += 1
+        size = p.stat().st_size
+        if image_ok(p):
+            rsize = _remote_sizes.get(key)
+            if key in remote and rsize is not None and rsize != size and memo.get(key) != f"up:{size}":
+                if upload_now(p):
+                    out["uploaded"] += 1
+                memo[key] = f"up:{size}"
+            continue
+        rsize = _remote_sizes.get(key)
+        if key in remote and rsize and rsize != size and memo.get(key) != f"down:{rsize}":
+            tmp = p.with_name(p.name + ".check")
+            if download(key, tmp) and image_ok(tmp.read_bytes()):
+                os.replace(tmp, p)
+                out["fixed_here"] += 1
+                continue
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            memo[key] = f"down:{rsize}"
+        out["broken"].append(p.stem)
+    _save_memo(memo)
+    if out["broken"] or out["fixed_here"] or out["uploaded"]:
+        logger.info("file_store: pictures — %d fixed here, %d sent up again, still broken: %s",
+                    out["fixed_here"], out["uploaded"], ", ".join(out["broken"]) or "none")
+    return out
+
+
 def reconcile() -> dict[str, int]:
     try:
         pushed = push_missing()
         pulled = pull_missing()
+        repaired = repair_images()
         logger.info("file_store: queued %d upload(s), downloaded %d file(s) for %s", pushed, pulled, prefix())
-        return {"queued": pushed, "downloaded": pulled}
+        return {"queued": pushed, "downloaded": pulled, "repaired": repaired["fixed_here"], "reuploaded": repaired["uploaded"]}
     except Exception as exc:  # noqa: BLE001 — offline start must not fail
         _stats["last_error"] = f"reconcile: {exc}"[:300]
         logger.warning("file_store: reconcile failed: %s", exc)
-        return {"queued": 0, "downloaded": 0}
+        return {"queued": 0, "downloaded": 0, "repaired": 0, "reuploaded": 0}
 
 
 def reconcile_in_background() -> None:

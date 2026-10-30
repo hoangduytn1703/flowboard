@@ -229,6 +229,12 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   `?assistant=`, `?job=`) và mọi thứ bấm trong lúc đó. Giờ `AppInner` có `booted` — chỉ render trang sau lần tải board đầu. (Trước đó tưởng nhầm do `key`
   của `AppInner`.) **Bẫy test UI**: bấm một lựa chọn rồi bấm nút có lưu bài (vd "📅 Lên lịch" lưu bài trước) → lựa chọn được lưu vào bài, lần chạy sau
   bấm là TẮT nó — kết quả xen kẽ đúng / sai, không phải lỗi.
+- **Ảnh trên B2 bị cắt cụt** (tìm ra 30/10): `media.fetch_and_cache` ghi dòng Asset (→ hook đẩy B2 ở luồng nền) RỒI mới xoá logo Gemini ghi đè
+  file bằng bản to hơn → boto3 `upload_file` đọc kích thước cũ + nội dung mới → B2 giữ bản cụt (dấu hiệu: JPEG q95 4:4:4 của chính tool, thiếu đuôi), máy
+  kia tải về ảnh nửa dưới là mảng màu. Giờ: xoá logo TRƯỚC khi ghi Asset (cả `ingest_inline_bytes`), ghi file qua `.part` (`media.write_atomic`),
+  `upload_now` đẩy từ một lần đọc bytes (`put_object`) và không đẩy ảnh hỏng (`media.image_ok`), xoá logo hàng loạt thì `requeue`, `file_store.repair_images`
+  (chạy trong `reconcile` khi đăng nhập; nhớ `media_checked.json`) tải lại ảnh hỏng từ B2 / đẩy lại ảnh lành khi bản B2 khác cỡ, `scheduler._check_picture` không
+  đăng ảnh hỏng. **Ghi file đang được đọc / đẩy: luôn qua file tạm + `os.replace`, và cập nhật Asset sau cùng.**
 - **TikTok lúc có lúc không trả trang "Security Check"** thay cho trang sản phẩm (thấy thật 21/10): `product_link.fetch_page` nhận diện trang chặn (`_looks_blocked`), thử lại 1 lần sau 3 s rồi báo lỗi — trước đó đã lưu một sản phẩm tên "Security Check".
 - **Vite có lúc giữ bản biên dịch RỖNG của một file vừa sửa** (21/10: `AccountPanel.tsx` trả 0 byte → cả app trắng, lỗi "does not provide an export named …" dù `tsc` sạch). Kiểm tra `curl -s -o /dev/null -w '%{size_download}' localhost:5174/src/<file>`; sửa bằng `touch <file>`.
 - **Gemini chậm/treo không hẳn do key rẻ, mà do model**: đo cùng một câu hỏi, `gemini-3.1-flash-lite` ~4 s, `3.5-flash` ~21 s (nhiều thinking token), `3.7`/`3.8-flash` quá 40 s. Việc đọc sản phẩm từ link dùng `product_link.EXTRACT_MODEL` (lite, ~13 s cả quy trình). Kịch bản clip (`analyze`) vẫn dùng model mặc định, có thể chậm; chưa đổi vì chưa so chất lượng. Fallback chỉ xử lý 503, không xử lý treo/timeout.
@@ -1305,6 +1311,47 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
   Chrome Web Store từ chối → giữ cách cài tay kèm video.
 
 ## Việc đang dở / chưa kiểm chứng
+- **Rà soát 30/10 — lỗi & cải thiện CHƯA SỬA** (người dùng bảo chỉ log; quét 20 trang bằng Playwright + đo API + cả bộ test; ưu tiên từ trên xuống):
+  **Mục 1–4 ĐÃ SỬA 30/10** (xem Nhật ký; 5–15 còn đó). Ảnh hỏng cũ trên máy cty chỉ tự lành khi máy nhà (bản ảnh lành) chạy `repair_images` đẩy lại lên B2.
+  1. **Bài bị đăng 2 lần lên Page**: bài #39 "Tập 7 | Hành tinh lăn nghiêng…" — lịch #18 "Đăng ngay từ trang Bài viết" 11:22 30/10 + lịch #17 tự đăng 12:00
+     (trợ lý lên lịch) → 2 bài trên Page (`…_122120111967493254`, `…_122120121951493254`). Không có gì chặn: `scheduler.create` / `publish` / `tick` không xem
+     bài đã có lịch `posted` / `planned` trên cùng page, "Đăng ngay" không nhắc lịch đang chờ. Hướng: đăng xong thì lịch `planned` khác của cùng bài + cùng page
+     → `skipped` (như `fb_sync` làm với bài đăng tay); `tick` bỏ qua bài đã đăng lên page đó; hộp / thanh "Đăng ngay" cảnh báo "bài này đã có lịch hh:mm".
+  2. **Hai máy cùng mở agent có thể đăng trùng**: `scheduler.run_loop` chạy ở mọi máy nối Neon, `tick` đọc slot `planned` rồi `publish` mà không giữ chỗ →
+     cần "claim" nguyên tử (`UPDATE … SET status='posting' WHERE id=… AND status='planned'`, chỉ máy giành được mới đăng) hoặc chỉ một máy chạy vòng tự đăng.
+  3. **5 ảnh trong media bị cụt đuôi** (máy cty, quét 251 ảnh bằng PIL: "image file is truncated", thiếu 4–53 byte cuối): `214da01e…` = ảnh bài #21 "Hệ Mặt
+     Trời - Tập 1" (nửa dưới thành mảng màu, thẻ Bài đã lưu + Lịch đăng chỉ thấy một dải), `53e2eb81`, `9c62d344`, `bcd436c1`, `ff895e4b` (ảnh lịch sử). Tải về
+     máy này 27/10 09:20 (ảnh làm ở máy nhà 26/10). Chưa rõ gốc — nghi: `media.fetch_and_cache` / `ingest_inline_bytes` ghi thẳng `path.write_bytes` (không qua
+     file tạm + `os.replace`), hoặc file bị đẩy lên B2 khi đang ghi (hook xoá logo Gemini ghi lại file sau khi Asset có) rồi máy kia tải bản cụt. Cần so kích thước
+     với file máy nhà + bản trên B2 (script ngoài app bị B2 trả 403 — dùng `file_store` khi agent đã đăng nhập). Chưa biết ảnh đã lên Facebook có hỏng không.
+     Nên thêm: kiểm ảnh tải về / trước khi đăng (PIL `load()`), hỏng thì tải lại.
+  4. **"Mở" ở Bài đã lưu như không làm gì**: bài mở ở khung trên nhưng trang vẫn đứng ở danh sách (trình duyệt giữ chỗ cuộn, `.qt-content` scrollTop
+     1032 → 1887) → cuộn lên khung bài khi mở (`PostsPage` `open()`).
+  5. **Đồng bộ Facebook ~10 s và làm đứng mọi request ~0,5–0,9 s** lúc bắt đầu và lúc ghi: `fb_sync.sync_channel` là `async` nhưng đọc / ghi Neon đồng bộ
+     ngay trong event loop (đo `/api/health` 0,85 s và 0,47 s trong lúc sync, bình thường 1 ms). Trang Bài viết / Lịch đăng gọi sync khi mở (`max_age 600`).
+     Hướng: phần DB qua `asyncio.to_thread`; Graph chậm vì field `insights` + `video_reels` (~9 s cho 64 bài). `scheduler.publish` (mỗi phút) cùng kiểu.
+  6. **Mở trang gọi API trùng, chậm khi gọi đồng loạt**: Lịch đăng ~18 request một lúc, mỗi cái 1,2–2,4 s (pool DB 5+5, Neon ~44 ms/câu); `/api/running`
+     2–3 lần mỗi trang (0,35 s khi gọi riêng — `dub.load_jobs()` đọc lại job.json mỗi lần), `/api/channels` 3 lần ở trang Bài viết (0,56–1,4 s cho 1 kênh — đọc
+     token FB ở kho trung tâm), `/api/posts` 0,7–1 s cho 11 bài, `/api/auth/me` 2 lần, `/api/schedule` 2 lần. Hướng: gộp / cache ngắn.
+  7. **Clip lồng tiếng / CapCut vẫn hiện Bước 1–4** vô nghĩa: Bước 1 "Mẫu này không có node sản phẩm. Thêm trong Canvas nếu cần" (Canvas đã ẩn khỏi menu), nút
+     "⚡ Tạo video tự động" vẫn bật → nên chỉ có Bước 5. Tiêu đề wizard "CÔNG CỤ NHANH · CLIP" (`QuicktoolApp.tsx:608`, tên cũ) → tên clip. `StepSetup.tsx:550`
+     "Đổi model ảnh/video trong ⚙ Settings (góc dưới trái)" → giờ là "Cài đặt" ở menu Nâng cao.
+  8. **Form Sản phẩm** (`ProductsPanel.tsx:714`): "tối đa 2 ảnh phụ" (Bước 1 nhận 4 ảnh); mẹo "ảnh người cầm sản phẩm… hoặc để cạnh người" ngược với bài học
+     Flow bỏ video khi có mặt người mẫu thật → "bàn tay cầm, tránh mặt người".
+  9. **Trang Bài viết**: chỉ có 1 kênh vẫn phải chọn tay → tự chọn. Thẻ Bài đã lưu (lưới 4 cột, 1400 px): hàng nút Mở / Copy / 📅 / Xoá chật, chữ rớt dưới icon;
+     chip số liệu xuống 2 hàng.
+  10. **Lịch đăng**: lịch đã đăng của bài đã xoá chỉ còn "(đã xoá)" (nên lưu tên bài vào `result` lúc đăng); lịch đã đăng vẫn có "Đổi giờ / kênh" (backend từ
+      chối đổi giờ); tiêu đề "Chủ nhật 01-11" xuống 2 dòng; khung chi tiết bên phải chiếm ~340 px làm 7 cột hẹp, tên bài cắt còn 2 chữ.
+  11. **Hôm nay**: mục "Đã ghép xong, chưa tải về" — nút "Mở" rớt xuống dòng riêng dưới ảnh.
+  12. **Sidebar**: credit Flow hiện 2 lần (chip "862 credit" + khối Tài khoản Flow "ULTRA 862"); cửa sổ cao 700 px thì mục "Cài đặt" bị khuất (thanh cuộn ẩn).
+  13. **Cài đặt**: Google Flow — chip "Gói Ultra" (theo `.env`) nhưng hàng tài khoản ghi "PRO" (lệch); Tạo ảnh & video — mô tả model "Khuyên dùng: Veo 3.1 Lite
+      hiện bị Flow nhận rồi huỷ…" (câu khuyên thành cảnh báo), hiện mã nội bộ "GEM_PIX_2"; tab Thông tin chỉ có số phiên bản.
+  14. **Kiểm tra bản mới** (`api/github.ts`) gọi `api.github.com/repos/hoangduytn1703/flowboard/releases/latest` → 404 hai lần mỗi lần mở Hôm nay (repo chưa có
+      Release / riêng tư) → im lặng khi 404, hoặc bỏ tới khi có kênh phát hành (Tauri updater).
+  15. Mỗi lần mở app ghi lại `ui_prefs` (PUT `/api/account/prefs`) dù không đổi (một setter chạy lúc khởi động, `store/settings.ts persist`); xem lướt 5 bước
+      wizard ghi `PATCH /api/boards/{id}` 5 lần (lưu `step`) — chấp nhận được.
+  Không thấy: lỗi trang trắng / pageerror, trang tràn ngang (1400 và 1024 px), ảnh vỡ link. Test backend 1178 pass / 1 fail có sẵn (`test_chat_agent` veo) / 2 skip
+  (Postgres), 16 phút trên máy Linux; `tsc` sạch. Không thử: lồng tiếng (theo lời người dùng), tạo ảnh / video Flow, viết bài AI, đăng thật.
 - **Thư viện link lồng tiếng (30/10)**: hàng đợi thư viện mới chạy thật với 2 link lỗi nhanh (example.com — trước khi chặn link không phải video), chưa lồng tiếng trọn một video thật từ thư viện, chưa chạy nhiều link liền nhau qua nhiều giờ. Chưa có: tách link theo file (lọc theo file nguồn), sắp xếp, ưu tiên / đổi thứ tự trong hàng đợi, giới hạn số video mỗi ngày, tự lấy tiêu đề video trước khi lồng tiếng.
 - **Edit auto CapCut (28/10)**: dự án ghi ra **chưa mở thử trong CapCut thật** (cấu trúc chép từ dự án người dùng tạo bằng CapCut 9.5.0, kiểm bằng
   đọc lại file + Playwright). Cần người dùng mở CapCut xem dự án "Flowboard thử — Lao xuống Enceladus…": video nền, giọng + nhạc, phụ đề, chữ nhấn mạnh,
@@ -1523,3 +1570,5 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
 - **30/10** — Trợ lý AI: nút ở tin nhắn kết quả (Mở bài viết / Mở Lịch đăng…) nằm một hàng dưới ảnh, nhỏ (12,5px, bo tròn), xen màu cam / xanh (`.dfa-link--a|b`), bỏ mũi tên. Người dùng đã bấm "✅ Làm luôn" cho kế hoạch #2: Tập 7 "Hành tinh lăn nghiêng trên quỹ đạo" đã viết (kèm ảnh) + lên lịch 12:00 30/10 tự đăng. `AssistantWidget.tsx`, `assistant.css`. Commit + push 30/10.
 - **30/10** — **📲 Thêm vào tin** khi đăng bài / Reel / clip lên Page (tin ảnh hoặc video, video dài tự cắt 60 giây đầu, tin lỗi không ảnh hưởng bài), lựa chọn ở hộp Lên lịch, hộp kéo thả, Đăng ngay, thanh đăng trang Bài viết; trợ lý AI hiểu "thêm vào tin". Sửa lỗi app dựng các trang hai lần lúc khởi động (mất `?post=`, `?assistant=`… và thao tác vừa bấm). Quy ước mới: tính năng hợp thì dạy luôn cho trợ lý. `facebook_publish.publish_story`, `scheduler._story`, `Schedule.fb_story` + migration, `routes/schedule.py`, `assistant.py`, `FormatPicker.tsx` (`StoryToggle`), `ScheduleDialog.tsx`, `DropTimeDialog.tsx`, `PostsPage.tsx`, `SchedulePage.tsx`, `App.tsx`. Test schedule / assistant / fb_sync / posts / running / channels 59 pass, `tsc` sạch; Playwright: chip + hộp lên lịch (không đăng thật). Commit + push 30/10.
 - **30/10** — Tin cho bài chỉ có chữ (người dùng hỏi: Facebook cho đăng tin chữ mà): API Page không có tin chữ nên tool vẽ ảnh tin 9:16 từ đoạn mở đầu (`services/story_card.py`, `scheduler._story(message, page_name)`), mở khoá chip ở trang Bài viết. Test `test_schedule.py` (+1, sửa 1) + assistant 27 pass, `tsc` sạch; xem 2 ảnh mẫu (dấu tiếng Việt đúng). Chưa đăng thật. Commit + push 30/10.
+- **30/10** — Rà soát một vòng (trừ lồng tiếng), chỉ log không sửa: 15 mục ở đầu "Việc đang dở" — nặng nhất là bài #39 bị đăng 2 lần lên Page (Đăng ngay + lịch tự đăng), 2 máy cùng chạy có thể đăng trùng, 5 ảnh media bị cụt đuôi (có ảnh bài Tập 1), "Mở" bài đã lưu không cuộn lên, đồng bộ Facebook làm đứng request. Playwright 20 trang ở 1400 / 1024 px + đo API; test backend 1178 pass / 1 fail có sẵn. Chưa commit.
+- **30/10** — Sửa 4 mục nặng của rà soát: (1) không đăng trùng — đăng xong thì lịch `planned` khác của cùng bài + cùng page → `skipped` (`scheduler._skip_twins`), vòng tự đăng không đăng lại bài đã lên page (`publish(auto=True)` + `_already_posted`); (2) giữ chỗ lịch nguyên tử `_claim` (status `posting`, `UPDATE … WHERE status IN planned/failed/skipped`) để 2 máy không cùng đăng, `posting` quá 60 phút → failed; (3) ảnh cụt trên B2 (xem Bẫy); (4) "Mở" bài đã lưu cuộn lên đầu. Frontend: trạng thái "đang đăng…". Test schedule / file_store / media / watermark / fb_sync / assistant / posts 70 pass, `tsc` sạch. Chưa viết test riêng cho claim / twins / repair_images. Commit + push 30/10.

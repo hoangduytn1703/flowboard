@@ -8,7 +8,7 @@ export interface Slot {
   board_id: number | null;
   channel_id: number | null;
   scheduled_at: string;
-  status: "planned" | "posted" | "failed" | "skipped";
+  status: "planned" | "posting" | "posted" | "failed" | "skipped";
   /** planned and the time has passed */
   due: boolean;
   /** publish through the channel's Facebook Page when the time comes */
