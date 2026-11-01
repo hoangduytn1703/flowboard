@@ -74,6 +74,10 @@ class NarrationOptions:
     speakers: dict[str, str] = field(default_factory=dict)
     # Per-clip voice override aligned with ``lines`` (None = ``voice``).
     line_voices: list[Optional[str]] = field(default_factory=list)
+    # Subtitles: "ass" = burned per clip by ffmpeg in ``sub_style`` (tts.SUB_STYLES); "remotion" = drawn on the
+    # joined clip by services/dub_remotion in one of its styles (rm_box…) — see :func:`subtitle_choice`.
+    sub_engine: str = "ass"
+    sub_style: str = "outline"
 
     def any_line(self) -> bool:
         return any(line.strip() for line in self.lines)
@@ -110,6 +114,8 @@ class ClipReport:
     extended_s: float = 0.0
     rate: int = 0
     error: Optional[str] = None
+    # the clip's subtitle cues (clip time) kept for the Remotion pass on the joined clip; not reported
+    cues: list = field(default_factory=list, repr=False)
 
 
 @dataclass
@@ -122,6 +128,11 @@ class ExportReport:
     bgm_error: Optional[str] = None
     overlays: int = 0
     overlays_error: Optional[str] = None
+    # Flow's ✦ stamp taken out of this many clips (services/video_watermark)
+    stamps_cleaned: int = 0
+    # subtitles drawn with: "ass" | "remotion" (and why Remotion fell back to ffmpeg)
+    subtitles_engine: str = ""
+    subtitles_error: Optional[str] = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -132,7 +143,10 @@ class ExportReport:
             "bgm_error": self.bgm_error,
             "overlays": self.overlays,
             "overlays_error": self.overlays_error,
-            "clips": [c.__dict__ for c in self.clips],
+            "stamps_cleaned": self.stamps_cleaned,
+            "subtitles_engine": self.subtitles_engine,
+            "subtitles_error": self.subtitles_error,
+            "clips": [{k: v for k, v in c.__dict__.items() if k != "cues"} for c in self.clips],
         }
 
 
@@ -291,10 +305,13 @@ def _image_clip(ffmpeg: str, src: Path, text: str, opts: NarrationOptions,
         f"fade=t=out:st={max(0.0, length - 0.45):.2f}:d=0.45",
     ]
     if opts.subtitles and (narration is not None or caption):
-        ass = work / f"{dst.stem}.ass"
         cues = tts.subtitle_cues(narration, tts.strip_speaker_tags(text)) if narration is not None else []
-        tts.write_ass(cues, ass, width=w, height=h, headline=caption, total_s=length)
-        vf.append(f"subtitles={_filter_path(ass)}")
+        if opts.sub_engine == "remotion":  # the lines go on the joined clip; the headline stays burned here
+            report.cues, cues = cues, []
+        if cues or caption:
+            ass = work / f"{dst.stem}.ass"
+            tts.write_ass(cues, ass, width=w, height=h, headline=caption, total_s=length, style=opts.sub_style)
+            vf.append(f"subtitles={_filter_path(ass)}")
     inputs = ["-loop", "1", "-framerate", "24", "-t", f"{length:.3f}", "-i", str(src)]
     chains = ["[0:v]" + ",".join(vf) + "[v]"]
     if narration is not None:
@@ -405,10 +422,13 @@ def _voice_clip(ffmpeg: str, src: Path, text: str, opts: NarrationOptions,
     if report.extended_s > 0:
         vf.append(f"tpad=stop_mode=clone:stop_duration={report.extended_s:.3f}")
     if opts.subtitles and (narration is not None or caption):
-        ass = work / f"{dst.stem}.ass"
         cues = tts.subtitle_cues(narration, tts.strip_speaker_tags(text)) if narration is not None else []
-        tts.write_ass(cues, ass, width=out_w, height=out_h, headline=caption, total_s=length)
-        vf.append(f"subtitles={_filter_path(ass)}")
+        if opts.sub_engine == "remotion":  # the lines go on the joined clip; a headline stays burned here
+            report.cues, cues = cues, []
+        if cues or caption:
+            ass = work / f"{dst.stem}.ass"
+            tts.write_ass(cues, ass, width=out_w, height=out_h, headline=caption, total_s=length, style=opts.sub_style)
+            vf.append(f"subtitles={_filter_path(ass)}")
     video_chain = (vf[0] + ",".join(vf[1:]) if len(vf) > 1 else vf[0] + "null") + "[v]"
 
     level = ORIGINAL_AUDIO_LEVELS.get(audio_mode, 0.2) if narration is not None else 1.0
@@ -574,6 +594,89 @@ def _join_voiced(ffmpeg: str, clips: list[Path], out_path: Path) -> Optional[str
             pass
 
 
+REMOTION_TO_ASS = {"rm_box": "box_yellow", "rm_karaoke": "box_yellow", "rm_outline": "outline"}
+
+
+def subtitle_choice(engine: Any, style: Any) -> tuple[str, str]:
+    """``(engine, style)`` as asked when possible: "remotion" with one of its styles when Remotion runs on this
+    machine, else the nearest ffmpeg look; "ass" with one of tts.SUB_STYLES."""
+    if engine == "remotion":
+        from flowboard.services import dub_remotion
+
+        ok, _reason = dub_remotion.available()
+        if ok:
+            return "remotion", style if style in dub_remotion.STYLES else dub_remotion.DEFAULT_STYLE
+        style = REMOTION_TO_ASS.get(style, "box_yellow")
+    return "ass", style if style in tts.SUB_STYLES else "outline"
+
+
+def _timeline_cues(clips: list[ClipReport], voiced: list[Path]) -> list[tuple[float, float, str]]:
+    """Every clip's subtitle cues moved onto the joined clip's timeline (each clip's real length, probed)."""
+    out: list[tuple[float, float, str]] = []
+    t = 0.0
+    for clip, path in zip(clips, voiced):
+        out += [(round(s + t, 3), round(e + t, 3), line) for s, e, line in clip.cues if line.strip()]
+        info = probe_clip(path)
+        t += info.duration if info else clip.duration + clip.extended_s
+    return out
+
+
+def _remotion_subtitles(joined: Path, cues: list[tuple[float, float, str]], style: str, out_dir: Path) -> Path:
+    """The joined clip with its subtitles drawn by Remotion (the dubbing tool's composition, sound kept)."""
+    from flowboard.services import dub_remotion
+
+    info = probe_clip(joined)
+    if info is None:
+        raise RuntimeError("không đọc được clip đã ghép")
+    out = out_dir / f"subs_{uuid.uuid4().hex}.mp4"
+    # where the ffmpeg subtitles sit (16 % above the bottom), so both engines look alike
+    spec = dub_remotion.build_spec(src=joined, out=out, cues=cues, layout={"x": 0.5, "y": 0.84, "scale": 1.0},
+                                   style=style, width=info.width, height=info.height, duration_s=info.duration)
+    try:
+        return dub_remotion.render(spec)
+    finally:
+        out.with_suffix(".remotion.json").unlink(missing_ok=True)  # the spec render() leaves next to the output
+
+
+def _burn_cues(ffmpeg: str, joined: Path, cues: list[tuple[float, float, str]], style: str, out_dir: Path) -> Optional[Path]:
+    """The ffmpeg fallback when Remotion fails: the same cues burned onto the joined clip."""
+    info = probe_clip(joined)
+    if info is None:
+        return None
+    out = out_dir / f"subs_{uuid.uuid4().hex}.mp4"
+    ass = out.with_suffix(".ass")
+    tts.write_ass(cues, ass, width=info.width, height=info.height, style=style)
+    cmd = [ffmpeg, "-y", "-v", "error", "-i", str(joined), "-vf", f"subtitles={_filter_path(ass)}",
+           *_encode_args(ffmpeg), "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(out)]
+    proc = subprocess.run(cmd, capture_output=True, timeout=_SMOOTH_TIMEOUT_S, check=False)
+    ass.unlink(missing_ok=True)
+    return out if proc.returncode == 0 and out.is_file() and out.stat().st_size > 0 else None
+
+
+def _stamp_free_paths(asset_ids: list[int], items: Optional[list["ExportItem"]]) -> dict[int, Path]:
+    """Flow's ✦ stamp taken out of the clips (services/video_watermark): {clip index: the stamp-free copy}. The
+    copies are usually ready — made in the background when the clips landed — else made now, three at a time;
+    a clip without the stamp (the seller's own, Muse…) is not in the result."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from flowboard.services import media as media_service, video_watermark
+
+    if not video_watermark.turned_on():
+        return {}
+    paths, err = _asset_paths(asset_ids)
+    if err:
+        return {}
+    todo = [(i, p) for i, p in enumerate(paths)
+            if not (items and i < len(items) and items[i].kind == "image")
+            and p.suffix.lower() in (".mp4", ".mov", ".m4v", ".webm")]
+    if not todo:
+        return {}
+    cache = media_service.MEDIA_CACHE_DIR / "clean"
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        done = list(pool.map(lambda ip: video_watermark.cleaned_copy(ip[1], cache), todo))
+    return {i: c for (i, p), c in zip(todo, done) if c != p}
+
+
 def export_video(
     asset_ids: list[int],
     *,
@@ -612,15 +715,19 @@ def export_video(
     # clips) cannot be stream-copied together — the join comes out garbled —
     # so they all go through the per-clip encode, fitted to one frame.
     fit_size = _mixed_frame_size(asset_ids, items)
-    if (any(trims) or fit_size) and narration is None:
+    # Flow's ✦ stamp out of every clip — the stamp-free copies have to be re-encoded, so the per-clip path
+    stamp_free = _stamp_free_paths(asset_ids, items)
+    report.stamps_cleaned = len(stamp_free)
+    if (any(trims) or fit_size or stamp_free) and narration is None:
         narration = NarrationOptions(lines=[])
-    if items or any(trims) or fit_size or (narration is not None and narration.any_line()):
+    if items or any(trims) or fit_size or stamp_free or (narration is not None and narration.any_line()):
         ffmpeg = shutil.which("ffmpeg")
         if ffmpeg is None:
             return None, "ffmpeg_not_found", report.as_dict()
         paths, err = _asset_paths(asset_ids)
         if err:
             return None, err, report.as_dict()
+        paths = [stamp_free.get(i, p) for i, p in enumerate(paths)]
         lines = list(narration.lines) + [""] * (len(paths) - len(narration.lines))
         work = out_dir / "tts" / f"export_{uuid.uuid4().hex}"
         work.mkdir(parents=True, exist_ok=True)
@@ -650,6 +757,19 @@ def export_video(
             return None, f"ffmpeg_failed: {(err or 'no output')[:300]}", report.as_dict()
         report.voiced = True
         joined_media = _register(joined_path)
+        report.subtitles_engine = narration.sub_engine if narration.subtitles else ""
+        cues = _timeline_cues(report.clips, voiced) if narration.subtitles and narration.sub_engine == "remotion" else []
+        if cues:
+            try:
+                drawn = _remotion_subtitles(joined_path, cues, narration.sub_style, out_dir)
+            except Exception as exc:  # noqa: BLE001 — Remotion missing / failed: the same lines burned by ffmpeg
+                logger.warning("video_export: Remotion subtitles failed (%s); burning them with ffmpeg", str(exc)[:200])
+                report.subtitles_error = str(exc)[:200]
+                report.subtitles_engine = "ass"
+                drawn = _burn_cues(ffmpeg, joined_path, cues, REMOTION_TO_ASS.get(narration.sub_style, "box_yellow"), out_dir)
+            if drawn is not None:
+                joined_path = drawn
+                joined_media = _register(drawn)
     else:
         joined_id, err = video_concat.concat_video_assets(asset_ids)
         if err or joined_id is None:

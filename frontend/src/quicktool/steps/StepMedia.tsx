@@ -12,6 +12,7 @@ import { toast } from "../../store/toast";
 import { knownFlowCheck } from "../flowModelCheck";
 import { FLOW_SLOW_AFTER_S, clockOf } from "../muse";
 import { MuseBridge, flowWaitS, useFlowWaits, useNow, type MuseFocus } from "./MuseBridge";
+import { JoinOptions } from "./JoinOptions";
 
 function statusLabel(n: FlowNode | null, waitS: number | null = null): string {
   if (!n) return "chưa có node";
@@ -225,6 +226,7 @@ export function StepMedia({ roles, kind, productName = "", boardName = "" }: {
             Flow chậm quá hoặc bỏ lượt thì làm cảnh đó bằng <strong>Muse</strong> (khung "🎬 Làm video bằng Muse" bên dưới).
           </p>
         )}
+        {kind === "video" && <JoinOptions roles={roles} />}
         {kind === "image" && (
           <p className="qt-card__hint">Mỗi ảnh mất khoảng 20–60 giây; ảnh chưa ưng thì bấm "Tạo lại…" ở cảnh đó và ghi muốn sửa gì (tiếng Việt cũng được).</p>
         )}

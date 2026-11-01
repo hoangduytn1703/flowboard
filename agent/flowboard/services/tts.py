@@ -696,14 +696,31 @@ def _ass_time(seconds: float) -> str:
     return f"{h}:{m:02d}:{s:05.2f}"
 
 
+#: the clip's subtitle looks on the ffmpeg path ("outline" = the original white text with a dark outline)
+SUB_STYLES: dict[str, str] = {
+    "outline": "Chữ trắng viền đen",
+    "box_yellow": "Hộp vàng chữ đen",
+    "box_white": "Hộp trắng chữ đen",
+}
+
+
 def write_ass(cues: list[tuple[float, float, str]], path: Path, *, width: int, height: int,
-              headline: Optional[str] = None, total_s: float = 0.0) -> Path:
+              headline: Optional[str] = None, total_s: float = 0.0, style: str = "outline") -> Path:
     """An ASS file for libass: bold white text with a dark outline near the
-    bottom of a 9:16 frame, sized relative to the video. ``headline`` (a
+    bottom of a 9:16 frame, sized relative to the video — or a yellow / white
+    box behind dark text (``style``, :data:`SUB_STYLES`). ``headline`` (a
     drama beat's on-screen title) sits near the top for the whole clip."""
     font_size = max(28, round(height * 0.042))
     margin_v = round(height * 0.16)
     head_size = max(32, round(height * 0.05))
+    if style in ("box_yellow", "box_white"):
+        back = "&H0014D8FF" if style == "box_yellow" else "&H00F4F4F4"  # ASS = &HAABBGGRR
+        # BorderStyle 3: an opaque box (OutlineColour) padded by Outline, dark bold text
+        sub_line = (f"Style: Default,Arial,{font_size},&H00141414,&H000000FF,{back},{back},"
+                    f"-1,0,0,0,100,100,0,0,3,{max(8, font_size // 4)},0,2,40,40,{margin_v},1")
+    else:
+        sub_line = (f"Style: Default,Arial,{font_size},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,"
+                    f"-1,0,0,0,100,100,0,0,1,{max(2, font_size // 12)},1,2,40,40,{margin_v},1")
     header = "\n".join([
         "[Script Info]",
         "ScriptType: v4.00+",
@@ -715,8 +732,7 @@ def write_ass(cues: list[tuple[float, float, str]], path: Path, *, width: int, h
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
         "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, "
         "Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-        f"Style: Default,Arial,{font_size},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,"
-        f"-1,0,0,0,100,100,0,0,1,{max(2, font_size // 12)},1,2,40,40,{margin_v},1",
+        sub_line,
         # Top-centre (alignment 8), warm yellow, heavier outline so it reads
         # over any still.
         f"Style: Headline,Arial,{head_size},&H0040E0FF,&H000000FF,&H00000000,&H80000000,"

@@ -1776,3 +1776,13 @@
   .qt-sidebar__foot .account-panel__copyright { padding: 7px 14px 1px; }
   .qt-sidebar__foot .account-panel__version-row { padding: 2px 14px 8px; }
 }
+
+/* Step 4: the voice + subtitles of the joined clip, picked ahead (steps/JoinOptions) */
+.qt-joinopts { margin: 4px 0 14px; padding: 12px 14px; border: 1px solid #3a4050; border-radius: 12px;
+  background: linear-gradient(180deg, rgba(255, 106, 43, 0.06), rgba(255, 255, 255, 0.015)); }
+.qt-joinopts__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+.qt-joinopts__head strong { font-size: 15px; }
+.qt-joinopts__head small { color: var(--muted); font-size: 13px; }
+.qt-joinopts__row { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px 16px; }
+.qt-joinopts__row .qt-field { margin: 0; }
+.qt-joinopts__row .qt-field > span { display: flex; align-items: center; gap: 8px; min-height: 34px; }

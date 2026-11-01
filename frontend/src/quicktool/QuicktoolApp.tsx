@@ -519,8 +519,11 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
   // is missing from it: read the list again once before calling the link stale.
   // `navigate` changes on every URL change (/clips/17 → /clips/17/script), so the
   // effect re-runs before the fresh list is back: wait for it, don't bounce.
+  // The read in flight is a ref, not state: the effect can run again before a state update lands (StrictMode runs
+  // effects twice; deps changing in the same commit) and then saw "already read, still missing" → bounced (31/10).
   const refreshedFor = useRef<number | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
+  const refreshing = useRef(false);
+  const [refreshTick, setRefreshTick] = useState(0);
   // A clip already loaded in the store may have changed on the agent since (a dub / CapCut export writes the new video
   // onto it): switchBoard skips the current board, so opening it again reads it fresh — Step 5 used to show (and
   // download) the video from before the last "Xuất lại" (29/10).
@@ -532,19 +535,20 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
     void refreshBoardState();
   }, [routeId, boardId, refreshBoardState]);
   useEffect(() => {
-    if (isNaN(routeId) || routeId === boardId || !boardsLoaded || refreshing) return;
+    if (isNaN(routeId) || routeId === boardId || !boardsLoaded || refreshing.current) return;
     if (boards.some((b) => b.id === routeId)) { freshFor.current = routeId; void switchBoard(routeId); return; }
     if (loadingBoard) return;
     if (refreshedFor.current !== routeId) {
       refreshedFor.current = routeId;
-      setRefreshing(true);
+      refreshing.current = true;
+      // a failed read falls through to the stale-link bounce on the next run
       void refreshBoards()
-        .catch(() => navigate("/clips", { replace: true }))
-        .finally(() => setRefreshing(false));
+        .catch(() => undefined)
+        .finally(() => { refreshing.current = false; setRefreshTick((t) => t + 1); });
       return;
     }
     navigate("/clips", { replace: true });
-  }, [routeId, boardId, boards, boardsLoaded, loadingBoard, refreshing, switchBoard, refreshBoards, navigate]);
+  }, [routeId, boardId, boards, boardsLoaded, loadingBoard, refreshTick, switchBoard, refreshBoards, navigate]);
 
   // No step in the URL: continue where this clip was left.
   useEffect(() => {
@@ -691,7 +695,9 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
           {step === 3 && <StepMedia roles={roles} kind="image" />}
           {step === 4 && (isDrama ? <StepSequence roles={roles} /> : <StepMedia roles={roles} kind="video" productName={productLabel.name} boardName={boardName} />)}
           {step === 5 && <StepExport roles={roles} productName={productLabel.name} price={productLabel.price} channelId={qt.channel_id ?? null}
-                                     dubJobId={qt.template_id === "dub" ? ((qt as { dub?: { job_id?: string } }).dub?.job_id ?? null) : null} />}
+                                     dubJobId={qt.template_id === "dub" ? ((qt as { dub?: { job_id?: string } }).dub?.job_id ?? null)
+                                       : qt.template_id === "dub_part" ? ((qt as { dub_part?: { job_id?: string } }).dub_part?.job_id ?? null) : null}
+                                     dubPart={qt.template_id === "dub_part" ? ((qt as { dub_part?: { index: number; total: number } }).dub_part ?? null) : null} />}
           {step === 1 && loaded && <ClipChannel boardId={routeId} channelId={qt.channel_id ?? null} />}
           {step === 5 && loaded && <ClipPost boardId={routeId} productId={qt.product_id ?? null} channelId={qt.channel_id ?? null} />}
           <div className="qt-footer">

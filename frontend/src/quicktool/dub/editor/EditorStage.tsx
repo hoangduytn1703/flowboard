@@ -6,6 +6,7 @@ import { Player, type PlayerRef } from "@remotion/player";
 import { DEFAULT_BLUR, emphasisY, layoutBlurs, withBlurs, type DubBlur, type DubHighlights, type DubLayout, type SubLook } from "../../../api/dub";
 import { mediaUrl } from "../../../api/client";
 import { DUB_FPS, DubSubtitles, emphasisAt, emphasisFont, zoomAt, type DubLayoutSpec, type DubRemotionStyle } from "../../../remotion/DubSubtitles";
+import { canvasRect, gridCss } from "../../../remotion/canvasGeom";
 import { chunkAt, effectiveLayout, splitAll, W_MAX, W_MIN, type EditCue } from "./cues";
 import { DeviceChrome } from "./DeviceChrome";
 import { overlaps, platformOf, type PlatformKey, type Rect } from "./platforms";
@@ -53,6 +54,9 @@ type Drag =
 
 export const EditorStage = forwardRef<StageHandle, {
   src: string;
+  /** the source video's own size (where a whole video sits in the output format) */
+  srcW: number;
+  srcH: number;
   voiceUrl?: string;
   bgmUrl?: string;
   player: StagePlayer | null;
@@ -80,7 +84,7 @@ export const EditorStage = forwardRef<StageHandle, {
   /** "📱 Xem trên": show the frame inside that app's screen, with its buttons over it (view only) */
   platform?: PlatformKey | null;
 }>(function EditorStage({
-  src, voiceUrl, bgmUrl, player, frameW, frameH, cues, layout, style, highlights, selected, readOnly, audio,
+  src, srcW, srcH, voiceUrl, bgmUrl, player, frameW, frameH, cues, layout, style, highlights, selected, readOnly, audio,
   onLayout, onSubGeom, onSelect, onEditText, onTime, onPlaying, onDuration, onNatural, platform = null,
 }, ref) {
   const area = useRef<HTMLDivElement>(null);
@@ -246,6 +250,16 @@ export const EditorStage = forwardRef<StageHandle, {
   const blurs = layoutBlurs(layout);
   const canvas = layout.canvas ?? null;
   const frameSpec = layout.frame ?? null;
+  // a whole video in the format: its place, and what fills the rest (colour / grid / uploaded picture or video)
+  const wholeFit = canvas && canvas.fit !== "crop" ? canvas.fit : null;
+  const wholeRect = wholeFit && srcW > 0 && srcH > 0 ? canvasRect(srcW, srcH, frameW, frameH, canvas) : null;
+  const canvasBgUrl = (wholeFit === "image" || wholeFit === "video") && canvas?.media_id ? mediaUrl(canvas.media_id) : null;
+  const fgPxW = (box.w || 0) * (frameSpec ? frameSpec.scale : 1);
+  const canvasBgLayer = !canvas || !wholeFit || wholeFit === "blur" || wholeFit === "black" ? null
+    : wholeFit === "grid" ? <div className="dx-stage__cbg" style={gridCss(canvas.color, canvas.line, canvas.cell, frameW || 1, frameH || 1, fgPxW)} />
+    : wholeFit === "image" && canvasBgUrl ? <img className="dx-stage__cbg" src={canvasBgUrl} alt="" />
+    : wholeFit === "video" && canvasBgUrl ? <video className="dx-stage__cbg" src={canvasBgUrl} muted loop autoPlay playsInline />
+    : <div className="dx-stage__cbg" style={{ background: canvas.color }} />;
   const mascot = layout.mascot ?? null;
   const fontPx = stageH ? stageH * 0.036 * lay.scale : 16;
   const pad = fontPx * 0.25;
@@ -381,6 +395,7 @@ export const EditorStage = forwardRef<StageHandle, {
               highlights: hlSpec, sfx: [],
               mascotSrc: mascot?.media_id ? mediaUrl(mascot.media_id) : undefined,
               frameBgSrc: frameSpec?.bg === "image" && frameSpec.bg_image ? mediaUrl(frameSpec.bg_image) : undefined,
+              srcWidth: srcW || undefined, srcHeight: srcH || undefined, canvasBgSrc: canvasBgUrl ?? undefined,
             }}
             durationInFrames={Math.max(1, Math.ceil(player.durationS * fps))}
             fps={fps}
@@ -398,13 +413,19 @@ export const EditorStage = forwardRef<StageHandle, {
               <video ref={bgVideo} className="dx-stage__bgvid" src={src} muted playsInline preload="auto" />}
             <div className="dx-stage__fg" style={{ ...frameStyle, overflow: "hidden", ...(canvas?.fit === "black" ? { background: "#000" } : {}) }}>
               {canvas?.fit === "blur" && <video ref={canvasBg} className="dx-stage__bgvid" src={src} muted playsInline preload="auto" />}
+              {canvasBgLayer}
               <video ref={video} src={src} muted playsInline preload="auto"
                      style={{
                        position: "relative",
-                       // the output format: the source fitted like the render does it (services/dub.canvas_filter)
+                       // the output format: the source placed like the render does it (services/dub.canvas_filter)
                        ...(canvas ? (canvas.fit === "crop"
-                         ? { objectFit: "cover", objectPosition: `${(canvas.pos * 100).toFixed(1)}% ${(canvas.pos * 100).toFixed(1)}%` }
-                         : { objectFit: "contain" }) : {}),
+                         ? { objectFit: "cover", objectPosition: `${(canvas.cut * 100).toFixed(1)}% ${(canvas.cut * 100).toFixed(1)}%` }
+                         : wholeRect ? { position: "absolute", left: pct(wholeRect.x), top: pct(wholeRect.y), width: pct(wholeRect.w),
+                                         height: pct(wholeRect.h),
+                                         // "Cắt 4:3": the box has the cut shape; cover + the cut position = the render's crop
+                                         ...(canvas.inner ? { objectFit: "cover", objectPosition: `${(canvas.cut * 100).toFixed(1)}% ${(canvas.cut * 100).toFixed(1)}%` }
+                                           : { objectFit: "fill" }) }
+                           : { objectFit: "contain" }) : {}),
                        ...(zoom > 1 ? { transform: `scale(${zoom.toFixed(4)})`, transformOrigin: "50% 50%" } : {}),
                      }}
                      onLoadedMetadata={(e) => {

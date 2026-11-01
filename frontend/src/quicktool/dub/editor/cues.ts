@@ -1,4 +1,4 @@
-import type { DubHighlights, DubLayout, SubLook } from "../../../api/dub";
+import type { DubHighlights, DubLayout, SubLang, SubLook } from "../../../api/dub";
 
 /** One dubbed line as the editor holds it: its slot on the timeline, the source text and the Vietnamese line. */
 export interface EditCue {
@@ -36,6 +36,8 @@ export interface EditDoc {
   style: string;
   /** "✨ Nhấn chữ quan trọng" (normHighlights shape) */
   highlights: DubHighlights;
+  /** the language the lines are in ("Ngôn ngữ phụ đề" — switching it rewrites every line, one undo step) */
+  lang: SubLang;
 }
 
 // Mirrors services/dub.py (SUB_MAX_CHARS, SUB_MARGIN_X_FRAC, sub_font_px, sub_max_chars, split_cue)
@@ -60,21 +62,47 @@ export function subMaxChars(width: number, height: number, layout: DubLayout): n
 
 export interface Chunk { start: number; end: number; text: string; cue: number }
 
+// Mirrors services/dub (_WIDE, _UNSPACED, _CJK_TAIL, text_units, _cue_tokens): CJK / Hangul characters are drawn about
+// twice as wide as a Latin letter; Chinese / Japanese have no spaces, so a long run is cut one character at a time.
+const WIDE = /[\u1100-\u11ff\u2e80-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]/g;
+const UNSPACED = /[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]/;
+const CJK_TAIL = new Set("，。！？、：；）」』》,.!?:;)");
+
+export function textUnits(text: string): number {
+  return text.length + (text.match(WIDE)?.length ?? 0);
+}
+
+function cueTokens(text: string): [string, boolean][] {
+  const out: [string, boolean][] = [];
+  text.split(/\s+/).filter(Boolean).forEach((w, i) => {
+    if (UNSPACED.test(w) && textUnits(w) > 6) {
+      let first = true;
+      for (const ch of w) {
+        if (!first && CJK_TAIL.has(ch) && out.length) { out[out.length - 1] = [out[out.length - 1][0] + ch, out[out.length - 1][1]]; continue; }
+        out.push([ch, i > 0 && first]);
+        first = false;
+      }
+    } else out.push([w, i > 0]);
+  });
+  return out;
+}
+
 export function splitCue(start: number, end: number, text: string, maxChars: number, cue: number): Chunk[] {
-  const words = text.split(/\s+/).filter(Boolean);
-  if (!words.length) return [];
+  const tokens = cueTokens(text);
+  if (!tokens.length) return [];
   const chunks: string[] = [];
   let cur = "";
-  for (const w of words) {
-    if (cur && cur.length + 1 + w.length > maxChars) { chunks.push(cur); cur = w; }
-    else cur = `${cur} ${w}`.trim();
+  for (const [tok, spaced] of tokens) {
+    const cand = cur && spaced ? `${cur} ${tok}` : cur + tok;
+    if (cur && textUnits(cand) > maxChars) { chunks.push(cur); cur = tok; }
+    else cur = cand;
   }
   if (cur) chunks.push(cur);
-  const total = chunks.reduce((n, c) => n + c.length, 0) || 1;
+  const total = chunks.reduce((n, c) => n + textUnits(c), 0) || 1;
   const out: Chunk[] = [];
   let t = start;
   chunks.forEach((c, i) => {
-    const e = i === chunks.length - 1 ? end : t + (end - start) * (c.length / total);
+    const e = i === chunks.length - 1 ? end : t + (end - start) * (textUnits(c) / total);
     out.push({ start: t, end: e, text: c, cue });
     t = e;
   });

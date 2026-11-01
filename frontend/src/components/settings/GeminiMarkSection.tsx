@@ -24,7 +24,7 @@ export function GeminiMarkSection() {
   async function toggle(enabled: boolean) {
     try {
       setStatus(await api<MarkStatus>("/api/media/clean-marks", { method: "PUT", body: JSON.stringify({ enabled }) }));
-      toast.success(enabled ? "Ảnh tạo mới sẽ được xoá logo Gemini ✦ tự động." : "Đã tắt — ảnh tạo mới giữ nguyên logo.");
+      toast.success(enabled ? "Ảnh tạo mới và clip ghép sẽ được xoá logo Gemini ✦ tự động." : "Đã tắt — ảnh tạo mới và clip ghép giữ nguyên logo.");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     }
@@ -46,11 +46,12 @@ export function GeminiMarkSection() {
     <div className="settings-panel__section">
       <label className="settings-field settings-field--check">
         <input type="checkbox" checked={status?.enabled ?? true} disabled={!status} onChange={(e) => void toggle(e.target.checked)} />
-        <span className="settings-panel__label">Tự xoá logo Gemini ✦ ở góc ảnh sau khi tạo</span>
+        <span className="settings-panel__label">Tự xoá logo Gemini ✦ ở góc ảnh và video</span>
       </label>
       <div className="settings-panel__hint">
         Flow in một ngôi sao mờ ở góc dưới phải mọi ảnh tạo ra. Tool hoàn nguyên đúng điểm ảnh gốc dưới ngôi sao (không làm mờ),
-        ngay khi ảnh về máy. Ảnh bạn upload không bị đụng tới. Video Veo chưa xử lý.
+        ngay khi ảnh về máy. Video Flow cũng có ngôi sao này (cả ngôi sao sót từ ảnh cảnh): tool xoá ngầm ngay khi video về máy và
+        khi ghép clip ở Bước 5 thì dùng bản đã xoá (video gốc giữ nguyên). Ảnh / video bạn upload không có logo thì không bị đụng tới.
       </div>
       <div className="qt-post__actions" style={{ marginTop: 8 }}>
         <button type="button" className="qt-btn qt-btn--small" disabled={busy || !status} onClick={() => void runAll()}>

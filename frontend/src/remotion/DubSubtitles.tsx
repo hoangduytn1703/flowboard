@@ -8,7 +8,8 @@
 // Kept separate from the ffmpeg/ASS subtitle path (services/dub.py
 // `write_sub_ass`): that one is untouched, this is the second engine.
 import { loadFont } from "@remotion/google-fonts/BeVietnamPro";
-import { AbsoluteFill, Audio, Img, interpolate, OffthreadVideo, Sequence, useCurrentFrame, useVideoConfig } from "remotion";
+import { AbsoluteFill, Audio, Html5Video, Img, interpolate, Loop, OffthreadVideo, Sequence, useCurrentFrame, useVideoConfig } from "remotion";
+import { canvasRect, gridCss } from "./canvasGeom";
 
 const { fontFamily } = loadFont("normal", { weights: ["600", "700", "800"], subsets: ["latin", "vietnamese"] });
 
@@ -32,8 +33,17 @@ export interface DubBlurSpec {
  * width / height are already the format's; this says how the source fills it. */
 export interface DubCanvasSpec {
   aspect: string;
-  fit: "blur" | "black" | "crop";
+  fit: "blur" | "black" | "color" | "grid" | "image" | "video" | "crop";
   pos: number;
+  /** a whole video's size in the format (0.5–1) and the background's colour / grid / uploaded file */
+  scale?: number;
+  color?: string;
+  line?: string;
+  cell?: number;
+  media_id?: string;
+  /** the video cut to this shape first ("4:3") and where the crops cut (older layouts: a "crop" fit's cut is pos) */
+  inner?: string;
+  cut?: number;
 }
 
 export interface DubFrameSpec {
@@ -140,6 +150,12 @@ export type DubSubtitlesProps = {
   mascotSrc?: string;
   /** the frame's background picture (bg "image"), same serving as the sticker */
   frameBgSrc?: string;
+  /** the source video's own size: where a whole video sits in the output format (canvasGeom.canvasRect) */
+  srcWidth?: number;
+  srcHeight?: number;
+  /** the output format's uploaded background picture / video, and the video's length (it is looped with <Loop>) */
+  canvasBgSrc?: string;
+  canvasBgDurS?: number;
   /** the key moments (null / undefined = off) */
   highlights?: DubHighlightsSpec | null;
   /** sound effects at the key moments */
@@ -181,7 +197,8 @@ export function wordWindows(cue: DubCue): { word: string; from: number; to: numb
   });
 }
 
-export const DubSubtitles: React.FC<DubSubtitlesProps> = ({ src, width, height, cues, layout, style, muted, mascotSrc, frameBgSrc, highlights, sfx }) => {
+export const DubSubtitles: React.FC<DubSubtitlesProps> = ({ src, width, height, cues, layout, style, muted, mascotSrc, frameBgSrc, highlights, sfx,
+                                                             srcWidth, srcHeight, canvasBgSrc, canvasBgDurS }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const t = frame / fps;
@@ -197,18 +214,38 @@ export const DubSubtitles: React.FC<DubSubtitlesProps> = ({ src, width, height, 
   const fontPx = height * 0.036 * (lay.scale || 1);
   const blurs = layout.blurs ?? (layout.blur ? [layout.blur] : []);
   const canvas = layout.canvas ?? null;
-  // the source in the output format: cropped to fill, or whole (contain) over black bars / a blurred copy of itself
+  // the source in the output format: cropped to fill, or whole at its place (canvasRect) over its background —
+  // a blurred copy of itself, black, a colour, a grid, an uploaded picture or (looped) video: services/dub.canvas_filter
+  const whole = canvas && canvas.fit !== "crop" ? canvas.fit : null;
+  const rect = whole && srcWidth && srcHeight ? canvasRect(srcWidth, srcHeight, width, height, canvas) : null;
+  const pctOf = (v: number) => `${(v * 100).toFixed(3)}%`;
+  const videoBox: React.CSSProperties = rect
+    ? { position: "absolute", left: pctOf(rect.x), top: pctOf(rect.y), width: pctOf(rect.w), height: pctOf(rect.h), objectFit: "fill" }
+    : { position: "absolute", inset: 0, width: "100%", height: "100%" };
   const fitCss: React.CSSProperties = canvas
-    ? (canvas.fit === "crop" ? { objectFit: "cover", objectPosition: `${canvas.pos * 100}% ${canvas.pos * 100}%` } : { objectFit: "contain" })
+    ? (canvas.fit === "crop" || (rect && canvas.inner)
+      ? { objectFit: "cover", objectPosition: `${(canvas.cut ?? canvas.pos) * 100}% ${(canvas.cut ?? canvas.pos) * 100}%` }
+      : rect ? {} : { objectFit: "contain" })
     : {};
+  const cover: React.CSSProperties = { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" };
+  const bgColor = canvas?.color || "#211915";
+  const background = !canvas || !whole || whole === "black" ? null
+    : whole === "blur"
+      ? <OffthreadVideo src={src} muted style={{ ...cover, filter: `blur(${Math.round(Math.min(width, height) / 30)}px)`, transform: "scale(1.08)" }} />
+      : whole === "grid"
+        ? <AbsoluteFill style={gridCss(bgColor, canvas.line || "#4a3a2e", canvas.cell || 0.11, width, height, width)} />
+        : whole === "image" && canvasBgSrc
+          ? <Img src={canvasBgSrc} style={cover} />
+          : whole === "video" && canvasBgSrc
+            ? (canvasBgDurS && canvasBgDurS > 0
+              // OffthreadVideo cannot loop by itself: one <Loop> round per length of the background video
+              ? <Loop durationInFrames={Math.max(1, Math.floor(canvasBgDurS * fps))}><OffthreadVideo src={canvasBgSrc} muted style={cover} /></Loop>
+              : <Html5Video src={canvasBgSrc} muted loop style={cover} />)
+            : <AbsoluteFill style={{ background: bgColor }} />;
   const picture = (fill: "contain" | "fill") => (
     <>
-      {canvas?.fit === "blur" && (
-        <OffthreadVideo src={src} muted style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover",
-                                                filter: `blur(${Math.round(Math.min(width, height) / 30)}px)`, transform: "scale(1.08)" }} />
-      )}
-      <OffthreadVideo src={src} muted={muted}
-                      style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: fill, ...fitCss, ...zoomCss }} />
+      {background}
+      <OffthreadVideo src={src} muted={muted} style={{ objectFit: fill, ...videoBox, ...fitCss, ...zoomCss }} />
     </>
   );
 

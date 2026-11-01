@@ -103,6 +103,9 @@ export interface FlowboardNodeData extends Record<string, unknown> {
   /** Spoken-language style for Gemini voices ("giọng kể chuyện kịch tính"). */
   voiceStyle?: string;
   subtitles?: boolean;
+  /** Export node: how the joined clip gets its subtitles — "ass" (ffmpeg) / "remotion", and the look */
+  subEngine?: "ass" | "remotion";
+  subStyle?: string;
   originalAudio?: "duck" | "keep" | "mute";
   /** Export node: background music (an uploaded audio asset) and its level. */
   bgmMediaId?: string;
@@ -385,6 +388,8 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           voiceRate: n.data["voiceRate"] as number | undefined,
           voiceStyle: n.data["voiceStyle"] as string | undefined,
           subtitles: n.data["subtitles"] as boolean | undefined,
+          subEngine: n.data["subEngine"] as "ass" | "remotion" | undefined,
+          subStyle: n.data["subStyle"] as string | undefined,
           originalAudio: n.data["originalAudio"] as "duck" | "keep" | "mute" | undefined,
           bgmMediaId: n.data["bgmMediaId"] as string | undefined,
           bgmName: n.data["bgmName"] as string | undefined,
@@ -477,6 +482,8 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           voiceRate: n.data["voiceRate"] as number | undefined,
           voiceStyle: n.data["voiceStyle"] as string | undefined,
           subtitles: n.data["subtitles"] as boolean | undefined,
+          subEngine: n.data["subEngine"] as "ass" | "remotion" | undefined,
+          subStyle: n.data["subStyle"] as string | undefined,
           originalAudio: n.data["originalAudio"] as "duck" | "keep" | "mute" | undefined,
           bgmMediaId: n.data["bgmMediaId"] as string | undefined,
           bgmName: n.data["bgmName"] as string | undefined,
@@ -611,6 +618,8 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           voiceRate: n.data["voiceRate"] as number | undefined,
           voiceStyle: n.data["voiceStyle"] as string | undefined,
           subtitles: n.data["subtitles"] as boolean | undefined,
+          subEngine: n.data["subEngine"] as "ass" | "remotion" | undefined,
+          subStyle: n.data["subStyle"] as string | undefined,
           originalAudio: n.data["originalAudio"] as "duck" | "keep" | "mute" | undefined,
           bgmMediaId: n.data["bgmMediaId"] as string | undefined,
           bgmName: n.data["bgmName"] as string | undefined,

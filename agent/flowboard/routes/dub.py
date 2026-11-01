@@ -17,7 +17,7 @@ from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from flowboard.services import dub, dub_links, dub_remotion, tts
+from flowboard.services import dub, dub_links, dub_remotion, dub_split, tts
 
 router = APIRouter(prefix="/api/dub", tags=["dub"])
 
@@ -37,6 +37,12 @@ class StartBody(BaseModel):
     batch_id: str = Field(default="", max_length=40)
     # "★ Mẫu chỉnh sửa": start with that saved look (layout, style, engine, key-moment settings)
     look_preset_id: Optional[int] = None
+    # "google" = free Google / Microsoft translation (like VieDub, the default); "ai" = the AI set in Settings
+    translator: str = Field(default="google", pattern="^(google|ai)$")
+    # "dub" = Vietnamese voice-over; "sub" = subtitles only, the video keeps its own sound (no voice read: faster)
+    mode: str = Field(default="dub", pattern="^(dub|sub)$")
+    # subtitles only: their language — "vi", "orig" (the video's own words) or another (services/dub.SUB_LANGS)
+    sub_lang: str = Field(default="vi", pattern="^(vi|orig|en|zh|ja|ko|th|id|es|fr|de|pt|ru)$")
 
 
 class RenderBody(BaseModel):
@@ -55,6 +61,10 @@ class RenderBody(BaseModel):
     looks: Optional[list[Optional[dict[str, Any]]]] = Field(default=None, max_length=2000)
     # "✨ Nhấn chữ quan trọng": {on, words, zoom, sfx, sfx_set, y, points: [{at, words, line}]}
     highlights: Optional[dict[str, Any]] = None
+    # switch a project between voice-over and subtitles only
+    mode: Optional[str] = Field(default=None, pattern="^(dub|sub)$")
+    # the language the lines are in now (the editor re-translated them: POST /jobs/{id}/subtitles)
+    sub_lang: Optional[str] = Field(default=None, pattern="^(vi|orig|en|zh|ja|ko|th|id|es|fr|de|pt|ru)$")
 
 
 @router.get("/status")
@@ -63,6 +73,7 @@ def get_status() -> dict[str, Any]:
     st["styles"] = [{"key": k, "label": v} for k, v in dub.STYLES.items()]
     st["remotion_styles"] = [{"key": k, "label": v} for k, v in dub_remotion.STYLES.items()]
     st["max_minutes"] = dub.MAX_DURATION_S // 60
+    st["translators"] = [{"key": k, "label": v} for k, v in dub.TRANSLATORS.items()]
     st["default_layout"] = dict(dub.DEFAULT_LAYOUT)
     return st
 
@@ -73,8 +84,8 @@ async def start(body: StartBody) -> dict[str, Any]:
         look = _look_preset(body.look_preset_id)
         job = dub.start_job(url=body.url, source_media_id=body.source_media_id, voice=body.voice, keep_bgm=body.keep_bgm,
                             style=look["style"] if look else body.style, engine=look["engine"] if look else body.engine, channel_id=body.channel_id, name=body.name,
-                            auto_render=body.auto_render, batch_id=body.batch_id,
-                            layout=look["layout"] if look else None, highlights=look["highlights"] if look else None)
+                            auto_render=body.auto_render, batch_id=body.batch_id, translator=body.translator, mode=body.mode,
+                            sub_lang=body.sub_lang, layout=look["layout"] if look else None, highlights=look["highlights"] if look else None)
     except dub.DubError as exc:
         raise HTTPException(400, str(exc))
     return job.public()
@@ -158,11 +169,32 @@ async def render(job_id: str, body: RenderBody) -> dict[str, Any]:
         sent = body.model_dump(exclude_unset=True)
         dub.render_job(job, lines=body.lines, voice=body.voice, style=body.style, keep_bgm=body.keep_bgm,
                        name=body.name, layout=body.layout, engine=body.engine, timings=body.timings, looks=body.looks,
-                       highlights=body.highlights,
+                       highlights=body.highlights, mode=body.mode, sub_lang=body.sub_lang,
                        **({"channel_id": body.channel_id} if "channel_id" in sent else {}))
     except dub.DubError as exc:
         raise HTTPException(400, str(exc))
     return job.public()
+
+
+class SubLangBody(BaseModel):
+    lang: str = Field(pattern="^(vi|orig|en|zh|ja|ko|th|id|es|fr|de|pt|ru)$")
+
+
+@router.post("/jobs/{job_id}/subtitles")
+async def subtitle_language(job_id: str, body: SubLangBody) -> dict[str, Any]:
+    """The editor's "Ngôn ngữ phụ đề": every line in another language from the source words (Google Dịch, or the
+    words as heard for "orig") — nothing is saved; the editor puts them in and the next export keeps them.
+    → {lines, translated_by, lang}"""
+    import asyncio
+
+    job = _job(job_id)
+    if not job.segments:
+        raise HTTPException(400, "Video này chưa có câu nào")
+    try:
+        lines, by = await asyncio.to_thread(dub.subtitle_lines, job, body.lang)
+    except dub.DubError as exc:
+        raise HTTPException(400, str(exc))
+    return {"lines": lines, "translated_by": by, "lang": body.lang}
 
 
 class PickBody(BaseModel):
@@ -522,6 +554,9 @@ class LinkQueueBody(LinkIdsBody):
     channel_id: Optional[int] = None
     auto_render: bool = True
     look_preset_id: Optional[int] = None
+    translator: str = Field(default="google", pattern="^(google|ai)$")
+    mode: str = Field(default="dub", pattern="^(dub|sub)$")
+    sub_lang: str = Field(default="vi", pattern="^(vi|orig|en|zh|ja|ko|th|id|es|fr|de|pt|ru)$")
 
 
 @router.get("/links")
@@ -547,7 +582,8 @@ def queue_links(body: LinkQueueBody) -> dict[str, Any]:
         engine = dub._check_engine(look["engine"] if look else body.engine)
         options: dict[str, Any] = {"voice": body.voice, "keep_bgm": body.keep_bgm, "engine": engine,
                                    "style": dub._style_for(engine, look["style"] if look else body.style),
-                                   "channel_id": body.channel_id, "auto_render": body.auto_render}
+                                   "channel_id": body.channel_id, "auto_render": body.auto_render,
+                                   "translator": body.translator, "mode": body.mode, "sub_lang": body.sub_lang}
         if look:
             options["layout"], options["highlights"] = look["layout"], look["highlights"]
         return dub_links.queue(body.ids, options)
@@ -564,3 +600,121 @@ def unqueue_links(body: LinkIdsBody) -> dict[str, Any]:
 def delete_links(body: LinkIdsBody) -> dict[str, Any]:
     """Out of the library only — the dubbed videos and clips made from these links stay."""
     return {"deleted": dub_links.delete(body.ids)}
+
+
+# ── background of the output format ("Khung xuất" → Nền: ảnh / video tải lên) ──
+
+MAX_BG_IMAGE_BYTES = 20 * 1024 * 1024
+MAX_BG_VIDEO_BYTES = 300 * 1024 * 1024
+_BG_IMAGE_EXT = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
+_BG_VIDEO_EXT = {"video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm", "image/gif": ".gif"}
+
+
+@router.post("/background", status_code=201)
+async def upload_background(file: UploadFile = File(...)) -> dict[str, Any]:
+    """A picture or a video for the output format's background (kept on this machine, never sent to Flow).
+    A GIF counts as a video (it moves; looped like one)."""
+    import uuid
+
+    from flowboard.db import get_session
+    from flowboard.db.models import Asset
+    from flowboard.services import media as media_service
+
+    mime = (file.content_type or "").lower().split(";")[0].strip()
+    suffix = Path(file.filename or "").suffix.lower()
+    by_ext = {e: m for m, e in {**_BG_IMAGE_EXT, **_BG_VIDEO_EXT}.items()}
+    if mime not in _BG_IMAGE_EXT and mime not in _BG_VIDEO_EXT:
+        mime = by_ext.get(".jpg" if suffix == ".jpeg" else suffix, "")
+    if not mime:
+        raise HTTPException(415, "Chỉ nhận ảnh JPG / PNG / WEBP hoặc video MP4 / MOV / WEBM / GIF")
+    kind = "image" if mime in _BG_IMAGE_EXT else "video"
+    limit = MAX_BG_IMAGE_BYTES if kind == "image" else MAX_BG_VIDEO_BYTES
+    media_id = uuid.uuid4().hex
+    media_service.MEDIA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    path = media_service.MEDIA_CACHE_DIR / f"{media_id}{(_BG_IMAGE_EXT | _BG_VIDEO_EXT)[mime]}"
+    size = 0
+    try:
+        with path.open("wb") as out:
+            while chunk := await file.read(1 << 20):
+                size += len(chunk)
+                if size > limit:
+                    raise HTTPException(413, f"File lớn hơn {limit // (1024 * 1024)} MB")
+                out.write(chunk)
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
+    if size == 0:
+        path.unlink(missing_ok=True)
+        raise HTTPException(400, "File rỗng")
+    if mime == "image/gif":
+        # a moving GIF plays everywhere as an mp4 (the Remotion engine and the preview cannot loop a GIF as a video)
+        mp4 = path.with_suffix(".mp4")
+        err = await _gif_to_mp4(path, mp4)
+        path.unlink(missing_ok=True)
+        if err:
+            mp4.unlink(missing_ok=True)
+            raise HTTPException(400, f"Không đọc được GIF: {err[:200]}")
+        path, mime = mp4, "video/mp4"
+    with get_session() as s:
+        s.add(Asset(kind=kind, uuid_media_id=media_id, local_path=str(path), mime=mime))
+        s.commit()
+    return {"media_id": media_id, "url": f"/media/{media_id}", "kind": kind}
+
+
+async def _gif_to_mp4(src: Path, dst: Path) -> str:
+    import asyncio
+
+    from flowboard.services.video_export import _run
+
+    cmd = [dub._ffmpeg(), "-y", "-v", "error", "-i", str(src), "-movflags", "+faststart", "-pix_fmt", "yuv420p",
+           "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-an", str(dst)]
+    err = await asyncio.to_thread(_run, cmd, 300)
+    return err or ("" if dst.is_file() and dst.stat().st_size > 0 else "file rỗng")
+
+
+# ── "✂️ Cắt thành nhiều video" (services/dub_split) ─────────────────────────
+
+class CutRow(BaseModel):
+    start: float
+    end: float
+    title: str = Field(default="", max_length=120)
+
+
+class CutRowsBody(BaseModel):
+    rows: list[CutRow] = Field(default_factory=list, max_length=dub_split.MAX_PARTS)
+
+
+class SuggestBody(BaseModel):
+    target_s: float = Field(default=60, ge=10, le=900)
+    ai: bool = True
+
+
+@router.post("/jobs/{job_id}/split/suggest")
+async def split_suggest(job_id: str, body: SuggestBody) -> dict[str, Any]:
+    """Rows for "AI gợi ý" (AI failing → the even split, with a note) or "Chia đều" (``ai: false``); not saved."""
+    job = _job(job_id)
+    if not job.segments:
+        raise HTTPException(400, "Video chưa có câu nào")
+    return await dub_split.suggest(job, body.target_s, body.ai)
+
+
+@router.put("/jobs/{job_id}/cuts")
+def save_cuts(job_id: str, body: CutRowsBody) -> dict[str, Any]:
+    """The rows as edited (kept with the project, so they are there next time)."""
+    job = _job(job_id)
+    return {"cuts": dub_split.save_rows(job, [r.model_dump() for r in body.rows])}
+
+
+@router.post("/jobs/{job_id}/split")
+def split_start(job_id: str, body: CutRowsBody) -> dict[str, Any]:
+    """Cut the latest export into one clip per row (a thread; poll ``GET …/split``)."""
+    job = _job(job_id)
+    try:
+        return dub_split.start(job, [r.model_dump() for r in body.rows])
+    except dub_split.SplitError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/jobs/{job_id}/split")
+def split_state(job_id: str) -> dict[str, Any]:
+    return dub_split.state(job_id)

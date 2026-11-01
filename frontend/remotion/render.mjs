@@ -55,8 +55,25 @@ async function ensureBundle() {
   return out;
 }
 
-const MIME = { ".mp4": "video/mp4", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif",
+const MIME = { ".mp4": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif",
                ".wav": "audio/wav", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac", ".ogg": "audio/ogg" };
+
+/**
+ * A port free on both IPv4 and IPv6 for Remotion's own bundle server. Remotion picks 3000 when 127.0.0.1:3000 is free
+ * and then opens http://localhost:3000 — which the browser may resolve to ::1, where another app can be listening
+ * (seen 1/11: the "TikTok Live Games" server on [::]:3000 answered, and the render died "getStaticCompositions").
+ */
+function freePort() {
+  return new Promise((resolve) => {
+    const s = http.createServer();
+    s.once("error", () => {
+      const v4 = http.createServer();
+      v4.once("error", () => resolve(null));
+      v4.listen(0, "127.0.0.1", () => { const p = v4.address().port; v4.close(() => resolve(p)); });
+    });
+    s.listen({ port: 0, host: "::", ipv6Only: false }, () => { const p = s.address().port; s.close(() => resolve(p)); });
+  });
+}
 
 /** Serve the input video (and the mascot sticker) with Range support on 127.0.0.1:<random port>. */
 function serveFile(file, extra = {}) {
@@ -99,6 +116,8 @@ async function main() {
   const extra = {};
   if (spec.mascot_file && fs.existsSync(spec.mascot_file)) extra[`/mascot${path.extname(spec.mascot_file).toLowerCase()}`] = spec.mascot_file;
   if (spec.frame_bg_file && fs.existsSync(spec.frame_bg_file)) extra[`/framebg${path.extname(spec.frame_bg_file).toLowerCase()}`] = spec.frame_bg_file;
+  // the output format's uploaded background picture / video
+  if (spec.canvas_bg_file && fs.existsSync(spec.canvas_bg_file)) extra[`/canvasbg${path.extname(spec.canvas_bg_file).toLowerCase()}`] = spec.canvas_bg_file;
   // the sound effects of the key moments: one served path per file (props.sfx[i] ↔ spec.sfx_files[i])
   const sfxPaths = (spec.sfx_files || []).map((f, i) => {
     if (!f || !fs.existsSync(f)) return null;
@@ -110,16 +129,19 @@ async function main() {
   try {
     const mascotPath = Object.keys(extra).find((k) => k.startsWith("/mascot"));
     const bgPath = Object.keys(extra).find((k) => k.startsWith("/framebg"));
+    const canvasBgPath = Object.keys(extra).find((k) => k.startsWith("/canvasbg"));
     const props = spec.props || {};
     const sfx = (props.sfx || []).map((s, i) => (sfxPaths[i] ? { ...s, src: `${base}${sfxPaths[i]}` } : s));
     const inputProps = { ...props, sfx, src: url, ...(mascotPath ? { mascotSrc: `${base}${mascotPath}` } : {}),
-                         ...(bgPath ? { frameBgSrc: `${base}${bgPath}` } : {}) };
+                         ...(bgPath ? { frameBgSrc: `${base}${bgPath}` } : {}),
+                         ...(canvasBgPath ? { canvasBgSrc: `${base}${canvasBgPath}` } : {}) };
     log("PHASE select");
-    const composition = await selectComposition({ serveUrl, id: spec.composition || "DubSubtitles", inputProps });
+    const port = await freePort();
+    const composition = await selectComposition({ serveUrl, id: spec.composition || "DubSubtitles", inputProps, port });
     log(`FRAMES ${composition.durationInFrames} ${composition.width}x${composition.height}@${composition.fps}`);
     let last = -1;
     await renderMedia({
-      composition, serveUrl, inputProps,
+      composition, serveUrl, inputProps, port,
       codec: "h264", audioCodec: "aac", crf: spec.crf ?? 18, x264Preset: "fast", pixelFormat: "yuv420p",
       outputLocation: spec.out,
       concurrency: spec.concurrency ?? null,

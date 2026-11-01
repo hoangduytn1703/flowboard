@@ -71,7 +71,11 @@ interface SettingsState {
   mediaProvider: MediaProviderKey;
   imageProvider: ImageProviderKey;
   uiMode: UiMode;
+  /** the dubbing voice picked last (trang Lồng tiếng, thư viện link, Edit auto CapCut) — the default for the next
+   * video; "" = the built-in default. Follows the login like the model picks. */
+  dubVoice: string;
   hydrateFromAccount(prefs: Record<string, string | number | boolean>): void;
+  setDubVoice(voice: string): void;
   setImageModel(model: ImageModelKey): void;
   setImageProvider(p: ImageProviderKey): void;
   setUiMode(mode: UiMode): void;
@@ -95,6 +99,7 @@ interface PersistShape {
   mediaProvider?: MediaProviderKey;
   imageProvider?: ImageProviderKey;
   uiMode?: UiMode;
+  dubVoice?: string;
 }
 
 const PERSIST_VERSION = 2;
@@ -141,6 +146,9 @@ const persisted = loadPersisted();
 const VALID_VIDEO_QUALITIES: VideoQuality[] = ["fast", "lite", "quality", "lite_relaxed"];
 const VALID_MEDIA_PROVIDERS: MediaProviderKey[] = ["flow", "muse"];
 const VALID_IMAGE_PROVIDERS: ImageProviderKey[] = ["flow", "openai", "xai"];
+// a voice id of one of the voice families (services/tts.voice_kind): Edge, VieNeu, Gemini, FPT.AI
+const isVoiceId = (v: unknown): v is string =>
+  typeof v === "string" && v.length <= 80 && /^(vi-VN-|vieneu:|gemini:|fpt:)/.test(v);
 
 function snapshotPersist(get: () => SettingsState): PersistShape {
   return {
@@ -152,6 +160,7 @@ function snapshotPersist(get: () => SettingsState): PersistShape {
     mediaProvider: get().mediaProvider,
     imageProvider: get().imageProvider,
     uiMode: get().uiMode,
+    dubVoice: get().dubVoice || undefined,
   };
 }
 
@@ -177,6 +186,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       ? persisted.imageProvider
       : "flow",
   uiMode: persisted.uiMode === "canvas" ? "canvas" : "quicktool",
+  dubVoice: isVoiceId(persisted.dubVoice) ? persisted.dubVoice : "",
   /** Apply the preferences saved with the account (called once after login). */
   hydrateFromAccount(prefs) {
     const next: Partial<SettingsState> = {};
@@ -187,6 +197,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     if (VALID_MEDIA_PROVIDERS.includes(prefs.mediaProvider as MediaProviderKey)) next.mediaProvider = prefs.mediaProvider as MediaProviderKey;
     if (VALID_IMAGE_PROVIDERS.includes(prefs.imageProvider as ImageProviderKey)) next.imageProvider = prefs.imageProvider as ImageProviderKey;
     if (prefs.uiMode === "canvas" || prefs.uiMode === "quicktool") next.uiMode = prefs.uiMode;
+    if (isVoiceId(prefs.dubVoice)) next.dubVoice = prefs.dubVoice;
     serverSync = true;
     if (Object.keys(next).length === 0) {
       // Nothing saved yet for this account: push what this browser has.
@@ -202,6 +213,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   setImageModel(model) {
     set({ imageModel: model });
+    persist(snapshotPersist(get));
+  },
+  setDubVoice(voice) {
+    if (!isVoiceId(voice) || voice === get().dubVoice) return;
+    set({ dubVoice: voice });
     persist(snapshotPersist(get));
   },
   setImageProvider(p) {

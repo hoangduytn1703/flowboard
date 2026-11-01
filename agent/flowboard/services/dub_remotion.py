@@ -70,9 +70,11 @@ def _cue(c: tuple) -> dict[str, Any]:
 
 def build_spec(*, src: Path, out: Path, cues: list[tuple], layout: dict[str, Any], style: str,
                width: int, height: int, duration_s: float, fps: int = FPS, concurrency: Optional[Any] = None,
-               highlights: Optional[dict[str, Any]] = None, sfx: Optional[list[tuple[float, float]]] = None) -> dict[str, Any]:
+               highlights: Optional[dict[str, Any]] = None, sfx: Optional[list[tuple[float, float]]] = None,
+               src_size: Optional[tuple[int, int]] = None) -> dict[str, Any]:
     """``highlights`` = {words, zoom, y, points: [{at, words}]} (the key moments, None = off);
-    ``sfx`` = [(at, seconds)] — the files go in ``spec["sfx_files"]`` in the same order (render.mjs serves them)."""
+    ``sfx`` = [(at, seconds)] — the files go in ``spec["sfx_files"]`` in the same order (render.mjs serves them);
+    ``src_size`` = the source video's size (where a whole video sits in the output format)."""
     if style not in STYLES:
         style = DEFAULT_STYLE
     return {
@@ -93,6 +95,7 @@ def build_spec(*, src: Path, out: Path, cues: list[tuple], layout: dict[str, Any
             "muted": False,
             "highlights": highlights,
             "sfx": [{"at": round(float(a), 3), "dur": round(float(d), 3)} for a, d in (sfx or [])],
+            **({"srcWidth": int(src_size[0]), "srcHeight": int(src_size[1])} if src_size else {}),
         },
     }
 

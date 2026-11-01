@@ -60,6 +60,14 @@ ENCODE_TIMEOUT_S = 60 * 60
 TRANSLATE_BATCH = 60
 #: Already-translated lines shown to the next batch so the voice stays consistent.
 TRANSLATE_CONTEXT = 4
+#: Who translates: "google" = free Google / Microsoft machine translation, no key, no AI quota (what VieDub
+#: dubs with — services/free_translate); "ai" = the AI provider set for auto_prompt (Claude CLI / Gemini…:
+#: spoken style + a word budget per line, but it spends that AI's quota) — falls back to "google" when it fails.
+TRANSLATORS: dict[str, str] = {
+    "google": "Google Dịch (miễn phí, như VieDub)",
+    "ai": "AI (theo Cài đặt — Claude / Gemini…)",
+}
+DEFAULT_TRANSLATOR = "google"
 
 STYLES: dict[str, str] = {
     "box_yellow": "Hộp vàng, chữ đen (như page mẫu)",
@@ -197,26 +205,58 @@ def speedup_for(voice_s: float, slot_s: float) -> float:
     return min(MAX_SPEEDUP, round(voice_s / slot_s, 3))
 
 
+#: characters drawn about twice as wide as a Latin letter (CJK, Hangul, full-width forms)
+_WIDE = re.compile(r"[\u1100-\u11ff\u2e80-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]")
+#: scripts written without spaces between words (Chinese characters, Japanese kana): cut one character at a time
+_UNSPACED = re.compile(r"[぀-ヿ㐀-鿿豈-﫿]")
+#: punctuation that stays with the character before it when a CJK run is cut
+_CJK_TAIL = set("，。！？、：；）」』》,.!?:;)")
+
+
+def text_units(text: str) -> int:
+    """A line's width in Latin-letter units: wide characters count twice (``max_chars`` is in these units)."""
+    return len(text) + len(_WIDE.findall(text))
+
+
+def _cue_tokens(text: str) -> list[tuple[str, bool]]:
+    """``(token, space before)``: the words of a spaced language (Korean too); a run of Chinese / Japanese,
+    written without spaces, cut one character at a time, its punctuation kept with the character before."""
+    out: list[tuple[str, bool]] = []
+    for i, w in enumerate(text.split()):
+        if _UNSPACED.search(w) and text_units(w) > 6:
+            first = True
+            for ch in w:
+                if not first and ch in _CJK_TAIL and out:
+                    out[-1] = (out[-1][0] + ch, out[-1][1])
+                    continue
+                out.append((ch, i > 0 and first))
+                first = False
+        else:
+            out.append((w, i > 0))
+    return out
+
+
 def split_cue(start: float, end: float, text: str, max_chars: int = SUB_MAX_CHARS) -> list[tuple[float, float, str]]:
-    """One subtitle box per ≤ ``max_chars`` chunk, the slot split by chunk length."""
-    words = text.split()
-    if not words:
+    """One subtitle box per ≤ ``max_chars`` (width units) chunk, the slot split by chunk width."""
+    tokens = _cue_tokens(text)
+    if not tokens:
         return []
     chunks: list[str] = []
     cur = ""
-    for w in words:
-        if cur and len(cur) + 1 + len(w) > max_chars:
+    for tok, spaced in tokens:
+        cand = f"{cur} {tok}" if cur and spaced else cur + tok
+        if cur and text_units(cand) > max_chars:
             chunks.append(cur)
-            cur = w
+            cur = tok
         else:
-            cur = f"{cur} {w}".strip()
+            cur = cand
     if cur:
         chunks.append(cur)
-    total = sum(len(c) for c in chunks) or 1
+    total = sum(text_units(c) for c in chunks) or 1
     out: list[tuple[float, float, str]] = []
     t = start
     for i, c in enumerate(chunks):
-        dur = (end - start) * (len(c) / total)
+        dur = (end - start) * (text_units(c) / total)
         e = end if i == len(chunks) - 1 else t + dur
         out.append((round(t, 3), round(e, 3), c))
         t = e
@@ -249,8 +289,13 @@ MAX_BLURS = 8
 #: output formats ("Khung xuất"): width:height; "source" (None) keeps the video's own size
 CANVAS_ASPECTS: dict[str, tuple[int, int]] = {"9:16": (9, 16), "16:9": (16, 9), "4:3": (4, 3), "3:4": (3, 4),
                                               "1:1": (1, 1), "4:5": (4, 5)}
-#: how a video of another shape goes into the format: blurred copy behind it / black bars / cropped to fill
-CANVAS_FITS = ("blur", "black", "crop")
+#: how a video of another shape goes into the format: whole, over a background (a blurred copy of itself, black,
+#: a colour, a grid, an uploaded picture / video) — or cropped to fill
+CANVAS_FITS = ("blur", "black", "color", "grid", "image", "video", "crop")
+#: backgrounds that need an uploaded file (``media_id``); without one the colour stands in
+CANVAS_BG_MEDIA = ("image", "video")
+#: the grid of the reference page (dark brown, lighter lines, square cells ~1/9 of the width)
+CANVAS_DEFAULT = {"color": "#211915", "line": "#4a3a2e", "cell": 0.11, "scale": 1.0}
 
 
 def _norm_blur(b: Any) -> Optional[dict[str, float]]:
@@ -262,12 +307,25 @@ def _norm_blur(b: Any) -> Optional[dict[str, float]]:
 
 
 def normalize_canvas(raw: Any) -> Optional[dict[str, Any]]:
-    """``{aspect, fit, pos}`` — the output format; None = the source video's own size.
-    ``pos`` (0–1) is where a "crop" fit cuts along the long axis (0.5 = centre)."""
+    """``{aspect, fit, pos, scale, color, line, cell, media_id, inner, cut}`` — the output format; None = the source's
+    own size. ``fit`` "crop" fills the format; every other fit is a background around the video, which is the whole
+    source or — ``inner`` an aspect key ("Cắt 4:3") — the source cut to that shape first (a 4:3 look on a 9:16 phone
+    screen, the background instead of the app's black bars). ``cut`` (0–1): where either crop cuts (a layout saved
+    before 31/10 kept a "crop" fit's cut in ``pos``); ``pos`` (0–1): where the video sits along the free side
+    (0.5 = centre); ``scale`` (0.5–1): the video's size in the format (smaller shows background all round); ``color``
+    the background colour (and the grid's), ``line`` / ``cell`` (fraction of the width) the grid, ``media_id`` the
+    uploaded picture / video of an "image" / "video" background."""
     if not isinstance(raw, dict) or raw.get("aspect") not in CANVAS_ASPECTS:
         return None
-    return {"aspect": raw["aspect"], "fit": raw.get("fit") if raw.get("fit") in CANVAS_FITS else "blur",
-            "pos": _num(raw, "pos", 0.0, 1.0, 0.5)}
+    d = CANVAS_DEFAULT
+    fit = raw.get("fit") if raw.get("fit") in CANVAS_FITS else "blur"
+    pos = _num(raw, "pos", 0.0, 1.0, 0.5)
+    return {"aspect": raw["aspect"], "fit": fit,
+            "pos": pos, "scale": _num(raw, "scale", 0.5, 1.0, d["scale"]),
+            "color": dub_decor._hex(raw.get("color"), d["color"]), "line": dub_decor._hex(raw.get("line"), d["line"]),
+            "cell": _num(raw, "cell", 0.04, 0.3, d["cell"]), "media_id": str(raw.get("media_id") or "").strip()[:64],
+            "inner": raw["inner"] if fit != "crop" and raw.get("inner") in CANVAS_ASPECTS else "",
+            "cut": _num(raw, "cut", 0.0, 1.0, pos if fit == "crop" else 0.5)}
 
 
 def normalize_layout(raw: Any) -> dict[str, Any]:
@@ -318,24 +376,92 @@ def canvas_size(width: int, height: int, layout: Optional[dict]) -> tuple[int, i
     return w, h
 
 
+def inner_crop(src_w: int, src_h: int, canvas: Optional[dict]) -> Optional[tuple[int, int, int, int]]:
+    """The part of the source a background format shows when the video is cut to another shape first ("Cắt 4:3"):
+    ``(x, y, w, h)`` pixels, cut at ``cut`` along the trimmed side; None = the whole source. Mirrored by
+    ``remotion/canvasGeom.innerCrop``."""
+    if not canvas or canvas.get("fit") == "crop" or canvas.get("inner") not in CANVAS_ASPECTS or src_w <= 0 or src_h <= 0:
+        return None
+    aw, ah = CANVAS_ASPECTS[canvas["inner"]]
+    r, s = aw / ah, src_w / src_h
+    if abs(r - s) < 0.01:
+        return None
+    cut = canvas.get("cut", 0.5)
+    if r < s:  # narrower: trim the sides
+        w = min(src_w, _even(src_h * r))
+        return int((src_w - w) * cut) // 2 * 2, 0, w, src_h
+    h = min(src_h, _even(src_w / r))
+    return 0, int((src_h - h) * cut) // 2 * 2, src_w, h
+
+
+def canvas_rect(src_w: int, src_h: int, width: int, height: int, canvas: dict) -> tuple[int, int, int, int]:
+    """Where the video sits in the format: ``(x, y, w, h)`` pixels — the source (or its :func:`inner_crop`) fitted
+    into ``scale`` of the format, placed at ``pos`` along the side with more free room (centred on the other).
+    Mirrored by ``remotion/canvasGeom.ts`` for the preview and the Remotion render."""
+    ic = inner_crop(src_w, src_h, canvas)
+    if ic:
+        src_w, src_h = ic[2], ic[3]
+    k = min(width * canvas.get("scale", 1.0) / src_w, height * canvas.get("scale", 1.0) / src_h)
+    w, h = min(width, _even(src_w * k)), min(height, _even(src_h * k))
+    fx, fy = width - w, height - h
+    pos = canvas.get("pos", 0.5)
+    px, py = (0.5, pos) if fy >= fx else (pos, 0.5)
+    return int(fx * px) // 2 * 2, int(fy * py) // 2 * 2, w, h
+
+
 def canvas_filter(canvas: Optional[dict], src_w: int, src_h: int, width: int, height: int,
-                  src: str = "[0:v]", out: str = "[vc]") -> str:
-    """The source picture into the ``width``×``height`` format: a blurred copy behind it, black bars, or cropped
-    to fill (at ``pos`` along the cut axis). Empty when the format is the source's own size."""
-    if not canvas or (width, height) == (src_w, src_h):
+                  src: str = "[0:v]", out: str = "[vc]", bg_index: Optional[int] = None) -> str:
+    """The source picture into the ``width``×``height`` format: cropped to fill (at ``pos`` along the cut axis), or
+    whole (:func:`canvas_rect`) over a background — a blurred copy of itself, black, a colour, a grid, or the
+    uploaded picture / video of input ``bg_index`` (that background takes the main video's frame timing, as VieDub
+    does: it is laid over a copy of the video, the video's frames drive the output). Empty when there is nothing to do."""
+    if not canvas:
         return ""
     fit = canvas.get("fit", "blur")
+    ic = inner_crop(src_w, src_h, canvas)
+    if (width, height) == (src_w, src_h) and not ic and (fit == "crop" or canvas.get("scale", 1.0) >= 0.999):
+        return ""
     if fit == "crop":
-        pos = canvas.get("pos", 0.5)
+        pos = canvas.get("cut", canvas.get("pos", 0.5))
         return (f"{src}scale={width}:{height}:force_original_aspect_ratio=increase,"
                 f"crop={width}:{height}:(iw-{width})*{pos}:(ih-{height})*{pos},setsar=1{out}")
-    fg = f"scale={width}:{height}:force_original_aspect_ratio=decrease:force_divisible_by=2"
-    if fit == "black":
-        return f"{src}{fg},pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1{out}"
-    bw, bh = _even(width / 4), _even(height / 4)  # blur a small copy: fast, and soft enough
-    return (f"{src}split[cv_a][cv_b];[cv_a]scale={bw}:{bh}:force_original_aspect_ratio=increase,crop={bw}:{bh},"
-            f"boxblur=10:2,scale={width}:{height},setsar=1[cv_bg];[cv_b]{fg},setsar=1[cv_fg];"
-            f"[cv_bg][cv_fg]overlay=(W-w)/2:(H-h)/2{out}")
+    x, y, w, h = canvas_rect(src_w, src_h, width, height, canvas)
+    fg = (f"crop={ic[2]}:{ic[3]}:{ic[0]}:{ic[1]}," if ic else "") + f"scale={w}:{h},setsar=1"
+    if fit in ("black", "color") or (fit in CANVAS_BG_MEDIA and bg_index is None):
+        color = "black" if fit == "black" else "0x" + canvas.get("color", CANVAS_DEFAULT["color"])[1:]
+        return f"{src}{fg},pad={width}:{height}:{x}:{y}:color={color}{out}"
+    if fit == "grid":
+        cell = max(8, round(width * canvas.get("cell", CANVAS_DEFAULT["cell"])))
+        t = max(1, round(min(width, height) / 400))
+        ox, oy = (width % cell) // 2, (height % cell) // 2  # the grid centred, like the preview
+        bg = (f"[cv_a]scale={width}:{height},setsar=1,"
+              f"drawbox=x=0:y=0:w=iw:h=ih:color=0x{canvas.get('color', CANVAS_DEFAULT['color'])[1:]}@1:t=fill,"
+              f"drawgrid=x={ox}:y={oy}:w={cell}:h={cell}:t={t}:c=0x{canvas.get('line', CANVAS_DEFAULT['line'])[1:]}@1[cv_bg]")
+    elif fit in CANVAS_BG_MEDIA:
+        bg = (f"[cv_a]scale={width}:{height},setsar=1[cv_base];[{bg_index}:v]scale={width}:{height}:"
+              f"force_original_aspect_ratio=increase,crop={width}:{height},setsar=1,format=yuv420p[cv_img];"
+              f"[cv_base][cv_img]overlay=0:0:shortest=1[cv_bg]")
+    else:  # blur: a small copy blurred and blown up — fast, and soft enough
+        bw, bh = _even(width / 4), _even(height / 4)
+        bg = (f"[cv_a]scale={bw}:{bh}:force_original_aspect_ratio=increase,crop={bw}:{bh},"
+              f"boxblur=10:2,scale={width}:{height},setsar=1[cv_bg]")
+    return f"{src}split[cv_a][cv_b];{bg};[cv_b]{fg}[cv_fg];[cv_bg][cv_fg]overlay={x}:{y}{out}"
+
+
+def canvas_bg_file(layout: Optional[dict]) -> Optional[tuple[Path, str]]:
+    """``(file, "image" | "video")`` of the format's uploaded background on this machine (fetched when it is not),
+    else None — then the colour stands in."""
+    c = normalize_layout(layout)["canvas"]
+    if not c or c["fit"] not in CANVAS_BG_MEDIA or not c["media_id"]:
+        return None
+    p = dub_decor.local_media(c["media_id"])
+    return (Path(p), c["fit"]) if p else None
+
+
+def canvas_bg_args(bg: tuple[Path, str]) -> list[str]:
+    """Input args of a background: a picture repeated, a video looped (its sound is never mapped)."""
+    path, kind = bg
+    return ["-loop", "1", "-i", str(path)] if kind == "image" else ["-stream_loop", "-1", "-i", str(path)]
 
 
 #: subtitle box width range (fraction of the frame width)
@@ -501,7 +627,7 @@ def blur_filter(blur: Optional[dict], width: int, height: int, src: str = "[0:v]
 def video_filter(ass: Path, width: int, height: int, layout: Optional[dict],
                  mascot_index: Optional[int] = None, mascot_animated: bool = False,
                  frame_bg_index: Optional[int] = None, zoom: str = "",
-                 source: Optional[tuple[int, int]] = None) -> str:
+                 source: Optional[tuple[int, int]] = None, canvas_bg_index: Optional[int] = None) -> str:
     """The whole ``-filter_complex`` video part → ``[v]``: zoom (key moments, on the source), the output
     format (``source`` size → ``width``×``height``, :func:`canvas_filter`), frame, blur boxes,
     mascot (input ``mascot_index``, prepared by ``dub_decor.prepare_mascot``),
@@ -513,7 +639,7 @@ def video_filter(ass: Path, width: int, height: int, layout: Optional[dict],
         parts.append(f"{src}{zoom}[vz]")
         src = "[vz]"
     if source is not None:
-        fit = canvas_filter(lay["canvas"], source[0], source[1], width, height, src, "[vc]")
+        fit = canvas_filter(lay["canvas"], source[0], source[1], width, height, src, "[vc]", canvas_bg_index)
         if fit:
             parts.append(fit)
             src = "[vc]"
@@ -652,6 +778,19 @@ class Job:
     auto_render: bool = True
     #: several links dubbed together ("loạt"): the editor lists them side by side and can apply one look to all
     batch_id: str = ""
+    #: who translates (see TRANSLATORS); ``translated_by`` = who actually did ("google", "microsoft", "ai",
+    #: or "google (AI lỗi …)" when the AI failed and the free translator took over)
+    translator: str = DEFAULT_TRANSLATOR
+    translated_by: str = ""
+    #: "dub" = Vietnamese voice-over (the original); "sub" = subtitles only — the source keeps its own sound, no
+    #: voice is read, no music separated (much faster)
+    mode: str = "dub"
+    #: the subtitles' language (SUB_LANGS): "vi", "orig" (the video's own words) or another — subtitles only
+    sub_lang: str = "vi"
+    #: "✂️ Cắt thành nhiều video" (services/dub_split): the rows being edited [{start, end, title}] and the parts
+    #: cut so far [{index, start, end, title, media_id, board_id, at}]
+    cuts: list[dict] = field(default_factory=list)
+    parts: list[dict] = field(default_factory=list)
     #: every mp4 this job rendered: [{media_id, size, sha256, at}] — "📂 Mở lại video đã làm" finds the
     #: project from a downloaded file (the tag inside it first, these fingerprints second)
     outputs: list[dict] = field(default_factory=list)
@@ -678,13 +817,15 @@ class Job:
             "style": self.style, "engine": self.engine, "layout": dict(self.layout), "highlights": normalize_highlights(self.highlights),
             "channel_id": self.channel_id, "name": self.name, "language": self.language,
             "width": self.width, "height": self.height, "batch_id": self.batch_id,
+            "translator": self.translator, "translated_by": self.translated_by, "mode": self.mode,
+            "sub_lang": self.sub_lang, "cuts": [dict(c) for c in self.cuts], "parts": [dict(p) for p in self.parts],
             "title": self.title, "duration_s": round(self.duration_s, 1),
             "segments": [s.public() for s in self.segments],
         }
         if self.media_id:
             out["media_id"] = self.media_id
             out["media_url"] = f"/media/{self.media_id}"
-        if self.work is not None and (self.work / "voice.wav").is_file():
+        if self.mode != "sub" and self.work is not None and (self.work / "voice.wav").is_file():
             out["voice_url"] = f"/api/dub/jobs/{self.id}/voice"
             if self.keep_bgm and (self.work / "bgm.wav").is_file():
                 out["bgm_url"] = f"/api/dub/jobs/{self.id}/bgm"
@@ -757,10 +898,128 @@ def translation_batches(n: int, size: int = TRANSLATE_BATCH) -> list[tuple[int, 
     return out
 
 
+def normalize_translator(value: Any) -> str:
+    return value if value in TRANSLATORS else DEFAULT_TRANSLATOR
+
+
+MODES = ("dub", "sub")
+
+
+def normalize_mode(value: Any) -> str:
+    return value if value in MODES else "dub"
+
+
+#: "💬 Chỉ chèn phụ đề": the language of the burned subtitles — Vietnamese (the default), the video's own words
+#: ("orig", nothing translated: an English video gets English subtitles) or another language (Google Dịch).
+#: A voice-over always reads Vietnamese.
+SUB_LANGS: dict[str, str] = {
+    "vi": "tiếng Việt", "orig": "ngôn ngữ gốc", "en": "tiếng Anh", "zh": "tiếng Trung", "ja": "tiếng Nhật",
+    "ko": "tiếng Hàn", "th": "tiếng Thái", "id": "tiếng Indonesia", "es": "tiếng Tây Ban Nha", "fr": "tiếng Pháp",
+    "de": "tiếng Đức", "pt": "tiếng Bồ Đào Nha", "ru": "tiếng Nga",
+}
+
+
+def normalize_sub_lang(value: Any) -> str:
+    return value if value in SUB_LANGS else "vi"
+
+
+def _base_lang(code: Optional[str]) -> str:
+    return (code or "").lower().split("-")[0].split("_")[0]
+
+
+def subtitle_lines(job: "Job", lang: str) -> tuple[list[str], str]:
+    """Every line's subtitle in ``lang`` from the source words (the editor's "Ngôn ngữ phụ đề"): the words as heard
+    for "orig" / the video's own language, else Google / Microsoft. ``(lines, who translated)``."""
+    from flowboard.services import free_translate
+
+    lang = normalize_sub_lang(lang)
+    src = [s.src for s in job.segments]
+    if lang == "orig" or (_base_lang(job.language) and _base_lang(job.language) == lang):
+        return list(src), "none"
+    try:
+        return free_translate.translate_lines(src, job.language or None, target=lang)
+    except free_translate.TranslateError as exc:
+        raise DubError(f"dịch thất bại: {exc}") from exc
+
+
+def _title_source(title: str) -> str:
+    """A downloaded title without its hashtags / @mentions (Douyin titles end in a dozen of them)."""
+    return re.sub(r"[#@]\S+", " ", title or "").strip(" ，,。.!！|-")
+
+
+async def _vi_title(job: Job) -> None:
+    """The clip's name in Vietnamese (the person reads the clip list in Vietnamese) — one free call, best effort."""
+    from flowboard.services import free_translate
+
+    title_src = _title_source(job.title)
+    if not title_src or _base_lang(job.language) == "vi":
+        return
+    try:
+        title = (await asyncio.to_thread(free_translate.translate_lines, [title_src], job.language or None))[0][0]
+    except free_translate.TranslateError:
+        return
+    if title:
+        job.title = title[:60].rstrip(" ,.;:")
+
+
+async def _translate_free(job: Job, start: int = 0, note: str = "", target: str = "vi") -> None:
+    """Lines ``start:`` (and the title when nothing set it yet) with free Google / Microsoft
+    translation — no key, no AI quota, like VieDub. ``note`` = why the AI was not used;
+    ``target`` = the subtitles' language (subtitles only — the title stays Vietnamese)."""
+    from flowboard.services import free_translate
+
+    segs = job.segments[start:]
+    src = [s.src for s in segs]
+    base = 52 if start == 0 else 56
+    label = f"Đang dịch sang {SUB_LANGS.get(target, target)} (Google Dịch)" + (f" — {note}" if note else "")
+    _set(job, label, base)
+
+    def progress(k: int, n: int) -> None:
+        if n > 1:
+            _set(job, f"{label} {k}/{n}", base + int(8 * k / n))
+
+    try:
+        vi, by = await asyncio.to_thread(free_translate.translate_lines, src, job.language or None,
+                                         target=target, progress=progress)
+    except free_translate.TranslateError as exc:
+        raise DubError(f"dịch thất bại: {exc}" + (f" (AI cũng lỗi: {note})" if note else "")) from exc
+    for seg, line in zip(segs, vi):
+        seg.text = line
+    if start == 0 or not job.translated_by:
+        job.translated_by = by + (f" ({note})" if note else "")
+    if start == 0:
+        title_src = _title_source(job.title)
+        title = ""
+        if title_src:
+            try:
+                title = (await asyncio.to_thread(free_translate.translate_lines, [title_src], job.language or None))[0][0]
+            except free_translate.TranslateError:
+                title = ""
+        title = title or next((s.text for s in job.segments if s.text.strip()), "")
+        if title:
+            job.title = title[:60].rstrip(" ,.;:")
+
+
 async def _translate(job: Job) -> None:
-    """Translate in batches of :data:`TRANSLATE_BATCH` lines, in order; each
-    batch sees the last few lines already translated so the voice and the
-    terms stay the same across the whole video."""
+    """Free Google / Microsoft translation (the default, like VieDub), or the AI
+    (``job.translator == "ai"``): batches of :data:`TRANSLATE_BATCH` lines, in order,
+    each seeing the last few lines already translated so the voice and the terms
+    stay the same. An AI that fails (quota used up, CLI missing…) hands the rest
+    to the free translator instead of failing the video. Subtitles only may want
+    another language (``job.sub_lang``): the video's own words, or Google into it."""
+    target = job.sub_lang if job.mode == "sub" else "vi"
+    if target == "orig" or _base_lang(job.language) == target:
+        for seg in job.segments:  # the words as heard (an own Vietnamese video, or the original-language subtitles)
+            seg.text = seg.src
+        job.translated_by = "none"
+        await _vi_title(job)
+        return
+    if target != "vi":
+        await _translate_free(job, target=target)  # the title still goes to Vietnamese there
+        return
+    if job.translator != "ai":
+        await _translate_free(job)
+        return
     segs = job.segments
     batches = translation_batches(len(segs))
     title = ""
@@ -780,16 +1039,20 @@ async def _translate(job: Job) -> None:
         prompt = head + f"TRANSCRIPT ({len(lines)} lines):\n" + "\n".join(lines) + "\n\nTranslate now."
         try:
             text = await run_llm("auto_prompt", prompt, system_prompt=_TRANSLATE_SYSTEM, timeout=LLM_TIMEOUT_S)
-        except LLMError as exc:
-            where = f" (phần {b + 1}/{len(batches)})" if len(batches) > 1 else ""
-            raise DubError(f"dịch thất bại{where}: {exc}") from exc
-        part_title, vi = parse_translation(text, end - start)
+            part_title, vi = parse_translation(text, end - start)
+        except (LLMError, DubError) as exc:
+            logger.warning("dub %s: AI translation failed at part %d/%d, Google takes over: %s", job.id, b + 1, len(batches), exc)
+            if title:
+                job.title = title
+            await _translate_free(job, start, note=f"AI lỗi: {str(exc)[:160]}")
+            return
         for seg, line in zip(segs[start:end], vi):
             seg.text = line
         if b == 0:
             title = part_title
     if title:
         job.title = title
+    job.translated_by = "ai"
 
 
 def _prepare(job: Job) -> None:
@@ -1056,9 +1319,13 @@ def waveform(job: Job) -> Path:
     if job.work is None:
         raise DubError("Chưa có giọng đọc")
     voice = job.work / "voice.wav"
-    if not voice.is_file():
-        raise DubError("Chưa có giọng đọc — render video trước")
     out = job.work / "wave.png"
+    if job.mode == "sub":  # subtitles only: the sound the video keeps
+        if job.src_path is None or not Path(job.src_path).is_file():
+            raise DubError("Chưa có video gốc")
+        voice, out = Path(job.src_path), job.work / "wave_src.png"
+    elif not voice.is_file():
+        raise DubError("Chưa có giọng đọc — render video trước")
     if out.is_file() and out.stat().st_mtime >= voice.stat().st_mtime:
         return out
     err = _run([_ffmpeg(), "-y", "-v", "error", "-i", str(voice), "-filter_complex",
@@ -1133,12 +1400,13 @@ def _render(job: Job) -> None:
     job.width, job.height = info.width, info.height
     out_w, out_h = canvas_size(info.width, info.height, job.layout)  # "Khung xuất": the picture every overlay is placed on
     voice = job.work / "voice.wav"
+    sub_only = job.mode == "sub"  # subtitles only: no voice read, no music separated, the source keeps its sound
     _upgrade_voice_key(job)
     key = voice_key(job)
     bgm_path = job.work / "bgm.wav"
     bgm_thread: Optional[Any] = None
     bgm_errors: list[BaseException] = []
-    if (job.keep_bgm and status().get("separate") and not bgm_path.is_file()
+    if (not sub_only and job.keep_bgm and status().get("separate") and not bgm_path.is_file()
             and not (voice.is_file() and job.voice_key == key)):
         # Separate the music while the voice is being read (that step waits on the network): saves its whole run.
         import threading
@@ -1151,7 +1419,9 @@ def _render(job: Job) -> None:
 
         bgm_thread = threading.Thread(target=separate, name=f"dub-bgm-{job.id}", daemon=True)
         bgm_thread.start()
-    if voice.is_file() and job.voice_key == key:
+    if sub_only:
+        _set(job, "Chỉ chèn phụ đề — giữ nguyên tiếng gốc", 85)
+    elif voice.is_file() and job.voice_key == key:
         _set(job, "Dùng lại giọng đã đọc", 81)  # only the subtitles / layout changed
     else:
         pieces = _voice_pieces(job)
@@ -1160,7 +1430,7 @@ def _render(job: Job) -> None:
         follow_voice(job, placed, info.duration)
         job.voice_key = voice_key(job)  # the lines now sit where their voice is: a layout-only re-render reuses it
     bgm: Optional[Path] = None
-    if job.keep_bgm:
+    if job.keep_bgm and not sub_only:
         if status().get("separate"):
             bgm = bgm_path
             if bgm_thread is not None:
@@ -1190,21 +1460,29 @@ def _render(job: Job) -> None:
         for a, b, t in split_cue(s.start, s.end, s.text, sub_max_chars(out_w, out_h, own)):
             cues.append((a, b, t, s.look) if s.look else (a, b, t))
     if job.engine == "remotion":
-        _render_remotion(job, ffmpeg, src, voice, bgm, info, cues, hl, sfx_pieces)
+        _render_remotion(job, ffmpeg, src, None if sub_only else voice, bgm, info, cues, hl, sfx_pieces)
         return
     ass = write_sub_ass(cues, job.work / "subs.ass", width=out_w, height=out_h, style=job.style, layout=job.layout,
                         emphasis=emphasis_events(hl, job.layout, info.duration))
     media_id = uuid.uuid4().hex
     dst = media_service.MEDIA_CACHE_DIR / f"{media_id}.mp4"
-    cmd = [ffmpeg, "-y", "-v", "error", "-i", str(src), "-i", str(voice)]
+    cmd = [ffmpeg, "-y", "-v", "error", "-i", str(src)]
+    if not sub_only:
+        cmd += ["-i", str(voice)]  # input 1
     if bgm is not None:
-        cmd += ["-i", str(bgm)]
-    next_index = 3 if bgm is not None else 2
+        cmd += ["-i", str(bgm)]    # input 2
+    next_index = 1 if sub_only else (3 if bgm is not None else 2)
     sfx_index = None
     if sfx_track is not None:
         sfx_index = next_index
         next_index += 1
         cmd += ["-i", str(sfx_track)]
+    canvas_bg = canvas_bg_file(job.layout)
+    canvas_bg_index = None
+    if canvas_bg is not None:
+        canvas_bg_index = next_index
+        next_index += 1
+        cmd += canvas_bg_args(canvas_bg)
     frame_bg = dub_decor.frame_bg_path(normalize_layout(job.layout).get("frame"))
     frame_bg_index = None
     if frame_bg is not None:
@@ -1217,12 +1495,12 @@ def _render(job: Job) -> None:
         mascot_index = next_index
         cmd += dub_decor.mascot_input_args(*mascot)
     vgraph = video_filter(ass, out_w, out_h, job.layout, mascot_index, bool(mascot and mascot[1]), frame_bg_index,
-                          zoom=zoom_filter(hl, info.width, info.height, probe_fps(src)), source=(info.width, info.height))
-    agraph, amap = audio_mix(bgm is not None, sfx_index)
-    if agraph:
-        cmd += ["-filter_complex", f"{vgraph};{agraph}", "-map", "[v]", "-map", amap]
-    else:
-        cmd += ["-filter_complex", vgraph, "-map", "[v]", "-map", amap]
+                          zoom=zoom_filter(hl, info.width, info.height, probe_fps(src)), source=(info.width, info.height),
+                          canvas_bg_index=canvas_bg_index)
+    agraph, amap = (audio_mix_sub(info.has_audio, sfx_index) if sub_only else audio_mix(bgm is not None, sfx_index))
+    cmd += ["-filter_complex", f"{vgraph};{agraph}" if agraph else vgraph, "-map", "[v]"]
+    if amap:
+        cmd += ["-map", amap]
     cmd += [*_encode_args(ffmpeg), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-shortest",
             "-metadata", f"comment={output_tag(job)}", "-movflags", "+faststart", str(dst)]
     err = _run(cmd, ENCODE_TIMEOUT_S)
@@ -1254,6 +1532,16 @@ def audio_mix(with_bgm: bool, sfx_index: Optional[int]) -> tuple[str, str]:
     return ";".join(parts), "[a]"
 
 
+def audio_mix_sub(has_audio: bool, sfx_index: Optional[int]) -> tuple[str, Optional[str]]:
+    """Subtitles only: the source's own sound ([0:a]) + the key-moment sounds; map None = a silent video."""
+    if sfx_index is None:
+        return "", ("0:a:0" if has_audio else None)
+    fx = f"[{sfx_index}:a]volume={key_moments.SFX_VOLUME}[fx]"
+    if not has_audio:
+        return fx, "[fx]"
+    return f"{fx};[0:a][fx]amix=inputs=2:duration=first:normalize=0[a]", "[a]"
+
+
 def has_picture_layers(job: Job) -> bool:
     lay = normalize_layout(job.layout)
     return bool(lay.get("frame") or lay.get("blurs") or lay.get("mascot") or lay.get("canvas"))
@@ -1282,6 +1570,12 @@ def render_clean_video(job: Job, dst: Path) -> Path:
     ass = write_sub_ass([], work / "capcut_nosub.ass", width=out_w, height=out_h, style=job.style, layout=job.layout)
     cmd = [ffmpeg, "-y", "-v", "error", "-i", str(src)]
     next_index = 1
+    canvas_bg = canvas_bg_file(job.layout)
+    canvas_bg_index = None
+    if canvas_bg is not None:
+        canvas_bg_index = next_index
+        next_index += 1
+        cmd += canvas_bg_args(canvas_bg)
     frame_bg = dub_decor.frame_bg_path(lay.get("frame"))
     frame_bg_index = None
     if frame_bg is not None:
@@ -1294,7 +1588,7 @@ def render_clean_video(job: Job, dst: Path) -> Path:
         mascot_index = next_index
         cmd += dub_decor.mascot_input_args(*mascot)
     vgraph = video_filter(ass, out_w, out_h, job.layout, mascot_index, bool(mascot and mascot[1]), frame_bg_index,
-                          source=(info.width, info.height))
+                          source=(info.width, info.height), canvas_bg_index=canvas_bg_index)
     cmd += ["-filter_complex", vgraph, "-map", "[v]", "-an", "-t", f"{info.duration:.3f}", *_encode_args(ffmpeg),
             "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(dst)]
     err = _run(cmd, ENCODE_TIMEOUT_S)
@@ -1303,7 +1597,7 @@ def render_clean_video(job: Job, dst: Path) -> Path:
     return dst
 
 
-def _render_remotion(job: Job, ffmpeg: str, src: Path, voice: Path, bgm: Optional[Path], info: Any,
+def _render_remotion(job: Job, ffmpeg: str, src: Path, voice: Optional[Path], bgm: Optional[Path], info: Any,
                      cues: list[tuple[float, float, str]], hl: Optional[dict[str, Any]] = None,
                      sfx_pieces: Optional[list[tuple[float, Path, float]]] = None) -> None:
     """The second engine: ffmpeg only muxes the dubbed audio into the video
@@ -1314,6 +1608,10 @@ def _render_remotion(job: Job, ffmpeg: str, src: Path, voice: Path, bgm: Optiona
     _set(job, "Đang ghép tiếng vào video (chưa có phụ đề)", 91)
 
     def mux(copy_video: bool) -> Optional[str]:
+        if voice is None:  # subtitles only: the source as it is (its own sound)
+            cmd = [ffmpeg, "-y", "-v", "error", "-i", str(src), "-map", "0:v:0", "-map", "0:a:0?"]
+            cmd += ["-c", "copy"] if copy_video else [*_encode_args(ffmpeg), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k"]
+            return _run(cmd + ["-movflags", "+faststart", str(nosub)], ENCODE_TIMEOUT_S)
         cmd = [ffmpeg, "-y", "-v", "error", "-i", str(src), "-i", str(voice)]
         if bgm is not None:
             cmd += ["-i", str(bgm), "-filter_complex",
@@ -1339,7 +1637,8 @@ def _render_remotion(job: Job, ffmpeg: str, src: Path, voice: Path, bgm: Optiona
                                    highlights=({"words": hl["words"], "zoom": hl["zoom"], "y": emphasis_y(job.layout, hl),
                                                 "points": [{"at": p["at"], "words": p["words"]} for p in hl["points"]]}
                                                if hl["on"] and hl["points"] else None),
-                                   sfx=[(at, dur) for at, _p, dur in (sfx_pieces or [])])
+                                   sfx=[(at, dur) for at, _p, dur in (sfx_pieces or [])],
+                                   src_size=(info.width, info.height))
     if sfx_pieces:
         spec["sfx_files"] = [str(p) for _a, p, _d in sfx_pieces]
     mascot = normalize_layout(job.layout).get("mascot")
@@ -1353,6 +1652,11 @@ def _render_remotion(job: Job, ffmpeg: str, src: Path, voice: Path, bgm: Optiona
     bg_file = dub_decor.frame_bg_path(normalize_layout(job.layout).get("frame"))
     if bg_file is not None:
         spec["frame_bg_file"] = str(bg_file)
+    canvas_bg = canvas_bg_file(job.layout)
+    if canvas_bg is not None:
+        spec["canvas_bg_file"] = str(canvas_bg[0])
+        if canvas_bg[1] == "video":  # OffthreadVideo cannot loop by itself: the composition wraps it in <Loop>
+            spec["props"]["canvasBgDurS"] = round(tts._probe_duration(canvas_bg[0]) or 0.0, 3)
     labels = {"browser": "Remotion: chuẩn bị Chrome (lần đầu tải ~150 MB)", "bundle": "Remotion: đóng gói giao diện phụ đề (lần đầu)",
               "select": "Remotion: đọc video"}
 
@@ -1398,7 +1702,7 @@ def _save_board(job: Job) -> int:
     name = (job.name or job.title or "Video lồng tiếng").strip()[:80]
     narration = " ".join(s.text for s in job.segments if s.text.strip())
     qt = {"template_id": "dub", "step": 5, "source_url": job.url, "channel_id": job.channel_id,
-          "dub": {"job_id": job.id, "voice": job.voice, "style": job.style, "layout": dict(job.layout),
+          "dub": {"job_id": job.id, "voice": job.voice, "style": job.style, "layout": dict(job.layout), "mode": job.mode,
                   "keep_bgm": job.keep_bgm, "language": job.language, "source_media_id": job.source_media_id,
                   # the whole editable project, so it can be reopened even if <work>/job.json is gone
                   # (another machine, cleaned media folder) — see restore_from_board
@@ -1414,7 +1718,7 @@ def _save_board(job: Job) -> int:
             s.commit()
             s.refresh(board)
             video = Node(board_id=board.id, short_id=generate_unique_short_id(s, board.id), type="video", x=0, y=0,
-                         data={"title": "Video lồng tiếng", "narration": narration, "mediaId": job.media_id,
+                         data={"title": "Video có phụ đề" if job.mode == "sub" else "Video lồng tiếng", "narration": narration, "mediaId": job.media_id,
                                "dubbed": True}, status="done")
             export = Node(board_id=board.id, short_id=generate_unique_short_id(s, board.id), type="export", x=320, y=0,
                           data={"title": "Xuất", "mediaId": job.media_id, "voice": job.voice}, status="done")
@@ -1499,6 +1803,10 @@ def _job_from_dict(d: dict, work: Path, fallback_time: float) -> Job:
               width=int(d.get("width") or 0), height=int(d.get("height") or 0),
               channel_id=d.get("channel_id"), name=str(d.get("name") or ""),
               auto_render=bool(d.get("auto_render", True)), batch_id=str(d.get("batch_id") or ""),
+              translator=normalize_translator(d.get("translator")), translated_by=str(d.get("translated_by") or ""),
+              mode=normalize_mode(d.get("mode")), sub_lang=normalize_sub_lang(d.get("sub_lang")),
+              cuts=[c for c in d.get("cuts") or [] if isinstance(c, dict)],
+              parts=[p for p in d.get("parts") or [] if isinstance(p, dict)],
               language=str(d.get("language") or ""),
               status=str(d.get("status") or "error"), phase=str(d.get("phase") or ""),
               progress=int(d.get("progress") or 0), title=str(d.get("title") or ""),
@@ -1536,6 +1844,7 @@ def normalize_look_preset(raw: Any) -> dict[str, Any]:
 
 def start_job(*, url: Optional[str], source_media_id: Optional[str], voice: str, keep_bgm: bool, style: str,
               channel_id: Optional[int], name: str, auto_render: bool, engine: str = "ass", batch_id: str = "",
+              translator: str = DEFAULT_TRANSLATOR, mode: str = "dub", sub_lang: str = "vi",
               layout: Optional[dict] = None, highlights: Optional[dict] = None) -> Job:
     st = status()
     if not st["available"]:
@@ -1550,7 +1859,9 @@ def start_job(*, url: Optional[str], source_media_id: Optional[str], voice: str,
     style = _style_for(engine, style)
     job = Job(id=uuid.uuid4().hex[:12], url=url or None, source_media_id=source_media_id or None, voice=voice,
               keep_bgm=keep_bgm, style=style, engine=engine, channel_id=channel_id, name=(name or "").strip(),
-              auto_render=auto_render, batch_id=(batch_id or "").strip()[:40])
+              auto_render=auto_render, batch_id=(batch_id or "").strip()[:40],
+              translator=normalize_translator(translator), mode=normalize_mode(mode))
+    job.sub_lang = normalize_sub_lang(sub_lang) if job.mode == "sub" else "vi"
     if layout is not None:  # a look preset: the clip starts with that look (points are picked for this clip when on)
         job.layout = normalize_layout(layout)
     if highlights is not None:
@@ -1620,14 +1931,20 @@ def render_job(job: Job, *, lines: Optional[list[str]], voice: Optional[str], st
                layout: Optional[dict] = None, engine: Optional[str] = None,
                timings: Optional[list[list[float]]] = None,
                looks: Optional[list[Optional[dict]]] = None,
-               highlights: Optional[dict] = None) -> Job:
+               highlights: Optional[dict] = None, mode: Optional[str] = None, sub_lang: Optional[str] = None) -> Job:
     """Render (again) with edited lines / options. Allowed from ``review``,
     ``done`` and ``error`` (after a render failure). ``timings`` = new
-    [start, end] per line from the timeline editor."""
+    [start, end] per line from the timeline editor; ``sub_lang`` = the language
+    the edited lines are in (the editor re-translates them, see :func:`subtitle_lines`)."""
     if job.status in ("queued", "running", "rendering"):
         raise DubError("Video này đang chạy")
     if not job.segments or job.src_path is None or not Path(job.src_path).is_file():
         raise DubError("Chưa có bản dịch để render (agent đã khởi động lại?) — làm lại từ link.")
+    new_lang = normalize_sub_lang(sub_lang) if sub_lang is not None else job.sub_lang
+    if (normalize_mode(mode) if mode is not None else job.mode) == "dub" and new_lang != "vi" and _base_lang(job.language) != "vi":
+        # checked before anything changes: a refused export leaves the project as it was
+        raise DubError("Lồng tiếng đọc tiếng Việt — các câu đang là " + SUB_LANGS.get(new_lang, new_lang)
+                       + ". Đổi “Ngôn ngữ phụ đề” sang tiếng Việt trước.")
     _upgrade_voice_key(job)
     if timings is not None:
         apply_timings(job, timings)
@@ -1659,8 +1976,12 @@ def render_job(job: Job, *, lines: Optional[list[str]], voice: Optional[str], st
         job.name = name.strip()
     if channel_id is not _UNSET:
         job.channel_id = channel_id
+    if sub_lang is not None:
+        job.sub_lang = normalize_sub_lang(sub_lang)
+    if mode is not None:
+        job.mode = normalize_mode(mode)
     job.error, job.stop = None, False
-    quick = bool(job.work) and (job.work / "voice.wav").is_file() and job.voice_key == voice_key(job)
+    quick = job.mode == "sub" or (bool(job.work) and (job.work / "voice.wav").is_file() and job.voice_key == voice_key(job))
     job._render_only = True  # type: ignore[attr-defined]
     job.started_at = time.time()  # queue order: behind whatever waits already
     job.status, job.phase, job.progress = "queued", "Đang in lại phụ đề" if quick else "Đang render", 61
@@ -1677,7 +1998,8 @@ def render_job(job: Job, *, lines: Optional[list[str]], voice: Optional[str], st
 
 TAG_PREFIX = "flowboard-dub:"
 SNAPSHOT_KEYS = ("url", "source_media_id", "voice", "keep_bgm", "style", "engine", "layout", "highlights", "width", "height",
-                 "channel_id", "name", "language", "title", "duration_s", "segments", "media_id", "batch_id")
+                 "channel_id", "name", "language", "title", "duration_s", "segments", "media_id", "batch_id", "mode",
+                 "sub_lang", "cuts", "parts")
 
 
 def output_tag(job: Job) -> str:

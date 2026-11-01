@@ -446,7 +446,9 @@ def feed() -> Optional[str]:
                     job = dub.start_job(url=link.url, source_media_id=None, voice=o.get("voice") or tts.DEFAULT_VOICE,
                                         keep_bgm=bool(o.get("keep_bgm")), style=o.get("style") or "box_yellow",
                                         channel_id=o.get("channel_id"), name="", auto_render=o.get("auto_render", True) is not False,
-                                        engine=o.get("engine") or "ass", layout=o.get("layout"), highlights=o.get("highlights"))
+                                        engine=o.get("engine") or "ass", layout=o.get("layout"), highlights=o.get("highlights"),
+                                        translator=o.get("translator") or "google", mode=o.get("mode") or "dub",
+                                        sub_lang=o.get("sub_lang") or "vi")
                 except dub.DubError as exc:
                     link.error = str(exc)
                     s.add(link)

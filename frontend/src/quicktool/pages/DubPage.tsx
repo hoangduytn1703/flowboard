@@ -10,8 +10,9 @@ import { DubEditor, type BatchLook } from "../dub/editor/DubEditor";
 import { DubJobsDialog, jobTitle } from "../dub/DubJobsDialog";
 import { DubLinksDialog } from "../dub/DubLinksDialog";
 import { VOICES } from "../../api/client";
-import type { DubEngine } from "../../api/dub";
+import { SUB_LANGS, subLangName, type DubEngine, type DubMode, type DubTranslator, type SubLang } from "../../api/dub";
 import { toast } from "../../store/toast";
+import { useSettingsStore } from "../../store/settings";
 import { ChannelPicker } from "../channels/ChannelPicker";
 import { PageEmpty, PageLoading } from "../PageState";
 import { ClipPost } from "../steps/ClipPost";
@@ -47,7 +48,9 @@ export function DubPage() {
   const linkInputs = useRef<(HTMLInputElement | null)[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState("");
-  const [voice, setVoice] = useState(DEFAULT_VOICE);
+  // the voice picked last is the default next time (account pref — both machines; also set from the link library)
+  const voice = useSettingsStore((s) => s.dubVoice) || DEFAULT_VOICE;
+  const setVoice = useSettingsStore((s) => s.setDubVoice);
   const [style, setStyle] = useState("box_yellow");
   const [engine, setEngine] = useState<DubEngine>("ass");
   // "★ Mẫu chỉnh sửa": a saved look for the new video (the default one is pre-picked); its style / engine win
@@ -59,6 +62,30 @@ export function DubPage() {
   }, []);
   const [keepBgm, setKeepBgm] = useState(true);
   const [review, setReview] = useState(false);
+  // "dub" = Vietnamese voice-over; "sub" = only subtitles, the video keeps its sound (no voice read — much faster).
+  // Always opens on the voice-over (the person's ask, 1/11) — subtitles only is picked per video, not remembered.
+  const [mode, setMode] = useState<DubMode>("dub");
+  const subOnly = mode === "sub";
+  // subtitles only: their language — Vietnamese, the video's own words, or another (remembered per browser)
+  const [subLang, setSubLangState] = useState<SubLang>(() => {
+    try {
+      const v = localStorage.getItem("flowboard.dub.subLang");
+      return SUB_LANGS.some((l) => l.key === v) ? (v as SubLang) : "vi";
+    } catch { return "vi"; }
+  });
+  const setSubLang = (l: SubLang) => {
+    setSubLangState(l);
+    try { localStorage.setItem("flowboard.dub.subLang", l); } catch { /* private window */ }
+  };
+  const lang: SubLang = subOnly ? subLang : "vi";
+  // who translates — free Google like VieDub (default) or the AI of Settings (spends its quota); remembered per browser
+  const [translator, setTranslatorState] = useState<DubTranslator>(() => {
+    try { return localStorage.getItem("flowboard.dub.translator") === "ai" ? "ai" : "google"; } catch { return "google"; }
+  });
+  const setTranslator = (t: DubTranslator) => {
+    setTranslatorState(t);
+    try { localStorage.setItem("flowboard.dub.translator", t); } catch { /* private window */ }
+  };
   const [channelId, setChannelId] = useState<number | null>(null);
   const [starting, setStarting] = useState(false);
   const [job, setJob] = useState<DubJob | null>(null);
@@ -215,7 +242,7 @@ export function DubPage() {
       for (const src of sources) {
         started.push(await startDub({
           ...src, voice, keep_bgm: keepBgm, style, engine, channel_id: channelId,
-          name: sources.length > 1 ? "" : name.trim(), auto_render: !review, batch_id: batchId, look_preset_id: lookId,
+          name: sources.length > 1 ? "" : name.trim(), auto_render: !review, batch_id: batchId, look_preset_id: lookId, translator, mode, sub_lang: lang,
         }));
       }
       if (batchId) {
@@ -378,8 +405,10 @@ export function DubPage() {
   const lookName = looks.find((p) => p.id === lookId)?.name;
   const styleName = styleOptions.find((o) => o.key === style)?.label ?? style;
   const linkSettings = [
-    (VOICES[voice] ?? voice).split(" · ").filter((x, i, a) => a.indexOf(x) === i).join(" · "),
-    status.separate ? (keepBgm ? "giữ nhạc nền" : "bỏ nhạc nền") : "",
+    subOnly ? "chỉ chèn phụ đề, giữ tiếng gốc" : (VOICES[voice] ?? voice).split(" · ").filter((x, i, a) => a.indexOf(x) === i).join(" · "),
+    lang === "orig" ? "phụ đề ngôn ngữ gốc, không dịch" : lang !== "vi" ? `phụ đề ${subLangName(lang)} (Google Dịch)`
+      : translator === "ai" ? "dịch bằng AI" : "dịch bằng Google",
+    !subOnly && status.separate ? (keepBgm ? "giữ nhạc nền" : "bỏ nhạc nền") : "",
     lookName ? `mẫu “${lookName}”` : `phụ đề ${styleName}`,
     review ? "dừng ở bản dịch để xem lại" : "tự xuất video",
     channelId ? "gắn kênh đã chọn" : "",
@@ -480,7 +509,28 @@ export function DubPage() {
 
               <section className="qt-card">
                 <div className="qt-card__eyebrow">2 · Giọng & phụ đề</div>
-                <VoiceField value={voice} onChange={setVoice} sampleText="Các mẹ bầu bị căng cứng bụng cuối thai kỳ thì nhớ đeo đai nâng bụng ngay nha." disabled={working} />
+                <div className="qt-field"><span>Làm gì với video</span>
+                  <div className="qt-dub__mode" role="radiogroup" aria-label="Làm gì với video">
+                    <label className={`qt-dub__modeopt${!subOnly ? " is-on" : ""}`}>
+                      <input type="radio" name="dub-mode" checked={!subOnly} disabled={working} onChange={() => setMode("dub")} />
+                      <span><strong>🎙 Lồng tiếng Việt</strong><small>Đọc giọng Việt thay tiếng gốc + phụ đề</small></span>
+                    </label>
+                    <label className={`qt-dub__modeopt${subOnly ? " is-on" : ""}`}>
+                      <input type="radio" name="dub-mode" checked={subOnly} disabled={working} onChange={() => setMode("sub")} />
+                      <span><strong>💬 Chỉ chèn phụ đề</strong><small>Giữ nguyên tiếng gốc, chỉ thêm phụ đề (tiếng Việt, đúng lời gốc hoặc ngôn ngữ khác) — nhanh hơn nhiều</small></span>
+                    </label>
+                  </div>
+                </div>
+                {subOnly && (
+                  <label className="qt-field">
+                    <span>Phụ đề bằng</span>
+                    <select value={subLang} onChange={(e) => setSubLang(e.target.value as SubLang)} disabled={working}>
+                      {SUB_LANGS.map((l) => <option key={l.key} value={l.key}>{l.label}</option>)}
+                    </select>
+                  </label>
+                )}
+                {subOnly && subLang === "orig" && <p className="qt-card__hint">Phụ đề đúng lời nói trong video (video tiếng Anh → phụ đề tiếng Anh), không dịch.</p>}
+                {!subOnly && <VoiceField value={voice} onChange={setVoice} sampleText="Các mẹ bầu bị căng cứng bụng cuối thai kỳ thì nhớ đeo đai nâng bụng ngay nha." disabled={working} />}
                 {looks.length > 0 && (
                   <label className="qt-field">
                     <span>Mẫu chỉnh sửa <small className="qt-card__hint">(kiểu phụ đề, vùng mờ, khung xuất, khung, nhân vật… đã lưu từ clip trước — lưu / đặt mặc định ở nút ★ Mẫu trong trình chỉnh sửa)</small></span>
@@ -500,6 +550,17 @@ export function DubPage() {
                     </option>
                   </select>
                 </label>
+                {lang === "vi" && (
+                  <label className="qt-field">
+                    <span>Dịch bằng</span>
+                    <select value={translator} onChange={(e) => setTranslator(e.target.value as DubTranslator)} disabled={working}>
+                      <option value="google">Google Dịch — miễn phí, không tốn lượt AI (như VieDub)</option>
+                      <option value="ai">AI theo Cài đặt (Claude / Gemini…) — câu nói tự nhiên, vừa giờ hơn, tốn lượt AI</option>
+                    </select>
+                  </label>
+                )}
+                {lang === "vi" && translator === "ai" && <p className="qt-card__hint">AI hết lượt / lỗi giữa chừng thì phần còn lại tự dịch bằng Google, video không bị dừng.</p>}
+                {lang !== "vi" && lang !== "orig" && <p className="qt-card__hint">Dịch sang {subLangName(lang)} bằng Google Dịch (miễn phí).</p>}
                 <label className="qt-field">
                   <span>Kiểu phụ đề</span>
                   <select value={style} onChange={(e) => setStyle(e.target.value)} disabled={working || lookId !== null}>
@@ -507,15 +568,18 @@ export function DubPage() {
                   </select>
                 </label>
                 {engine === "remotion" && <p className="qt-card__hint">Remotion vẽ phụ đề bằng Chrome nên render chậm hơn ffmpeg (ước 1–3 phút cho clip 1 phút); lần đầu còn tải Chrome (~150 MB) và đóng gói giao diện.</p>}
-                <label className="qt-check" title={status.separate ? "Tách giọng nói khỏi nhạc (spleeter), giữ nhạc nền dưới giọng Việt" : "Máy này chưa có mô hình tách giọng"}>
-                  <input type="checkbox" checked={keepBgm} disabled={!status.separate || working} onChange={(e) => setKeepBgm(e.target.checked)} /> Giữ nhạc nền gốc (tách giọng nói ra)
-                </label>
+                {!subOnly && (
+                  <label className="qt-check" title={status.separate ? "Tách giọng nói khỏi nhạc (spleeter), giữ nhạc nền dưới giọng Việt" : "Máy này chưa có mô hình tách giọng"}>
+                    <input type="checkbox" checked={keepBgm} disabled={!status.separate || working} onChange={(e) => setKeepBgm(e.target.checked)} /> Giữ nhạc nền gốc (tách giọng nói ra)
+                  </label>
+                )}
                 <label className="qt-check" title="Dừng sau khi dịch để bạn sửa từng câu, rồi mới render">
                   <input type="checkbox" checked={review} disabled={working} onChange={(e) => setReview(e.target.checked)} /> Xem lại bản dịch trước khi render
                 </label>
                 <ChannelPicker value={channelId} onChange={setChannelId} label="Lưu vào kênh" disabled={working} />
                 <button type="button" className="qt-btn qt-btn--accent qt-btn--big" disabled={starting} onClick={() => void start()}>
-                  {starting ? "Đang gửi…" : linkList.length > 1 ? `🎙 Lồng tiếng ${linkList.length} video` : working ? "🎙 Thêm vào hàng đợi" : "🎙 Lồng tiếng"}
+                  {starting ? "Đang gửi…" : linkList.length > 1 ? `${subOnly ? "💬 Chèn phụ đề" : "🎙 Lồng tiếng"} ${linkList.length} video`
+                    : working ? "➕ Thêm vào hàng đợi" : subOnly ? "💬 Chèn phụ đề" : "🎙 Lồng tiếng"}
                 </button>
               </section>
 
@@ -603,7 +667,8 @@ export function DubPage() {
       {allOpen && <DubJobsDialog jobs={recent} onOpen={openJobById} onClose={() => setAllOpen(false)} onDelete={removeFromList} />}
       {linksOpen && (
         <DubLinksDialog
-          settings={{ voice, keep_bgm: keepBgm && !!status.separate, style, engine, channel_id: channelId, auto_render: !review, look_preset_id: lookId }}
+          onVoice={setVoice}
+          settings={{ voice, keep_bgm: keepBgm && !!status.separate, style, engine, channel_id: channelId, auto_render: !review, look_preset_id: lookId, translator, mode, sub_lang: lang }}
           settingsLabel={linkSettings} importFiles={linkFiles}
           onOpenJob={(id) => { closeLinks(); openJobById(id); }}
           onOpenClip={(boardId) => { closeLinks(); navigate(`/clips/${boardId}/export`); }}

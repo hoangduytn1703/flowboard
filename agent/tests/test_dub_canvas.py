@@ -22,7 +22,8 @@ def test_an_old_single_blur_reads_as_a_list_and_boxes_are_capped():
 
 
 def test_the_canvas_is_normalized_and_sized_from_the_long_side():
-    assert dub.normalize_canvas({"aspect": "9:16"}) == {"aspect": "9:16", "fit": "blur", "pos": 0.5}
+    c = dub.normalize_canvas({"aspect": "9:16"})
+    assert {k: c[k] for k in ("aspect", "fit", "pos", "scale")} == {"aspect": "9:16", "fit": "blur", "pos": 0.5, "scale": 1.0}
     assert dub.normalize_canvas({"aspect": "2:1"}) is None and dub.normalize_canvas(None) is None
     assert dub.normalize_canvas({"aspect": "1:1", "fit": "crop", "pos": 3})["pos"] == 1.0
     lay = lambda a: {"canvas": {"aspect": a}}  # noqa: E731

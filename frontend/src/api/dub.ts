@@ -19,7 +19,13 @@ export interface DubStatus {
   remotion_styles?: { key: string; label: string }[];
   /** sound-effect sets for the key moments: built-in, and the user's CapCut sounds when learned */
   sfx_sets?: { key: "builtin" | "capcut"; label: string; count: number }[];
+  /** who translates: free Google / Microsoft (like VieDub) or the AI set in Settings */
+  translators?: { key: DubTranslator; label: string }[];
 }
+
+/** "google" = free machine translation, no key / AI quota (the default, like VieDub); "ai" = the AI provider
+ * of Settings (Claude / Gemini…: spoken style + a word budget per line, spends that AI's quota; falls back to Google) */
+export type DubTranslator = "google" | "ai";
 
 /** "ass" = ffmpeg/libass (the original), "remotion" = services/dub_remotion */
 export type DubEngine = "ass" | "remotion";
@@ -87,14 +93,29 @@ export interface DubMascot {
 export const DEFAULT_LAYOUT: DubLayout = { x: 0.5, y: 0.8, scale: 1, blur: null, blurs: [], canvas: null, frame: null, mascot: null };
 
 export type CanvasAspect = "9:16" | "16:9" | "4:3" | "3:4" | "1:1" | "4:5";
-/** a video of another shape goes into the format: a blurred copy behind it / black bars / cropped to fill */
-export type CanvasFit = "blur" | "black" | "crop";
+/** a video of another shape goes into the format: whole over a background (a blurred copy of itself, black, a colour,
+ * a grid, an uploaded picture / video) — or cropped to fill */
+export type CanvasFit = "blur" | "black" | "color" | "grid" | "image" | "video" | "crop";
 export interface DubCanvas {
   aspect: CanvasAspect;
   fit: CanvasFit;
-  /** where "crop" cuts along the long axis, 0–1 (0.5 = centre) */
+  /** where "crop" cuts, or where the whole video sits along the free side, 0–1 (0.5 = centre) */
   pos: number;
+  /** the whole video's size in the format, 0.5–1 (smaller = background all round) */
+  scale: number;
+  /** background colour (and the grid's), grid line colour, grid cell (share of the width) */
+  color: string;
+  line: string;
+  cell: number;
+  /** the uploaded picture / video of an "image" / "video" background */
+  media_id: string;
+  /** a background format: the video cut to this shape first ("Cắt 4:3" on a 9:16 screen); "" = the whole video */
+  inner: CanvasAspect | "";
+  /** where either crop cuts, 0–1 (0.5 = the middle) */
+  cut: number;
 }
+/** mirrors services/dub.CANVAS_DEFAULT (the grid of the reference page: dark brown, lighter lines) */
+export const CANVAS_DEFAULT = { color: "#211915", line: "#4a3a2e", cell: 0.11, scale: 1 };
 export const CANVAS_ASPECTS: { key: CanvasAspect; w: number; h: number; hint: string }[] = [
   { key: "9:16", w: 9, h: 16, hint: "TikTok · Reels · Shorts" },
   { key: "16:9", w: 16, h: 9, hint: "YouTube · màn hình ngang" },
@@ -103,9 +124,37 @@ export const CANVAS_ASPECTS: { key: CanvasAspect; w: number; h: number; hint: st
   { key: "1:1", w: 1, h: 1, hint: "Vuông · Facebook · Instagram" },
   { key: "4:5", w: 4, h: 5, hint: "Facebook / Instagram dọc" },
 ];
-export const CANVAS_FITS: { key: CanvasFit; label: string }[] = [
-  { key: "blur", label: "Nền mờ" }, { key: "black", label: "Viền đen" }, { key: "crop", label: "Cắt cho đầy" },
+export const CANVAS_FITS: { key: CanvasFit; label: string; hint: string }[] = [
+  { key: "blur", label: "Nền mờ", hint: "Chính video phóng to + làm mờ phía sau" },
+  { key: "black", label: "Viền đen", hint: "Nền đen" },
+  { key: "color", label: "Màu", hint: "Nền một màu tự chọn" },
+  { key: "grid", label: "Lưới", hint: "Nền kẻ ô sọc (như các page phim hoạt hình hay dùng)" },
+  { key: "image", label: "Ảnh", hint: "Ảnh nền tự tải lên" },
+  { key: "video", label: "Video", hint: "Video nền tự tải lên (tự lặp, không lấy tiếng)" },
+  { key: "crop", label: "Phủ kín khung", hint: "Không có nền: phóng video cho kín khung, cắt bớt phần thừa" },
 ];
+/** A format as the agent stores it (services/dub.normalize_canvas): every key, the same order, defaults filled. */
+export function normCanvas(raw: Partial<DubCanvas> | null | undefined): DubCanvas | null {
+  if (!raw || !CANVAS_ASPECTS.some((a) => a.key === raw.aspect)) return null;
+  const num = (v: unknown, lo: number, hi: number, d: number) =>
+    typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d;
+  const hex = (v: unknown, d: string) => (typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v) ? v.toLowerCase() : d);
+  const fit: CanvasFit = CANVAS_FITS.some((f) => f.key === raw.fit) ? (raw.fit as CanvasFit) : "blur";
+  const pos = num(raw.pos, 0, 1, 0.5);
+  return {
+    aspect: raw.aspect as CanvasAspect,
+    fit,
+    pos,
+    scale: num(raw.scale, 0.5, 1, CANVAS_DEFAULT.scale),
+    color: hex(raw.color, CANVAS_DEFAULT.color),
+    line: hex(raw.line, CANVAS_DEFAULT.line),
+    cell: num(raw.cell, 0.04, 0.3, CANVAS_DEFAULT.cell),
+    media_id: String(raw.media_id ?? "").trim().slice(0, 64),
+    inner: fit !== "crop" && CANVAS_ASPECTS.some((a) => a.key === raw.inner) ? (raw.inner as CanvasAspect) : "",
+    // a "crop" fit saved before 31/10 kept its cut in pos
+    cut: num(raw.cut, 0, 1, fit === "crop" ? pos : 0.5),
+  };
+}
 export const MAX_BLURS = 8;
 
 const even = (v: number) => Math.max(2, Math.round(v / 2) * 2);
@@ -130,7 +179,7 @@ export function withBlurs(l: DubLayout, blurs: DubBlur[]): DubLayout {
 export function normLayout(raw: Partial<DubLayout> | null | undefined): DubLayout {
   const r = { ...DEFAULT_LAYOUT, ...(raw ?? {}) };
   const blurs = layoutBlurs(r);
-  return { x: r.x, y: r.y, scale: r.scale, w: r.w ?? null, blur: blurs[0] ?? null, blurs, canvas: r.canvas ?? null,
+  return { x: r.x, y: r.y, scale: r.scale, w: r.w ?? null, blur: blurs[0] ?? null, blurs, canvas: normCanvas(r.canvas),
            frame: r.frame ?? null, mascot: r.mascot ?? null };
 }
 
@@ -261,6 +310,15 @@ export async function uploadMascot(file: File): Promise<{ media_id: string; url:
 }
 export const DEFAULT_BLUR: DubBlur = { x: 0.1, y: 0.62, w: 0.8, h: 0.07, amount: 5 };
 
+/** A picture or a video for the output format's background (stays on this machine; a GIF counts as a video). */
+export async function uploadDubBackground(file: File): Promise<{ media_id: string; url: string; kind: "image" | "video" }> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch("/api/dub/background", { method: "POST", body: form });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
+}
+
 export interface DubSegment {
   start: number;
   end: number;
@@ -304,6 +362,16 @@ export interface DubJob {
   name: string;
   /** several links dubbed together: the editor lists them side by side */
   batch_id?: string;
+  translator?: DubTranslator;
+  /** who actually translated: "google" / "microsoft" / "ai", or "google (AI lỗi: …)" */
+  translated_by?: string;
+  /** "dub" = Vietnamese voice-over; "sub" = subtitles only (the video keeps its own sound) */
+  mode?: DubMode;
+  /** the subtitles' language (SUB_LANGS) — "vi" unless subtitles only asked for another */
+  sub_lang?: SubLang;
+  /** "✂️ Cắt thành nhiều video": the rows being edited and the parts cut so far */
+  cuts?: DubCutRow[];
+  parts?: DubPart[];
   language: string;
   title: string;
   duration_s: number;
@@ -327,6 +395,91 @@ export interface DubStart {
   batch_id?: string;
   /** "★ Mẫu chỉnh sửa" to start with (layout, style, engine, key-moment settings) */
   look_preset_id?: number | null;
+  translator?: DubTranslator;
+  mode?: DubMode;
+  /** subtitles only: their language */
+  sub_lang?: SubLang;
+}
+
+/** "dub" = Vietnamese voice-over; "sub" = only subtitles, the video keeps its own sound (no voice read: faster) */
+export type DubMode = "dub" | "sub";
+
+/** The subtitles' language — mirrors services/dub.SUB_LANGS: Vietnamese, the video's own words ("orig", not
+ * translated: an English video gets English subtitles) or another language (Google Dịch). A voice-over reads Vietnamese. */
+export type SubLang = "vi" | "orig" | "en" | "zh" | "ja" | "ko" | "th" | "id" | "es" | "fr" | "de" | "pt" | "ru";
+export const SUB_LANGS: { key: SubLang; label: string }[] = [
+  { key: "vi", label: "Tiếng Việt" },
+  { key: "orig", label: "Ngôn ngữ gốc của video (không dịch)" },
+  { key: "en", label: "Tiếng Anh" },
+  { key: "zh", label: "Tiếng Trung (giản thể)" },
+  { key: "ja", label: "Tiếng Nhật" },
+  { key: "ko", label: "Tiếng Hàn" },
+  { key: "th", label: "Tiếng Thái" },
+  { key: "id", label: "Tiếng Indonesia" },
+  { key: "es", label: "Tiếng Tây Ban Nha" },
+  { key: "fr", label: "Tiếng Pháp" },
+  { key: "de", label: "Tiếng Đức" },
+  { key: "pt", label: "Tiếng Bồ Đào Nha" },
+  { key: "ru", label: "Tiếng Nga" },
+];
+export function subLangLabel(key: string | undefined, sourceLang?: string): string {
+  if (key === "orig") return `Ngôn ngữ gốc${sourceLang ? ` (${sourceLang})` : ""}`;
+  return SUB_LANGS.find((l) => l.key === key)?.label ?? "Tiếng Việt";
+}
+/** The name inside a sentence: "tiếng Anh", "ngôn ngữ gốc (en)". */
+export function subLangName(key: string | undefined, sourceLang?: string): string {
+  const label = subLangLabel(key, sourceLang);
+  return label.charAt(0).toLowerCase() + label.slice(1);
+}
+/** The lines are already in Vietnamese — the voice-over can read them. */
+export function linesAreVietnamese(lang: string | undefined, sourceLang: string | undefined): boolean {
+  const base = (sourceLang ?? "").toLowerCase().split(/[-_]/)[0];
+  return (lang ?? "vi") === "vi" || base === "vi";
+}
+
+/** Every line in another language, from the source words (the editor's "Ngôn ngữ phụ đề"; nothing is saved). */
+export function dubSubtitleLines(id: string, lang: SubLang): Promise<{ lines: string[]; translated_by: string; lang: SubLang }> {
+  return post(`/api/dub/jobs/${id}/subtitles`, { lang });
+}
+
+/** One part to cut out of the exported video (seconds). */
+export interface DubCutRow {
+  start: number;
+  end: number;
+  title: string;
+}
+/** A part cut out: its own video and clip. */
+export interface DubPart extends DubCutRow {
+  index: number;
+  media_id: string;
+  board_id: number;
+  at: number;
+}
+export interface DubSplitState {
+  status: "idle" | "running" | "done" | "error";
+  phase?: string;
+  progress?: number;
+  done?: number;
+  total?: number;
+  error?: string | null;
+  parts?: DubPart[];
+}
+/** "✨ AI gợi ý" (``ai``) / "Chia đều theo câu": rows for parts of about ``target_s`` seconds (not saved). */
+export function suggestDubCuts(id: string, targetS: number, ai: boolean): Promise<{ rows: DubCutRow[]; by: "ai" | "even"; note: string }> {
+  return post(`/api/dub/jobs/${id}/split/suggest`, { target_s: targetS, ai });
+}
+/** Keep the rows with the project. */
+export async function saveDubCuts(id: string, rows: DubCutRow[]): Promise<{ cuts: DubCutRow[] }> {
+  const res = await fetch(`/api/dub/jobs/${id}/cuts`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rows }) });
+  if (!res.ok) throw new Error(await extractErrorMessage(res));
+  return res.json();
+}
+/** Cut the latest export into one clip per row (runs on the agent; poll ``getDubSplit``). */
+export function startDubSplit(id: string, rows: DubCutRow[]): Promise<DubSplitState> {
+  return post(`/api/dub/jobs/${id}/split`, { rows });
+}
+export function getDubSplit(id: string): Promise<DubSplitState> {
+  return api<DubSplitState>(`/api/dub/jobs/${id}/split`);
 }
 
 export interface DubRender {
@@ -344,6 +497,10 @@ export interface DubRender {
   looks?: (SubLook | null)[];
   /** "✨ Nhấn chữ quan trọng" settings + points (on with no points = the AI picks them while rendering) */
   highlights?: DubHighlights;
+  /** switch between voice-over and subtitles only */
+  mode?: DubMode;
+  /** the language the lines are in (after "Ngôn ngữ phụ đề") */
+  sub_lang?: SubLang;
 }
 
 /** "✨ AI chọn chữ quan trọng": the key moments for the lines as the editor holds them, without rendering. */
@@ -492,6 +649,7 @@ export function importDubLinks(files: { name: string; text: string }[]): Promise
 
 export interface DubLinkQueue {
   ids: number[];
+  mode: DubMode;
   voice: string;
   keep_bgm: boolean;
   style: string;
@@ -499,6 +657,8 @@ export interface DubLinkQueue {
   channel_id: number | null;
   auto_render: boolean;
   look_preset_id: number | null;
+  translator: DubTranslator;
+  sub_lang: SubLang;
 }
 
 export function queueDubLinks(body: DubLinkQueue): Promise<{ queued: number; skipped: { id: number; reason: string }[]; started: string | null }> {

@@ -230,7 +230,7 @@ def test_long_transcript_is_translated_in_batches_with_context(monkeypatch):
     import asyncio
     import json as _json
 
-    job = dub.Job(id="t1", url=None, source_media_id="x", language="zh")
+    job = dub.Job(id="t1", url=None, source_media_id="x", language="zh", translator="ai")
     job.segments = [dub.Segment(float(i), float(i) + 0.9, f"src{i}") for i in range(130)]
     calls = []
 

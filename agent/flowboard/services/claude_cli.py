@@ -56,6 +56,19 @@ class ClaudeCliError(RuntimeError):
     """Raised when the CLI invocation fails (non-zero exit, bad envelope, timeout)."""
 
 
+def _stdout_reason(stdout: str) -> str:
+    """Why a failed ``claude -p --output-format json`` run failed: the envelope's ``result`` (e.g. the usage-limit
+    notice), else the end of whatever it printed."""
+    text = (stdout or "").strip()
+    try:
+        env = json.loads(text)
+        if isinstance(env, dict):
+            return str(env.get("result") or env.get("subtype") or "")[:400]
+    except ValueError:
+        pass
+    return text[-400:]
+
+
 async def _probe_available() -> bool:
     # Try to resolve and probe claude binary. Both halves run in a worker
     # thread: `resolve_cli_binary` shells out too on Windows, and this
@@ -226,8 +239,11 @@ async def run_claude(
         raise ClaudeCliError(f"claude CLI error: {exc}") from exc
 
     if result.returncode != 0:
-        stderr = result.stderr.decode(errors="replace")[:400]
-        raise ClaudeCliError(f"claude CLI exited {result.returncode}: {stderr}")
+        stderr = result.stderr.decode(errors="replace").strip()[:400]
+        # With --output-format json the CLI puts the reason (usage limit, auth…) in the stdout envelope
+        # and leaves stderr empty — the bare "exited 1:" told the user nothing.
+        reason = stderr or _stdout_reason(result.stdout.decode(errors="replace"))
+        raise ClaudeCliError(f"claude CLI exited {result.returncode}: {reason}")
 
     stdout = result.stdout.decode(errors="replace")
     try:

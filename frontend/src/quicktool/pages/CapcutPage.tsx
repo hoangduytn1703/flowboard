@@ -33,6 +33,7 @@ import type {
 } from "../../api/capcut";
 import { DEFAULT_VOICE } from "../../api/client";
 import { toast } from "../../store/toast";
+import { useSettingsStore } from "../../store/settings";
 import { PageLoading } from "../PageState";
 import { VoiceField } from "../VoiceField";
 import "../quicktool.css";
@@ -605,7 +606,9 @@ export function CapcutPage() {
   const [uploading, setUploading] = useState(false);
   const [opts, setOpts] = useState<CapcutJobOptions>(DEFAULT_OPTS);
   const [dubOn, setDubOn] = useState(false);
-  const [voice, setVoice] = useState(DEFAULT_VOICE);
+  // the dubbing voice picked last (same default as the dub page — account pref)
+  const voice = useSettingsStore((s) => s.dubVoice) || DEFAULT_VOICE;
+  const setVoice = useSettingsStore((s) => s.setDubVoice);
   const [keepBgm, setKeepBgm] = useState(true);
   const [learning, setLearning] = useState(false);
   const [job, setJob] = useState<CapcutJob | null>(null);

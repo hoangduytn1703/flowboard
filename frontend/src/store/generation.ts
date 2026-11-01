@@ -705,12 +705,15 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
           items,
           smooth60,
           narrations,
-          voice: node?.data.voice,
+          // no voice picked on the clip: the account's favourite dubbing voice (settings.dubVoice)
+          voice: node?.data.voice || useSettingsStore.getState().dubVoice || undefined,
           voice_rate: node?.data.voiceRate ?? 0,
           voice_style: node?.data.voiceStyle ?? "",
           voices,
           speakers,
           subtitles: node?.data.subtitles !== false,
+          sub_engine: node?.data.subEngine ?? "ass",
+          sub_style: node?.data.subStyle ?? "",
           original_audio: node?.data.originalAudio ?? "duck",
           // Background music looped under the whole clip (an uploaded audio asset).
           bgm_media_id: node?.data.bgmMediaId || undefined,

@@ -7,6 +7,7 @@ import {
 import { toast } from "../../store/toast";
 import { PageEmpty, PageLoading } from "../PageState";
 import { pageList } from "./DubJobsDialog";
+import { VoiceField } from "../VoiceField";
 
 const PER_PAGE = 12;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
@@ -88,9 +89,11 @@ const statusHint: Record<DubLinkStatus, string> = {
  * link whether its video was already dubbed, and queue the ones still to do: they run one video at a
  * time with the settings of the page's form (voice, music, look preset, channel).
  */
-export function DubLinksDialog({ settings, settingsLabel, importFiles, onOpenJob, onOpenClip, onQueued, onClose }: {
+export function DubLinksDialog({ settings, settingsLabel, onVoice, importFiles, onOpenJob, onOpenClip, onQueued, onClose }: {
   /** the page form's dub settings, used for every link queued from here */
   settings: Omit<DubLinkQueue, "ids">;
+  /** pick the voice right here (it is the page's voice, remembered as the default) */
+  onVoice?: (voice: string) => void;
   settingsLabel: string;
   /** files dropped on the page: imported as soon as the dialog opens */
   importFiles?: File[] | null;
@@ -425,6 +428,15 @@ export function DubLinksDialog({ settings, settingsLabel, importFiles, onOpenJob
                 </div>
               </>
             )}
+          </div>
+        )}
+        {lib && !confirm && onVoice && (settings.mode ?? "dub") === "dub" && (
+          <div className="qt-dublinks__voice">
+            <span className="qt-dublinks__voicelabel" title="Giọng chọn ở đây thành giọng mặc định cho lần sau (cả form Lồng tiếng, theo tài khoản)">
+              🎙 Giọng đọc cho link xếp hàng <small>· tool nhớ làm mặc định</small>
+            </span>
+            <VoiceField value={settings.voice} onChange={onVoice} disabled={!!busy} compact
+                        sampleText="Các bạn ơi, hôm nay mình kể cho các bạn nghe một chuyện cực kỳ thú vị." />
           </div>
         )}
         {lib && toQueue.length > 0 && !confirm && (

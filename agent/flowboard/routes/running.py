@@ -81,6 +81,20 @@ def _dub_items() -> list[dict[str, Any]]:
     return out
 
 
+def _dub_split_items() -> list[dict[str, Any]]:
+    """"✂️ Cắt thành nhiều video" running (ffmpeg, one thread per video)."""
+    from flowboard.services import dub_split
+
+    out = []
+    for job_id, st in list(dub_split.SPLITS.items()):
+        if st.get("status") != "running":
+            continue
+        out.append({"key": f"dubsplit:{job_id}", "kind": "dub", "title": f"Cắt “{st.get('title') or 'video'}”",
+                    "detail": st.get("phase") or "Đang cắt", "progress": int(st.get("progress") or 0),
+                    "started_at": _iso_from_ts(st.get("started_at") or 0), "link": f"/tools/dub?job={job_id}"})
+    return out
+
+
 def _dub_link_items() -> list[dict[str, Any]]:
     """Links waiting in the dubbing link library (they start one by one as the dub queue frees up)."""
     from flowboard.services import dub_links
@@ -184,7 +198,7 @@ def _flow_items() -> list[dict[str, Any]]:
 @router.get("")
 def running() -> dict[str, Any]:
     items: list[dict[str, Any]] = []
-    for source in (_dub_items, _dub_link_items, _clean_items, _capcut_items, _assistant_items, _flow_items, _op_items):
+    for source in (_dub_items, _dub_split_items, _dub_link_items, _clean_items, _capcut_items, _assistant_items, _flow_items, _op_items):
         try:
             items += source()
         except Exception:  # noqa: BLE001 — one broken source must not hide the others
@@ -227,6 +241,13 @@ def outcome(key: str = Query(..., max_length=80)) -> dict[str, Any]:
         return {"ok": True, "message": f"{t['title']} — xong" if t else "Đã xong"}
     if kind == "dublinks":
         return {"ok": True, "message": "Đã đưa hết link trong thư viện vào lồng tiếng"}
+    if kind == "dubsplit":
+        from flowboard.services import dub_split
+
+        st = dub_split.state(ident)
+        if st.get("status") == "error":
+            return {"ok": False, "message": st.get("error") or "Cắt video lỗi"}
+        return {"ok": True, "message": f"Đã cắt xong {st.get('done') or ''} video — bấm để xem".replace("  ", " ")}
     if kind == "clean":
         from flowboard.services import video_clean
 

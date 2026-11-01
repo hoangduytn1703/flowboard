@@ -1,7 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import {
-  DEFAULT_BLUR, DEFAULT_LAYOUT, emphasisY, HL_Y_MAX, HL_Y_MIN, layoutBlurs, MAX_BLURS, withBlurs,
-  type DubBlur, type DubEngine, type DubHighlights, type DubLayout, type DubStatus,
+  DEFAULT_BLUR, DEFAULT_LAYOUT, emphasisY, HL_Y_MAX, HL_Y_MIN, layoutBlurs, linesAreVietnamese, MAX_BLURS, SUB_LANGS,
+  subLangName, withBlurs,
+  type DubBlur, type DubEngine, type DubHighlights, type DubLayout, type DubMode, type DubStatus, type SubLang,
 } from "../../../api/dub";
 import { ChannelPicker } from "../../channels/ChannelPicker";
 import { VoiceField } from "../../VoiceField";
@@ -9,7 +10,7 @@ import { DecorControls } from "../DecorControls";
 import { clock, effectiveLayout, readingLoad, W_MAX, W_MIN, type EditCue, type GeomPatch } from "./cues";
 import type { Sel } from "./EditorStage";
 
-export type InspectorTab = "sub" | "list" | "hl" | "blur" | "decor" | "out";
+export type InspectorTab = "sub" | "list" | "hl" | "blur" | "decor" | "cut" | "out";
 
 const TABS: { key: InspectorTab; label: string }[] = [
   { key: "sub", label: "💬 Phụ đề" },
@@ -17,6 +18,7 @@ const TABS: { key: InspectorTab; label: string }[] = [
   { key: "hl", label: "✨ Nhấn" },
   { key: "blur", label: "🌫 Làm mờ" },
   { key: "decor", label: "🎨 Trang trí" },
+  { key: "cut", label: "✂️ Cắt" },
   { key: "out", label: "⚙ Xuất" },
 ];
 
@@ -43,6 +45,8 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 
 export interface OutSettings {
+  /** voice-over or subtitles only */
+  mode: DubMode;
   name: string;
   voice: string;
   engine: DubEngine;
@@ -54,7 +58,7 @@ export function Inspector({
   tab, onTab, selected, onSelect, cues, origin, onCueText, onCueTiming, onPlayCue,
   layout, onLayout, style, onStyle, styles, status, out, onOut, orientation,
   readOnly, focusText, onDetect, detecting, activeCue, onPickCue,
-  scope, onScope, onGeom, onApplyAll, onClearLook, onClearAll, customCount, hl,
+  scope, onScope, onGeom, onApplyAll, onClearLook, onClearAll, customCount, hl, cutPane, lang,
 }: {
   tab: InspectorTab;
   onTab: (t: InspectorTab) => void;
@@ -91,6 +95,10 @@ export function Inspector({
   onClearAll: () => void;
   customCount: number;
   hl: HighlightsCtl;
+  /** "✂️ Cắt": cut the exported video into several clips */
+  cutPane: ReactNode;
+  /** "Ngôn ngữ phụ đề": the lines' language now, the video's own (Whisper), switching (rewrites every line) */
+  lang: { value: SubLang; source: string; busy: boolean; set: (l: SubLang) => void };
 }) {
   const textRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -335,12 +343,49 @@ export function Inspector({
           </fieldset>
         )}
 
+        {tab === "cut" && cutPane}
+
         {tab === "out" && (
           <section className="dx-insp__sec">
             <label className="qt-field"><span>Tên clip</span>
               <input value={out.name} disabled={readOnly} onChange={(e) => onOut({ name: e.target.value })} placeholder="VD: Mẹo giảm căng bụng cho mẹ bầu" /></label>
-            <VoiceField value={out.voice} onChange={(v) => onOut({ voice: v })} disabled={readOnly}
-                        sampleText={cues.find((c) => c.text.trim())?.text ?? "Xin chào các mẹ bầu."} />
+            <div className="qt-field"><span>Kiểu làm</span>
+              <div className="dx-insp__mode" role="radiogroup" aria-label="Kiểu làm">
+                <label className={`dx-insp__modeopt${out.mode === "dub" ? " is-on" : ""}`}>
+                  <input type="radio" name="dx-mode" checked={out.mode === "dub"} disabled={readOnly} onChange={() => onOut({ mode: "dub" })} />
+                  🎙 Lồng tiếng Việt
+                </label>
+                <label className={`dx-insp__modeopt${out.mode === "sub" ? " is-on" : ""}`}>
+                  <input type="radio" name="dx-mode" checked={out.mode === "sub"} disabled={readOnly} onChange={() => onOut({ mode: "sub" })} />
+                  💬 Chỉ phụ đề (giữ tiếng gốc)
+                </label>
+              </div>
+            </div>
+            {out.mode === "sub" && (
+              <label className="qt-field">
+                <span>Ngôn ngữ phụ đề{lang.busy ? " · đang dịch…" : ""}</span>
+                <select value={lang.value} disabled={readOnly || lang.busy} onChange={(e) => lang.set(e.target.value as SubLang)}>
+                  {SUB_LANGS.map((l) => (
+                    <option key={l.key} value={l.key}>{l.key === "orig" ? `Ngôn ngữ gốc của video${lang.source ? ` (${lang.source})` : ""} — không dịch` : l.label}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {out.mode === "sub" && (
+              <p className="dx-insp__tip">Đổi ngôn ngữ là viết lại chữ của mọi câu (Google Dịch, hoặc đúng lời gốc) — bấm Hoàn tác (Ctrl+Z) để lấy lại.</p>
+            )}
+            {out.mode === "dub" && !linesAreVietnamese(lang.value, lang.source) && (
+              <div className="dx-insp__warn">
+                Lồng tiếng đọc tiếng Việt — các câu đang là {subLangName(lang.value, lang.source)}.
+                <button type="button" className="qt-btn qt-btn--small" disabled={readOnly || lang.busy} onClick={() => lang.set("vi")}>
+                  {lang.busy ? "Đang dịch…" : "Dịch sang tiếng Việt"}
+                </button>
+              </div>
+            )}
+            {out.mode === "dub" && (
+              <VoiceField value={out.voice} onChange={(v) => onOut({ voice: v })} disabled={readOnly}
+                          sampleText={cues.find((c) => c.text.trim())?.text ?? "Xin chào các mẹ bầu."} />
+            )}
             <label className="qt-field">
               <span>Công nghệ phụ đề</span>
               <select value={out.engine} disabled={readOnly} onChange={(e) => {
@@ -353,13 +398,17 @@ export function Inspector({
                 <option value="remotion" disabled={!status.remotion}>Remotion · font Việt, emoji màu{status.remotion ? "" : " (chưa dùng được)"}</option>
               </select>
             </label>
-            <label className="qt-check" title={status.separate ? "" : "Máy này chưa có mô hình tách giọng"}>
-              <input type="checkbox" checked={out.keepBgm} disabled={!status.separate || readOnly} onChange={(e) => onOut({ keepBgm: e.target.checked })} /> Giữ nhạc nền gốc
-            </label>
+            {out.mode === "dub" && (
+              <label className="qt-check" title={status.separate ? "" : "Máy này chưa có mô hình tách giọng"}>
+                <input type="checkbox" checked={out.keepBgm} disabled={!status.separate || readOnly} onChange={(e) => onOut({ keepBgm: e.target.checked })} /> Giữ nhạc nền gốc
+              </label>
+            )}
             <ChannelPicker value={out.channelId} onChange={(id) => onOut({ channelId: id })} label="Lưu vào kênh" disabled={readOnly} />
             <p className="dx-insp__tip">
-              Đổi giọng, sửa chữ hoặc dời câu thì lúc xuất phải đọc lại giọng (lâu hơn); chỉ đổi vị trí / kiểu / khung / vùng mờ thì
-              chỉ in lại hình (nhanh). Kiểu có sẵn của {out.engine === "remotion" ? "Remotion" : "ffmpeg"}: {engineStyles.map((s) => s.label).join(", ")}.
+              {out.mode === "sub"
+                ? "Chỉ phụ đề: video giữ nguyên tiếng gốc, không đọc giọng — xuất nhanh dù sửa chữ hay dời câu."
+                : "Đổi giọng, sửa chữ hoặc dời câu thì lúc xuất phải đọc lại giọng (lâu hơn); chỉ đổi vị trí / kiểu / khung / vùng mờ thì chỉ in lại hình (nhanh)."}{" "}
+              Kiểu có sẵn của {out.engine === "remotion" ? "Remotion" : "ffmpeg"}: {engineStyles.map((s) => s.label).join(", ")}.
             </p>
           </section>
         )}

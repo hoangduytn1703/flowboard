@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import {
-  BGM_DEFAULT_VOLUME, BGM_VOLUMES, COVER_STYLES, DEFAULT_VOICE, MAX_MUSIC_BYTES, MAX_SPEAKERS, VOICES,
+  BGM_DEFAULT_VOLUME, BGM_VOLUMES, COVER_STYLES, MAX_MUSIC_BYTES, MAX_SPEAKERS, VOICES,
   createCover, isGeminiVoice, mediaUrl, parseSpeakers, patchNode, previewVoice, speakerTags, uploadMusic,
   type CoverStyle, patchBoardData } from "../../api/client";
 import { VoiceOptions, useVoiceGroups } from "../VoiceField";
@@ -11,6 +11,8 @@ import { hasMedia, isBusy, type ClipRoles } from "../roles";
 import "../voices.css";
 import { useToastOn } from "../../store/toast";
 import { ClipArranger, OverlayEditor } from "./ExportEditor";
+import { joinVoice, SubtitleField, subChoiceOf, subChoicePatch } from "./JoinOptions";
+import { useSettingsStore } from "../../store/settings";
 import { ScheduleDialog } from "../schedule/ScheduleDialog";
 
 // ── voice preview ───────────────────────────────────────────────────────────
@@ -106,10 +108,12 @@ function DialogueLine({ text, tags }: { text: string; tags: string[] }) {
 }
 
 /** Step 5 — voice options, the clip list, the final file. */
-export function StepExport({ roles, productName = "", price = "", channelId = null, dubJobId = null }: {
+export function StepExport({ roles, productName = "", price = "", channelId = null, dubJobId = null, dubPart = null }: {
   roles: ClipRoles; productName?: string; price?: string; channelId?: number | null;
   /** a clip made by the dubbing tool: it is edited there, not joined here */
   dubJobId?: string | null;
+  /** a part cut out of a dubbed video ("✂️ Cắt thành nhiều video") */
+  dubPart?: { index: number; total: number } | null;
 }) {
   const voiceGroups = useVoiceGroups();
   const navigate = useNavigate();
@@ -151,9 +155,11 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
         const cut = exp?.data.clipTrims?.[s.video!.id];
         return t + (cut ? Math.max(0.5, Math.min(cut[1] ?? 8, 8) - cut[0]) : 8);
       }, 0));
-  const voice = exp && typeof exp.data.voice === "string" && exp.data.voice in VOICES ? exp.data.voice : DEFAULT_VOICE;
+  // the clip's own voice, else the account's favourite dubbing voice (also what the export sends)
+  const favouriteVoice = useSettingsStore((s) => s.dubVoice);
+  const setFavouriteVoice = useSettingsStore((s) => s.setDubVoice);
+  const voice = joinVoice(exp?.data, favouriteVoice);
   const voiceStyle = typeof exp?.data.voiceStyle === "string" ? exp.data.voiceStyle : "";
-  const subtitles = exp ? exp.data.subtitles !== false : true;
   const originalAudio = exp?.data.originalAudio ?? "duck";
   const smooth60 = exp?.data.smooth60 === true;
   const busy = isBusy(exp);
@@ -254,12 +260,19 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
     <div className="qt-step qt-step--two">
       {dubJobId ? (
         <section className="qt-card qt-dubclip">
-          <div className="qt-card__eyebrow">Video lồng tiếng</div>
-          <h3 className="qt-card__title">Chỉnh phụ đề, giọng đọc, bản dịch</h3>
-          <p className="qt-card__hint">
-            Clip này làm từ công cụ <strong>Lồng tiếng video</strong>. Vị trí và cỡ phụ đề, kiểu chữ, vùng làm mờ chữ gốc, giọng đọc và
-            từng câu dịch đều chỉnh ở đó — bấm "Áp dụng" / "Render lại" xong thì clip này tự cập nhật bản mới.
-          </p>
+          <div className="qt-card__eyebrow">{dubPart ? `Phần ${dubPart.index}/${dubPart.total} của video lồng tiếng` : "Video lồng tiếng"}</div>
+          <h3 className="qt-card__title">{dubPart ? "Chỉnh hoặc cắt lại ở trang Lồng tiếng" : "Chỉnh phụ đề, giọng đọc, bản dịch"}</h3>
+          {dubPart ? (
+            <p className="qt-card__hint">
+              Clip này được <strong>cắt</strong> từ một video lồng tiếng. Muốn sửa phụ đề, giọng hay đổi chỗ cắt: mở trang chỉnh, sửa rồi
+              "Xuất lại video", sau đó vào tab <strong>✂️ Cắt</strong> bấm cắt lại — clip này tự nhận bản mới.
+            </p>
+          ) : (
+            <p className="qt-card__hint">
+              Clip này làm từ công cụ <strong>Lồng tiếng video</strong>. Vị trí và cỡ phụ đề, kiểu chữ, vùng làm mờ chữ gốc, giọng đọc và
+              từng câu dịch đều chỉnh ở đó — bấm "Áp dụng" / "Render lại" xong thì clip này tự cập nhật bản mới.
+            </p>
+          )}
           <ul className="qt-dubclip__list">
             <li>🎯 Kéo phụ đề, đổi cỡ chữ, kiểu hộp vàng / trắng / viền</li>
             <li>🌫 Vùng làm mờ che chữ gốc</li>
@@ -319,7 +332,7 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
               Giọng đọc
               <VoicePreviewButton voice={voice} style={voiceStyle} />
             </span>
-            <select value={voice} disabled={busy} onChange={(e) => { stopSample(); setOption({ voice: e.target.value }); }}>
+            <select value={voice} disabled={busy} onChange={(e) => { stopSample(); setOption({ voice: e.target.value }); setFavouriteVoice(e.target.value); }}>
               <VoiceOptions groups={voiceGroups} />
             </select>
           </label>
@@ -415,10 +428,7 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
               </div>
             )}
           </div>
-          <label className="qt-check">
-            <input type="checkbox" checked={subtitles} disabled={busy} onChange={(e) => setOption({ subtitles: e.target.checked })} />
-            Phụ đề tiếng Việt theo lời thoại
-          </label>
+          <SubtitleField value={subChoiceOf(exp?.data)} disabled={busy} onChange={(key) => setOption(subChoicePatch(key))} />
           <label className="qt-check">
             <input type="checkbox" checked={smooth60} disabled={busy} onChange={(e) => setOption({ smooth60: e.target.checked })} />
             Mượt 60 fps (chậm, ~15 s xử lý cho mỗi giây video)

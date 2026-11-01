@@ -218,6 +218,7 @@ def ingest_inline_bytes(
     # Clean before the row update queues the bucket upload (see fetch_and_cache).
     from flowboard.services import watermark
     watermark.clean_if_generated(path, kind, mime)
+    _warm_video_stamp(path, kind, mime)
     with get_session() as s:
         row = s.exec(
             select(Asset).where(Asset.uuid_media_id == media_id)
@@ -232,6 +233,19 @@ def ingest_inline_bytes(
         s.commit()
     logger.info("media: ingested %d inline bytes for %s", len(data), media_id)
     return True
+
+
+def _warm_video_stamp(path: Path, kind: Optional[str], mime: Optional[str]) -> None:
+    """A Flow clip just landed: its ✦ stamp is taken out in the background (a copy in ``media/clean/``), so the
+    export uses it without waiting — services/video_watermark. The original file stays as Flow made it."""
+    if kind != "video" and not (mime or "").startswith("video/"):
+        return
+    try:
+        from flowboard.services import video_watermark
+
+        video_watermark.prewarm(path, MEDIA_CACHE_DIR / "clean")
+    except Exception as exc:  # noqa: BLE001 — never in the way of caching the clip
+        logger.warning("stamp warm-up not started for %s: %s", path.name, exc)
 
 
 async def fetch_and_cache(media_id: str) -> Optional[tuple[bytes, str, Path]]:
@@ -291,6 +305,7 @@ async def fetch_and_cache(media_id: str) -> Optional[tuple[bytes, str, Path]]:
     from flowboard.services import watermark
     if watermark.clean_if_generated(path, kind, mime):
         content = path.read_bytes()
+    _warm_video_stamp(path, kind, mime)
 
     with get_session() as s:
         row = s.exec(

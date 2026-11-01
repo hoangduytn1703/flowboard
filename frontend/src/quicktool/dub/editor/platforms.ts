@@ -47,7 +47,7 @@ function fullScreenZone(navH: number, name: string) {
     const zone = { x: 0, y: 0, w: 1, h: 1 - navH };
     const zoneAspect = PHONE / (1 - navH);
     const note = a > 0.75
-      ? `${name} hiện video ${a >= 1 ? "ngang" : "gần vuông"} nhỏ ở giữa màn hình, trên dưới là nền đen — video dọc 9:16 mới phủ kín.`
+      ? `${name} hiện video ${a >= 1 ? "ngang" : "gần vuông"} nhỏ ở giữa màn hình, trên dưới là nền đen — video dọc 9:16 mới phủ kín. Muốn thay phần đen bằng nền riêng: chọn một kiểu ở hàng “Nền” phía trên.`
       : Math.abs(a - zoneAspect) / zoneAspect > 0.08 ? `${name} để video gần kín màn hình (còn dải đen mỏng trên / dưới).` : undefined;
     return { rect: zone, fit: "contain", note };
   };

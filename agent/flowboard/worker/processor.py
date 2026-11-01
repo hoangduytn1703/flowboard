@@ -951,7 +951,7 @@ async def _handle_export_video(params: dict) -> tuple[dict, Optional[str]]:
     from pathlib import Path
 
     from flowboard.services import tts
-    from flowboard.services.video_export import BGM_DEFAULT_VOLUME, ExportItem, NarrationOptions, export_video
+    from flowboard.services.video_export import BGM_DEFAULT_VOLUME, ExportItem, NarrationOptions, export_video, subtitle_choice
 
     # Explicit order with stills and clips mixed (drama clips) …
     raw_items = params.get("items")
@@ -987,7 +987,10 @@ async def _handle_export_video(params: dict) -> tuple[dict, Optional[str]]:
         raw_voices = params.get("voices")
         line_voices = [v if isinstance(v, str) and v in tts.VOICES else None
                        for v in (raw_voices if isinstance(raw_voices, list) else [])]
+        sub_engine, sub_style = subtitle_choice(params.get("sub_engine"), params.get("sub_style"))
         narration = NarrationOptions(
+            sub_engine=sub_engine,
+            sub_style=sub_style,
             lines=[t if isinstance(t, str) else "" for t in raw_lines],
             voice=voice,
             rate=rate,
