@@ -593,12 +593,22 @@ async def auto_prompt_batch(
         return prompts
 
 
+#: The Quicktool scenes are written as phone footage of a real buyer
+#: (``clip_style``); a refine / revise must not turn them back into the
+#: studio / editorial look the rules above describe for Canvas shots.
+_KEEP_LOOK = (
+    " If the text describes a real phone-video look (a handheld or propped phone, a "
+    "mirror selfie, a real lived-in place, natural available light, the person busy with "
+    "the product), keep that look, its camera and its 'Audio:' line — do not turn it into "
+    "a studio or editorial shot or add eye contact the text does not ask for."
+)
+
 _REFINE_SUFFIX = (
     "\n\nREFINE MODE: the user typed their own description below (any "
     "language, possibly rough). Keep every intent in it — subject, action, "
     "setting, mood, props — and rewrite it as ONE production-ready prompt in "
     "English that follows all the rules above and uses the upstream context. "
-    "Do not add ideas the user did not ask for. Output only the prompt."
+    "Do not add ideas the user did not ask for." + _KEEP_LOOK + " Output only the prompt."
 )
 
 #: The sentences the templates and the reference-video builder put after
@@ -680,8 +690,8 @@ _REVISE_SUFFIX = (
     "description words from the current prompt VERBATIM (e.g. \"Women's "
     "short-sleeved round-neck t-shirt\"): never shorten them to \"the "
     "product\" or \"the item\" — the image model needs them to draw the "
-    "right garment. English, ONE prompt, same rules as above. Output only "
-    "the prompt."
+    "right garment." + _KEEP_LOOK + " English, ONE prompt, same rules as above. "
+    "Output only the prompt."
 )
 
 #: A revised prompt keeps the template's constraint sentences, so it may run

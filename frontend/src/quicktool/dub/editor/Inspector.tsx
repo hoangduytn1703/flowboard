@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { NamesPanel, type NamesCtl } from "./NamesPanel";
 import {
   DEFAULT_BLUR, DEFAULT_LAYOUT, emphasisY, HL_Y_MAX, HL_Y_MIN, layoutBlurs, linesAreVietnamese, MAX_BLURS, SUB_LANGS,
   subLangName, withBlurs,
@@ -58,7 +59,7 @@ export function Inspector({
   tab, onTab, selected, onSelect, cues, origin, onCueText, onCueTiming, onPlayCue,
   layout, onLayout, style, onStyle, styles, status, out, onOut, orientation,
   readOnly, focusText, onDetect, detecting, activeCue, onPickCue,
-  scope, onScope, onGeom, onApplyAll, onClearLook, onClearAll, customCount, hl, cutPane, lang,
+  scope, onScope, onGeom, onApplyAll, onClearLook, onClearAll, customCount, hl, cutPane, lang, names,
 }: {
   tab: InspectorTab;
   onTab: (t: InspectorTab) => void;
@@ -99,6 +100,8 @@ export function Inspector({
   cutPane: ReactNode;
   /** "Ngôn ngữ phụ đề": the lines' language now, the video's own (Whisper), switching (rewrites every line) */
   lang: { value: SubLang; source: string; busy: boolean; set: (l: SubLang) => void };
+  /** "🔤 Tên riêng" (top of "📜 Các câu") */
+  names: NamesCtl;
 }) {
   const textRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -267,8 +270,11 @@ export function Inspector({
         )}
 
         {tab === "list" && (
-          <CueList cues={cues} origin={origin} selected={i} active={activeCue} readOnly={readOnly}
-                   onPick={onPickCue} onText={onCueText} />
+          <>
+            <NamesPanel ctl={names} readOnly={readOnly} />
+            <CueList cues={cues} origin={origin} selected={i} active={activeCue} readOnly={readOnly}
+                     onPick={onPickCue} onText={onCueText} />
+          </>
         )}
 
         {tab === "hl" && <HighlightsPane hl={hl} layout={layout} status={status} readOnly={readOnly} selected={selected} onSelect={onSelect} />}

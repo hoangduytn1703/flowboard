@@ -44,7 +44,8 @@ export function buildCharacterPrompt(
   const g = CHARACTER_GENDERS.find((x) => x.key === gender)?.tag;
   const c = CHARACTER_COUNTRIES.find((x) => x.key === country)?.tag;
   const subject = [c, g].filter(Boolean).join(" ") || "person";
-  const vibeTokens = CHARACTER_VIBES.find((v) => v.key === vibe)?.tokens ?? [];
+  const preset = CHARACTER_VIBES.find((v) => v.key === vibe);
+  const vibeTokens = (gender === "male" ? preset?.male : preset?.tokens) ?? [];
   const tail = extras.trim();
   // Pose anchor is front-loaded (right after subject) because diffusion
   // models weight earlier tokens more — vibe tokens like "editorial /
@@ -52,7 +53,9 @@ export function buildCharacterPrompt(
   // negatives reinforce the lock so the headshot stays usable as a
   // character reference across every downstream shot.
   return [
-    `Studio portrait headshot of a ${subject} character`,
+    // Not "studio": the reference face feeds every scene, and a studio beauty
+    // portrait makes the whole clip look staged (7/11).
+    `Natural daylight head-and-shoulders portrait photo of a ${subject} character`,
     "subject directly faces the camera, head perfectly straight with zero tilt and zero turn",
     "shoulders square to camera, axially symmetric pose, nose centered, both eyes equally visible at the same height",
     `an ordinary, non-famous everyday person with their own distinctive face (${ownTraits()}), natural skin texture with visible pores, not resembling any celebrity, idol, actor or influencer`,

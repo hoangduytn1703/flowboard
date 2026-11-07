@@ -3,7 +3,7 @@
   "category": "food",
   "order": 31,
   "title": "Review ăn thử",
-  "blurb": "4 cảnh ăn thử: món lên bàn, cắn miếng đầu tiên, cận kết cấu + khói nóng, kết luận và giá. Cần có người ăn thử.",
+  "blurb": "Review ăn thử như quay thật ở quán: món lên bàn, miếng đầu tiên, cận kết cấu + khói, ăn gần hết và chốt giá. 4 cảnh × 8 s, cần có người ăn thử.",
   "scenes": 4,
   "inputs": [
     {
@@ -28,7 +28,7 @@
       "key": "setting",
       "label": "Bối cảnh",
       "placeholder": "ví dụ: quán ăn vỉa hè buổi tối, bàn inox",
-      "default": "a cozy Vietnamese eatery table with a wooden top and warm light"
+      "default": "a small Vietnamese eatery table with a worn wooden top, a cup of iced tea and warm afternoon light"
     },
     {
       "key": "charGender",
@@ -85,7 +85,7 @@
   ],
   "character": {
     "charVibe": "casual",
-    "charExtras": "early 20s, expressive foodie, big appetite, cheerful"
+    "charExtras": "early 20s, everyday clothes, hair tied up, expressive foodie"
   },
   "nodes": [
     {
@@ -93,7 +93,7 @@
       "type": "note",
       "data": {
         "title": "Kịch bản",
-        "prompt": "Review ăn thử {{product}} — 4 cảnh × 8 s\n\n1. Món lên bàn: hero shot món vừa được bưng ra, khói bốc, tay xoay đĩa về phía camera.\n2. Miếng đầu tiên: người ăn cắn miếng đầu, biểu cảm mắt mở to.\n3. Cận kết cấu: gắp lên sát ống kính, thấy sốt, khói, độ mềm giòn.\n4. Kết luận: chỉ vào món, nhận xét và đọc giá, chừa chỗ cho chữ giá ở trên.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh món thật (bước 1) → tạo Người ăn thử (bước 1) → tạo ảnh từng cảnh (bước 3) → tạo video từng cảnh (bước 4, Omni Flash 8 s) → ghép + lồng tiếng (bước 5).\nLồng tiếng: mỗi cảnh có sẵn một câu thoại tiếng Việt (sửa ở bước 2); bước 5 đọc giọng + phụ đề rồi ghép thành clip hoàn chỉnh."
+        "prompt": "Review ăn thử {{product}} — 4 cảnh × 8 s\n\n1. Món lên bàn: món vừa bưng ra còn khói, tay kéo đĩa lại gần, lấy đũa.\n2. Miếng đầu tiên: thổi, ăn, nhai, nhướng mày gật gù.\n3. Cận kết cấu: gắp miếng lên sát điện thoại, thấy sốt, khói, bên trong.\n4. Chốt: ăn gần hết, lau miệng, chỉ đũa vào đĩa, gắp thêm miếng cuối.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh món thật (bước 1) → tạo Người ăn thử (bước 1) → tạo ảnh từng cảnh (bước 3) → tạo video từng cảnh (bước 4, Omni Flash 8 s) → ghép + lồng tiếng (bước 5).\nLồng tiếng: mỗi cảnh có sẵn một câu thoại tiếng Việt (sửa ở bước 2); bước 5 đọc giọng + phụ đề rồi ghép thành clip hoàn chỉnh."
       }
     },
     {
@@ -115,7 +115,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 1 - Món lên bàn",
-        "prompt": "Hero shot of {{product}} just served on the table with steam rising, in {{setting}}. The model's hands reach into frame to turn the dish toward the camera, warm appetizing light, shallow depth of field, commercial food photography. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "prompt": "Vertical phone photo filmed by a friend: {{product}} just served on {{setting}}, steam rising, the model's hands at the edge of the frame pulling the plate closer, chopsticks and a cup of iced tea beside it. Warm natural light, real food texture, a slightly messy table. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -123,7 +123,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 2 - Miếng đầu tiên",
-        "prompt": "Medium close-up of the model taking the first bite of {{product}}, eyes widening with delight, in {{setting}}. Warm natural light, the dish sharp and visible in frame. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "prompt": "Vertical phone video still filmed across the table: the model lifts the first bite of {{product}} with chopsticks toward the mouth, eyes on the food, face three-quarters, in {{setting}}. Warm natural light, everyday clothes, hair tied up. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -131,7 +131,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 3 - Cận kết cấu",
-        "prompt": "Extreme close-up of a bite of {{product}} lifted on chopsticks or a spoon toward the lens, texture, sauce and steam clearly visible, in {{setting}}. Macro food photography, glossy detail, warm light, the dish in the background. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "prompt": "Vertical phone close-up: chopsticks lift a piece of {{product}} toward the phone, the sauce, steam and texture clearly visible, the plate soft in the background, in {{setting}}. Warm side light, real uneven texture. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -139,7 +139,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 4 - Kết luận",
-        "prompt": "Medium shot of the model pointing at {{product}} on the table and giving a verdict to the camera with a satisfied grin, in {{setting}}. Bright cheerful light, clean space at the top for a price caption. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "prompt": "Vertical phone video still: the model sits back from the half-empty plate of {{product}}, wiping the mouth with a napkin, looking content, face partly turned, in {{setting}}. Warm afternoon light, used napkins and an empty glass on the table. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -147,8 +147,8 @@
       "type": "video",
       "data": {
         "title": "Video 1 - Món lên bàn",
-        "prompt": "0-3s: the dish is set down, steam curls up. 3-6s: hands turn the plate toward the camera. 6-8s: the dish sits still, glossy and steaming. Locked-off camera, no zoom.",
-        "narration": "Hôm nay mình đi ăn thử {{product_name}} đang hot, nhìn thôi là thấy muốn ăn rồi."
+        "prompt": "0-3s: the plate is set down and steam curls up. 3-6s: the hands slide the plate closer. 6-8s: chopsticks are picked up from the cup. Handheld phone with a small natural shake. Audio: the plate touching wood, eatery chatter, ice in a glass.",
+        "narration": "Hôm nay mình ăn thử {{product_name}}, vừa bưng ra là thơm lừng."
       }
     },
     {
@@ -156,8 +156,8 @@
       "type": "video",
       "data": {
         "title": "Video 2 - Miếng đầu tiên",
-        "prompt": "0-3s: the model lifts a bite to the mouth. 3-6s: bites, eyes widen, a slow nod. 6-8s: a happy, full-mouth reaction. Locked-off camera, dish stays in frame.",
-        "narration": "Miếng đầu tiên cắn vào là đậm đà, nóng hổi, đúng vị mình thích."
+        "prompt": "0-3s: the model blows on the bite once. 3-6s: takes it and chews with the mouth closed, the eyebrows going up. 6-8s: a little nod, glancing back at the plate. Handheld phone across the table. Audio: a soft blow, chewing, eatery chatter.",
+        "narration": "Miếng đầu tiên nè, nóng hổi, đậm đà đúng kiểu mình thích."
       }
     },
     {
@@ -165,8 +165,8 @@
       "type": "video",
       "data": {
         "title": "Video 3 - Cận kết cấu",
-        "prompt": "0-3s: chopsticks lift the food, sauce drips. 3-6s: a slow turn showing the texture. 6-8s: steam rises past the lens. Locked-off macro camera, warm light.",
-        "narration": "Nhìn kết cấu này nè, trong mềm, ngoài vừa tới, sốt bám đều."
+        "prompt": "0-3s: chopsticks lift the food and a drip of sauce falls. 3-6s: the piece turns to show the inside. 6-8s: steam drifts past the phone. Handheld phone close-up with focus breathing. Audio: sauce dripping on the plate, quiet chatter.",
+        "narration": "Nhìn kỹ nè, sốt thấm vô từng miếng luôn."
       }
     },
     {
@@ -174,8 +174,8 @@
       "type": "video",
       "data": {
         "title": "Video 4 - Kết luận",
-        "prompt": "0-3s: the model points at the dish. 3-6s: counts on the fingers while giving the verdict. 6-8s: a thumbs-up and a grin. Locked-off camera, clean space at the top.",
-        "narration": "Giá {{price}} mà ngon vậy là quá ổn, mọi người ghé giỏ hàng đặt thử nha."
+        "prompt": "0-3s: the model wipes the mouth with a napkin. 3-6s: points the chopsticks at the plate and nods. 6-8s: picks up one last bite. Handheld phone across the table. Audio: napkin rustle, chopsticks tapping the plate.",
+        "narration": "Giá {{price}} mà được vầy là ổn áp, ai ở gần thì ghé giỏ hàng đặt thử nha."
       }
     }
   ],

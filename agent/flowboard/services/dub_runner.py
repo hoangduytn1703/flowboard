@@ -57,7 +57,10 @@ def _load_whisper():
     raise SystemExit(f"could not load whisper: {last}")
 
 
-def transcribe(audio: str, out: str, language: str | None, words: bool = False) -> None:
+def transcribe(audio: str, out: str, language: str | None, words: bool = False, hint: str | None = None) -> None:
+    """``hint`` = names / words the video is about (its title + hashtags) → faster-whisper ``hotwords``, which is
+    put in front of EVERY 30 s window (``initial_prompt`` only reaches the first one with
+    condition_on_previous_text off) — Whisper hears 爱因斯坦 instead of 安音斯坦."""
     _progress(5)
     model = _load_whisper()
     _progress(15)
@@ -69,6 +72,7 @@ def transcribe(audio: str, out: str, language: str | None, words: bool = False) 
         vad_parameters={"min_silence_duration_ms": 350},
         condition_on_previous_text=False,
         word_timestamps=words,
+        hotwords=hint or None,
     )
     total = max(float(getattr(info, "duration", 0.0) or 0.0), 0.1)
     rows = []
@@ -166,7 +170,7 @@ def main(argv: list[str]) -> int:
         return 0
     if len(argv) >= 3 and argv[0] == "transcribe":
         transcribe(argv[1], argv[2], argv[3] if len(argv) > 3 and argv[3] not in ("", "auto") else None,
-                   words=len(argv) > 4 and argv[4] == "words")
+                   words=len(argv) > 4 and argv[4] == "words", hint=argv[5] if len(argv) > 5 and argv[5] else None)
         return 0
     if len(argv) == 4 and argv[0] == "separate":
         separate(argv[1], argv[2], argv[3])

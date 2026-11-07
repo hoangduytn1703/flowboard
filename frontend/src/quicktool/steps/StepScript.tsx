@@ -51,10 +51,24 @@ function VoicePick({ node }: { node: FlowNode }) {
 /** Step 2 — the script: one row per scene with its image prompt, motion
  * prompt and Vietnamese voice line, all editable in place. `category` (the
  * product's industry) picks which saved prompts "📚 Chọn prompt" offers first. */
-export function StepScript({ roles, category, productId = null, boardId = null }: {
+export function StepScript({ roles, category, productId = null, boardId = null, voiceless = false }: {
   roles: ClipRoles; category: string | null; productId?: number | null; boardId?: number | null;
+  /** "🔇 Không lời": no voice lines, no subtitles — the clip keeps its real sounds. */
+  voiceless?: boolean;
 }) {
   const writeNarrations = useQuicktoolStore((s) => s.writeNarrations);
+  const setVoiceless = useQuicktoolStore((s) => s.setVoiceless);
+  const [switching, setSwitching] = useState(false);
+  async function switchVoice(on: boolean) {
+    const lines = roles.scenes.filter((s) => typeof s.video?.data.narration === "string" && s.video.data.narration.trim()).length;
+    if (on && lines > 0 && !window.confirm(`Chuyển thành clip không lời: bỏ ${lines} lời thoại đang có, khi ghép giữ tiếng động thật của từng video. Tiếp tục?`)) return;
+    setSwitching(true);
+    await setVoiceless(on);
+    setVoiceWords({});
+    setRev((r) => r + 1);
+    setSwitching(false);
+    toast.success(on ? "Đã chuyển thành clip không lời." : "Đã bật lại lời thoại — AI viết lời cho các cảnh còn trống.");
+  }
   const [writing, setWriting] = useState(false);
   // "Viết lại kịch bản theo sản phẩm": the box is open / the wish typed / busy.
   const [tailorOpen, setTailorOpen] = useState(false);
@@ -99,7 +113,7 @@ export function StepScript({ roles, category, productId = null, boardId = null }
   async function tailorAll() {
     if (boardId === null || tailoring) return;
     const made = roles.scenes.filter((s) => s.image.data.mediaId || s.video?.data.mediaId).length;
-    if (!window.confirm(`AI viết lại mô tả ảnh, chuyển động và lời thoại của ${roles.scenes.length} cảnh theo mô tả + điểm bán của sản phẩm.`
+    if (!window.confirm(`AI viết lại mô tả ảnh, chuyển động${voiceless ? "" : " và lời thoại"} của ${roles.scenes.length} cảnh theo mô tả + điểm bán của sản phẩm.`
       + (made ? ` ${made} cảnh đã có ảnh/video sẽ cần "Tạo lại" để theo kịch bản mới.` : "")
       + " Mỗi cảnh có \"↺ Về prompt trước đó\" ở nút Tạo lại… nếu không ưng. Tiếp tục?")) return;
     setTailoring(true);
@@ -164,6 +178,7 @@ export function StepScript({ roles, category, productId = null, boardId = null }
               {tailoring ? "AI đang viết…" : "✨ Viết lại kịch bản theo sản phẩm"}
             </button>
           )}
+          {!voiceless && (
           <button
             type="button"
             className="qt-btn"
@@ -173,8 +188,25 @@ export function StepScript({ roles, category, productId = null, boardId = null }
           >
             {writing ? "Đang viết…" : "✨ AI viết lời thoại cho cả clip"}
           </button>
+          )}
           </div>
         </div>
+        {roles.scenes.some((s) => s.video) && (voiceless ? (
+          <div className="qt-voiceless">
+            <strong>🔇 Clip không lời</strong>
+            <small>Không lồng tiếng, không phụ đề — khi ghép giữ tiếng động thật của từng video (tiếng vải, tiếng máy, tiếng xung quanh).</small>
+            <button type="button" className="qt-btn qt-btn--small" disabled={switching} onClick={() => void switchVoice(false)}>
+              {switching ? "Đang viết lời…" : "🎙 Thêm lời thoại"}
+            </button>
+          </div>
+        ) : (
+          <div className="qt-voiceless">
+            <small>Muốn clip chỉ có hình mặc / dùng sản phẩm + tiếng động thật, không giọng đọc?</small>
+            <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" disabled={switching} onClick={() => void switchVoice(true)}>
+              🔇 Chuyển thành clip không lời
+            </button>
+          </div>
+        ))}
         {tailorOpen && productId !== null && (
           <div className="qt-regen qt-tailor">
             <label className="qt-regen__label" htmlFor="tailor-wish">Muốn nhấn mạnh gì? (không bắt buộc)</label>
@@ -192,7 +224,7 @@ export function StepScript({ roles, category, productId = null, boardId = null }
         )}
         <p className="qt-card__hint">
           Mô tả ảnh và chuyển động viết bằng tiếng Anh (Flow hiểu tiếng Anh tốt hơn) — gõ tiếng Việt rồi bấm
-          "Viết lại" cũng được. Lời thoại tiếng Việt, ≤ 24 từ để vừa 8 giây.
+          "Viết lại" cũng được.{voiceless ? " Clip không lời: tả rõ tiếng động ở cuối mỗi chuyển động (\"Audio: …\")." : " Lời thoại tiếng Việt, ≤ 24 từ để vừa 8 giây."}
         </p>
         <div className="qt-scenes">
           {roles.scenes.map((s) => {
@@ -228,7 +260,7 @@ export function StepScript({ roles, category, productId = null, boardId = null }
                       <span>
                         Chuyển động (8 s)
                         <button type="button" className="qt-link" disabled={refining !== null}
-                                onClick={() => refine(s.video!, "static")}>
+                                onClick={() => refine(s.video!)}>
                           {refining === s.video.id ? "đang viết…" : "✨ Viết lại chuẩn"}
                         </button>
                         <PromptLibraryButtons kind="video" context={ctx}
@@ -244,6 +276,7 @@ export function StepScript({ roles, category, productId = null, boardId = null }
                         onBlur={(e) => saveField(s.video!, "prompt", e.target.value)}
                       />
                     </label>
+                    {!voiceless && (
                     <label className={`qt-field${voiceCount(s.video) > MAX_VOICE_WORDS ? " qt-field--voice-over" : ""}`}
                            htmlFor={`qt-nar-${s.video.id}`}>
                       <span>
@@ -286,11 +319,12 @@ export function StepScript({ roles, category, productId = null, boardId = null }
                         maxLength={400}
                         key={`n-${s.video.id}-${s.video.data.narration}`}
                         defaultValue={(s.video.data.narration as string) ?? ""}
-                        placeholder="Mọi người ơi, hôm nay mình…"
+                        placeholder="Nói như kể với bạn: trời nắng vậy mà mặc cái này vô là mát liền…"
                         onChange={(e) => setVoiceWords((p) => ({ ...p, [s.video!.id]: wordCount(e.target.value) }))}
                         onBlur={(e) => saveField(s.video!, "narration", e.target.value.trim())}
                       />
                     </label>
+                    )}
                   </>
                 ) : (
                   // No clip under this still (drama beats): the voice line and
@@ -332,7 +366,7 @@ export function StepScript({ roles, category, productId = null, boardId = null }
           })}
           {roles.scenes.length === 0 && <div className="qt-empty">Board chưa có cảnh nào.</div>}
         </div>
-        {roles.scenes.length > 0 && (
+        {roles.scenes.length > 0 && !voiceless && (
           <p className="qt-card__hint">
             Hội thoại: gõ <code>[A]</code> … <code>[B]</code> … trong một lời thoại rồi chọn giọng cho A/B ở bước 5.
           </p>

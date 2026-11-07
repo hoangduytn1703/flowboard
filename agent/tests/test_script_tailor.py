@@ -38,7 +38,7 @@ async def test_scenes_are_rewritten_from_the_product_and_keep_constraints(monkey
     out = await script_tailor.tailor_spec(spec, PRODUCT, variant=1, of=3, template_title=t["title"])
     # The product facts and the clip number went to the model; the template text did too.
     assert "Sốt mắm gia truyền" in seen["prompt"] and "clip 2 of 3" in seen["prompt"]
-    assert "melted cheese" in seen["prompt"]
+    assert "crumpled napkin" in seen["prompt"]
     imgs = [n for n in out["nodes"] if n["type"] == "image"]
     vids = [n for n in out["nodes"] if n["type"] == "video"]
     assert all("scorched rice" in n["data"]["prompt"] and "cheese" not in n["data"]["prompt"] for n in imgs)
@@ -46,7 +46,7 @@ async def test_scenes_are_rewritten_from_the_product_and_keep_constraints(monkey
     assert all(n["data"]["prompt"].count(HANDS_MARKER) == 1 for n in imgs + vids)     # hands kept, once
     assert all(n["data"]["narration"].startswith("Cơm cháy giòn rụm") for n in vids)
     # The input spec is untouched (the caller falls back to it on failure).
-    assert "melted cheese" in [n for n in spec["nodes"] if n["type"] == "image"][0]["data"]["prompt"]
+    assert "crumpled napkin" in [n for n in spec["nodes"] if n["type"] == "image"][0]["data"]["prompt"]
 
 
 @pytest.mark.asyncio
@@ -87,8 +87,8 @@ def test_existing_clip_is_rewritten_in_place_and_keeps_the_old_text(client, monk
     nodes = client.get(f"/api/boards/{board['id']}").json()["nodes"]
     by_title = {n["data"].get("title"): n for n in nodes}
     pairs = [(by_title[f"Cảnh {i} - {t}"]["id"], by_title[f"Video {i} - {t}"]["id"])
-             for i, t in ((1, "Hero shot"), (2, "Thưởng thức"), (3, "Kết"))]
-    old_v1 = by_title["Video 1 - Hero shot"]["data"]["prompt"]
+             for i, t in ((1, "Món vừa mở"), (2, "Thưởng thức"), (3, "Kết"))]
+    old_v1 = by_title["Video 1 - Món vừa mở"]["data"]["prompt"]
     seen = {}
 
     async def fake_llm(feature, prompt, *, system_prompt=None, timeout=0):

@@ -3,7 +3,7 @@
   "category": "fashion",
   "order": 10,
   "title": "Quảng cáo quần áo",
-  "blurb": "Người mẫu mặc sản phẩm qua 4 cảnh: giới thiệu, cận chất liệu, dáng đứng, kết. Mỗi cảnh một clip 8 s.",
+  "blurb": "Mặc thử như clip TikTok thật: soi gương mặc vào, cận chất vải, mặc đi đúng việc của món đồ, soi lại lần cuối. 4 cảnh × 8 s, quay kiểu điện thoại.",
   "scenes": 4,
   "inputs": [
     {
@@ -21,8 +21,8 @@
     {
       "key": "setting",
       "label": "Bối cảnh",
-      "placeholder": "ví dụ: studio sáng, phía sau là tủ đồ gỗ",
-      "default": "a bright minimalist studio with wooden wardrobes behind the model"
+      "placeholder": "ví dụ: phòng ngủ có gương lớn, ngoài phố, quán cà phê",
+      "default": "a lived-in Vietnamese apartment bedroom with a full-length mirror, a clothes rack and afternoon window light"
     },
     {
       "key": "charGender",
@@ -78,8 +78,8 @@
     }
   ],
   "character": {
-    "charVibe": "clean",
-    "charExtras": "early 20s, long hair, soft friendly smile"
+    "charVibe": "casual",
+    "charExtras": "early 20s, everyday natural hair, relaxed friendly look"
   },
   "nodes": [
     {
@@ -87,7 +87,7 @@
       "type": "note",
       "data": {
         "title": "Kịch bản",
-        "prompt": "Quảng cáo {{product}} — 4 cảnh × 8 s\n\n1. Giới thiệu: toàn thân, người mẫu bước vào khung hình và nhìn thẳng camera.\n2. Chất liệu: cận cảnh tay vuốt vải, thấy rõ chi tiết sản phẩm.\n3. Dáng: trung cảnh, xoay nhẹ người, tay đút túi.\n4. Kết: nụ cười, cử chỉ chào, khung hình sạch cho chữ/logo.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh sản phẩm thật (bước 1) → tạo Người mẫu (bước 1) → tạo ảnh từng cảnh (bước 3) → tạo video từng cảnh (bước 4, Omni Flash 8 s) → ghép + lồng tiếng (bước 5).\nLồng tiếng: mỗi cảnh có sẵn một câu thoại tiếng Việt (sửa ở bước 2); bước 5 đọc giọng + phụ đề rồi ghép thành clip hoàn chỉnh."
+        "prompt": "Quảng cáo {{product}} — 4 cảnh × 8 s\n\n1. Soi gương: chụp gương bằng điện thoại, vừa mặc vào, kéo chỉnh vạt áo.\n2. Chất liệu: tay vò / kéo nhẹ vải sát điện thoại, thấy đường may, vải đàn hồi lại.\n3. Mặc thật: khoác túi chuẩn bị ra ngoài, đi vài bước, vải chuyển động tự nhiên.\n4. Soi lại: xoay người xem phía sau trong gương, thả lỏng, hài lòng.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh sản phẩm thật (bước 1) → tạo Người mẫu (bước 1) → tạo ảnh từng cảnh (bước 3) → tạo video từng cảnh (bước 4, Omni Flash 8 s) → ghép + lồng tiếng (bước 5).\nLồng tiếng: mỗi cảnh có sẵn một câu thoại tiếng Việt (sửa ở bước 2); bước 5 đọc giọng + phụ đề rồi ghép thành clip hoàn chỉnh."
       }
     },
     {
@@ -109,7 +109,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 1 - Giới thiệu",
-        "prompt": "Full-body editorial photo of the model wearing {{product}}, standing relaxed and facing the camera with direct eye contact, in {{setting}}. Soft even studio lighting, neutral background, knees-up framing, the product fully visible. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "prompt": "Vertical phone mirror selfie: the model stands at a full-length mirror holding the phone at chest height, the phone hiding part of the face, wearing {{product}} just put on and tugging the hem straight with the free hand, in {{setting}}. Natural window light from one side, everyday hair, visible fabric creases, a few clothes on a rack behind. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -117,7 +117,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 2 - Chất liệu",
-        "prompt": "Close-up of the model's hands gently smoothing the fabric of {{product}}, in {{setting}}. Shallow depth of field, crisp texture and stitching detail, warm soft light, face partially visible at the top of frame. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "prompt": "Vertical phone close-up held by a friend: the model's hands pinch and gently stretch the fabric of {{product}} at the sleeve, showing the weave and the stitching, in {{setting}}. Side window light raking across the fabric, natural skin on the hands, slight phone softness at the edges. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -125,7 +125,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 3 - Dáng",
-        "prompt": "Medium shot of the model wearing {{product}}, body turned three-quarters, one hand in pocket, chin slightly lifted, in {{setting}}. Clean editorial pose, product centered and fully framed. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "prompt": "Vertical phone video still filmed by a friend at chest height: the model, wearing {{product}}, picks up a bag from a chair, about to head out, body three-quarters to the camera and face turned partly away, in {{setting}}. Natural window light, keys in one hand, everyday hair, the outfit hanging naturally. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -133,7 +133,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 4 - Kết",
-        "prompt": "Medium shot of the model wearing {{product}}, smiling warmly straight at the camera with a small friendly wave, in {{setting}}. Bright flattering light, generous empty space on one side for a logo. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "prompt": "Vertical phone mirror selfie, slightly wider: the model in {{product}} gives the outfit a last check at the mirror, half turned to see the back, the phone covering part of the face, in {{setting}}. Afternoon window light, the room a little lived-in. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -141,8 +141,8 @@
       "type": "video",
       "data": {
         "title": "Video 1 - Giới thiệu",
-        "prompt": "0-3s: the model takes a half step toward the camera and settles. 3-6s: she tucks her hair behind one ear and looks straight into the lens. 6-8s: she holds a confident smile. Locked-off camera, no zoom, product stays fully in frame.",
-        "narration": "Mọi người ơi, hôm nay mình mặc thử {{product_name}} cho cả nhà xem nha."
+        "prompt": "0-3s: the model tugs the hem down and smooths the front with one hand. 3-6s: turns a little to one side to check the fit in the mirror, the fabric swinging and settling. 6-8s: a small satisfied exhale, a glance down at the outfit. Mirror selfie, the phone moves slightly with the body. Audio: fabric rustle, a soft footstep on the floor.",
+        "narration": "Mặc thử {{product_name}} nè, lên người nhìn còn ưng hơn trên ảnh."
       }
     },
     {
@@ -150,8 +150,8 @@
       "type": "video",
       "data": {
         "title": "Video 2 - Chất liệu",
-        "prompt": "0-3s: fingers run along the fabric. 3-6s: the hand lifts the hem slightly to show the texture. 6-8s: the hand rests, fabric settles. Locked-off macro camera, soft light, no zoom.",
-        "narration": "Nhìn kỹ chất vải nè, mềm, dày dặn, đường may đều tăm tắp luôn."
+        "prompt": "0-3s: fingers pinch the fabric and pull it gently. 3-6s: let go, the fabric springs back and the creases settle. 6-8s: the hand runs along the seam. Handheld phone close-up with subtle natural shake and focus breathing. Audio: soft fabric rustle, faint room tone.",
+        "narration": "Sờ vô là biết vải dày dặn, đường may đều, kéo nhẹ vẫn đứng form."
       }
     },
     {
@@ -159,8 +159,8 @@
       "type": "video",
       "data": {
         "title": "Video 3 - Dáng",
-        "prompt": "0-3s: the model pivots from three-quarter to front. 3-6s: she shifts her weight and adjusts the collar. 6-8s: a small confident smirk at the camera. Locked-off camera, product stays centered.",
-        "narration": "Lên dáng thì khỏi bàn, form chuẩn, mặc đi chơi hay đi làm đều hợp."
+        "prompt": "0-3s: the model swings the bag onto one shoulder. 3-6s: walks two steps toward the door, the fabric moving with each step. 6-8s: stops and adjusts the collar without looking at the camera. Handheld phone following with a small natural shake. Audio: footsteps, keys jingling, the bag strap rustling.",
+        "narration": "Mặc ra ngoài cử động thoải mái, không bị vướng chỗ nào."
       }
     },
     {
@@ -168,8 +168,8 @@
       "type": "video",
       "data": {
         "title": "Video 4 - Kết",
-        "prompt": "0-3s: the model breaks into a warm smile. 3-6s: a small friendly wave toward the camera. 6-8s: she holds the pose, calm and bright. Locked-off camera, clean space on one side for text.",
-        "narration": "Ưng thì ghé giỏ hàng bên dưới chốt liền nha mọi người."
+        "prompt": "0-3s: the model turns to look at the back of the outfit in the mirror. 3-6s: turns back to the front and smooths a sleeve. 6-8s: relaxes the shoulders, a small closed-mouth smile at the reflection. Mirror selfie, the phone moves a little with the body. Audio: fabric swish, soft room tone.",
+        "narration": "Ai đang kiếm một cái mặc hằng ngày thì xem giỏ hàng nha."
       }
     }
   ],

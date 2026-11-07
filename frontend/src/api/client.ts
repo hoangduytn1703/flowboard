@@ -175,6 +175,8 @@ export interface QuicktoolState {
   sequence?: { node: string; keepAudio?: boolean }[];
   drama?: { title?: string; hook?: string | null; tone?: string | null } | null;
   source_url?: string | null;
+  /** "🔇 Không lời": no voice-over, no subtitles — the pictures and the clips' real sounds. */
+  voiceless?: boolean;
 }
 
 /** The model picked on the review screen of a link / video clip, or on
@@ -236,6 +238,22 @@ export function listBoardSummaries(): Promise<BoardSummary[]> {
 }
 
 /** Shallow-merge `data` into the board's settings (a null value removes a key). */
+/** How many of a clip's scenes already have their 60 fps copy, made in the background (services/smooth_prewarm). */
+export interface Smooth60Status {
+  total: number;
+  ready: number;
+  running: number;
+}
+
+export function getSmooth60(boardId: number): Promise<Smooth60Status> {
+  return api<Smooth60Status>(`/api/boards/${boardId}/smooth60`);
+}
+
+/** "Mượt 60 fps" turned on: the clip's scenes are smoothed in the background now, so "Ghép" does not wait. */
+export function warmSmooth60(boardId: number): Promise<Smooth60Status> {
+  return api<Smooth60Status>(`/api/boards/${boardId}/smooth60`, { method: "POST" });
+}
+
 export function patchBoardData(id: number, data: Record<string, unknown>): Promise<Board> {
   return api<Board>(`/api/boards/${id}`, {
     method: "PATCH",
@@ -1540,6 +1558,8 @@ export async function createBoardFromTemplate(
   /** Clip `index` of `of` for the same product: the agent writes each a different angle. */
   variant?: { index: number; of: number },
   channelId?: number | null,
+  /** "🔇 Không lời": scenes written for no voice-over, no voice lines. */
+  voiceless = false,
 ): Promise<Board> {
   const res = await fetch("/api/boards/from-template", {
     method: "POST",
@@ -1547,6 +1567,7 @@ export async function createBoardFromTemplate(
     body: JSON.stringify({
       template_id: templateId, name, inputs, product_id: productId ?? null, channel_id: channelId ?? null,
       ...(variant ? { variant: variant.index, variant_of: variant.of } : {}),
+      ...(voiceless ? { voiceless: true } : {}),
     }),
   });
   if (!res.ok) throw new Error(await extractErrorMessage(res));
@@ -1796,6 +1817,8 @@ export interface ReferencePlanScene {
 }
 
 export interface ReferenceAnalysis {
+  /** Written for a "🔇 Không lời" clip: the scenes have no narration. */
+  voiceless?: boolean;
   category: ProductCategory;
   category_vi: string;
   product_seen: string;
@@ -1825,11 +1848,12 @@ export async function analyzeReferenceVideo(
   mediaId: string,
   productId: number | null,
   scenes?: number,
+  voiceless = false,
 ): Promise<{ media_id: string; product: Product | null; analysis: ReferenceAnalysis; blocked: boolean; block_reason: string | null }> {
   const res = await fetch("/api/reference-video/analyze", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ media_id: mediaId, product_id: productId, scenes: scenes ?? null }),
+    body: JSON.stringify({ media_id: mediaId, product_id: productId, scenes: scenes ?? null, voiceless }),
   });
   if (!res.ok) throw new Error(await extractErrorMessage(res));
   return res.json();
@@ -1840,11 +1864,12 @@ export async function analyzeProductLink(
   url: string,
   productId: number | null,
   scenes?: number,
+  voiceless = false,
 ): Promise<{ product: Product | null; analysis: ReferenceAnalysis; blocked: boolean; block_reason: string | null }> {
   const res = await fetch("/api/reference-video/analyze-link", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url, product_id: productId, scenes: scenes ?? null }),
+    body: JSON.stringify({ url, product_id: productId, scenes: scenes ?? null, voiceless }),
   });
   if (!res.ok) throw new Error(await extractErrorMessage(res));
   return res.json();
@@ -1861,6 +1886,8 @@ export async function buildFromReferenceVideo(input: {
   /** Overrides the analysis' suggested character; omit to keep it. */
   character?: CharacterPick | null;
   channelId?: number | null;
+  /** "🔇 Không lời": the clip gets no voice lines. */
+  voiceless?: boolean;
 }): Promise<Board & { nodes: Record<string, string> }> {
   const res = await fetch("/api/reference-video/build", {
     method: "POST",
@@ -1868,7 +1895,7 @@ export async function buildFromReferenceVideo(input: {
     body: JSON.stringify({
       media_id: input.mediaId, source_url: input.sourceUrl ?? null, product_id: input.productId, analysis: input.analysis,
       name: input.name ?? null, force: input.force ?? false, character: input.character ?? null,
-      channel_id: input.channelId ?? null,
+      channel_id: input.channelId ?? null, voiceless: input.voiceless ?? false,
     }),
   });
   if (!res.ok) throw new Error(await extractErrorMessage(res));

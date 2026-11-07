@@ -3,7 +3,7 @@
   "category": "cosmetics",
   "order": 20,
   "title": "Quảng cáo mỹ phẩm",
-  "blurb": "3 cảnh: sản phẩm trên nền sạch, người mẫu dùng thử, kết da đẹp + sản phẩm. Phong cách beauty editorial.",
+  "blurb": "Mỹ phẩm như clip dùng thật ở nhà: sản phẩm trên bồn rửa mặt, thoa lên da trước gương, cận da sau khi dùng. 3 cảnh × 8 s, quay kiểu điện thoại.",
   "scenes": 3,
   "inputs": [
     {
@@ -22,7 +22,7 @@
       "key": "setting",
       "label": "Bối cảnh",
       "placeholder": "ví dụ: bàn trang điểm sáng, nền pastel",
-      "default": "a clean pastel beauty studio with soft diffused light"
+      "default": "a small real bathroom with a mirror, a sink counter with a few everyday toiletries and soft morning window light"
     },
     {
       "key": "charGender",
@@ -86,8 +86,8 @@
     }
   ],
   "character": {
-    "charVibe": "clean",
-    "charExtras": "mid 20s, glowing clear skin, hair tied back, serene expression"
+    "charVibe": "casual",
+    "charExtras": "mid 20s, natural skin with real texture, hair clipped back, bare face"
   },
   "nodes": [
     {
@@ -95,7 +95,7 @@
       "type": "note",
       "data": {
         "title": "Kịch bản",
-        "prompt": "Quảng cáo {{product}} — 3 cảnh × 8 s\n\n1. Sản phẩm: cận chai trên nền sạch, giọt nước, ánh sáng mềm — không có người.\n2. Dùng thử: người mẫu nhỏ/thoa sản phẩm lên má, nhẹ nhàng.\n3. Kết: cận mặt da căng bóng, tay cầm sản phẩm cạnh mặt, chừa chỗ cho logo.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh sản phẩm thật (bước 1) → tạo Người mẫu (bước 1) → tạo ảnh từng cảnh (bước 3) → tạo video từng cảnh (bước 4, Omni Flash 8 s) → ghép + lồng tiếng (bước 5).\nLồng tiếng: mỗi cảnh có sẵn một câu thoại tiếng Việt (sửa ở bước 2); bước 5 đọc giọng + phụ đề rồi ghép thành clip hoàn chỉnh."
+        "prompt": "Quảng cáo {{product}} — 3 cảnh × 8 s\n\n1. Sản phẩm: chai trên bồn rửa mặt cạnh đồ dùng hằng ngày, vài giọt nước — không có người.\n2. Dùng thử: chấm sản phẩm lên má trước gương, tán nhẹ, ghé sát gương xem.\n3. Sau khi dùng: cận da tự nhiên dưới ánh cửa sổ, đặt sản phẩm xuống.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh sản phẩm thật (bước 1) → tạo Người mẫu (bước 1) → tạo ảnh từng cảnh (bước 3) → tạo video từng cảnh (bước 4, Omni Flash 8 s) → ghép + lồng tiếng (bước 5).\nLồng tiếng: mỗi cảnh có sẵn một câu thoại tiếng Việt (sửa ở bước 2); bước 5 đọc giọng + phụ đề rồi ghép thành clip hoàn chỉnh."
       }
     },
     {
@@ -117,7 +117,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 1 - Sản phẩm",
-        "prompt": "Luxury beauty product shot of {{product}} standing on a clean surface with a few water droplets, in {{setting}}. Soft diffused light, subtle reflections, minimal composition, no people. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "prompt": "Vertical phone photo looking down at {{product}} standing on the sink counter beside a toothbrush cup and a folded towel, in {{setting}}, a few water drops on the counter. Soft window light from the side, real reflections, slightly imperfect framing, no people. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -125,7 +125,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 2 - Dùng thử",
-        "prompt": "Close-up of the model gently applying {{product}} to her cheek with her fingertips, eyes softly closed, in {{setting}}. Dewy skin, soft beauty lighting, product visible in the other hand. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "prompt": "Vertical phone mirror shot: the model, hair clipped back, dabs {{product}} onto the cheek with the fingertips at the bathroom mirror, the product held in the other hand, face three-quarters and partly turned away, in {{setting}}. Soft morning light, real skin texture with pores, no heavy makeup. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -133,7 +133,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 3 - Kết",
-        "prompt": "Beauty close-up of the model with glowing skin, looking at the camera and holding {{product}} next to her face, in {{setting}}. Clean bright light, space on one side for a logo. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "prompt": "Vertical phone close-up in the mirror: the model's cheek after applying {{product}}, skin fresh with a natural sheen and real pores, the product held near the jaw, the face partly out of frame, in {{setting}}. Window daylight from the side. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -141,8 +141,8 @@
       "type": "video",
       "data": {
         "title": "Video 1 - Sản phẩm",
-        "prompt": "0-3s: a single water droplet slides down the bottle. 3-6s: soft light sweeps across the glass. 6-8s: the product sits still, glossy. Locked-off macro camera, no zoom.",
-        "narration": "Mọi người ơi, đây là {{product_name}} mình đang dùng mỗi ngày nè."
+        "prompt": "0-3s: a water drop slides down the bottle. 3-6s: the light shifts a little as a curtain moves. 6-8s: the product stands still on the counter. Phone propped on the shelf, still. Audio: a faint drip from the tap, quiet bathroom tone.",
+        "narration": "Góc bồn rửa mặt của mình giờ có thêm {{product_name}} nè."
       }
     },
     {
@@ -150,8 +150,8 @@
       "type": "video",
       "data": {
         "title": "Video 2 - Dùng thử",
-        "prompt": "0-3s: fingertips glide the product across the cheek in a small circle. 3-6s: eyes open gently, a soft satisfied breath. 6-8s: a calm serene smile. Locked-off camera, soft beauty light.",
-        "narration": "Chất kem mịn, thấm nhanh, không bết dính chút nào luôn."
+        "prompt": "0-3s: fingertips pat the product onto the cheek in small taps. 3-6s: spread it outward in small circles. 6-8s: the model leans toward the mirror to check, a soft exhale. Phone propped against the mirror, still. Audio: soft tapping on skin, the tap running quietly.",
+        "narration": "Lấy một ít chấm lên má, tán nhẹ ra là thấm vô liền."
       }
     },
     {
@@ -159,8 +159,8 @@
       "type": "video",
       "data": {
         "title": "Video 3 - Kết",
-        "prompt": "0-3s: the model tilts her head slightly, skin catching the light. 3-6s: she lifts the product beside her face. 6-8s: a gentle smile held for the logo. Locked-off camera.",
-        "narration": "Da mình lên tông thấy rõ, ghé giỏ hàng bên dưới thử ngay nha."
+        "prompt": "0-3s: the model tilts the head so the window light runs across the cheek. 3-6s: touches the skin lightly with the back of the fingers. 6-8s: puts the product down on the counter. Handheld phone close-up with subtle natural shake. Audio: the bottle set down on ceramic, quiet room tone.",
+        "narration": "Da ai đang cần thêm bước này thì xem giỏ hàng nha."
       }
     }
   ],

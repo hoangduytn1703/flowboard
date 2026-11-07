@@ -37,6 +37,12 @@ export const CHARACTER_VIBES = [
       "slicked-back low bun or polished sleek hair, simple modern minimalist outfit, delicate gold hoop earrings",
       "relaxed friendly expression with a gentle subtle smile, soft natural gaze, soft natural daylight, airy bright tone, clean minimalist backdrop",
     ],
+    // Men get their own grooming: the vibe's makeup / earrings put "Clean Girl" lip oil on a male model (7/11).
+    male: [
+      "clean, well-groomed men's look, clean-shaven or light stubble, healthy natural skin with real texture",
+      "neat short hair, simple plain crew-neck t-shirt, no jewelry",
+      "relaxed friendly expression with a gentle subtle smile, soft natural daylight, plain light wall behind",
+    ],
   },
   {
     key: "douyin",
@@ -46,6 +52,12 @@ export const CHARACTER_VIBES = [
       "shimmery glittery eyeshadow with light-catching pearl highlights, defined aegyo sal under-eye accent, individual cluster false lashes",
       "blurred-edge gradient lip in soft berry or muted red tone with diffused outline, delicate styled hair with face-framing strands, refined feminine outfit",
       "soft alluring expression with a composed sultry gaze, soft beauty lighting, clean pale studio backdrop, gentle dreamy atmosphere",
+    ],
+    // Men get their own grooming: the vibe's makeup / earrings put "Clean Girl" lip oil on a male model (7/11).
+    male: [
+      "trendy Douyin-style men's grooming, soft textured fringe hairstyle, natural skin with real texture",
+      "fashionable everyday streetwear, a thin silver chain at most",
+      "calm confident expression, soft natural window light, plain pale wall behind",
     ],
   },
   {
@@ -57,6 +69,12 @@ export const CHARACTER_VIBES = [
       "polished sleek hair, timeless tailored outfit, understated gold or pearl jewelry",
       "composed dignified expression with a calm refined gaze, soft directional studio lighting, warm neutral backdrop, timeless heritage atmosphere",
     ],
+    // Men get their own grooming: the vibe's makeup / earrings put "Clean Girl" lip oil on a male model (7/11).
+    male: [
+      "Old Money men's grooming, neatly combed side-parted hair, clean-shaven, natural matte skin",
+      "a crisp collared shirt or a fine knit polo, a simple watch",
+      "composed calm expression, warm natural window light, warm neutral wall behind",
+    ],
   },
   {
     key: "coldgirl",
@@ -66,6 +84,12 @@ export const CHARACTER_VIBES = [
       "cool-toned smoky eye, ash-pink blush, soft mauve lip, subtle high-point highlight on cheekbones, brow bone and cupid's bow",
       "sleek modern hair, edgy contemporary outfit, minimalist silver accessories",
       "cool composed expression with a confident detached gaze, cool-toned cinematic lighting, muted soft blue-grey backdrop, modern moody atmosphere",
+    ],
+    // Men get their own grooming: the vibe's makeup / earrings put "Clean Girl" lip oil on a male model (7/11).
+    male: [
+      "cool minimalist men's look, sleek modern haircut, natural skin with real texture",
+      "dark simple modern outfit, minimal silver accessories",
+      "cool composed expression, cool daylight, muted blue-grey wall behind",
     ],
   },
   {
@@ -77,6 +101,12 @@ export const CHARACTER_VIBES = [
       "soft confident expression, gentle closed-lip smile",
       "soft beauty lighting, clean studio glow, smooth pastel backdrop",
     ],
+    // Men get their own grooming: the vibe's makeup / earrings put "Clean Girl" lip oil on a male model (7/11).
+    male: [
+      "Seoul street-style men's look, soft layered hair, natural skin with real texture",
+      "trendy casual outfit, minimal accessories",
+      "soft confident closed-mouth smile, natural daylight, plain pastel wall behind",
+    ],
   },
   {
     key: "casual",
@@ -85,7 +115,13 @@ export const CHARACTER_VIBES = [
       "minimal natural styling, fresh clear skin, soft tinted lips",
       "relaxed natural hair, simple everyday outfit",
       "warm friendly soft smile, gentle natural gaze",
-      "soft natural daylight, airy bright tone, clean light backdrop",
+      "soft natural daylight, plain light wall behind",
+    ],
+    // Men get their own grooming: the vibe's makeup / earrings put "Clean Girl" lip oil on a male model (7/11).
+    male: [
+      "everyday natural men's look, short natural hair, a little stubble, natural skin with real texture",
+      "simple everyday t-shirt",
+      "warm friendly soft smile, gentle natural gaze, soft natural daylight, plain light wall behind",
     ],
   },
 ] as const;

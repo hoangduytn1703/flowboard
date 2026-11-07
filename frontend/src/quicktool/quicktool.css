@@ -1786,3 +1786,26 @@
 .qt-joinopts__row { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px 16px; }
 .qt-joinopts__row .qt-field { margin: 0; }
 .qt-joinopts__row .qt-field > span { display: flex; align-items: center; gap: 8px; min-height: 34px; }
+/* "Mượt 60 fps" (step 4 + 5): the checkbox and how many scenes are already smoothed in the background */
+.qt-smooth60 { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 0; }
+.qt-joinopts .qt-smooth60 { padding-top: 8px; border-top: 1px dashed var(--border); }
+.qt-smooth60 .qt-check { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; width: fit-content; }
+.qt-smooth60 .qt-check input { width: auto; height: auto; margin: 0; flex: none; }
+.qt-smooth60__done { color: #4ade80; }
+
+/* New clip dialog: "Lời thoại" — 🎙 voiced or 🔇 voiceless (NewClipDialog voiceChoice) */
+.qt-voicechoice { display: grid; grid-template-columns: auto 1fr 1fr; align-items: stretch; gap: 8px 10px; margin-top: 12px; }
+.qt-voicechoice__label { align-self: center; font-weight: 700; color: var(--muted); font-size: 14px; }
+.qt-voicechoice__opt { display: flex; align-items: flex-start; gap: 8px; padding: 9px 12px; border: 1px solid #3a4050;
+  border-radius: 10px; cursor: pointer; background: rgba(255, 255, 255, 0.02); }
+.qt-voicechoice__opt input { width: auto; height: auto; margin: 3px 0 0; flex: none; accent-color: var(--qt-accent); }
+.qt-voicechoice__opt span { display: flex; flex-direction: column; gap: 2px; }
+.qt-voicechoice__opt strong { font-size: 15px; }
+.qt-voicechoice__opt small { color: var(--muted); font-size: 13px; line-height: 1.35; }
+.qt-voicechoice__opt--on { border-color: var(--qt-accent); background: rgba(255, 106, 43, 0.08); }
+@media (max-width: 760px) { .qt-voicechoice { grid-template-columns: 1fr; } }
+/* A voiceless clip: steps 2 / 4 / 5 say so instead of showing the voice fields */
+.qt-voiceless { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 14px; margin: 4px 0 12px;
+  border: 1px dashed #3a4050; border-radius: 10px; background: rgba(255, 255, 255, 0.02); font-size: 14px; }
+.qt-voiceless strong { font-size: 15px; }
+.qt-voiceless small { color: var(--muted); flex: 1 1 260px; }

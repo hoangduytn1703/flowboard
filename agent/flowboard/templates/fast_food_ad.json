@@ -3,7 +3,7 @@
   "category": "food",
   "order": 30,
   "title": "Quảng cáo thức ăn nhanh",
-  "blurb": "3 cảnh: món ăn hero shot, người mẫu thưởng thức, kết với logo. Cận sản phẩm không cần người mẫu.",
+  "blurb": "Đồ ăn như clip ăn thật: món vừa mở ra còn nóng, cắn miếng đầu, cận miếng ăn dở. 3 cảnh × 8 s, quay kiểu điện thoại.",
   "scenes": 3,
   "inputs": [
     {
@@ -22,7 +22,7 @@
       "key": "setting",
       "label": "Bối cảnh",
       "placeholder": "ví dụ: quán ăn nhanh sáng sủa, bàn gỗ",
-      "default": "a bright modern fast-food diner with a wooden table"
+      "default": "a casual Vietnamese eatery table by the window, a drink with ice beside it and warm afternoon light"
     },
     {
       "key": "charGender",
@@ -87,7 +87,7 @@
   ],
   "character": {
     "charVibe": "casual",
-    "charExtras": "early 20s, cheerful, hungry-happy expression"
+    "charExtras": "early 20s, everyday clothes, hungry and cheerful"
   },
   "nodes": [
     {
@@ -95,7 +95,7 @@
       "type": "note",
       "data": {
         "title": "Kịch bản",
-        "prompt": "Quảng cáo {{product}} — 3 cảnh × 8 s\n\n1. Hero shot: cận món ăn, hơi nóng bốc lên, nước sốt chảy — không có người.\n2. Thưởng thức: người mẫu cắn miếng đầu tiên, biểu cảm sướng.\n3. Kết: người mẫu giơ sản phẩm về phía camera, chừa chỗ cho logo.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh món thật (bước 1) → tạo Người mẫu (bước 1) → tạo ảnh từng cảnh (bước 3) → tạo video từng cảnh (bước 4, Omni Flash 8 s) → ghép + lồng tiếng (bước 5).\nLồng tiếng: mỗi cảnh có sẵn một câu thoại tiếng Việt (sửa ở bước 2); bước 5 đọc giọng + phụ đề rồi ghép thành clip hoàn chỉnh."
+        "prompt": "Quảng cáo {{product}} — 3 cảnh × 8 s\n\n1. Món vừa mở: nhìn từ trên xuống, khói bốc, ly nước đá bên cạnh — không có người.\n2. Cắn miếng đầu: bạn quay đối diện, cắn một miếng to, nhai, gật gù.\n3. Cận miếng ăn dở: tay đưa miếng đang ăn lại gần điện thoại, thấy nhân bên trong.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh món thật (bước 1) → tạo Người mẫu (bước 1) → tạo ảnh từng cảnh (bước 3) → tạo video từng cảnh (bước 4, Omni Flash 8 s) → ghép + lồng tiếng (bước 5).\nLồng tiếng: mỗi cảnh có sẵn một câu thoại tiếng Việt (sửa ở bước 2); bước 5 đọc giọng + phụ đề rồi ghép thành clip hoàn chỉnh."
       }
     },
     {
@@ -116,8 +116,8 @@
       "key": "s1",
       "type": "image",
       "data": {
-        "title": "Cảnh 1 - Hero shot",
-        "prompt": "Appetizing close-up of {{product}} on a tray, steam rising, glossy sauce, melted cheese, fresh ingredients, in {{setting}}. Shallow depth of field, warm golden light, commercial food photography, no people. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "title": "Cảnh 1 - Món vừa mở",
+        "prompt": "Vertical phone photo from above the table: {{product}} just opened on {{setting}}, steam rising, a cold drink with ice beside it, a crumpled napkin. Warm natural light, real food texture with crumbs and uneven edges, no people. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -125,7 +125,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 2 - Thưởng thức",
-        "prompt": "Medium close-up of the model holding {{product}} with both hands, about to take a bite, eyes bright with anticipation, in {{setting}}. Warm natural light, product sharp and prominent in frame. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "prompt": "Vertical phone video still filmed by a friend across the table: the model holds {{product}} with both hands, about to take a bite, eyes on the food, face partly turned, in {{setting}}. Warm natural light, napkins and a drink on the table, real food texture. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -133,16 +133,16 @@
       "type": "image",
       "data": {
         "title": "Cảnh 3 - Kết",
-        "prompt": "Medium shot of the model smiling at the camera and holding {{product}} up toward the lens, in {{setting}}. Bright cheerful light, clean space on one side for a logo. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "prompt": "Vertical phone close-up: the model's hand holds the half-eaten {{product}} toward the phone, the filling and texture visible at the bite, in {{setting}}. Warm side light, a few crumbs on the fingers. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
       "key": "v1",
       "type": "video",
       "data": {
-        "title": "Video 1 - Hero shot",
-        "prompt": "0-3s: steam curls up from the food, sauce drips down the side. 3-6s: a hand lifts the top bun slightly to reveal melted cheese. 6-8s: it settles back, glossy and fresh. Locked-off macro camera, warm light.",
-        "narration": "Mọi người ơi nhìn {{product_name}} này đi, thèm chưa."
+        "title": "Video 1 - Món vừa mở",
+        "prompt": "0-3s: steam curls up off the food. 3-6s: a little sauce slides down the side. 6-8s: the steam drifts across the frame. Phone held above the table with a tiny natural sway. Audio: a soft sizzle, ice shifting in the cup, eatery chatter far off.",
+        "narration": "Mở ra mà khói còn bốc nghi ngút, ai đang đói đừng xem nha."
       }
     },
     {
@@ -150,8 +150,8 @@
       "type": "video",
       "data": {
         "title": "Video 2 - Thưởng thức",
-        "prompt": "0-3s: the model takes a big satisfying bite. 3-6s: eyes close in delight, a happy nod. 6-8s: she looks at the food and grins. Locked-off camera, product stays in frame.",
-        "narration": "Cắn một miếng là ghiền luôn, vị đậm đà, nóng hổi mới ra lò."
+        "prompt": "0-3s: the model takes a big bite. 3-6s: chews with the mouth closed, eyes closing for a second, a happy nod. 6-8s: looks down at the bitten food. Handheld phone across the table with a small natural shake. Audio: a crunchy bite, eatery chatter.",
+        "narration": "Cắn miếng đầu là muốn ăn tiếp liền, {{product_name}} đó mọi người."
       }
     },
     {
@@ -159,8 +159,8 @@
       "type": "video",
       "data": {
         "title": "Video 3 - Kết",
-        "prompt": "0-3s: the model raises the product toward the camera. 3-6s: a thumbs-up with the other hand. 6-8s: a bright smile held for the logo. Locked-off camera, clean space on one side.",
-        "narration": "Đói thì ghé giỏ hàng bên dưới đặt liền nha."
+        "prompt": "0-3s: the hand turns the food to show where it was bitten. 3-6s: a bit of filling shifts. 6-8s: the hand pulls back out of frame. Handheld phone close-up, natural shake and focus breathing. Audio: a paper wrapper crinkling, chewing off-screen.",
+        "narration": "Đói bụng thì xem giỏ hàng, đặt một phần ăn thử nha."
       }
     }
   ],

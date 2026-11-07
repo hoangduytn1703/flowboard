@@ -271,25 +271,26 @@ async def _fetch_page_once(url: str) -> dict[str, Any]:
     return {"url": str(resp.url), "title": title, "description": description, "image_url": image, "text": text}
 
 
-_SYSTEM = (
+_SYSTEM_HEAD = (
     "You are a director for short TikTok Shop / affiliate product videos in Vietnam. "
     "You get the text of a product page and, optionally, the product the user has chosen in "
-    "their library. Work out what is being sold, its strongest selling points and its real "
-    "details, then write a plan for a short ad video of that product. hook: one line, the "
-    "opening claim. style/tone: how the ad should feel. Every scene becomes one AI-generated "
-    "still image (image_prompt_en, English, photoreal, <= 480 chars, describe shot size, "
-    "subject, action, setting, light; refer to 'the product from the reference photo' and "
-    "'the model' instead of describing their looks) animated into an 8-second clip "
-    "(motion_prompt_en, English, 2-3 beats like '0-3s … 3-6s … 6-8s', locked-off camera) with "
-    "one spoken Vietnamese line (narration_vi, natural spoken Vietnamese, ngôi 'mình', <= 24 "
-    "words, first line hooks and names the product, last line is a call to action). Use only "
-    "facts from the page — never invent specs, prices, discounts or certifications. Use "
-    "between 3 and 5 scenes. If a person suits the product, describe a character to generate "
-    "(gender, country, vibe, extras_en); otherwise character is null. product_seen: the "
-    "product's name as the page states it. scenes: leave empty. match: whether the user's "
-    "chosen product is the same kind of thing the page sells; score 1.0 = same kind, 0.0 = "
-    "unrelated; explain reason_vi in Vietnamese. Output ONLY the JSON object."
+    "their library. Work out what is being sold, who buys it, where and how they really use it, "
+    "its strongest selling points and its real details, then write a plan for a short review "
+    "clip of that product that looks like a real buyer filmed it on a phone (a small story: the "
+    "situation → the product in hand / on → it doing its job in real use → a satisfied ending). "
+    "hook: one line, the opening claim. style/tone: how the clip should feel. Every scene becomes "
+    "one AI-generated still image (image_prompt_en, English, photoreal phone photo, <= 480 chars: "
+    "where the phone is, framing, subject, action, the real place, light, texture; refer to 'the "
+    "product from the reference photo' and 'the model' instead of describing their looks) animated "
+    "into an 8-second clip (motion_prompt_en, English). Use only facts from the page — never invent "
+    "specs, prices, discounts or certifications. Use between 3 and 5 scenes. If a person suits the "
+    "product, describe a character to generate (gender, country, vibe 'casual', extras_en with "
+    "everyday hair and clothes that fit the buyer); otherwise character is null. product_seen: the "
+    "product's name as the page states it. scenes: leave empty. match: whether the user's chosen "
+    "product is the same kind of thing the page sells; score 1.0 = same kind, 0.0 = unrelated; "
+    "explain reason_vi in Vietnamese.\n"
 )
+_SYSTEM = reference_video.system_prompt(_SYSTEM_HEAD, False)
 
 # Same shape as the video analysis, minus the beat-by-beat breakdown there is
 # no video to read it from.
@@ -306,7 +307,7 @@ PLAN_MODEL = "gemini-3.5-flash"
 
 
 async def analyze(url: str, product: Optional[dict], *, scenes: Optional[int] = None,
-                  model: Optional[str] = None) -> dict[str, Any]:
+                  model: Optional[str] = None, voiceless: bool = False) -> dict[str, Any]:
     """The adapted plan for the product at ``url``; the fetched page's
     ``title`` / ``image_url`` ride along as ``page``."""
     if not model or model == gemini_api.DEFAULT_MODEL:
@@ -324,7 +325,8 @@ async def analyze(url: str, product: Optional[dict], *, scenes: Optional[int] = 
         ask.append(f"Use exactly {n} scenes in the plan.")
     try:
         text = await gemini_api.generate_text(
-            "\n\n".join(ask), system=_SYSTEM, model=model, response_schema=_SCHEMA, timeout=180.0,
+            "\n\n".join(ask), system=reference_video.system_prompt(_SYSTEM_HEAD, voiceless), model=model,
+            response_schema=_SCHEMA, timeout=180.0,
         )
         data = gemini_api.parse_json(text)
     except gemini_api.GeminiAPIError as exc:
@@ -332,7 +334,7 @@ async def analyze(url: str, product: Optional[dict], *, scenes: Optional[int] = 
     except ValueError as exc:
         raise ProductLinkError(f"Gemini returned invalid JSON: {exc}") from exc
     try:
-        analysis = reference_video.normalize(data, product)
+        analysis = reference_video.normalize(data, product, voiceless=voiceless)
     except reference_video.ReferenceVideoError as exc:
         raise ProductLinkError(str(exc)) from exc
     analysis["page"] = {"url": page["url"], "title": page["title"], "image_url": page["image_url"]}

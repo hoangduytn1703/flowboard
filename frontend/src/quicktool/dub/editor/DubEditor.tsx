@@ -3,9 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { announceRunning } from "../../../components/BackgroundTasks";
 import { detectBands } from "../../../api/clean";
 import {
-  canvasSize, DEFAULT_BLUR, dubFilmstripUrl, dubSubtitleLines, dubWaveUrl, layoutBlurs, linesAreVietnamese, MAX_BLURS, normHighlights,
-  normLayout, pickDubHighlights, renderDub, stopDub, subLangName, withBlurs,
-  type DubEngine, type DubHighlights, type DubJob, type DubLayout, type DubRender, type DubStatus, type SubLang,
+  canvasSize, checkDubNames, DEFAULT_BLUR, dubFilmstripUrl, dubSubtitleLines, dubWaveUrl, layoutBlurs, linesAreVietnamese, MAX_BLURS,
+  normHighlights, normLayout, normNames, pickDubHighlights, renderDub, stopDub, subLangName, withBlurs,
+  type DubEngine, type DubHighlights, type DubJob, type DubLayout, type DubName, type DubRender, type DubStatus, type SubLang,
 } from "../../../api/dub";
 import { FormatBar, sourceBoxToFrame } from "./FormatBar";
 import { platformOf, type PlatformKey } from "./platforms";
@@ -30,6 +30,7 @@ function docFrom(job: DubJob): EditDoc {
     style: job.style,
     highlights: normHighlights(job.highlights),
     lang: job.sub_lang ?? "vi",
+    names: normNames(job.names),
   };
 }
 function outFrom(job: DubJob): OutSettings {
@@ -102,6 +103,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
   const [applyingAll, setApplyingAll] = useState(false);
   const [picking, setPicking] = useState(false);
   const [langBusy, setLangBusy] = useState(false);
+  const [namesBusy, setNamesBusy] = useState(false);
   const [showResult, setShowResult] = useState(false);
   const stage = useRef<StageHandle>(null);
   const timeline = useRef<TimelineHandle>(null);
@@ -298,6 +300,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
   const styleDirty = doc.style !== job.style;
   const hlDirty = !sameJson(doc.highlights, normHighlights(job.highlights));
   const langDirty = doc.lang !== (job.sub_lang ?? "vi");
+  const namesDirty = !sameJson(normNames(doc.names), normNames(job.names));
   // a voice-over reads Vietnamese: lines in another language must be translated back first
   const langBlocked = out.mode === "dub" && !linesAreVietnamese(doc.lang, job.language);
   const subOnly = out.mode === "sub";
@@ -310,6 +313,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
     lookEdits ? `${lookEdits} câu chỉnh riêng vị trí / cỡ` : "",
     modeDirty ? (subOnly ? "chuyển sang chỉ phụ đề" : "chuyển sang lồng tiếng") : "",
     langDirty ? `phụ đề ${subLangName(doc.lang, job.language)}` : "",
+    namesDirty ? "tên riêng" : "",
     voiceDirty ? "giọng đọc" : "",
     layoutDirty ? "vị trí / khung / vùng mờ" : "",
     styleDirty ? "kiểu chữ" : "",
@@ -318,7 +322,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
   ].filter(Boolean);
   const dirty = changes.length > 0;
   // subtitles only never reads a voice; a voice-over reads it again when lines / timings / the voice changed
-  const needVoice = !subOnly && (textEdits > 0 || timeEdits > 0 || voiceDirty || !job.voice_url);
+  const needVoice = !subOnly && (textEdits > 0 || timeEdits > 0 || voiceDirty || namesDirty || !job.voice_url);
   const neverRendered = job.status === "review" || !job.media_url;
 
   useEffect(() => {
@@ -335,7 +339,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
       const body: DubRender = {
         lines: doc.cues.map((c) => c.text), style: doc.style, layout: doc.layout, highlights: doc.highlights,
         voice: out.voice, engine: out.engine, keep_bgm: out.keepBgm, name: out.name.trim(), channel_id: out.channelId,
-        mode: out.mode, sub_lang: doc.lang,
+        mode: out.mode, sub_lang: doc.lang, names: normNames(doc.names),
       };
       if (timeEdits) body.timings = doc.cues.map((c) => [c.start, c.end]);
       if (lookEdits || customCount) body.looks = doc.cues.map((c) => cleanLook(c.look));
@@ -371,6 +375,27 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
       toast.error(errMessage(e));
     } finally {
       setLangBusy(false);
+    }
+  }
+  /** "✨ AI rà tên riêng": the names Google got wrong fixed in the lines + their Vietnamese reading — one undo step. */
+  async function checkNames() {
+    if (readOnly || namesBusy) return;
+    setNamesBusy(true);
+    try {
+      const r = await checkDubNames(job.job_id, docRef.current.cues.map((c) => c.text));
+      const fixed = Object.keys(r.fixes).length;
+      change((d) => {
+        // the user's own entries stay; the AI's are added after them
+        const names: DubName[] = normNames([...d.names, ...r.names]);
+        return { ...d, names, cues: d.cues.map((c, i) => (r.fixes[String(i)] !== undefined ? { ...c, text: r.fixes[String(i)] } : c)) };
+      });
+      toast.success(fixed || r.names.length
+        ? `AI sửa tên riêng ở ${fixed} câu, ghi cách đọc ${r.names.length} tên — xem lại ở “📜 Các câu” rồi bấm Xuất lại video (Ctrl+Z để bỏ).`
+        : "AI không thấy tên riêng nào sai.");
+    } catch (e) {
+      toast.error(errMessage(e));
+    } finally {
+      setNamesBusy(false);
     }
   }
   function close() {
@@ -616,6 +641,10 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
             onPickPoint: (i) => { setSel({ kind: "hl", i }); const p = doc.highlights.points[i]; if (p) stage.current?.seek(p.at + 0.01); },
           }}
           lang={{ value: doc.lang, source: job.language, busy: langBusy, set: (l) => void setSubLang(l) }}
+          names={{
+            value: doc.names, set: (names, key) => change((d) => ({ ...d, names }), key), check: () => void checkNames(),
+            checking: namesBusy, note: job.names_note ?? "", voiced: !subOnly,
+          }}
           cutPane={
             <CutPane job={job} cues={doc.cues} duration={total} now={time} dirty={dirty} readOnly={readOnly}
                      onSeek={(t) => stage.current?.seek(t)} onPlayRange={(a, b) => stage.current?.playRange(a, b)} onJob={onJob} />

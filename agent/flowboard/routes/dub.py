@@ -65,6 +65,8 @@ class RenderBody(BaseModel):
     mode: Optional[str] = Field(default=None, pattern="^(dub|sub)$")
     # the language the lines are in now (the editor re-translated them: POST /jobs/{id}/subtitles)
     sub_lang: Optional[str] = Field(default=None, pattern="^(vi|orig|en|zh|ja|ko|th|id|es|fr|de|pt|ru)$")
+    # "🔤 Tên riêng": [{write, say}] — the subtitle shows `write`, the voice reads `say` (services/dub_names)
+    names: Optional[list[dict[str, Any]]] = Field(default=None, max_length=200)
 
 
 @router.get("/status")
@@ -169,7 +171,7 @@ async def render(job_id: str, body: RenderBody) -> dict[str, Any]:
         sent = body.model_dump(exclude_unset=True)
         dub.render_job(job, lines=body.lines, voice=body.voice, style=body.style, keep_bgm=body.keep_bgm,
                        name=body.name, layout=body.layout, engine=body.engine, timings=body.timings, looks=body.looks,
-                       highlights=body.highlights, mode=body.mode, sub_lang=body.sub_lang,
+                       highlights=body.highlights, mode=body.mode, sub_lang=body.sub_lang, names=body.names,
                        **({"channel_id": body.channel_id} if "channel_id" in sent else {}))
     except dub.DubError as exc:
         raise HTTPException(400, str(exc))
@@ -178,6 +180,32 @@ async def render(job_id: str, body: RenderBody) -> dict[str, Any]:
 
 class SubLangBody(BaseModel):
     lang: str = Field(pattern="^(vi|orig|en|zh|ja|ko|th|id|es|fr|de|pt|ru)$")
+
+
+class NamesBody(BaseModel):
+    # the lines as they are in the editor now (default: the saved ones)
+    lines: Optional[list[str]] = Field(default=None, max_length=2000)
+
+
+@router.post("/jobs/{job_id}/names")
+async def check_names(job_id: str, body: NamesBody) -> dict[str, Any]:
+    """"🔤 Tên riêng → ✨ AI rà tên riêng": the lines whose names Google got wrong, corrected, and how a
+    Vietnamese voice should read the foreign names — nothing is saved; the editor puts them in (one undo step)
+    and the next export keeps them. → {fixes: {line index: text}, names: [{write, say}]}"""
+    from flowboard.services import dub_names
+
+    job = _job(job_id)
+    if not job.segments:
+        raise HTTPException(400, "Video này chưa có câu nào")
+    lines = body.lines if body.lines is not None else [s.text for s in job.segments]
+    if len(lines) != len(job.segments):
+        raise HTTPException(400, "Số câu không khớp")
+    try:
+        fixes, names = await dub_names.check([s.src for s in job.segments], [str(x or "") for x in lines],
+                                             title=job.title, language=job.language)
+    except dub_names.NamesError as exc:
+        raise HTTPException(400, f"Không rà được tên riêng: {exc}")
+    return {"fixes": {str(i): text for i, text in sorted(fixes.items())}, "names": names}
 
 
 @router.post("/jobs/{job_id}/subtitles")

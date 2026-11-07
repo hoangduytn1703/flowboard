@@ -3,7 +3,7 @@
   "category": "home",
   "order": 50,
   "title": "Review đồ gia dụng",
-  "blurb": "4 cảnh review tại nhà: khổ sở khi chưa có, mở hộp, dùng thử tính năng chính, kết quả + nhận xét. Quay người hoặc chỉ bàn tay đều được.",
+  "blurb": "Review tại nhà như quay thật: khổ sở khi làm tay, mở hộp, bật lên dùng thử, việc xong và nhà gọn. Quay người hoặc chỉ bàn tay đều được.",
   "scenes": 4,
   "inputs": [
     {
@@ -28,7 +28,7 @@
       "key": "setting",
       "label": "Bối cảnh",
       "placeholder": "ví dụ: bếp nhà sáng, mặt bàn trắng",
-      "default": "a bright modern Vietnamese home kitchen with white counters and morning light"
+      "default": "a real Vietnamese home kitchen with a slightly busy counter, a dish rack and morning light from the window"
     },
     {
       "key": "charGender",
@@ -93,7 +93,7 @@
   ],
   "character": {
     "charVibe": "casual",
-    "charExtras": "early 30s, homely, warm expression, hair tied back"
+    "charExtras": "early 30s, homely, hair tied back, house clothes"
   },
   "nodes": [
     {
@@ -101,7 +101,7 @@
       "type": "note",
       "data": {
         "title": "Kịch bản",
-        "prompt": "Review {{product}} — 4 cảnh × 8 s\n\n1. Vấn đề: làm việc nhà theo cách cũ, mệt và bừa; hộp sản phẩm còn nguyên ở phía sau.\n2. Mở hộp: tay mở hộp, nhấc sản phẩm ra, nhìn qua một lượt.\n3. Dùng thử: bật lên, tính năng chính đang chạy.\n4. Kết quả: nhà gọn sạch, nhận xét và chấm điểm, chừa chỗ cho chữ.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh sản phẩm thật (bước 1) → tạo Người review (bước 1) → tạo ảnh từng cảnh (bước 3) → tạo video từng cảnh (bước 4, Omni Flash 8 s) → ghép + lồng tiếng (bước 5).\nLồng tiếng: mỗi cảnh có sẵn một câu thoại tiếng Việt (sửa ở bước 2); bước 5 đọc giọng + phụ đề rồi ghép thành clip hoàn chỉnh."
+        "prompt": "Review {{product}} — 4 cảnh × 8 s\n\n1. Vấn đề: làm việc nhà theo cách cũ, mệt và bừa; hộp sản phẩm còn nguyên phía sau.\n2. Mở hộp: tay mở nắp, nhấc sản phẩm ra, xoay xem một lượt.\n3. Dùng thử: bấm nút, tính năng chính chạy, ghé lại xem.\n4. Kết quả: lau bếp lần cuối, nhìn việc đã xong, thở phào.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh sản phẩm thật (bước 1) → tạo Người review (bước 1) → tạo ảnh từng cảnh (bước 3) → tạo video từng cảnh (bước 4, Omni Flash 8 s) → ghép + lồng tiếng (bước 5).\nLồng tiếng: mỗi cảnh có sẵn một câu thoại tiếng Việt (sửa ở bước 2); bước 5 đọc giọng + phụ đề rồi ghép thành clip hoàn chỉnh."
       }
     },
     {
@@ -123,7 +123,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 1 - Vấn đề",
-        "prompt": "Candid medium shot of the model in {{setting}} doing a chore the old, hard way ({{pain}}), slightly tired and frustrated, cluttered counter, flat ordinary light. {{product}} still in its unopened box sits on the counter in the background. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "prompt": "Vertical phone video still filmed by a family member: the model in {{setting}} doing a chore the old, hard way ({{pain}}), slightly tired, face partly turned away, the counter cluttered, {{product}} still in its unopened box on the counter behind. Flat everyday light, house clothes. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -131,7 +131,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 2 - Mở hộp",
-        "prompt": "Top-down close-up of the model's hands opening the box and lifting out {{product}}, in {{setting}}. Soft daylight, product sharp and centred, packaging foam and manual beside it. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "prompt": "Vertical phone photo from above: the model's hands open the box and lift out {{product}} on the kitchen counter, packaging and the manual beside it, in {{setting}}. Morning window light, real cardboard texture. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -139,7 +139,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 3 - Dùng thử",
-        "prompt": "Medium close-up of the model using {{product}} for its main job in {{setting}}, the key feature clearly in action, a hand on the controls. Bright clean light, product prominent and in focus. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "prompt": "Vertical phone video still filmed at counter height: the model uses {{product}} for its main job in {{setting}}, the key feature working, a hand on the controls, the face partly out of frame. Natural kitchen light, everyday clutter around. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -147,7 +147,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 4 - Kết quả",
-        "prompt": "Medium shot of the model standing beside {{product}} in a now tidy {{setting}}, the finished result visible (clean, done, ready), looking at the camera with a satisfied nod, clean space on one side for text. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "prompt": "Vertical phone video still: the model wipes the now tidy counter beside {{product}}, the finished result visible (clean, done, ready), relaxed, face three-quarters, in {{setting}}. Morning light, a real home kitchen. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -155,7 +155,7 @@
       "type": "video",
       "data": {
         "title": "Video 1 - Vấn đề",
-        "prompt": "0-3s: the model keeps at the chore by hand and sighs. 3-6s: wipes the brow and glances at the boxed product behind. 6-8s: reaches toward the box. Locked-off camera.",
+        "prompt": "0-3s: the model keeps at the chore by hand and sighs. 3-6s: wipes the forehead with the back of the wrist and glances at the box behind. 6-8s: reaches toward the box. Handheld phone with a small natural shake. Audio: the chore's own sounds (scrubbing, chopping), a tired exhale.",
         "narration": "Trước giờ làm tay vừa lâu vừa mệt, nên mình mua thử {{product_name}} về xem sao."
       }
     },
@@ -164,8 +164,8 @@
       "type": "video",
       "data": {
         "title": "Video 2 - Mở hộp",
-        "prompt": "0-3s: hands lift the lid off the box. 3-6s: the product is lifted out and turned over. 6-8s: it is held toward the camera. Locked-off top-down camera.",
-        "narration": "Mở hộp ra là thấy chắc chắn, phụ kiện đầy đủ, nhìn xịn hơn mình nghĩ."
+        "prompt": "0-3s: hands pull the box flaps open. 3-6s: lift the product out and turn it over once. 6-8s: set it down on the counter. Phone held above with a tiny natural sway. Audio: cardboard flaps, plastic wrap crinkling.",
+        "narration": "Mở hộp ra thấy chắc tay, đồ đi kèm đầy đủ."
       }
     },
     {
@@ -173,8 +173,8 @@
       "type": "video",
       "data": {
         "title": "Video 3 - Dùng thử",
-        "prompt": "0-3s: a hand presses the control and the product starts working. 3-6s: the key feature runs, the result visible. 6-8s: the model leans in, impressed. Locked-off camera, product stays in frame.",
-        "narration": "Bật lên là chạy êm ru, xong việc trong vài phút, không phải đụng tay nhiều."
+        "prompt": "0-3s: a hand presses the control and the product starts working. 3-6s: the main job happens, the result visible. 6-8s: the model leans in to look closer. Handheld phone with subtle shake. Audio: the button click, the motor's steady hum.",
+        "narration": "Bấm một cái là chạy, mình đứng coi thôi chứ không phải đụng tay nhiều."
       }
     },
     {
@@ -182,8 +182,8 @@
       "type": "video",
       "data": {
         "title": "Video 4 - Kết quả",
-        "prompt": "0-3s: the model gestures at the tidy result. 3-6s: a thumbs-up at the camera. 6-8s: a warm smile held. Locked-off camera, clean space on one side.",
-        "narration": "Mình chấm {{product_name}} chín điểm, nhà nào cũng nên có một cái, link ở giỏ hàng nha."
+        "prompt": "0-3s: the model wipes the counter one last time. 3-6s: looks at the finished result with a relieved exhale. 6-8s: picks up a cup and leans on the counter. Handheld phone. Audio: a cloth on the counter, a cup set down.",
+        "narration": "Nhà ai hay làm việc này thì xem giỏ hàng nha, đỡ mệt lắm."
       }
     }
   ],

@@ -12,6 +12,7 @@ from typing import Any, Optional
 
 from flowboard.db import get_session
 from flowboard.db.models import Board
+from flowboard.services import clip_style
 from flowboard.services.board_builder import build_board as _build_board
 from flowboard.services.llm import gemini_api
 from flowboard.services.templates import PersonRequiredError, apply_product, with_hands
@@ -27,25 +28,41 @@ MIN_SCENES = 2
 _CATEGORY_VI = {"fashion": "thời trang", "cosmetics": "mỹ phẩm", "food": "đồ ăn / uống", "grocery": "tạp hoá / phụ kiện",
                 "home": "gia dụng", "other": "khác"}
 
-_SYSTEM = (
+_SYSTEM_HEAD = (
     "You are a director for short TikTok Shop / affiliate product videos in Vietnam. "
     "You get an existing ad video and, optionally, the product the user actually sells. "
     "First analyse the video: what it sells, its hook, structure, camera work, pacing, "
     "on-screen text and voice-over. Then write a plan for a NEW video that keeps the same "
     "structure, hook and energy but sells the user's product (or the same kind of product "
-    "if none is given). Every scene becomes one AI-generated still image (image_prompt_en, "
-    "English, photoreal, <= 480 chars, describe shot size, subject, action, setting, light; "
+    "if none is given), and looks like a real buyer filmed it on a phone. Every scene becomes "
+    "one AI-generated still image (image_prompt_en, English, photoreal phone photo, <= 480 "
+    "chars: where the phone is, framing, subject, action, the real place, light, texture; "
     "refer to 'the product from the reference photo' and 'the model' instead of describing "
-    "their looks) animated into an 8-second clip (motion_prompt_en, English, 2-3 beats like "
-    "'0-3s … 3-6s … 6-8s', locked-off camera unless the video pans) with one spoken "
-    "Vietnamese line (narration_vi, natural spoken Vietnamese, ngôi 'mình', <= 24 words, "
-    "first line hooks and names the product, last line is a call to action). "
+    "their looks) animated into an 8-second clip (motion_prompt_en, English). Follow the "
+    "video's camera work: a still shot becomes a propped phone, a moving one a handheld phone. "
     "Use between 2 and 6 scenes; merge beats that are too short. If the video shows a "
-    "person, describe a character to generate (gender, country, vibe, extras_en); otherwise "
-    "character is null. match: whether the user's product is the same kind of thing the "
-    "video advertises — a food ad does not fit a t-shirt. score 1.0 = same kind, 0.0 = "
-    "unrelated. Explain reason_vi in Vietnamese. Output ONLY the JSON object."
+    "person, describe a character to generate (gender, country, vibe 'casual' unless the "
+    "video's look clearly calls for another, extras_en with everyday hair and clothes); "
+    "otherwise character is null. match: whether the user's product is the same kind of thing "
+    "the video advertises — a food ad does not fit a t-shirt. score 1.0 = same kind, 0.0 = "
+    "unrelated. Explain reason_vi in Vietnamese.\n"
 )
+
+
+def plan_rules(voiceless: bool) -> str:
+    """The look / motion rules of a plan's scenes, and how narration_vi is written."""
+    if voiceless:
+        voice = clip_style.VOICELESS_RULES.replace("an empty voice", "an empty narration_vi")
+    else:
+        voice = clip_style.voice_rules(24).replace("VOICE (voice,", "VOICE (narration_vi,")
+    return clip_style.LOOK_RULES + clip_style.MOTION_RULES.replace("(video_prompt;", "(motion_prompt_en;") + voice
+
+
+def system_prompt(head: str, voiceless: bool) -> str:
+    return head + plan_rules(voiceless) + "Output ONLY the JSON object."
+
+
+_SYSTEM = system_prompt(_SYSTEM_HEAD, False)
 
 _SCHEMA = {
     "type": "OBJECT",
@@ -131,7 +148,7 @@ def _product_brief(product: Optional[dict]) -> str:
 
 
 async def analyze(video_path: Path, product: Optional[dict], *, scenes: Optional[int] = None,
-                  model: str = gemini_api.DEFAULT_MODEL) -> dict[str, Any]:
+                  model: str = gemini_api.DEFAULT_MODEL, voiceless: bool = False) -> dict[str, Any]:
     """Gemini's analysis + adapted plan for ``video_path``. Adds
     ``blocked`` when the product does not fit the video."""
     if not video_path.is_file():
@@ -145,19 +162,20 @@ async def analyze(video_path: Path, product: Optional[dict], *, scenes: Optional
     try:
         text = await gemini_api.generate_with_media(
             [], video_path, [gemini_api.text_part("\n\n".join(ask))],
-            model=model, system=_SYSTEM, response_schema=_SCHEMA, timeout=300.0,
+            model=model, system=system_prompt(_SYSTEM_HEAD, voiceless), response_schema=_SCHEMA, timeout=300.0,
         )
         data = gemini_api.parse_json(text)
     except gemini_api.GeminiAPIError as exc:
         raise ReferenceVideoError(str(exc)) from exc
     except ValueError as exc:
         raise ReferenceVideoError(f"Gemini returned invalid JSON: {exc}") from exc
-    return normalize(data, product)
+    return normalize(data, product, voiceless=voiceless)
 
 
-def normalize(data: dict[str, Any], product: Optional[dict]) -> dict[str, Any]:
+def normalize(data: dict[str, Any], product: Optional[dict], *, voiceless: bool = False) -> dict[str, Any]:
     """Defensive shaping of the model's answer: scene count bounds, the
-    match verdict, category label — and the block decision."""
+    match verdict, category label — and the block decision. ``voiceless``
+    drops every voice line ("🔇 Không lời")."""
     if not isinstance(data, dict):
         raise ReferenceVideoError("analysis is not an object")
     plan = [p for p in (data.get("plan") or []) if isinstance(p, dict) and p.get("image_prompt_en")]
@@ -166,7 +184,7 @@ def normalize(data: dict[str, Any], product: Optional[dict]) -> dict[str, Any]:
     plan = plan[:MAX_SCENES]
     for i, p in enumerate(plan, start=1):
         p.setdefault("title_vi", f"Cảnh {i}")
-        p["narration_vi"] = str(p.get("narration_vi") or "").strip()
+        p["narration_vi"] = "" if voiceless else str(p.get("narration_vi") or "").strip()
         p["motion_prompt_en"] = str(p.get("motion_prompt_en") or "").strip()
     category = data.get("category") if data.get("category") in CATEGORIES else "other"
     match = data.get("match") if isinstance(data.get("match"), dict) else {}
@@ -191,6 +209,7 @@ def normalize(data: dict[str, Any], product: Optional[dict]) -> dict[str, Any]:
             "reason_vi": str(match.get("reason_vi") or ""),
         },
         "blocked": blocked,
+        "voiceless": voiceless,
     }
     if blocked:
         out["block_reason"] = (
@@ -240,7 +259,8 @@ def _character_for(analysis: dict[str, Any], product: Optional[dict], pick: Char
     return suggested, None
 
 
-def board_spec(analysis: dict[str, Any], product: Optional[dict], character_pick: CharacterPick = None) -> dict:
+def board_spec(analysis: dict[str, Any], product: Optional[dict], character_pick: CharacterPick = None,
+               *, voiceless: bool = False) -> dict:
     """A board spec in the same shape the templates use."""
     plan = analysis["plan"]
     character, hands = _character_for(analysis, product, character_pick)
@@ -259,6 +279,8 @@ def board_spec(analysis: dict[str, Any], product: Optional[dict], character_pick
     ).strip()
     if hands:
         script += "\nChế độ chỉ quay bàn tay: không có người mẫu, không lộ mặt."
+    if voiceless:
+        script += "\n" + clip_style.NOTE_VOICELESS
     nodes.append({"key": "script", "type": "note", "data": {"title": "Kịch bản", "prompt": script}})
     refs: list[str] = []
     if character:
@@ -266,7 +288,7 @@ def board_spec(analysis: dict[str, Any], product: Optional[dict], character_pick
             "title": "Người mẫu",
             "charGender": character.get("gender", "female"),
             "charCountry": character.get("country", "vn"),
-            "charVibe": character.get("vibe", "clean"),
+            "charVibe": character.get("vibe", "casual"),
             "charExtras": str(character.get("extras_en") or "")[:200],
         }})
         refs.append("model")
@@ -282,7 +304,7 @@ def board_spec(analysis: dict[str, Any], product: Optional[dict], character_pick
         nodes.append({"key": f"v{i}", "type": "video", "data": {
             "title": f"Video {i} - {p['title_vi']}"[:80],
             "prompt": shot(p.get("motion_prompt_en") or ""),
-            "narration": p.get("narration_vi") or "",
+            "narration": "" if voiceless else (p.get("narration_vi") or ""),
         }})
         for r in refs:
             edges.append([r, f"s{i}"])
@@ -293,9 +315,10 @@ def board_spec(analysis: dict[str, Any], product: Optional[dict], character_pick
 
 def build_board(analysis: dict[str, Any], product: Optional[dict], *, name: Optional[str],
                 source_media_id: Optional[str], source_url: Optional[str] = None,
-                character_pick: CharacterPick = None, channel_id: Optional[int] = None) -> dict[str, Any]:
+                character_pick: CharacterPick = None, channel_id: Optional[int] = None,
+                voiceless: bool = False) -> dict[str, Any]:
     """Create the board for the plan. Returns ``{id, name, nodes}``."""
-    spec = board_spec(analysis, product, character_pick)
+    spec = board_spec(analysis, product, character_pick, voiceless=voiceless)
     _, hands = _character_for(analysis, product, character_pick)
     base = (product.get("name") if product else None) or analysis.get("product_seen") or "Clip"
     from_link = source_media_id is None
@@ -311,6 +334,7 @@ def build_board(analysis: dict[str, Any], product: Optional[dict], *, name: Opti
             "source_media_id": source_media_id,
             "source_url": source_url,
             "hands": hands,
+            **({"voiceless": True} if voiceless else {}),
             "reference": {
                 "category": analysis.get("category"),
                 "hook": analysis.get("hook"),

@@ -1564,6 +1564,7 @@ class WorkerController:
             except Exception:  # noqa: BLE001
                 logger.exception("account_pool.note_result failed")
 
+            warm_clip: Optional[tuple[Optional[int], str]] = None
             with get_session() as s:
                 req = s.get(Request, rid)
                 if req is None:
@@ -1628,6 +1629,16 @@ class WorkerController:
                     node_status="error" if err else "done",
                     node_data_patch=node_patch,
                 )
+                if not err and req.type in PARALLEL_TYPES and node_patch and isinstance(node_patch.get("mediaId"), str):
+                    warm_clip = (req.node_id, node_patch["mediaId"])
+            # a scene clip landed: smoothed to 60 fps right away when its board wants it (services/smooth_prewarm)
+            if warm_clip is not None:
+                try:
+                    from flowboard.services import smooth_prewarm
+
+                    smooth_prewarm.after_clip(*warm_clip)
+                except Exception:  # noqa: BLE001 — a warm-up never fails the request
+                    logger.exception("worker: 60 fps warm-up not started for rid=%s", rid)
         except Exception as exc:  # noqa: BLE001
             logger.exception("worker exception on rid=%s", rid)
             try:

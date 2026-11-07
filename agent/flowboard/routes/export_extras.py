@@ -7,6 +7,8 @@
    style?}`` → ``{media_id}``: a 1080×1920 PNG cover rendered from a scene
    image with the title burned in (``video_export.render_cover``),
    registered as an image Asset so ``/media/{id}`` serves it.
+3. ``GET / POST /api/boards/{board_id}/smooth60``  → ``{total, ready, running}``: how many scenes already have their
+   60 fps copy / start smoothing them in the background now (services/smooth_prewarm).
 """
 from __future__ import annotations
 
@@ -122,3 +124,27 @@ def create_cover(board_id: int, body: CoverBody) -> dict[str, Any]:
     logger.info("cover: board %d → %s (%d bytes)", board_id, media_id, dst.stat().st_size)
     return {"media_id": media_id, "url": f"/media/{media_id}", "width": video_export.COVER_SIZE[0],
             "height": video_export.COVER_SIZE[1]}
+
+
+def _board_or_404(board_id: int) -> None:
+    with get_session() as s:
+        if s.get(Board, board_id) is None:
+            raise HTTPException(404, "Không thấy clip này.")
+
+
+@router.get("/api/boards/{board_id}/smooth60")
+def smooth60_status(board_id: int) -> dict[str, Any]:
+    """How many of the clip's scenes already have their 60 fps copy (made in the background, services/smooth_prewarm)."""
+    from flowboard.services import smooth_prewarm
+
+    _board_or_404(board_id)
+    return smooth_prewarm.board_status(board_id)
+
+
+@router.post("/api/boards/{board_id}/smooth60")
+def smooth60_warm(board_id: int) -> dict[str, Any]:
+    """"Mượt 60 fps" just turned on: the clip's scenes are smoothed in the background now, so "Ghép" does not wait."""
+    from flowboard.services import smooth_prewarm
+
+    _board_or_404(board_id)
+    return smooth_prewarm.warm_board(board_id)

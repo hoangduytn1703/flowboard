@@ -3,7 +3,7 @@
   "category": "any",
   "order": 70,
   "title": "Clip affiliate chung",
-  "blurb": "Dùng cho mọi ngành hàng. 4 cảnh: hook gây chú ý, nỗi đau của khách, sản phẩm giải quyết, kêu gọi \"link ở giỏ hàng\". Lấy mô tả sản phẩm làm nội dung.",
+  "blurb": "Dùng cho mọi ngành hàng, quay kiểu điện thoại: hook \"khoan, xem cái này\", nỗi khổ của khách, sản phẩm giải quyết, nhắc giỏ hàng. Lấy mô tả sản phẩm làm nội dung.",
   "scenes": 4,
   "inputs": [
     {
@@ -28,7 +28,7 @@
       "key": "setting",
       "label": "Bối cảnh",
       "placeholder": "ví dụ: phòng khách sáng, sofa xám",
-      "default": "a bright everyday Vietnamese living room with natural light"
+      "default": "a lived-in Vietnamese living room with a sofa, a small table and natural window light"
     },
     {
       "key": "charGender",
@@ -93,7 +93,7 @@
   ],
   "character": {
     "charVibe": "casual",
-    "charExtras": "mid 20s, energetic content creator, expressive face"
+    "charExtras": "mid 20s, everyday clothes, expressive face"
   },
   "nodes": [
     {
@@ -101,7 +101,7 @@
       "type": "note",
       "data": {
         "title": "Kịch bản",
-        "prompt": "Clip affiliate {{product}} — 4 cảnh × 8 s\n\n1. Hook: giơ sản phẩm sát camera, biểu cảm \"khoan, xem cái này\".\n2. Nỗi đau: cảnh khổ sở với cách cũ, sản phẩm để cạnh bên.\n3. Giải pháp: dùng sản phẩm, vấn đề biến mất, cười nhẹ nhõm.\n4. Kêu gọi: cầm sản phẩm, chỉ xuống giỏ hàng, chừa chỗ cho chữ ở dưới.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh sản phẩm thật (bước 1) → tạo Người mẫu (bước 1) → tạo ảnh từng cảnh (bước 3) → tạo video từng cảnh (bước 4, Omni Flash 8 s) → ghép + lồng tiếng (bước 5).\nLồng tiếng: mỗi cảnh có sẵn một câu thoại tiếng Việt (sửa ở bước 2); bước 5 đọc giọng + phụ đề rồi ghép thành clip hoàn chỉnh."
+        "prompt": "Clip affiliate {{product}} — 4 cảnh × 8 s\n\n1. Hook: tự quay, đưa sản phẩm sát điện thoại, mặt kiểu \"khoan, xem cái này\".\n2. Nỗi khổ: loay hoay với cách cũ, sản phẩm để bên cạnh.\n3. Giải quyết: dùng sản phẩm, vấn đề hết, thở phào nhìn kết quả.\n4. Nhắc giỏ hàng: cầm sản phẩm cạnh vai, chỉ xuống phía dưới màn hình.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh sản phẩm thật (bước 1) → tạo Người mẫu (bước 1) → tạo ảnh từng cảnh (bước 3) → tạo video từng cảnh (bước 4, Omni Flash 8 s) → ghép + lồng tiếng (bước 5).\nLồng tiếng: mỗi cảnh có sẵn một câu thoại tiếng Việt (sửa ở bước 2); bước 5 đọc giọng + phụ đề rồi ghép thành clip hoàn chỉnh."
       }
     },
     {
@@ -123,7 +123,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 1 - Hook",
-        "prompt": "Eye-catching medium close-up of the model holding {{product}} right up to the camera with a surprised \"wait, look at this\" expression, in {{setting}}. Punchy bright light, bold TikTok-style framing, product sharp and large in frame. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "prompt": "Vertical phone selfie at arm's length: the model holds {{product}} up close to the phone with a surprised 'wait, look at this' look, the face partly behind the product, in {{setting}}. Natural window light, everyday hair and clothes, slightly off-center framing. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -131,7 +131,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 2 - Nỗi đau",
-        "prompt": "Candid medium shot of the model frustrated by a problem that {{product}} solves ({{pain}}), in {{setting}}, with {{product}} set aside on a table nearby. Flat ordinary light, relatable everyday mess. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "prompt": "Vertical phone video still filmed by a friend: the model struggles with a problem that {{product}} solves ({{pain}}), in {{setting}}, with {{product}} set aside on a table nearby. Flat ordinary light, a relatable everyday mess. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -139,7 +139,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 3 - Giải pháp",
-        "prompt": "Medium close-up of the model using {{product}} with the problem visibly solved, a relieved happy smile, in {{setting}}. Bright clean light, product in use and prominent. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "prompt": "Vertical phone video still: the model uses {{product}} with the problem visibly solved, a relieved look at the result, face three-quarters, in {{setting}}. Natural light, the product in use and easy to see. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -147,7 +147,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 4 - Kêu gọi",
-        "prompt": "Medium shot of the model holding {{product}} in one hand and pointing down toward the bottom of the frame where the shopping-cart link sits, in {{setting}}. Bright flattering light, clean space at the bottom for text. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "prompt": "Vertical phone selfie at arm's length: the model holds {{product}} beside the shoulder and points down toward the bottom of the screen where the shop link is, in {{setting}}. Natural window light, a relaxed everyday look. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -155,8 +155,8 @@
       "type": "video",
       "data": {
         "title": "Video 1 - Hook",
-        "prompt": "0-3s: the model whips the product toward the lens. 3-6s: holds it still, eyebrows raised. 6-8s: a knowing nod. Locked-off camera, no zoom.",
-        "narration": "Khoan, đừng lướt, {{product_name}} này mình phải khoe cho mọi người xem."
+        "prompt": "0-3s: the model brings the product up toward the phone quickly. 3-6s: holds it still, eyebrows raised, mouth closed. 6-8s: a small knowing nod. Selfie at arm's length with natural hand shake. Audio: the product brushing a sleeve, room tone.",
+        "narration": "Khoan lướt đã, cái {{product_name}} này mình phải khoe liền."
       }
     },
     {
@@ -164,8 +164,8 @@
       "type": "video",
       "data": {
         "title": "Video 2 - Nỗi đau",
-        "prompt": "0-3s: the model struggles with the old way and sighs. 3-6s: shakes the head at the mess. 6-8s: glances at the product nearby. Locked-off camera.",
-        "narration": "Mọi người có hay bực mình vì chuyện này không, mình thì gặp hoài luôn."
+        "prompt": "0-3s: the model struggles with the old way and sighs. 3-6s: shakes the head at the mess. 6-8s: glances at the product nearby. Handheld phone with a small natural shake. Audio: the sounds of the struggle, a frustrated exhale.",
+        "narration": "Có ai giống mình, ngày nào cũng bực vì chuyện này không."
       }
     },
     {
@@ -173,8 +173,8 @@
       "type": "video",
       "data": {
         "title": "Video 3 - Giải pháp",
-        "prompt": "0-3s: the model picks up the product and uses it. 3-6s: the problem is gone, a relieved smile. 6-8s: a satisfied nod at the camera. Locked-off camera, product stays in frame.",
-        "narration": "Từ ngày có {{product_name}} là xong hết, nhanh gọn, đúng kiểu mình cần."
+        "prompt": "0-3s: the model picks up the product and uses it. 3-6s: the problem is gone. 6-8s: a relieved exhale, looking at the result. Handheld phone. Audio: the product's own sound, a relieved exhale.",
+        "narration": "Giờ có nó rồi là xong trong một nốt nhạc."
       }
     },
     {
@@ -182,8 +182,8 @@
       "type": "video",
       "data": {
         "title": "Video 4 - Kêu gọi",
-        "prompt": "0-3s: the model lifts the product beside the face. 3-6s: points down toward the cart link. 6-8s: a bright smile held. Locked-off camera, clean space at the bottom.",
-        "narration": "Ưng thì bấm vô giỏ hàng bên dưới nha, mình để link sẵn rồi đó."
+        "prompt": "0-3s: the model lifts the product beside the shoulder. 3-6s: points down toward the bottom of the screen. 6-8s: lowers the product with a small closed-mouth smile. Selfie at arm's length, natural shake. Audio: room tone, a soft laugh through the nose.",
+        "narration": "Ai đang gặp y chang thì bấm giỏ hàng bên dưới xem nha."
       }
     }
   ],

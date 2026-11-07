@@ -369,6 +369,10 @@ export interface DubJob {
   mode?: DubMode;
   /** the subtitles' language (SUB_LANGS) — "vi" unless subtitles only asked for another */
   sub_lang?: SubLang;
+  /** "🔤 Tên riêng": the subtitle shows `write`, the voice reads `say` */
+  names?: DubName[];
+  /** how the AI name check went after the translation ("" = not run) */
+  names_note?: string;
   /** "✂️ Cắt thành nhiều video": the rows being edited and the parts cut so far */
   cuts?: DubCutRow[];
   parts?: DubPart[];
@@ -437,6 +441,30 @@ export function linesAreVietnamese(lang: string | undefined, sourceLang: string 
   return (lang ?? "vi") === "vi" || base === "vi";
 }
 
+/** A proper name a Vietnamese voice would misread: the subtitle shows `write`, the voice reads `say`
+ * ("Einstein" → "Anh xtanh"). Mirrors services/dub_names. */
+export interface DubName { write: string; say: string }
+
+/** Same shape / order the agent keeps (dub_names.normalize_names), so the editor can tell when it changed. */
+export function normNames(raw: DubName[] | undefined): DubName[] {
+  const out: DubName[] = [];
+  const seen = new Set<string>();
+  for (const n of raw ?? []) {
+    const write = (n.write ?? "").replace(/\s+/g, " ").trim().slice(0, 60);
+    const say = (n.say ?? "").replace(/-/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
+    if (!write || seen.has(write.toLowerCase())) continue;
+    seen.add(write.toLowerCase());
+    out.push({ write, say: say || write });
+  }
+  return out;
+}
+
+/** "✨ AI rà tên riêng": the lines whose names Google got wrong, corrected, and the names' Vietnamese reading
+ * — for the lines as the editor holds them; nothing is saved. */
+export function checkDubNames(id: string, lines: string[]): Promise<{ fixes: Record<string, string>; names: DubName[] }> {
+  return post(`/api/dub/jobs/${id}/names`, { lines });
+}
+
 /** Every line in another language, from the source words (the editor's "Ngôn ngữ phụ đề"; nothing is saved). */
 export function dubSubtitleLines(id: string, lang: SubLang): Promise<{ lines: string[]; translated_by: string; lang: SubLang }> {
   return post(`/api/dub/jobs/${id}/subtitles`, { lang });
@@ -501,6 +529,8 @@ export interface DubRender {
   mode?: DubMode;
   /** the language the lines are in (after "Ngôn ngữ phụ đề") */
   sub_lang?: SubLang;
+  /** "🔤 Tên riêng" glossary: how the voice reads the foreign names */
+  names?: DubName[];
 }
 
 /** "✨ AI chọn chữ quan trọng": the key moments for the lines as the editor holds them, without rendering. */

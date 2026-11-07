@@ -42,6 +42,7 @@ import { buildCharacterPrompt } from "../lib/characterPrompt";
 import { deriveRoles, hasMedia, isBusy, type ClipRoles } from "../quicktool/roles";
 import { useBoardStore, type FlowNode } from "./board";
 import { useGenerationStore } from "./generation";
+import { useSettingsStore } from "./settings";
 import type { CountryKey, GenderKey, VibeKey } from "../constants/character";
 import { toast } from "./toast";
 import { checkModelNode, knownFlowCheck } from "../quicktool/flowModelCheck";
@@ -95,6 +96,10 @@ interface QuicktoolStore {
   _exportClip(): Promise<boolean>;
   // Drama clips: the play order (beat stills + spliced-in footage).
   isDrama(): boolean;
+  /** "🔇 Không lời": the clip has no voice-over and no subtitles (Board.data.quicktool.voiceless). */
+  isVoiceless(): boolean;
+  /** Turn "Không lời" on (every voice line is dropped) or off (empty lines are written by the AI). */
+  setVoiceless(on: boolean): Promise<void>;
   sequenceItems(): SequenceItem[];
   saveSequence(items: SequenceItem[]): void;
   moveSequenceItem(index: number, delta: number): void;
@@ -363,9 +368,10 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
       return null;
     }
     const dbId = parseInt(id, 10);
-    const title = "Clip hoàn chỉnh";
-    useBoardStore.getState().updateNodeData(id, { title });
-    if (!isNaN(dbId)) patchNode(dbId, { data: { title } }).catch(() => {});
+    // a new clip starts with the account's last "Mượt 60 fps" choice (its scenes may already be smoothed for it)
+    const data = { title: "Clip hoàn chỉnh", smooth60: useSettingsStore.getState().smooth60 };
+    useBoardStore.getState().updateNodeData(id, data);
+    if (!isNaN(dbId)) patchNode(dbId, { data }).catch(() => {});
     return id;
   },
 
@@ -450,6 +456,33 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
     } catch (err) {
       set({ error: `Upload thất bại: ${err instanceof Error ? err.message : "lỗi"}` });
       return false;
+    }
+  },
+
+  isVoiceless() {
+    const { boardId, boards } = useBoardStore.getState();
+    return !!(boards.find((b) => b.id === boardId)?.data?.quicktool as QuicktoolState | undefined)?.voiceless;
+  },
+
+  async setVoiceless(on) {
+    const boardId = useBoardStore.getState().boardId;
+    if (boardId === null) return;
+    const current = (useBoardStore.getState().boards.find((b) => b.id === boardId)?.data?.quicktool ?? {}) as QuicktoolState;
+    useBoardStore.setState((s) => ({
+      boards: s.boards.map((b) => b.id === boardId
+        ? { ...b, data: { ...(b.data ?? {}), quicktool: { ...current, voiceless: on } } } : b),
+    }));
+    await patchBoardData(boardId, { quicktool: { voiceless: on } }).catch(() => {});
+    const videos = get().roles().scenes.map((s) => s.video).filter((v): v is FlowNode => !!v);
+    if (on) {
+      for (const v of videos) {
+        if (typeof v.data.narration !== "string" || !v.data.narration) continue;
+        useBoardStore.getState().updateNodeData(v.id, { narration: "" });
+        const dbId = parseInt(v.id, 10);
+        if (!isNaN(dbId)) patchNode(dbId, { data: { narration: "" } }).catch(() => {});
+      }
+    } else if (videos.length && videos.every((v) => !(typeof v.data.narration === "string" && v.data.narration.trim()))) {
+      await get().writeNarrations();
     }
   },
 
@@ -665,7 +698,8 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
       }
       if (!stillRunning(get)) return;
 
-      const missing = !get().isDrama()
+      // A "🔇 Không lời" clip is joined with its own sounds: no voice lines to write.
+      const missing = !get().isDrama() && !get().isVoiceless()
         && get().roles().scenes.some((s) => s.video && !(typeof s.video.data.narration === "string" && s.video.data.narration.trim()));
       if (missing) {
         set({ auto: "narration", autoMessage: "Viết lời thoại…" });
@@ -673,7 +707,7 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
       }
       if (!stillRunning(get)) return;
 
-      set({ auto: "export", autoMessage: "Ghép clip + lồng tiếng…" });
+      set({ auto: "export", autoMessage: get().isVoiceless() ? "Ghép clip…" : "Ghép clip + lồng tiếng…" });
       if (!(await get().exportClip())) throw new Error(get().error ?? "xuất video");
       const exp = get().roles().export;
       if (exp) await waitForNode(exp.id, hasMedia);

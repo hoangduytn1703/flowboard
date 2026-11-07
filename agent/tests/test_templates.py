@@ -128,7 +128,7 @@ def test_render_fills_inputs_and_character_picks():
     assert "a rooftop at dusk" in by_key["s1"]["data"]["prompt"]
     assert by_key["model"]["data"]["charGender"] == "male"
     assert by_key["model"]["data"]["charCountry"] == "jp"
-    assert by_key["model"]["data"]["charVibe"] == "clean"  # template default kept
+    assert by_key["model"]["data"]["charVibe"] == "casual"  # template default kept
 
 
 def test_create_board_from_template_route(client):

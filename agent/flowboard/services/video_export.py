@@ -187,11 +187,21 @@ def _encode_args(ffmpeg: str) -> list[str]:
     return ["-c:v", "libx264", "-preset", "fast", "-crf", "18"]
 
 
-def _run(cmd: list[str], timeout: int) -> Optional[str]:
-    """Run ffmpeg; None on success, else the stderr tail."""
+def _low_priority_kwargs() -> dict[str, Any]:
+    """subprocess options that run a background ffmpeg below normal priority (Windows class / POSIX nice)."""
+    import sys
+
+    if sys.platform == "win32":
+        return {"creationflags": getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)}
+    return {"preexec_fn": lambda: os.nice(10)}  # noqa: PLW1509 — only sets the child's niceness
+
+
+def _run(cmd: list[str], timeout: int, low_priority: bool = False) -> Optional[str]:
+    """Run ffmpeg; None on success, else the stderr tail. ``low_priority`` = work nobody is waiting on (the 60 fps
+    warm-up) yields the CPU to everything else."""
     try:
         proc = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                              timeout=timeout, check=False)
+                              timeout=timeout, check=False, **(_low_priority_kwargs() if low_priority else {}))
     except subprocess.TimeoutExpired:
         return f"timed out after {timeout}s"
     except OSError as exc:
@@ -202,7 +212,7 @@ def _run(cmd: list[str], timeout: int) -> Optional[str]:
     return None
 
 
-def smooth_to_60fps(src: Path, dst: Path) -> Optional[str]:
+def smooth_to_60fps(src: Path, dst: Path, low_priority: bool = False) -> Optional[str]:
     """Interpolate ``src`` to 60 fps into ``dst``. None on success, else why."""
     ffmpeg = shutil.which("ffmpeg")
     if ffmpeg is None:
@@ -210,7 +220,7 @@ def smooth_to_60fps(src: Path, dst: Path) -> Optional[str]:
     cmd = [ffmpeg, "-y", "-i", str(src), "-vf", _MINTERPOLATE,
            *_encode_args(ffmpeg), "-pix_fmt", "yuv420p",
            "-c:a", "copy", "-movflags", "+faststart", str(dst)]
-    err = _run(cmd, _SMOOTH_TIMEOUT_S)
+    err = _run(cmd, _SMOOTH_TIMEOUT_S, low_priority=low_priority)
     if err is None and not dst.is_file():
         return "no output file"
     return err
@@ -220,18 +230,23 @@ _smooth_locks: dict[str, threading.Lock] = {}
 _smooth_locks_guard = threading.Lock()
 
 
-def smoothed_copy(src: Path, cache_dir: Path) -> tuple[Path, Optional[str]]:
+def smoothed_path(src: Path, cache_dir: Path) -> Path:
+    """Where :func:`smoothed_copy` keeps the 60 fps copy of ``src`` (named by the source file + its size)."""
+    return cache_dir / f"{src.stem}.{src.stat().st_size}.60.mp4"
+
+
+def smoothed_copy(src: Path, cache_dir: Path, low_priority: bool = False) -> tuple[Path, Optional[str]]:
     """``src`` at 60 fps, made once into ``cache_dir`` (named by the source file + size, written through a temp file);
     (the copy, None) or (``src``, why) when the smoothing failed. Two exports of the same clip wait for one run."""
     cache_dir.mkdir(parents=True, exist_ok=True)
-    dst = cache_dir / f"{src.stem}.{src.stat().st_size}.60.mp4"
+    dst = smoothed_path(src, cache_dir)
     with _smooth_locks_guard:
         lock = _smooth_locks.setdefault(str(dst), threading.Lock())
     with lock:
         if dst.is_file() and dst.stat().st_size > 0:
             return dst, None
         part = dst.with_name(dst.stem + ".part.mp4")
-        err = smooth_to_60fps(src, part)
+        err = smooth_to_60fps(src, part, low_priority=low_priority)
         if err is None and part.is_file() and part.stat().st_size > 0:
             os.replace(part, dst)
             return dst, None

@@ -116,12 +116,14 @@ function RegenBox({ node, kind, onSubmit, onClose }: {
 }
 
 /** Steps 3 and 4 — the same grid, once for scene images, once for clips. */
-export function StepMedia({ roles, kind, productName = "", boardName = "" }: {
+export function StepMedia({ roles, kind, productName = "", boardName = "", voiceless = false }: {
   roles: ClipRoles;
   kind: "image" | "video";
   /** For the Muse message ("clip bán hàng <tên sản phẩm>") and the still file names. */
   productName?: string;
   boardName?: string;
+  /** "🔇 Không lời": the join options skip the voice and the subtitles. */
+  voiceless?: boolean;
 }) {
   const generateScene = useQuicktoolStore((s) => s.generateScene);
   const generateVideo = useQuicktoolStore((s) => s.generateVideo);
@@ -226,7 +228,7 @@ export function StepMedia({ roles, kind, productName = "", boardName = "" }: {
             Flow chậm quá hoặc bỏ lượt thì làm cảnh đó bằng <strong>Muse</strong> (khung "🎬 Làm video bằng Muse" bên dưới).
           </p>
         )}
-        {kind === "video" && <JoinOptions roles={roles} />}
+        {kind === "video" && <JoinOptions roles={roles} voiceless={voiceless} />}
         {kind === "image" && (
           <p className="qt-card__hint">Mỗi ảnh mất khoảng 20–60 giây; ảnh chưa ưng thì bấm "Tạo lại…" ở cảnh đó và ghi muốn sửa gì (tiếng Việt cũng được).</p>
         )}

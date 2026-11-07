@@ -42,63 +42,64 @@ export const DRAMA_ENABLED = false;
 const DRAMA_BEAT_CHOICES = [4, 6, 8, 10, 12];
 
 /** Backdrops offered for the extra clips of one product, per template. The
- * first entry of each is that template's own default, so clip 1 is unchanged. */
+ * first entry of each is that template's own default, so clip 1 is unchanged.
+ * Real places a buyer films in (7/11), not studios. */
 const SETTING_IDEAS: Record<string, string[]> = {
   fashion_ad: [
-    "a bright minimalist studio with wooden wardrobes behind the model",
+    "a lived-in Vietnamese apartment bedroom with a full-length mirror, a clothes rack and afternoon window light",
+    "an apartment building elevator with a mirror wall and overhead light",
+    "a busy Vietnamese street with parked motorbikes in harsh midday sun",
     "a sunlit Vietnamese café terrace with rattan chairs and green plants",
-    "a quiet Hanoi old-quarter street with yellow walls in soft morning light",
-    "a modern co-working space with large windows and white desks",
-    "a cozy bedroom corner with a full-length mirror and warm lamp light",
+    "a real office corner with a desk, a laptop and window light",
   ],
   cosmetics_ad: [
-    "a clean pastel beauty studio with soft diffused light",
-    "a bright bathroom vanity with white marble and morning window light",
-    "a cozy bedroom dressing table with warm lamp light and a round mirror",
-    "a minimalist cream-colored studio with a single dried-flower vase",
+    "a small real bathroom with a mirror, a sink counter with a few everyday toiletries and soft morning window light",
+    "a bedroom dressing table with a round mirror, some makeup scattered and a warm desk lamp",
+    "a bed with rumpled sheets at night, lit by a warm bedside lamp",
+    "the front seat of a car with sunlight through the windshield",
     "a sunny balcony with sheer curtains and potted plants",
   ],
   fast_food_ad: [
-    "a bright modern fast-food diner with a wooden table",
-    "a lively Vietnamese street-food stall with plastic stools at dusk",
-    "a sunny rooftop terrace table with city skyline behind",
-    "a cozy home kitchen counter with warm pendant light",
-    "a clean white picnic table in a green park",
+    "a casual Vietnamese eatery table by the window, a drink with ice beside it and warm afternoon light",
+    "a Vietnamese street-food stall with plastic stools at dusk under string lights",
+    "an office desk at lunch break with a laptop pushed aside",
+    "a living-room sofa with a TV glow in the evening",
+    "the front seat of a parked car with a takeaway bag",
   ],
   unboxing_review: [
-    "a tidy wooden desk by a window with soft daylight",
-    "a modern living-room coffee table with a grey sofa behind",
-    "a bright white studio desk with a ring light visible",
-    "a cozy bedroom desk with fairy lights and a plant",
-    "a minimalist workspace with a monitor and dark wooden shelves",
+    "a real home desk by a window with a few everyday things, a box cutter and a cardboard shipping box",
+    "a living-room coffee table with a sofa behind and afternoon light",
+    "a bedroom desk with fairy lights, a plant and a messy pile of books",
+    "a shop counter with a few parcels and a tape dispenser",
+    "an office desk with a laptop and a sticky note on the monitor",
   ],
   grocery_ad: [
-    "a clean white desk with a phone, a notebook and soft daylight",
-    "a pastel bedroom desk with a small plant and a phone stand",
-    "a café table with a latte and a laptop in warm light",
-    "a car dashboard and console in soft daylight",
-    "a tidy shop counter with a phone and a small mirror",
+    "a real home desk by a window with a phone, a charger cable, a notebook and a coffee mug",
+    "a bedroom desk with a small plant and a phone stand in warm lamp light",
+    "a café table with an iced coffee and a laptop",
+    "a car dashboard and console in daylight",
+    "a motorbike seat parked on a sunny street",
   ],
   home_appliance_review: [
-    "a bright modern Vietnamese home kitchen with white counters and morning light",
+    "a real Vietnamese home kitchen with a slightly busy counter, a dish rack and morning light from the window",
     "a small apartment kitchen with wooden cabinets and warm evening light",
     "a tiled living room with a sofa and a balcony door open to daylight",
-    "a compact laundry corner with a washing machine and shelves",
-    "a family dining table with a kettle and bowls in soft daylight",
+    "a laundry corner with a washing machine, a basket of clothes and shelves",
+    "a family dining table with a kettle and bowls in daylight",
   ],
   food_review: [
-    "a cozy Vietnamese eatery table with a wooden top and warm light",
-    "a lively street-food stall with plastic stools at dusk",
-    "a bright café window table in the morning",
+    "a small Vietnamese eatery table with a worn wooden top, a cup of iced tea and warm afternoon light",
+    "a Vietnamese street-food stall with plastic stools at dusk under string lights",
+    "a café window table in the morning",
     "a home dining table with a steaming pot in warm lamp light",
     "a night-market food court with string lights behind",
   ],
   affiliate_reel: [
-    "a bright everyday Vietnamese living room with natural light",
-    "a tidy bedroom with a desk and a window in soft daylight",
-    "a small home office with a plant and a ring light",
+    "a lived-in Vietnamese living room with a sofa, a small table and natural window light",
+    "a bedroom with a desk and a window in daylight, the bed unmade",
     "a kitchen counter with morning light through the window",
-    "a sunny balcony with potted plants and a small table",
+    "the front seat of a car with daylight through the windows",
+    "a small balcony with potted plants and a plastic stool",
   ],
 };
 const MAX_CLIPS = 5;
@@ -164,6 +165,8 @@ export function NewClipDialog({
   // One product, several clips: clip 1 uses the "Bối cảnh" field, the others
   // these backdrops.
   const [clipCount, setClipCount] = useState(1);
+  // "🔇 Không lời": no voice-over, no subtitles — the scenes are written to be watched with their real sounds.
+  const [voiceless, setVoiceless] = useState(false);
   const [extraSettings, setExtraSettings] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -338,13 +341,27 @@ export function NewClipDialog({
     }
   }
 
+  /** "🔇 Không lời" ⇄ "🎙 Có lồng tiếng". A plan written without voice lines
+   * cannot become a voiced one by itself: it is analysed again. */
+  function pickVoiceless(on: boolean) {
+    setVoiceless(on);
+    if (!on && analysis?.voiceless) {
+      setAnalysis(null);
+      setRefPhase("pick");
+    }
+    if (!on && linkAnalysis?.voiceless) {
+      setLinkAnalysis(null);
+      setLinkPhase("pick");
+    }
+  }
+
   async function analyzeLink() {
     const url = productUrl.trim();
     if (!url) return;
     setError(null);
     setLinkPhase("analyzing");
     try {
-      const res = await analyzeProductLink(url, productId);
+      const res = await analyzeProductLink(url, productId, undefined, voiceless);
       setLinkAnalysis(res.analysis);
       setAnalyzedUrl(url);
       setLinkPhase("review");
@@ -361,7 +378,7 @@ export function NewClipDialog({
     try {
       const board = await buildFromReferenceVideo({
         mediaId: null, sourceUrl: analyzedUrl, productId, analysis: linkAnalysis, name: name.trim() || undefined, force, character: characterPick,
-        channelId,
+        channelId, voiceless,
       });
       useBoardStore.setState((s) => ({
         boards: [{ id: board.id, name: board.name, created_at: board.created_at, data: board.data }, ...s.boards],
@@ -435,7 +452,7 @@ export function NewClipDialog({
       if (!sent.product_name?.trim()) delete sent.product_name;
     }
     if (clipCount <= 1) {
-      const id = await createNewBoardFromTemplate(kind, baseName, sent, productId, channelId);
+      const id = await createNewBoardFromTemplate(kind, baseName, sent, productId, channelId, voiceless);
       setBusy(false);
       if (id === null) {
         setError(useBoardStore.getState().error ?? "Không tạo được clip");
@@ -451,7 +468,7 @@ export function NewClipDialog({
       const setting = n === 0 ? sent.setting : settingFor(n);
       return createBoardFromTemplate(
         kind, `${baseName} #${n + 1}`, { ...sent, ...(setting ? { setting } : {}) }, productId,
-        productId ? { index: n, of: clipCount } : undefined, channelId,
+        productId ? { index: n, of: clipCount } : undefined, channelId, voiceless,
       );
     }));
     for (const r of results) if (r.status === "fulfilled") ids.push(r.value.id);
@@ -506,7 +523,7 @@ export function NewClipDialog({
         setUpload(up);
       }
       setRefPhase("analyzing");
-      const res = await analyzeReferenceVideo(up.media_id, productId);
+      const res = await analyzeReferenceVideo(up.media_id, productId, undefined, voiceless);
       setAnalysis(res.analysis);
       setRefPhase("review");
     } catch (err) {
@@ -522,7 +539,7 @@ export function NewClipDialog({
     try {
       const board = await buildFromReferenceVideo({
         mediaId: upload.media_id, productId, analysis, name: name.trim() || undefined, force, character: characterPick,
-        channelId,
+        channelId, voiceless,
       });
       useBoardStore.setState((s) => ({
         boards: [{ id: board.id, name: board.name, created_at: board.created_at, data: board.data }, ...s.boards],
@@ -612,7 +629,9 @@ export function NewClipDialog({
                   {shown.plan.map((p, i) => (
                     <li key={i}>
                       <div className="qt-ref__plan-title">{i + 1}. {p.title_vi}</div>
-                      <div className="qt-ref__plan-line">🎙 {p.narration_vi}</div>
+                      {voiceless
+                        ? <div className="qt-ref__plan-line">🔇 không lời</div>
+                        : p.narration_vi && <div className="qt-ref__plan-line">🎙 {p.narration_vi}</div>}
                       <div className="qt-ref__plan-prompt">{p.image_prompt_en}</div>
                     </li>
                   ))}
@@ -626,6 +645,20 @@ export function NewClipDialog({
                          placeholder={refNamePlaceholder} onChange={(e) => setName(e.target.value)} disabled={locked} />
                 </label>
               </>
+  );
+
+  const voiceChoice = (
+    <div className="qt-voicechoice" role="radiogroup" aria-label="Lời thoại">
+      <span className="qt-voicechoice__label">Lời thoại</span>
+      <label className={`qt-voicechoice__opt${!voiceless ? " qt-voicechoice__opt--on" : ""}`}>
+        <input type="radio" name="qt-voicechoice" checked={!voiceless} disabled={locked} onChange={() => pickVoiceless(false)} />
+        <span><strong>🎙 Có lồng tiếng</strong><small>giọng đọc kể như người mua thật + phụ đề</small></span>
+      </label>
+      <label className={`qt-voicechoice__opt${voiceless ? " qt-voicechoice__opt--on" : ""}`}>
+        <input type="radio" name="qt-voicechoice" checked={voiceless} disabled={locked} onChange={() => pickVoiceless(true)} />
+        <span><strong>🔇 Không lời</strong><small>chỉ cảnh mặc / dùng sản phẩm + tiếng động thật — không giọng, không phụ đề</small></span>
+      </label>
+    </div>
   );
 
   return (
@@ -935,6 +968,7 @@ export function NewClipDialog({
                 ))}
               </div>
             )}
+            {voiceChoice}
           </div>
         )}
 
@@ -984,6 +1018,7 @@ export function NewClipDialog({
                 </div>
               </>
             ) : review}
+            {voiceChoice}
           </div>
         )}
 
@@ -1010,6 +1045,7 @@ export function NewClipDialog({
                 </div>
               </>
             ) : review}
+            {voiceChoice}
           </div>
         )}
 

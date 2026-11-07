@@ -15,6 +15,7 @@ from sqlmodel import select
 from flowboard.db import get_session
 from flowboard.db.models import Edge, Node
 from flowboard.node_mirror import apply_node_patch
+from flowboard.services import clip_style
 from flowboard.services.activity import record_activity
 from flowboard.services.llm import run_llm
 from flowboard.services.llm.base import LLMError
@@ -26,17 +27,13 @@ MAX_WORDS = 24
 
 _SYSTEM = (
     "You write voice-over lines in Vietnamese for short TikTok Shop / affiliate "
-    "product videos. The video is a sequence of clips (about 8 seconds each); you "
-    "get the script, the product and a description of every clip, in order.\n"
-    "Write ONE spoken line per clip, in natural spoken Vietnamese (ngôi 'mình', "
-    "gọi người xem 'mọi người' hoặc 'các bạn'), casual and warm like a seller "
-    "talking to camera — no hashtags, no emoji, no English marketing words, no "
-    "quotation marks. Each line at most "
-    f"{MAX_WORDS} words so it fits its clip. The first line must hook attention "
-    "and name the product; the middle lines each describe what that clip shows "
-    "plus one selling point; the last line ends with a short call to action "
-    "(e.g. 'Ghé giỏ hàng bên dưới nhé'). Mention the price only if the script "
-    "gives one. Output ONLY a JSON array of strings, one per clip, in the same "
+    "product videos that look like a real buyer filmed them on a phone. The video is a "
+    "sequence of clips (about 8 seconds each); you get the script, the product and a "
+    "description of every clip, in order. Write ONE spoken line per clip that fits what "
+    "that clip shows. Mention the price only if the script gives one. No English "
+    "marketing words.\n"
+    + clip_style.voice_rules(MAX_WORDS)
+    + "Output ONLY a JSON array of strings, one per clip, in the same "
     "order as given — no prose, no code fences."
 )
 

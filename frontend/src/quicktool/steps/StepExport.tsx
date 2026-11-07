@@ -11,7 +11,7 @@ import { hasMedia, isBusy, type ClipRoles } from "../roles";
 import "../voices.css";
 import { useToastOn } from "../../store/toast";
 import { ClipArranger, OverlayEditor } from "./ExportEditor";
-import { joinVoice, SubtitleField, subChoiceOf, subChoicePatch } from "./JoinOptions";
+import { joinVoice, Smooth60Field, SubtitleField, subChoiceOf, subChoicePatch } from "./JoinOptions";
 import { useSettingsStore } from "../../store/settings";
 import { ScheduleDialog } from "../schedule/ScheduleDialog";
 
@@ -108,8 +108,10 @@ function DialogueLine({ text, tags }: { text: string; tags: string[] }) {
 }
 
 /** Step 5 — voice options, the clip list, the final file. */
-export function StepExport({ roles, productName = "", price = "", channelId = null, dubJobId = null, dubPart = null }: {
+export function StepExport({ roles, productName = "", price = "", channelId = null, dubJobId = null, dubPart = null, voiceless = false }: {
   roles: ClipRoles; productName?: string; price?: string; channelId?: number | null;
+  /** "🔇 Không lời": joined with the clips' own sound — no voice, no subtitles. */
+  voiceless?: boolean;
   /** a clip made by the dubbing tool: it is edited there, not joined here */
   dubJobId?: string | null;
   /** a part cut out of a dubbed video ("✂️ Cắt thành nhiều video") */
@@ -163,7 +165,6 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
   const voice = joinVoice(exp?.data, favouriteVoice);
   const voiceStyle = typeof exp?.data.voiceStyle === "string" ? exp.data.voiceStyle : "";
   const originalAudio = exp?.data.originalAudio ?? "duck";
-  const smooth60 = exp?.data.smooth60 === true;
   const busy = isBusy(exp);
 
   // Stop any sample when the step unmounts.
@@ -286,10 +287,12 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
       ) : (
       <section className="qt-card">
         <div className="qt-card__eyebrow">Bước 5</div>
-        <h3 className="qt-card__title">Ghép & lồng tiếng</h3>
+        <h3 className="qt-card__title">{voiceless ? "Ghép clip" : "Ghép & lồng tiếng"}</h3>
         <div className="qt-stats">
           <div className="qt-stat"><strong>{clips.length}</strong><span>clip sẵn sàng</span></div>
-          <div className="qt-stat"><strong>{voiced}</strong><span>có lời thoại</span></div>
+          {voiceless
+            ? <div className="qt-stat"><strong>🔇</strong><span>không lời</span></div>
+            : <div className="qt-stat"><strong>{voiced}</strong><span>có lời thoại</span></div>}
           <div className="qt-stat"><strong>~{estimate}s</strong><span>thời lượng</span></div>
         </div>
         {!isDrama && clips.length > 0 ? (
@@ -297,7 +300,7 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
             <>
               {typeof s.video!.data.narration === "string" && s.video!.data.narration
                 ? <DialogueLine text={s.video!.data.narration} tags={allTags} />
-                : <em>chưa có lời thoại</em>}
+                : <em>{voiceless ? "không lời — giữ tiếng thật" : "chưa có lời thoại"}</em>}
               {typeof s.video!.data.voice === "string" && s.video!.data.voice in VOICES && (
                 <small className="qt-speakers__unused"> · giọng riêng: {VOICES[s.video!.data.voice]}</small>
               )}
@@ -322,13 +325,20 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
           {clips.length === 0 && <li className="qt-empty">{isDrama ? "Chưa có ảnh nào — quay lại bước 3." : "Chưa có video nào — quay lại bước 4."}</li>}
         </ol>
         )}
-        {clips.length > 0 && voiced < clips.length && !isDrama && (
+        {voiceless && (
+          <div className="qt-voiceless">
+            <strong>🔇 Clip không lời</strong>
+            <small>Không giọng đọc, không phụ đề — ghép giữ tiếng động thật của từng video. Muốn có lời thì bật lại ở Bước 2.</small>
+          </div>
+        )}
+        {clips.length > 0 && voiced < clips.length && !isDrama && !voiceless && (
           <button type="button" className="qt-btn qt-btn--ghost" onClick={() => void writeNarrations()}>
             ✨ AI viết lời thoại còn thiếu
           </button>
         )}
 
         <div className="qt-form">
+          {!voiceless && (<>
           <label className="qt-field">
             <span>
               Giọng đọc
@@ -397,6 +407,7 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
               <option value="keep">Giữ nguyên</option>
             </select>
           </label>
+          </>)}
           <div className="qt-field">
             <span>Nhạc nền <small>mp3 / m4a / wav · tối đa 20 MB</small></span>
             {bgmMediaId ? (
@@ -430,11 +441,8 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
               </div>
             )}
           </div>
-          <SubtitleField value={subChoiceOf(exp?.data)} disabled={busy} onChange={(key) => setOption(subChoicePatch(key))} />
-          <label className="qt-check">
-            <input type="checkbox" checked={smooth60} disabled={busy} onChange={(e) => setOption({ smooth60: e.target.checked })} />
-            Mượt 60 fps (thêm ~2–3 phút cho clip 4 cảnh; ghép lại lần sau thì nhanh vì đã làm mượt sẵn)
-          </label>
+          {!voiceless && <SubtitleField value={subChoiceOf(exp?.data)} disabled={busy} onChange={(key) => setOption(subChoicePatch(key))} />}
+          <Smooth60Field data={exp?.data} disabled={busy} onChange={setOption} />
         </div>
 
         <OverlayEditor exp={exp} busy={busy} setOption={setOption} productName={productName} price={price} />
@@ -445,7 +453,7 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
           disabled={busy || sending || clips.length === 0}
           onClick={() => { setSending(true); void exportClip().finally(() => setSending(false)); }}
         >
-          {busy || sending ? "Đang ghép + lồng tiếng…" : hasMedia(exp) ? "Ghép lại" : "Ghép video hoàn chỉnh"}
+          {busy || sending ? (voiceless ? "Đang ghép…" : "Đang ghép + lồng tiếng…") : hasMedia(exp) ? "Ghép lại" : "Ghép video hoàn chỉnh"}
         </button>
         {exp?.data.error && <div className="product-form__error">{String(exp.data.error)}</div>}
       </section>

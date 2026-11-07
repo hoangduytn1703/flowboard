@@ -69,7 +69,7 @@ def test_typos_and_missing_accents_still_land_on_the_right_channel_and_series():
 
 def test_model_prompt_is_a_front_facing_portrait_of_an_original_person():
     p = assistant.model_prompt({"gender": "female", "country": "kr", "look": "short bob hair, pastel cardigan"}, traits="x and y")
-    assert p.startswith("Studio portrait headshot of a Korean female character")
+    assert p.startswith("Natural daylight head-and-shoulders portrait photo of a Korean female character")
     assert "not resembling any celebrity" in p and "own distinctive face (x and y)" in p and "short bob hair" in p
 
 

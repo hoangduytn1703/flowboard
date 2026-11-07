@@ -3,7 +3,7 @@
   "category": "grocery",
   "order": 40,
   "title": "Tạp hoá & phụ kiện",
-  "blurb": "4 cảnh quay bàn tay: cầm sản phẩm thấy kích thước, lắp/dùng thử, cận chi tiết, dùng thật + giá. Hợp ốp lưng, mica, phụ kiện điện thoại, đồ dùng nhỏ.",
+  "blurb": "Quay bàn tay như clip thật ở bàn làm việc: cầm lên thấy kích thước, lắp / dùng thử, cận chi tiết, dùng thật hằng ngày. Hợp ốp lưng, mica, phụ kiện điện thoại, đồ dùng nhỏ.",
   "scenes": 4,
   "inputs": [
     {
@@ -28,7 +28,7 @@
       "key": "setting",
       "label": "Bối cảnh",
       "placeholder": "ví dụ: bàn học trắng, có điện thoại và sổ tay",
-      "default": "a clean white desk with a phone, a notebook and soft daylight"
+      "default": "a real home desk by a window with a phone, a charger cable, a notebook and a coffee mug"
     },
     {
       "key": "charGender",
@@ -92,8 +92,8 @@
     }
   ],
   "character": {
-    "charVibe": "clean",
-    "charExtras": "mid 20s, neat, friendly, hair tied back"
+    "charVibe": "casual",
+    "charExtras": "mid 20s, everyday look, hair tied back"
   },
   "nodes": [
     {
@@ -101,7 +101,7 @@
       "type": "note",
       "data": {
         "title": "Kịch bản",
-        "prompt": "Quảng cáo {{product}} — 4 cảnh × 8 s\n\n1. Trên tay: cận sản phẩm trong tay, thấy rõ kích thước thật.\n2. Lắp / dùng thử: tay lắp hoặc dùng sản phẩm đúng cách.\n3. Chi tiết: macro chất liệu, cạnh viền, độ hoàn thiện.\n4. Dùng thật + giá: sản phẩm trong bối cảnh dùng hằng ngày, chừa chỗ dán giá.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh sản phẩm thật (bước 1) → tạo Người mẫu (bước 1) → tạo ảnh từng cảnh (bước 3) → tạo video từng cảnh (bước 4, Omni Flash 8 s) → ghép + lồng tiếng (bước 5).\nLồng tiếng: mỗi cảnh có sẵn một câu thoại tiếng Việt (sửa ở bước 2); bước 5 đọc giọng + phụ đề rồi ghép thành clip hoàn chỉnh."
+        "prompt": "Quảng cáo {{product}} — 4 cảnh × 8 s\n\n1. Trên tay: cầm sản phẩm sát điện thoại, xoay trước / sau, thấy kích thước thật.\n2. Lắp / dùng thử: tay lắp hoặc dùng sản phẩm đúng cách, nghe tiếng tách.\n3. Chi tiết: cận cạnh viền, độ hoàn thiện dưới ánh cửa sổ.\n4. Dùng thật: sản phẩm trên bàn trong lúc làm việc bình thường, giá ở lời thoại.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh sản phẩm thật (bước 1) → tạo Người mẫu (bước 1) → tạo ảnh từng cảnh (bước 3) → tạo video từng cảnh (bước 4, Omni Flash 8 s) → ghép + lồng tiếng (bước 5).\nLồng tiếng: mỗi cảnh có sẵn một câu thoại tiếng Việt (sửa ở bước 2); bước 5 đọc giọng + phụ đề rồi ghép thành clip hoàn chỉnh."
       }
     },
     {
@@ -123,7 +123,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 1 - Trên tay",
-        "prompt": "Close-up of the model's hand holding {{product}} up to the camera to show its real size, fingers lightly gripping it, in {{setting}}. Crisp focus on the product, soft daylight, clean background, the product fills most of the frame. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "prompt": "Vertical phone close-up held at desk height: the model's hand holds {{product}} up in front of the phone to show its real size, fingers gripping it naturally, in {{setting}}. Window daylight from one side, the desk a little lived-in behind, slight phone softness at the edges. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -131,7 +131,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 2 - Lắp / dùng thử",
-        "prompt": "Close-up of the model's hands fitting or using {{product}} the way it is meant to be used (snapping it onto a phone, opening it, plugging it in or placing it where it belongs), in {{setting}}. Natural daylight, product sharp and centred, hands partly in frame. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "prompt": "Vertical phone close-up from above: the model's hands fit or use {{product}} the way it is meant to be used (snapping it onto a phone, opening it, plugging it in or placing it where it belongs), in {{setting}}. Natural daylight, real fingerprints and wear on the things around it. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -139,7 +139,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 3 - Chi tiết",
-        "prompt": "Macro shot of {{product}} held still between the model's fingertips, showing its texture, edges, finish and small details, in {{setting}}. Shallow depth of field, soft side light, no text. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "prompt": "Vertical phone macro close-up: {{product}} held between the model's fingertips by the window, light running across its surface, the edges and small details visible, in {{setting}}. Side daylight, real surface texture, the background soft. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -147,7 +147,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 4 - Dùng thật + giá",
-        "prompt": "Lifestyle shot of {{product}} in everyday use on the table in {{setting}}, the model's hand resting beside it, styled like a TikTok Shop product photo with empty space at the top for a price sticker. Warm natural light, tidy composition. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "prompt": "Vertical phone photo: {{product}} in everyday use on the desk in {{setting}}, the model's hand resting next to it mid-task, a coffee mug and a cable nearby. Warm natural light, nothing staged. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -155,8 +155,8 @@
       "type": "video",
       "data": {
         "title": "Video 1 - Trên tay",
-        "prompt": "0-3s: the hand turns the product slowly to show the front. 3-6s: it flips to show the back and the edges. 6-8s: the hand brings it closer to the lens. Locked-off camera, no zoom.",
-        "narration": "Mọi người ơi, {{product_name}} đây, nhỏ gọn vừa tay luôn nè."
+        "prompt": "0-3s: the hand turns the product to show the front. 3-6s: flips it to show the back and the edges. 6-8s: holds it still near the phone. Handheld phone, small natural shake and focus breathing. Audio: a light tap of a fingernail on the product, quiet room tone.",
+        "narration": "Nhỏ gọn mà tiện dữ, {{product_name}} đây nè, cầm vừa tay luôn."
       }
     },
     {
@@ -164,8 +164,8 @@
       "type": "video",
       "data": {
         "title": "Video 2 - Lắp / dùng thử",
-        "prompt": "0-3s: the hands start fitting the product in place. 3-6s: it clicks or slides into position. 6-8s: a quick tap to show it holds firm. Locked-off camera, product stays in frame.",
-        "narration": "Lắp vô là khít, dùng cực tiện, ai cũng làm được."
+        "prompt": "0-3s: the hands line the product up. 3-6s: it clicks or slides into place. 6-8s: a quick press with the thumb shows it holds firm. Phone propped on the desk, still. Audio: a crisp click, a soft tap.",
+        "narration": "Lắp vô cái là khít, không cần dụng cụ gì hết."
       }
     },
     {
@@ -173,8 +173,8 @@
       "type": "video",
       "data": {
         "title": "Video 3 - Chi tiết",
-        "prompt": "0-3s: fingertips tilt the product so light runs across its surface. 3-6s: a slow rotation showing the edge and the finish. 6-8s: it settles, sharp and still. Locked-off macro camera.",
-        "narration": "Chi tiết sắc nét, chất liệu chắc tay, không hề ọp ẹp."
+        "prompt": "0-3s: fingertips tilt the product so the light slides across it. 3-6s: a turn of the wrist shows the edge. 6-8s: the thumb runs along the edge. Handheld phone macro with focus breathing. Audio: a fingertip on the surface, room tone.",
+        "narration": "Nhìn gần nè, cạnh viền làm chắc tay, không ọp ẹp."
       }
     },
     {
@@ -182,8 +182,8 @@
       "type": "video",
       "data": {
         "title": "Video 4 - Dùng thật + giá",
-        "prompt": "0-3s: the hand sets the product down in its place. 3-6s: the hand slides back, leaving the product centred. 6-8s: the shot holds still for a price sticker. Locked-off camera.",
-        "narration": "Giá {{price}} thôi, link ở giỏ hàng, chốt liền nha."
+        "prompt": "0-3s: the hand uses the product once more as part of a normal task. 3-6s: the hand moves away to pick up the mug. 6-8s: the product stays in its place on the desk. Phone propped on the desk, still. Audio: a mug lifted off the desk, keyboard taps far off.",
+        "narration": "Giá {{price}} thôi, ai cần thì xem giỏ hàng nha."
       }
     }
   ],

@@ -99,6 +99,8 @@ class AnalyzeBody(BaseModel):
     product_id: Optional[int] = None
     scenes: Optional[int] = Field(default=None, ge=2, le=6)
     model: Optional[str] = None
+    # "🔇 Không lời": scenes written for no voice-over (no narration_vi).
+    voiceless: bool = False
 
 
 @router.post("/analyze")
@@ -113,6 +115,7 @@ async def analyze_reference_video(body: AnalyzeBody) -> dict[str, Any]:
     try:
         analysis = await reference_video.analyze(
             path, product, scenes=body.scenes, model=body.model or gemini_api.DEFAULT_MODEL,
+            voiceless=body.voiceless,
         )
     except reference_video.ReferenceVideoError as exc:
         raise HTTPException(502, str(exc))
@@ -125,6 +128,7 @@ class AnalyzeLinkBody(BaseModel):
     product_id: Optional[int] = None
     scenes: Optional[int] = Field(default=None, ge=2, le=6)
     model: Optional[str] = None
+    voiceless: bool = False
 
 
 @router.post("/analyze-link")
@@ -136,7 +140,7 @@ async def analyze_product_link(body: AnalyzeLinkBody) -> dict[str, Any]:
         raise HTTPException(400, "Chưa có Gemini API key — thêm trong Settings → Gemini API keys.")
     try:
         analysis = await product_link.analyze(
-            body.url, product, scenes=body.scenes, model=body.model,
+            body.url, product, scenes=body.scenes, model=body.model, voiceless=body.voiceless,
         )
     except product_link.ProductLinkError as exc:
         raise HTTPException(502, str(exc))
@@ -154,6 +158,8 @@ class BuildBody(BaseModel):
     # The model the user picked on the review screen; None keeps the AI's suggestion.
     character: Optional[dict] = None
     channel_id: Optional[int] = None
+    # "🔇 Không lời" picked (or kept) on the review screen: no voice lines on the clip.
+    voiceless: bool = False
 
 
 @router.post("/build")
@@ -164,7 +170,7 @@ def build_from_reference(body: BuildBody) -> dict[str, Any]:
         _video_path(body.media_id)
     product = _product_or_404(body.product_id)
     try:
-        analysis = reference_video.normalize(body.analysis, product)
+        analysis = reference_video.normalize(body.analysis, product, voiceless=body.voiceless)
     except reference_video.ReferenceVideoError as exc:
         raise HTTPException(400, str(exc))
     if analysis["blocked"] and not body.force:
@@ -174,6 +180,7 @@ def build_from_reference(body: BuildBody) -> dict[str, Any]:
             analysis, product, name=body.name,
             source_media_id=media_service.normalize_media_id(body.media_id) if body.media_id else None,
             source_url=body.source_url, character_pick=body.character, channel_id=body.channel_id,
+            voiceless=body.voiceless,
         )
     except (PersonRequiredError, GenderMismatchError) as exc:
         raise HTTPException(400, str(exc))

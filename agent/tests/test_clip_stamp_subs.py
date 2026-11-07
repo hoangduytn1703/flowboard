@@ -127,7 +127,7 @@ def test_a_clip_without_the_stamp_is_left_alone_and_not_probed_twice(tmp_path, m
     assert not (tmp_path / "x.mp4").exists()
     cache = tmp_path / "clean"
     assert video_watermark.cleaned_copy(src, cache) == src
-    assert (cache / "own.nostamp").is_file()
+    assert (cache / f"own.nostamp{video_watermark.CLEAN_VERSION}").is_file()
     monkeypatch.setattr(video_watermark, "clean_video", lambda *a, **k: pytest.fail("probed again"))
     assert video_watermark.cleaned_copy(src, cache) == src
 

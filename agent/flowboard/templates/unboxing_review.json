@@ -3,7 +3,7 @@
   "category": "other",
   "order": 60,
   "title": "Review / mở hộp",
-  "blurb": "3 cảnh: mở hộp, cầm sản phẩm xem kỹ, dùng thử. Hợp đồ gia dụng, đồ công nghệ, phụ kiện.",
+  "blurb": "Mở hộp như clip thật: rạch băng keo mở thùng hàng, cầm lên xem kỹ, dùng thử lần đầu. Hợp đồ gia dụng, đồ công nghệ, phụ kiện.",
   "scenes": 3,
   "inputs": [
     {
@@ -22,7 +22,7 @@
       "key": "setting",
       "label": "Bối cảnh",
       "placeholder": "ví dụ: bàn làm việc gỗ, ánh sáng cửa sổ",
-      "default": "a tidy wooden desk by a window with soft daylight"
+      "default": "a real home desk by a window with a few everyday things, a box cutter and a cardboard shipping box"
     },
     {
       "key": "charGender",
@@ -87,7 +87,7 @@
   ],
   "character": {
     "charVibe": "casual",
-    "charExtras": "late 20s, friendly, curious expression"
+    "charExtras": "late 20s, everyday clothes, curious"
   },
   "nodes": [
     {
@@ -95,7 +95,7 @@
       "type": "note",
       "data": {
         "title": "Kịch bản",
-        "prompt": "Review {{product}} — 3 cảnh × 8 s\n\n1. Mở hộp: tay mở nắp hộp, sản phẩm lộ ra.\n2. Xem kỹ: người review cầm sản phẩm xoay nhìn, gật gù.\n3. Dùng thử: dùng sản phẩm, biểu cảm hài lòng, nhìn camera.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh sản phẩm thật (bước 1) → tạo Người review (bước 1) → tạo ảnh từng cảnh (bước 3) → tạo video từng cảnh (bước 4, Omni Flash 8 s) → ghép + lồng tiếng (bước 5).\nLồng tiếng: mỗi cảnh có sẵn một câu thoại tiếng Việt (sửa ở bước 2); bước 5 đọc giọng + phụ đề rồi ghép thành clip hoàn chỉnh."
+        "prompt": "Review {{product}} — 3 cảnh × 8 s\n\n1. Mở hộp: tay mở thùng hàng, gạt giấy chèn, sản phẩm lộ ra.\n2. Xem kỹ: cầm sản phẩm xoay xem, ghé sát một chi tiết, gật gù.\n3. Dùng thử: dùng lần đầu ngay trên bàn, phản ứng nhẹ nhàng, đặt xuống cạnh hộp.\n\nBối cảnh: {{setting}}.\nLàm: upload ảnh sản phẩm thật (bước 1) → tạo Người review (bước 1) → tạo ảnh từng cảnh (bước 3) → tạo video từng cảnh (bước 4, Omni Flash 8 s) → ghép + lồng tiếng (bước 5).\nLồng tiếng: mỗi cảnh có sẵn một câu thoại tiếng Việt (sửa ở bước 2); bước 5 đọc giọng + phụ đề rồi ghép thành clip hoàn chỉnh."
       }
     },
     {
@@ -117,7 +117,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 1 - Mở hộp",
-        "prompt": "Top-down close-up of hands lifting the lid of a box to reveal {{product}} nestled inside, on {{setting}}. Soft daylight, clean composition, product sharp and centered. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "prompt": "Vertical phone photo from above: the model's hands open a shipping box to reveal {{product}} inside, on {{setting}}. Window daylight, real cardboard, tape and packing paper. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -125,7 +125,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 2 - Xem kỹ",
-        "prompt": "Medium close-up of the reviewer holding {{product}} up and examining it closely, slight head tilt, in {{setting}}. Natural light, product in focus near the face. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "prompt": "Vertical phone video still filmed by a friend: the reviewer holds {{product}} close and looks it over, turning it in the hands, head tilted down toward it, face partly turned, in {{setting}}. Natural window light, everyday clothes. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -133,7 +133,7 @@
       "type": "image",
       "data": {
         "title": "Cảnh 3 - Dùng thử",
-        "prompt": "Medium shot of the reviewer using {{product}}, looking at the camera with a satisfied nod, in {{setting}}. Natural light, space on one side for text. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
+        "prompt": "Vertical phone video still: the reviewer uses {{product}} for the first time on the desk, the result visible, a relaxed half smile toward the product, in {{setting}}. Natural daylight, the opened box beside it. The product must match the reference photo exactly (shape, colour, print, material). Keep the product at its real size relative to the person, as in the reference photos."
       }
     },
     {
@@ -141,8 +141,8 @@
       "type": "video",
       "data": {
         "title": "Video 1 - Mở hộp",
-        "prompt": "0-3s: hands lift the lid. 3-6s: fingers peel back the wrapping to reveal the product. 6-8s: the product is lifted slightly toward the camera. Locked-off top-down camera.",
-        "narration": "Mọi người ơi, hàng về rồi, cùng mình mở hộp {{product_name}} nha."
+        "prompt": "0-3s: hands pull the box flaps open. 3-6s: fingers push the packing paper aside to reveal the product. 6-8s: the product is lifted out a little. Phone held above with a tiny natural sway. Audio: tape ripping, paper crinkling.",
+        "narration": "Hàng về rồi nè, mở hộp {{product_name}} xem có giống trên ảnh không."
       }
     },
     {
@@ -150,8 +150,8 @@
       "type": "video",
       "data": {
         "title": "Video 2 - Xem kỹ",
-        "prompt": "0-3s: the reviewer turns the product over in his hands. 3-6s: he brings it closer to the camera and raises an eyebrow. 6-8s: an approving nod. Locked-off camera.",
-        "narration": "Đóng gói kỹ, bên trong đầy đủ phụ kiện, nhìn chắc chắn lắm."
+        "prompt": "0-3s: the reviewer turns the product over in the hands. 3-6s: brings it closer and checks a detail. 6-8s: a small approving nod, eyes still on the product. Handheld phone with subtle shake. Audio: plastic film peeled off, a light tap.",
+        "narration": "Cầm lên thấy chắc tay, đóng gói cũng kỹ."
       }
     },
     {
@@ -159,8 +159,8 @@
       "type": "video",
       "data": {
         "title": "Video 3 - Dùng thử",
-        "prompt": "0-3s: the reviewer starts using the product. 3-6s: a pleased reaction, small smile. 6-8s: he looks at the camera and gives a thumbs-up. Locked-off camera, clean space on one side.",
-        "narration": "Dùng thử thấy ổn áp, ai cần thì ghé giỏ hàng bên dưới nha."
+        "prompt": "0-3s: the reviewer starts using the product. 3-6s: it works, and the reviewer reacts with a small pleased look. 6-8s: sets it down next to the box. Phone propped on the desk, still. Audio: the product's own sound, the box pushed aside.",
+        "narration": "Dùng thử thấy ổn, ai cần thì xem giỏ hàng nha."
       }
     }
   ],

@@ -323,6 +323,20 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   cạnh thì chưa) → lượt 2 làm lại từ đầu, trang theo dõi lượt 2 nên vẫn "Đang ghép"; (3) agent chạy từ phiên Claude Code (`run_in_background`) **chết theo phiên**
   khi phiên đó đóng (03:12, giống start127 20:39 — log không có lỗi nào). Sửa (1)(2) xem "Chỗ cần biết" → "Ghép nhanh"; (3): người dùng nên tự chạy `.\start.ps1`.
   Đo lỗi chậm: bảng `request` (created_at / finished_at) + các file trung gian `media/export_*.mp4` (giờ ghép xong) so với giờ request xong.
+- **Đo "phần sót" của logo bằng nền lấp từ xung quanh là KHÔNG tin được trên nền nhiều vân / mép cứng** (7/11): số đo nói chăn len tệ đi, ảnh phóng to cho thấy
+  bản mới sạch nhất; xu hướng "logo màu xám 227" cũng do lấp nền qua mép. Mọi thay đổi bộ xoá logo: so **ảnh phóng to trước / sau trên nhiều clip thật**
+  (script đo + ghép ô góc theo thời gian), số đo chỉ để tìm khung đáng xem. Clip Flow mẫu trong `media/` (tên uuid) + `media/clean/`.
+
+- **Clip trông "máy móc" là do prompt viết kiểu chụp quảng cáo studio** (7/11, người dùng: "video review từ link SP… máy móc quá"): cả 8 mẫu clip ghi
+  "editorial photo", "soft even studio lighting", "Locked-off camera", người mẫu "holds the pose" rồi cười / vẫy / giơ ngón cái vào ống kính, lời thoại đọc
+  thông số ("Mọi người ơi, đây là…"); `script_tailor` còn bắt chép nguyên văn các câu đó. Thêm 2 lỗi: phong cách mặc định "Clean Girl" (son bóng, khuyên tai
+  vàng) gắn cho cả **người mẫu nam**, và kịch bản viết "she" cho người mẫu nam (tailor không biết giới tính). Đọc hướng dẫn prompt UGC cho Veo / Flow rồi viết
+  lại hết theo `services/clip_style.py` (xem Chỗ cần biết). **Viết prompt cảnh mới: đọc `clip_style` trước, đừng dùng chữ studio / editorial / cinematic /
+  flawless / locked-off, đừng cho người mẫu nhìn ống kính tạo dáng, đừng viết "slowly"** (Veo ra quay chậm, giật ở 24 fps).
+- **Lồng tiếng dịch Google làm hỏng tên riêng** (7/11, người dùng: "việt hóa mạnh quá… tên các nhân vật nổi tiếng cũng bị việt hóa, đọc sai"): video tiếng Trung
+  "thoát khỏi thiên hà" — Whisper nghe 爱因斯坦 thành 安音斯坦 → Google ra "Anyinstein"; 洛希极限 → "Losey", 奥尔特云 → "Ultra Cloud", 比邻星 → "Billing Star",
+  旅行者一号 → "Du hành 1", còn hành tinh để tiếng Anh ("Mercury", "Neptune") thay vì Sao Thủy / Sao Hải Vương; giọng VieNeu đọc các chữ đó sai. Google không biết
+  ngữ cảnh — sửa bằng gợi ý tiêu đề cho Whisper + một lượt Gemini rà tên riêng + bảng cách đọc (xem Chỗ cần biết → "Tên riêng khi lồng tiếng").
 ## Chỗ cần biết trong code
 - Backend `agent/flowboard/`: `routes/products.py` (CRUD, `from-link`, `open-tabs` + `import-tabs`, `bulk-delete`), `services/product_link.py` (đọc trang sản phẩm bằng httpx + Gemini; chặn IP nội bộ), `services/tiktok_import.py`, `services/reference_video.py` (clip từ video mẫu / link: `/api/reference-video/analyze`, `analyze-link`, `build`), `services/video_export.py`, `services/flow_sdk.py`, `templates/*.json` (8 kiểu clip), `services/llm/gemini_api.py` (gọi Gemini bằng API key: xoay vòng nhiều key khi 429, key lỗi 400/401/403 nghỉ 6 h, 503 thử lại + lùi model `3.8-flash → 3.7 → 3.6 → 3.5 → 3.1-flash-lite`; `speak()` cho giọng Gemini TTS).
 - Frontend `frontend/src/quicktool/`: `QuicktoolApp.tsx` (route + wizard 5 bước), `NewClipDialog.tsx` (chọn sản phẩm, kiểu clip, "Số clip" N clip/1 sản phẩm), `quicktool.css`. `components/ProductsPanel.tsx` (trang `/products`, chọn nhiều + xoá). Cỡ chữ: thang riêng (chữ nội dung 16px); Canvas cố ý giữ chữ nhỏ.
@@ -674,6 +688,26 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   UI: Cài đặt → Tạo ảnh & video → `settings/GeminiMarkSection.tsx`. Cần `numpy` + `opencv-python-headless` (pyproject; máy khác `make
   install`). Test `test_watermark.py` (5). Kết quả thật: nền phẳng sạch (sai ~1–2 mức), nền vân đậm còn vệt rất mờ ở mép khi phóng to.
   Lưu ý: file trên B2 vẫn có logo (file_store chỉ đẩy khi tạo Asset) → máy kia mở ảnh thì hook xoá lại. **Video**: xem mục "Xoá logo Gemini trên video" (1/11).
+- **Xoá logo video làm lại 7/11** (đọc trước mục 1/11 bên dưới; đo trên 20 clip Omni thật, so trước / sau từng khung + ảnh phóng to):
+  (a) **sao ảnh cảnh NHẤP NHÁY** (~90 px; Flow cho nó từ 0,03 lên trắng đặc rồi xuống, chu kỳ ~20 khung, có clip còn **phóng to / thu nhỏ** theo; 4/20 clip):
+  `_twinkles(alphas)` (p90 ≥ `TWINKLE_HIGH` 0,5 và p90 − p25 ≥ 0,2 — logo của Flow không bao giờ đọc quá ~0,45) → `Stamp.varying`; mỗi khung `_Twinkle.read`
+  dò cỡ (`TWINKLE_SCALES` ×0,45–1,32, khớp trong đúng hộp của từng cỡ) + độ đậm; khi sao (gần như) tắt thì lưu **mảnh nền sạch** (`_Plate`, lượt đọc trước
+  `_collect_plates` gom cả clip), khung sao sáng dán mảnh gần nhất trước / sau trong `PLATE_MAX_AGE` 36 khung nếu vòng quanh vùng dán chưa đổi (`PLATE_RING_DIFF`)
+  — vùng dán = sao ở cỡ lớn nhất; không có mảnh khớp thì `_remove` (lấp từ xung quanh từ độ đậm 0,12–0,35). Trừ ngược mô hình không bao giờ khớp loại sao này
+  (Flow vẽ nó như vật phát sáng, không phải lớp phủ đều) — đừng quay lại hướng đó. (b) **Sao gốc bị dò lệch 1 px** khi sao bên cạnh sáng trắng → vệt cong sẫm:
+  `_track` chỉ dời khi khớp hơn `TRACK_GAIN` 0,03; sao không bao giờ dịch trong clip → `Stamp.fixed` (ghim). (c) **Logo của Flow luôn ở một chỗ**: hộp (155, 155)
+  của góc 302 px, mẫu cỡ 1 (tâm cách 2 mép 120,5 px) — 29/31 clip, dọc lẫn ngang; ảnh trung vị bỏ sót khi mép cảnh cắt ngang nó (áo đen trên tường sáng,
+  clip cảnh 4 áo khoác) → `_probe_own_stamp` đọc từng khung đúng chỗ đó (độ giống hình sao trên phần chênh với nền lấp + độ đậm nhất quán 0,15–0,45); vòng dò
+  chung thử `CANDIDATES` 3 ứng viên thay vì dừng ở cái sai đầu tiên. Trên clip 720 px logo này luôn **ghim** vào hộp đó (không dò, không bao giờ `varying`); vẫn cho
+  2 sao chồng nhau (cách 16 px — ảnh cảnh làm từ ảnh đã có sao); sao đứng yên chỉ nhận ở 2 chỗ đã biết (logo Flow / sao ảnh cảnh ~90 px), chỗ khác là quầng sáng
+  của cảnh. **Độ đậm logo Flow đọc theo cặp điểm hai bên viền** (`_pair_alpha`, 7/11 khuya): điểm ngay trong viền vs điểm ngay ngoài theo pháp tuyến, chỉ giữ cặp
+  nền phẳng hai phía (`PAIR_*`); đủ ≥ 30 % cặp thì dùng, không thì giữ số đọc từ nền lấp. Lý do: nền lấp làm nhoè mép cứng dưới sao (tường sáng / sàn tối) → đọc
+  0,347 thay vì ~0,31 → vết chữ V sẫm ở đầu nhọn dưới (cảnh 2 áo khoác); cặp điểm đọc 0,306. Trên các clip nền phẳng hai cách lệch ≤ 0,03 (logo Flow ≈ 0,26–0,31,
+  không cố định từng clip). Sao nhấp nháy KHÔNG dùng cách này (độ đậm đổi từng khung, trung vị cặp điểm vô nghĩa). (d) Màu trừ bằng hình sao nhoè `CHROMA_BLUR` 1,2 px (video lưu màu 4:2:0), sáng bằng hình sắc
+  (`_unblend` trong YCrCb). (e) **Bộ nhớ đệm có phiên bản** `CLEAN_VERSION` (đang 4: `<id>.clean4.mp4` / `.nostamp4`, bản cũ bị xoá khi làm bản mới) — không thì ghép
+  dùng lại bản xoá cũ. Đã thử rồi BỎ: khớp hình sao theo clip (cỡ / dịch nửa pixel / độ nhoè) — trên vải nhiều nếp nó đuổi theo vân vải, để sót sao mà mẫu thường
+  xoá được; màu lớp phủ W ≠ 255 (dữ liệu do lấp nền qua mép cứng, không phải thật). Kết quả: 4 clip nhấp nháy từ 8–53 % khung còn sao trắng + 17–22 % sao sẫm
+  → 0 % / 0 %; clip sao cố định giữ nguyên hoặc tốt hơn (chăn len); chậm thêm ~1,5–3 s / clip (13,6 → 16,8 s). Test `test_video_watermark_twinkle.py` (6).
 - **Xoá logo Gemini ✦ trên video + phụ đề clip chọn kiểu / Remotion** (1/11, người dùng: "khi render clip thì chạy ngầm xoá hết logo gemini
   góc dưới phải" + "Bước 4 có option phụ đề kiểu gì (Remotion hay ffmpeg) hoặc không phụ đề, chọn sẵn giọng"):
   - **`services/video_watermark.py`**: video Flow (Omni 720×1280) có sao **cố định** tâm ~120 px từ mép phải / dưới, rộng ~52 px (cùng hình sao của ảnh,
@@ -1372,6 +1406,15 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   `_create_lock` để 2 request 80 ms không cùng lọt); frontend `exportClip` dùng chung lượt đang gửi (`exportInFlight`), nút Bước 5 khoá ngay khi bấm (`sending`).
   Đo thật 4 clip áo khoác (Ryzen 7 5800H): ghép 60 fps + giọng VieNeu chưa có cache **179 s** (trước 618 s), "Ghép lại" đổi giọng **29 s** (đã có bản mượt).
   Test `test_export_speed.py` (6).
+  **60 fps làm ngầm khi từng cảnh về** (`services/smooth_prewarm.py`, 7/11 tối): worker xong một `gen_video*` có node → `after_clip(node_id, media_id)` →
+  nếu clip cần 60 fps (`board_wants`: node xuất `smooth60` của clip; clip chưa có node xuất thì lựa chọn quen dùng của tài khoản `ui_prefs.smooth60`)
+  thì một pool `SMOOTH_PARALLEL` luồng: tải clip về nếu chưa có → `video_watermark.cleaned_copy` (đúng bản export sẽ dùng) → `smoothed_copy(low_priority=True)`
+  (ffmpeg `BELOW_NORMAL_PRIORITY_CLASS` / `nice 10`). Ghép lúc đó gặp file đang làm thì chờ khoá của file, không làm lại. Routes `GET /api/boards/{id}/smooth60`
+  → `{total, ready, running}`, `POST …/smooth60` = làm ngầm mọi cảnh của clip (`routes/export_extras.py`). Frontend: pref tài khoản **`smooth60`**
+  (`store/settings.ts`), node xuất mới lấy sẵn giá trị đó (`_createExportNode`), ô dùng chung **`Smooth60Field`** (`JoinOptions.tsx`) ở **Bước 4** (khung "🎙 Giọng
+  đọc, phụ đề & độ mượt khi ghép") và Bước 5: bật → lưu node + pref + POST; dòng trạng thái poll 5 s ("Đang làm mượt sẵn r/N cảnh" / "✓ Đã làm mượt sẵn cả N
+  cảnh — ghép sẽ nhanh"); thấy ô đang bật mà còn cảnh chưa làm và không chạy → tự POST một lần (clip về trước khi bật, agent khởi động lại).
+  Test `test_smooth_prewarm.py` (5).
 - **🤖 Tự động đăng theo lịch** (7/11, người dùng: "tự soạn content xong tự post lên page mà user không phải làm gì, set cứng lịch, tới lúc đó mà có
   bài thôi"; chỉ Facebook Page, nằm trong trang Bài viết; AI: Claude CLI mặc định + Gemini): bảng **`AutoPlan`** (kênh, `days` 0 = T2…6 = CN, `times` "HH:MM"
   giờ VN ≤ 6, `lead_minutes` 30–1440 mặc định 180, `brief` = form Bài viết (`autopilot.clean_brief`), `series`, `product_mode` none | fixed | rotate +
@@ -1396,6 +1439,57 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   sang lịch mới). Trợ lý AI: kỹ năng **`auto_post`** {channel_id, days, times, kind?, topic?, series?, images?, product_id?, ai?, story?} — luôn chờ "✅ Làm luôn".
   Test `test_autopilot.py` (10), `test_assistant.py` (+1). Thử thật 7/11 (Page "Chúng ta hay tò mò", khung 6 ngày sau, đã dừng + xoá ngay, không đăng gì):
   Claude CLI viết 19 s đúng kiểu "Mẹo" (ngắm Sao Thổ), lịch auto được tạo; ảnh Flow lỗi `CAPTCHA_FAILED: grecaptcha not available` → bài vẫn sẵn sàng, ghi chú.
+- **Clip quay như người thật + "🔇 Không lời"** (7/11, người dùng: "video review từ link SP máy móc quá… tối ưu prompt cho thật, người hơn" +
+  "thêm option review không lời, chỉ mặc / thao tác dùng SP"):
+  - **`services/clip_style.py`** = luật chung cho mọi chỗ AI viết cảnh: `LOOK_RULES` (video dọc quay điện thoại, nói rõ điện thoại ở đâu — bạn cầm ngang ngực /
+    dựng trên kệ / chụp gương, nơi thật mà người mua dùng sản phẩm + 1–2 chi tiết đời thường, ánh sáng có thật, vân vải / da có lỗ chân lông, cấm chữ
+    editorial / studio / cinematic / commercial / flawless / perfect / hero shot / chừa chỗ cho logo), `MOTION_RULES` (giữ mốc 0-3s/3-6s/6-8s, MỘT hành động chính +
+    MỘT chi tiết người thật, nhìn sản phẩm / gương chứ không nhìn ống kính, không tạo dáng / ngón cái / vẫy, điện thoại cầm tay rung nhẹ hoặc dựng yên, không
+    locked-off / dolly, tốc độ thật không "slow", kết bằng `Audio: ` 1–2 tiếng thật, miệng ngậm), `VOICE_RULES` (kể như người mua nói với bạn, mỗi câu một ý,
+    đổi thông số thành cảm giác, câu 1 móc trong 2 giây — không mở bằng "Mọi người ơi, đây là…", câu cuối nhắc giỏ hàng nhẹ, không bịa lịch sử dùng / kết quả),
+    `VOICELESS_RULES` (lời rỗng, kể bằng hình: tình huống → mặc / lấy ra → dùng thật → kết nhẹ nhàng; `Audio:` quan trọng nhất, không nhạc không lời),
+    `person_line(gender, country)` (nam → "write he"; tay → chỉ tay), `POLISH_WORDS` / `polish_words()` (test giữ mẫu sạch), `NOTE_VOICE` / `NOTE_VOICELESS`
+    (dòng hướng dẫn trong ghi chú kịch bản).
+  - **8 mẫu clip viết lại** (`templates/*.json`: cảnh, chuyển động có `Audio:`, lời thoại, bối cảnh mặc định là nơi đời thường — phòng ngủ có gương, nhà tắm, quán ăn,
+    bàn làm việc ở nhà, bếp nhà hơi bừa — `charVibe` mặc định `casual`, ghi chú + blurb). Gợi ý bối cảnh (`quicktool/suggestions.ts BACKDROPS`) và bối cảnh cho clip
+    2–5 (`NewClipDialog SETTING_IDEAS`) cũng bỏ studio.
+  - **`script_tailor`**: `system_prompt(voiceless)` = `_BASE` + `clip_style.scene_rules`; `tailor_scenes/tailor_spec(voiceless=, person=, place=, place_fixed=)` —
+    bối cảnh mặc định của mẫu chỉ là gợi ý ("dời tới nơi sản phẩm thật sự được dùng": áo điều hoà → công trường / chạy xe), bối cảnh người bán gõ khác mặc định
+    (`setting_choice(template, inputs)`) thì giữ nguyên; tả sản phẩm bằng chữ hình ảnh, bỏ size / màu / giá (trước đây dán nguyên mô tả "Available in grey…, sized M
+    to 3XL" vào prompt ảnh); ảnh ≤ ~550 ký tự, chuyển động ≤ ~450. `tailor_board` đọc giới tính từ node nhân vật / `quicktool.hands` và `quicktool.voiceless`.
+  - **"Theo link sản phẩm" / "Theo video mẫu"**: `product_link._SYSTEM_HEAD`, `reference_video._SYSTEM_HEAD` + `reference_video.plan_rules(voiceless)` /
+    `system_prompt(head, voiceless)`; `analyze(..., voiceless=)`, `normalize(..., voiceless=)` (bỏ `narration_vi`, đánh dấu `analysis.voiceless`), `board_spec/build_board(
+    voiceless=)`; nhân vật gợi ý vibe `casual`. Routes `/api/reference-video/analyze|analyze-link|build` nhận `voiceless`.
+  - **Viết lời thoại** (`narration._SYSTEM`) dùng `VOICE_RULES`; "✨ Viết lại chuẩn" / "Tạo lại theo yêu cầu" (`prompt_synth._KEEP_LOOK` trong `_REFINE_SUFFIX` /
+    `_REVISE_SUFFIX`) giữ kiểu quay điện thoại, không kéo về studio; Bước 2 "Viết lại chuẩn" chuyển động không ép camera "static" nữa.
+  - **Người mẫu**: `constants/character.ts` mỗi phong cách có thêm `male` (tóc ngắn, cạo râu / râu lún phún, áo thun — không trang điểm / khuyên tai),
+    `buildCharacterPrompt` dùng nó khi giới tính nam; chân dung tham chiếu đổi "Studio portrait headshot" → "Natural daylight head-and-shoulders portrait photo"
+    (cả `assistant.model_prompt`).
+  - **"🔇 Không lời"**: hộp Clip mới có ô **"Lời thoại: 🎙 Có lồng tiếng / 🔇 Không lời"** (`voiceChoice`, ở mục 3 của mẫu, link sản phẩm, video mẫu; đổi từ Không lời
+    sang Có lồng tiếng sau khi đã phân tích link / video thì phân tích lại vì kế hoạch không có lời). `POST /api/boards/from-template {voiceless}` → tailor không lời +
+    `templates.voiceless_spec` (lời rỗng, ghi chú `NOTE_VOICELESS`, cả khi tailor lỗi / không có sản phẩm) + **`quicktool.voiceless: true`**. Ghép: lời rỗng →
+    worker không lồng tiếng, không phụ đề, giữ nguyên tiếng của từng clip (đường ghép có sẵn). Store `isVoiceless()` / `setVoiceless(on)` (bật = xoá lời mọi cảnh;
+    tắt mà lời đều trống = AI viết lời), "⚡ Tạo video tự động" bỏ bước viết lời khi không lời. Bước 2: thanh "🔇 Clip không lời" (+ "🎙 Thêm lời thoại") hoặc
+    "🔇 Chuyển thành clip không lời", ẩn ô lời thoại; Bước 4 (`JoinOptions voiceless`) và Bước 5 ẩn giọng / phụ đề / tiếng gốc, ghi "không lời — giữ tiếng thật"
+    (nhạc nền, 60 fps, chữ trên video vẫn có). Trợ lý AI: `create_clip {voiceless}` ("không lời", "chỉ quay mặc thử", "kiểu ASMR").
+  - Test `test_clip_style.py` (8: mẫu không còn chữ studio / có `Audio:` / có câu giữ sản phẩm / không "slow"; giới tính; voiceless_spec; tailor biết người + nơi;
+    tailor không lời không giữ lời; route tạo clip không lời; kế hoạch link không lời; trợ lý). Sửa test cũ theo nội dung mẫu mới (`test_script_tailor`,
+    `test_templates`, `test_reference_video`, `test_assistant`).
+- **Tên riêng khi lồng tiếng** (7/11, `services/dub_names.py`): (1) **Whisper nghe đúng tên**: `asr_hint(title)` (tiêu đề tải về + hashtag, bỏ #/@/link, ≤ 160
+  ký tự) → `dub_runner transcribe <wav> <out> auto - <hint>` → faster-whisper **`hotwords`** (đặt vào MỌI cửa sổ 30 s; `initial_prompt` chỉ tới cửa sổ đầu khi
+  `condition_on_previous_text=False`); chỉ khi job có `url`. (2) **AI rà tên riêng ngay sau Google** (`dub.needs_name_check`: lời tiếng Việt do google / microsoft dịch;
+  AI dịch thì bỏ qua) → `dub._check_names` → `dub_names.check(src, lines, title, language)`: Gemini `gemini-3.5-flash` qua pool key miễn phí (không tốn lượt Claude),
+  200 câu một lượt, 3 lượt cùng lúc, JSON `{fixes: [{line, text}], names: [{write, say}]}`; câu sửa chỉ nhận khi giữ gần hết chữ cũ (`is_name_fix`: thay ≤ 3 từ hoặc
+  ≤ 1/3 câu); lỗi / chưa có key → giữ bản Google, ghi `job.names_note`. Luật dạng tên: hành tinh / thiên thể quen dùng tên Việt (Sao Thủy… Trái Đất, Mặt Trời, Dải Ngân Hà),
+  tên nước ngoài khác giữ chữ Latin như báo Việt viết (Einstein, Titan, đám mây Oort, giới hạn Roche), người / nơi Trung Quốc theo dạng quen (Hán-Việt). (3) **Giọng đọc
+  theo bảng tên**: `Job.names` `[{write, say}]` (job.json, snapshot, `public()`, `normalize_names` bỏ gạch nối) → `dub.speech(job, text)` thay `write` bằng `say` (cả từ,
+  dài trước) trước khi đưa TTS — phụ đề vẫn ghi `write`; giọng Gemini đọc nguyên văn (tự đọc tên nước ngoài được); `voice_key` tính theo chữ được đọc → đổi bảng tên là
+  đọc lại giọng (TTS cache theo chữ). Routes: `POST /api/dub/jobs/{id}/names {lines?}` → `{fixes: {"i": text}, names}` (không lưu; nút "việc đang chạy" có "AI đang rà
+  tên riêng"), `RenderBody.names`. Editor: tab "📜 Các câu" có khung **"🔤 Tên riêng"** (`dub/editor/NamesPanel.tsx`: phụ đề ghi → đọc là, sửa / 🗑 / ＋ Thêm tên, dòng
+  `names_note`, nút **"✨ AI rà tên riêng"** = `checkDubNames` → sửa câu + thêm tên, một bước hoàn tác); `EditDoc.names`, thay đổi = "tên riêng" (xuất lại đọc giọng).
+  `api/dub.ts`: `DubName`, `normNames`, `checkDubNames`, `DubJob.names|names_note`, `DubRender.names`. Thử thật read-only trên job 46bfc7232d1b (813 câu): 43 s, sửa 28 câu
+  (Anyinstein → Einstein, Losey → Roche, Billing Star → Proxima Centauri, Ultra Cloud → đám mây Oort, Neptune → Sao Hải Vương, Du hành 1 → Voyager 1, 插绒 → Charon),
+  11 tên có cách đọc (Einstein → Anh xtanh, Roche → Rốt sơ, Oort → Ót). Còn sót vài chữ ("Taitan", "Olet Yunwai", "Sora"). Test `test_dub_names.py` (8).
 ## Lộ trình (chốt với người dùng 30/10) — làm theo thứ tự A → B, C chạy song song khi cần
 Mục tiêu cuối: **bán DFlow** cho người làm affiliate (2 gói **Pro** / **Premium**), dạng **app desktop Tauri 2** — mọi thao tác trong app,
 Chrome chỉ để cài extension và mở tab Flow đúng project. Người dùng nói rõ: không cần bàn chuyện đúng sai pháp lý, họ tự chịu trách nhiệm.
@@ -1450,6 +1544,15 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
   Chrome Web Store từ chối → giữ cách cài tay kèm video.
 
 ## Việc đang dở / chưa kiểm chứng
+- **Tên riêng khi lồng tiếng (7/11)**: chưa nghe giọng VieNeu / Edge đọc các cách đọc AI ghi ("Anh xtanh", "Prốc xi ma Xen tau ri") — có thể phải sửa tay ở khung
+  "🔤 Tên riêng"; gợi ý `hotwords` cho Whisper chưa chạy thật trên video mới (job cũ đã nhận dạng rồi — dùng nút "✨ AI rà tên riêng" trong trình chỉnh sửa rồi Xuất lại);
+  nút "▶ Nghe câu" của trình chỉnh sửa vẫn đọc chữ phụ đề (chưa theo bảng tên); Edit auto CapCut lồng tiếng trước dùng chung luồng dub nên có rà tên, còn phụ đề video
+  tải lên (Whisper riêng) thì không.
+- **Clip quay như người thật + Không lời (7/11)**: **chưa tạo ảnh / video thật qua Flow** với prompt mới (mới thử AI viết kịch bản bằng chữ cho áo điều hoà #5,
+  có lời 23 s / không lời 28 s — ra công trường, chạy xe, bấm nút quạt, tiếng quạt chạy) — cần xem Flow có giữ đúng sản phẩm khi cảnh "đời thường" hơn, prompt dài
+  hơn, góc chụp gương che mặt. Chưa thử "Theo link sản phẩm" / "Theo video mẫu" với prompt mới (dùng chung luật). Chưa xem giao diện bằng mắt (tsc sạch, Vite biên
+  dịch được; người dùng tự test). Clip đã tạo trước 7/11 vẫn giữ prompt cũ — bấm "✨ Viết lại kịch bản theo sản phẩm" ở Bước 2 để viết lại theo luật mới.
+  Tiếng thật của clip không lời phụ thuộc Flow (Omni có tạo âm thanh theo `Audio:`; chưa nghe thử).
 - **Tự động đăng theo lịch (7/11)**: chưa để một khung chạy tới giờ và đăng thật lên Page (vòng đăng là `scheduler.tick` có sẵn, đã đăng thật nhiều lần; phần mới mới thử tới bước "chờ tới giờ đăng"). Ảnh Flow trong lần thử lỗi `CAPTCHA_FAILED: grecaptcha not available` ngay sau khi khởi động lại agent — xem tab Flow / reload extension; ảnh lỗi thì bài đăng không ảnh. **Máy phải bật + agent chạy**: agent chạy từ phiên Claude Code chết theo phiên — nên tự khởi động agent khi đăng nhập Windows (chưa làm). Chưa có: video / Reel tự động (clip từ sản phẩm, video lồng tiếng thư viện link), học từ số liệu Facebook (bài nhiều view → kiểu đó), giới hạn số bài / ngày toàn kênh, lịch tự động cho YouTube (người dùng bảo chỉ FB).
 - **Rà soát 30/10 — lỗi & cải thiện CHƯA SỬA** (người dùng bảo chỉ log; quét 20 trang bằng Playwright + đo API + cả bộ test; ưu tiên từ trên xuống):
   **Mục 1–4 ĐÃ SỬA 30/10** (xem Nhật ký; 5–15 còn đó). Ảnh hỏng cũ trên máy cty chỉ tự lành khi máy nhà (bản ảnh lành) chạy `repair_images` đẩy lại lên B2.
@@ -1496,10 +1599,12 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
   clip phần (`dub_part`) vẫn hiện Bước 1–4 + nút "Tạo video tự động" vô nghĩa (giống mục 7 rà soát); cắt chỉ cắt bản đã xuất — sửa phụ đề thì Xuất lại rồi
   Cắt lại; chưa cắt được cả loạt video một lần; **chưa dạy trợ lý AI** (trợ lý chưa có kỹ năng lồng tiếng nào — nên thêm cả cụm: lồng tiếng / chỉ phụ đề /
   cắt theo link).
-- **Logo Gemini thứ hai NHẤP NHÁY không xoá được** (thấy 7/11, clip cảnh 2 của áo khoác `2ef707ea…`): ngoài sao cố định ~120 px (xoá tốt) có sao ~90 px mà độ đậm đổi từng khung (mờ → trắng hẳn) — `clean_video` trừ theo một độ đậm nên còn lại sao trắng / sao nâu sẫm trong video cuối. Chưa sửa (cần đo độ đậm theo từng khung cho sao đó). Video cũ của clip #67 cũng dính.
-- **Xoá logo video (1/11)**: còn vệt viền rất mờ ở chỗ nền tối–sáng (thấy khi phóng to); mới đo trên Omni 720×1280 — clip Veo / cỡ khác chưa thử (vị trí
-  tính theo tỉ lệ `k`, có thể lệch); video Flow đã về máy trước 1/11 chỉ được xoá lúc ghép (lần ghép đầu chậm thêm ~8 s / clip, 3 clip một lúc); "Xoá trên ảnh đã có"
-  ở Cài đặt chưa quét video. Phụ đề Remotion cho clip: chưa có kéo vị trí / cỡ (luôn y 0,84), chưa có nhấn chữ quan trọng như lồng tiếng.
+- **Xoá logo video còn lại (7/11)**: clip **Veo** có chữ "Veo" nhỏ sát góc phải dưới — chưa xoá (logo khác hẳn, cần mẫu riêng); sao rất mờ trên nền gần trắng
+  không dò ra (37449e62, 81601a94 — mắt cũng khó thấy); vết "V" ở đầu nhọn logo Flow trên mép tối–sáng đã giảm nhờ đọc độ đậm theo cặp điểm (cảnh 2 áo khoác),
+  nền quá rối (< 30 % cặp sạch) vẫn đọc kiểu cũ — **chưa xem lại bằng mắt trên các clip khác sau đổi này** (người dùng tự test 7/11);
+  sao nhấp nháy mà cảnh chuyển động liên tục (không có mảnh nền khớp) thì lấp từ xung quanh — mịn nhưng hơi nhoè trên nền nhiều vân. Video cũ của clip #67 phải ghép
+  lại mới hết sao (bộ nhớ đệm đã đổi phiên bản nên lần ghép sau tự xoá lại).
+- **Xoá logo video (1/11)**: clip cỡ khác 720×1280 / 1280×720 chưa thử (vị trí tính theo tỉ lệ `k`); "Xoá trên ảnh đã có" ở Cài đặt chưa quét video. Phụ đề Remotion cho clip: chưa có kéo vị trí / cỡ (luôn y 0,84), chưa có nhấn chữ quan trọng như lồng tiếng.
 - **Thư viện link lồng tiếng (30/10)**: hàng đợi thư viện mới chạy thật với 2 link lỗi nhanh (example.com — trước khi chặn link không phải video), chưa lồng tiếng trọn một video thật từ thư viện, chưa chạy nhiều link liền nhau qua nhiều giờ. Chưa có: tách link theo file (lọc theo file nguồn), sắp xếp, ưu tiên / đổi thứ tự trong hàng đợi, giới hạn số video mỗi ngày, tự lấy tiêu đề video trước khi lồng tiếng.
 - **Edit auto CapCut (28/10)**: dự án ghi ra **chưa mở thử trong CapCut thật** (cấu trúc chép từ dự án người dùng tạo bằng CapCut 9.5.0, kiểm bằng
   đọc lại file + Playwright). Cần người dùng mở CapCut xem dự án "Flowboard thử — Lao xuống Enceladus…": video nền, giọng + nhạc, phụ đề, chữ nhấn mạnh,
@@ -1728,3 +1833,8 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
 - **1/11** — Bước 4 có khung **"🎙 Giọng đọc & phụ đề khi ghép"** (giọng + nghe thử; phụ đề: Không / ffmpeg 3 kiểu / Remotion 3 kiểu — Bước 5 cùng ô chọn, "⚡ Tạo video tự động" dùng luôn; giọng mặc định = giọng yêu thích); **xoá logo Gemini ✦ trên video** chạy ngầm khi video Flow về máy + lúc ghép (cả sao sót từ ảnh cảnh); sửa Remotion lỗi khi cổng 3000 bị app khác chiếm. `video_watermark.py` (mới), `media.py`, `video_export.py`, `tts.py`, `processor.py`, `render.mjs`, `JoinOptions.tsx` (mới), `StepMedia.tsx`, `StepExport.tsx`, `generation.ts`, `board.ts`, `GeminiMarkSection.tsx`, CSS. Test `test_clip_stamp_subs.py` 6, cả bộ 1211 pass (9 lỗi môi trường Windows đã biết), `tsc` sạch. Thử thật: 4 clip của clip #61 sạch logo (ảnh so trước / sau), ghép thử bằng request riêng (không đụng clip #61) với Hải Đăng + Remotion: 60 s, khung hình không còn sao, phụ đề hộp vàng; Playwright Bước 4 / 5 không lỗi. Agent `start125`. Commit + push 2/11.
 - **7/11** — Tìm lý do clip áo khoác có quạt (link → video) mất hơn 30 phút: ghép 60 fps chạy một nhân trên cả clip ghép (8 phút 49 s), giọng VieNeu nạp model mỗi cảnh, nút Ghép bấm 2 lần chạy 2 lượt, agent chết theo phiên Claude Code. Sửa: 60 fps từng clip song song + lưu lại, đọc giọng trước một lượt, không đọc lại VieNeu, chặn export trùng (agent + nút). `video_export.py`, `routes/requests.py`, `store/quicktool.ts`, `StepExport.tsx`. Test `test_export_speed.py` 6 + export / tts / requests / drama 87 pass, `tsc` sạch. Đo thật bằng request riêng (không gắn clip #67): 179 s → ghép lại 29 s (trước 618 s). Agent `start130`. Commit 7/11.
 - **7/11** — **🤖 Tự động đăng theo lịch** cho Facebook Page trong trang Bài viết: đặt ngày + giờ cố định, agent tự soạn trước (Claude CLI mặc định, lỗi thì Gemini), vẽ ảnh Flow, lên lịch tự đăng; tới giờ chưa có bài thì bỏ khung; máy tắt lúc tới giờ thì bỏ lỡ (không đăng bù); tạm dừng huỷ bài chưa đăng; nút lấy cài đặt từ form viết; trợ lý AI có kỹ năng `auto_post`. `services/autopilot.py`, `routes/autopilot.py`, bảng `AutoPlan` / `AutoRun`, `llm/registry.use_ai`, `main.py`, `routes/running.py`, `assistant.py`, `api/autopilot.ts`, `posts/AutoPilot.tsx`, `autopilot.css`, `PostsPage.tsx`. Test autopilot 10 + assistant / running / posts / schedule / fb_sync / llm 200+ pass, `tsc` sạch. Thử thật an toàn (khung 6 ngày sau, đã dừng + xoá lịch, bài, slot thử). Agent `start131`. Commit 7/11.
+- **7/11** — Commit `9ef7dae` (tốc độ ghép + tự động đăng). Rồi theo yêu cầu "làm kỹ, cần hiệu quả": **xoá logo video làm lại** (sao ảnh cảnh nhấp nháy — đo độ đậm + cỡ từng khung, dán mảnh nền sạch từ khung sao tắt; sao gốc ghim, không dò lệch; logo Flow đọc từng khung ở vị trí cố định khi mép cảnh che; màu trừ theo hình nhoè; bộ nhớ đệm có phiên bản) — đo trên 20 clip Omni thật + ảnh phóng to, 4 clip nhấp nháy từ 8–53 % khung còn sao trắng → 0 %, clip áo khoác cảnh 4 hết bỏ sót logo; thử rồi bỏ khớp hình theo clip và màu W ≠ 255. **60 fps làm ngầm khi từng cảnh về** (`smooth_prewarm.py`, hook worker, routes `/api/boards/{id}/smooth60`, pref `smooth60`, ô ở Bước 4 + 5 có dòng trạng thái). `video_watermark.py`, `video_export.py`, `worker/processor.py`, `routes/export_extras.py`, `store/settings.ts`, `store/quicktool.ts`, `JoinOptions.tsx`, `StepExport.tsx`, `api/client.ts`, CSS. Test mới `test_video_watermark_twinkle.py` 6 + `test_smooth_prewarm.py` 5, test cũ xoá logo / ghép / media pass, `tsc` sạch. Chưa commit.
+- **7/11 khuya** — Xoá logo: kiểm video ghép cuối của clip áo khoác (4 cảnh, 60 fps, ghép 10,5 s khi đã làm mượt sẵn; làm mượt ngầm 217 s): sao nhấp nháy hết, còn vết chữ V sẫm ở đầu nhọn logo Flow cảnh 2 (sàn tối / tường sáng) do đọc độ đậm 0,347 thay vì ~0,31 → thêm `_pair_alpha` (đọc theo cặp điểm hai bên viền, chỉ cho logo Flow), `CLEAN_VERSION` 4. Đo cặp điểm trên ~30 clip; ép tay 0,28/0,30/0,32 trên cảnh 2 để chọn. Test xoá logo + làm mượt 22 pass. Người dùng bảo dừng test, tự test.
+- **7/11 tối** — Clip review **quay như người thật** + lựa chọn **🔇 Không lời**: tìm hiểu cách viết prompt UGC cho Veo / Flow (hướng dẫn Veo 3.1 của Google, các bộ prompt UGC, cách làm video TikTok Shop / review không lời) → `services/clip_style.py` (luật chung), viết lại 8 mẫu clip + gợi ý bối cảnh, `script_tailor` (biết giới tính, nơi dùng thật, không lời), `product_link` / `reference_video` / `narration` theo cùng luật, "Viết lại chuẩn" / "Tạo lại theo yêu cầu" giữ kiểu điện thoại; sửa người mẫu nam bị trang điểm kiểu nữ (`character.ts` thêm bản `male`) và chân dung tham chiếu bỏ "studio". Không lời: ô chọn ở hộp Clip mới, `quicktool.voiceless`, Bước 2 bật / tắt, Bước 4–5 ẩn giọng / phụ đề, tạo tự động bỏ viết lời, trợ lý AI `create_clip {voiceless}`. Test `test_clip_style.py` 8, cả bộ 1109 pass / 2 skip (bỏ 5 file lỗi môi trường Windows đã biết), `tsc` sạch. Thử AI thật (chữ, không lưu) cho áo điều hoà: có lời / không lời. **Chưa chạy qua Flow; agent của người dùng (cửa sổ của họ) cần khởi động lại để có backend mới.**
+- **7/11 khuya** — Lồng tiếng: **tên riêng bị Google dịch sai / đọc sai** (người dùng báo "Anyinstein"): Whisper nhận tiêu đề video làm `hotwords`, sau khi Google dịch một lượt Gemini (key miễn phí) sửa tên riêng trong câu + ghi cách đọc tiếng Việt, giọng đọc theo bảng tên (phụ đề vẫn ghi tên gốc), trình chỉnh sửa có khung "🔤 Tên riêng" + nút "✨ AI rà tên riêng" cho clip đã làm. `services/dub_names.py`, `dub.py` (`speech`, `voice_key`, `_check_names`, `needs_name_check`, `Job.names`), `dub_runner.py` (hotwords), `routes/dub.py` (`/jobs/{id}/names`, `RenderBody.names`), `op_tracker`, `api/dub.ts`, `dub/editor/NamesPanel.tsx`, `DubEditor`, `Inspector`, `cues.ts`, `editor.css`. Test `test_dub_names.py` 8 + mọi test lồng tiếng 162 pass, `tsc` sạch. Thử AI thật read-only trên clip "Chương cuối cùng…" (813 câu, 43 s, 28 câu sửa). Agent của người dùng cần khởi động lại.
+- **7/11 khuya** — README viết lại: bảng "Cần gì cho nhu cầu nào" (lõi / clip Flow / AI CLI / Gemini key / giọng đọc / Remotion / yt-dlp / lồng tiếng + xoá phụ đề AI (pyvideotrans) / CapCut / Facebook Page / tự động đăng / cloud), cài phần lõi Windows (`start.ps1 -FlowProjectId -Plan`) và Linux, cài thêm theo nhu cầu (đường dẫn model Whisper / spleeter / LaMa / VieNeu, `FLOWBOARD_ERASE_*`), lỗi hay gặp. Commit + push toàn bộ việc 7/11.

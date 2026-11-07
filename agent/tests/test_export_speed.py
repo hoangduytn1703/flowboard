@@ -36,14 +36,14 @@ def _count_smoothing(monkeypatch) -> dict:
     lock = threading.Lock()
     real = video_export.smooth_to_60fps
 
-    def counted(src, dst):
+    def counted(src, dst, **kw):
         with lock:
             seen["calls"].append(Path(src).name)
             seen["now"] += 1
             seen["most"] = max(seen["most"], seen["now"])
         try:
             time.sleep(0.3)  # long enough for the other clips to start alongside
-            return real(src, dst)
+            return real(src, dst, **kw)
         finally:
             with lock:
                 seen["now"] -= 1

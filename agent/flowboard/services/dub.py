@@ -35,7 +35,7 @@ from sqlmodel import select
 from flowboard.db import get_session
 from flowboard.db.models import Asset, Board, Node
 from flowboard.services import media as media_service
-from flowboard.services import dub_decor, dub_remotion, key_moments, sfx, tts
+from flowboard.services import dub_decor, dub_names, dub_remotion, key_moments, sfx, tts
 from flowboard.services.llm import run_llm
 from flowboard.services.llm.base import LLMError
 from flowboard.services.video_clean import erase_python, erase_root
@@ -787,6 +787,10 @@ class Job:
     mode: str = "dub"
     #: the subtitles' language (SUB_LANGS): "vi", "orig" (the video's own words) or another — subtitles only
     sub_lang: str = "vi"
+    #: proper names a Vietnamese voice would misread: [{write, say}] — the subtitle shows ``write``, the voice reads
+    #: ``say`` (services/dub_names); ``names_note`` = how the AI name check went ("" = not run)
+    names: list[dict] = field(default_factory=list)
+    names_note: str = ""
     #: "✂️ Cắt thành nhiều video" (services/dub_split): the rows being edited [{start, end, title}] and the parts
     #: cut so far [{index, start, end, title, media_id, board_id, at}]
     cuts: list[dict] = field(default_factory=list)
@@ -819,6 +823,7 @@ class Job:
             "width": self.width, "height": self.height, "batch_id": self.batch_id,
             "translator": self.translator, "translated_by": self.translated_by, "mode": self.mode,
             "sub_lang": self.sub_lang, "cuts": [dict(c) for c in self.cuts], "parts": [dict(p) for p in self.parts],
+            "names": [dict(n) for n in self.names], "names_note": self.names_note,
             "title": self.title, "duration_s": round(self.duration_s, 1),
             "segments": [s.public() for s in self.segments],
         }
@@ -1055,6 +1060,34 @@ async def _translate(job: Job) -> None:
     job.translated_by = "ai"
 
 
+def needs_name_check(job: Job) -> bool:
+    """The free translator wrote the Vietnamese lines (the AI translator handles names itself)."""
+    target = job.sub_lang if job.mode == "sub" else "vi"
+    return target == "vi" and job.translated_by.startswith(("google", "microsoft"))
+
+
+async def _check_names(job: Job, title: str = "") -> None:
+    """The AI name check (services/dub_names) right after Google: wrong names fixed in the lines, the glossary
+    kept for the voice. Best effort — a failure leaves the Google lines and says why in ``names_note``."""
+    _set(job, "Đang rà tên riêng (AI Gemini)", 60)
+
+    def progress(k: int, n: int) -> None:
+        if n > 1:
+            _set(job, f"Đang rà tên riêng (AI Gemini) {k}/{n}", 60)
+
+    try:
+        fixes, names = await dub_names.check([s.src for s in job.segments], [s.text for s in job.segments],
+                                             title=title or job.title, language=job.language, progress=progress)
+    except dub_names.NamesError as exc:
+        job.names_note = f"chưa rà tên riêng: {exc}"
+        logger.info("dub %s: name check skipped: %s", job.id, exc)
+        return
+    for i, text in fixes.items():
+        job.segments[i].text = text
+    job.names = names
+    job.names_note = f"AI đã rà tên riêng: sửa {len(fixes)} câu, {len(names)} tên có cách đọc riêng"
+
+
 def _prepare(job: Job) -> None:
     ffmpeg = _ffmpeg()
     job.status = "running"
@@ -1082,7 +1115,9 @@ def _prepare(job: Job) -> None:
     _extract_wav(ffmpeg, src, wav16, 16000, True)
     _set(job, "Đang nhận dạng tiếng gốc (Whisper)", 10)
     out_json = job.work / "asr.json"
-    _runner("transcribe", str(wav16), str(out_json), "auto",
+    # A downloaded video's title (+ hashtags) names what it is about: Whisper hears those names right.
+    hint = dub_names.asr_hint(job.title) if job.url else ""
+    _runner("transcribe", str(wav16), str(out_json), "auto", "-", hint,
             progress=lambda p: _set(job, "Đang nhận dạng tiếng gốc (Whisper)", 10 + p * 0.4), stop=lambda: job.stop)
     data = json.loads(out_json.read_text(encoding="utf-8"))
     job.language = str(data.get("language") or "")
@@ -1090,7 +1125,10 @@ def _prepare(job: Job) -> None:
     if not job.segments:
         raise DubError("Whisper không nghe ra câu nào trong video")
     _set(job, "Đang dịch sang tiếng Việt", 52)
+    title_src = job.title
     asyncio.run(_translate(job))
+    if needs_name_check(job):
+        asyncio.run(_check_names(job, title_src))
     _set(job, "Đã dịch xong", 60)
     persist(job)  # the translation survives an agent restart from here on (see _job_from_dict)
 
@@ -1122,7 +1160,7 @@ def _prefetch_edge(job: Job, spoken: list[Segment]) -> None:
                 if job.stop:
                     raise DubError("Đã dừng theo yêu cầu")
                 try:
-                    await tts.synthesize(seg.text, job.voice, 0)
+                    await tts.synthesize(speech(job, seg.text), job.voice, 0)
                 except tts.TTSError:
                     pass  # the loop below tries it again, with its rounds
             done += 1
@@ -1143,7 +1181,7 @@ def _voice_pieces(job: Job) -> list[tuple[float, Path, float]]:
         # VieNeu loads its model once for every line still missing (then each line below is a cache hit)
         _set(job, f"Đang tạo giọng đọc VieNeu ({len(spoken)} câu, trên máy)", 62)
         try:
-            asyncio.run(tts.synthesize_many([s.text for s in spoken], job.voice, 0))
+            asyncio.run(tts.synthesize_many([speech(job, s.text) for s in spoken], job.voice, 0))
         except tts.TTSError as exc:
             raise DubError(f"giọng đọc lỗi: {exc}") from exc
     if tts.voice_kind(job.voice) == "edge" and len(spoken) > 1:
@@ -1154,7 +1192,7 @@ def _voice_pieces(job: Job) -> list[tuple[float, Path, float]]:
         narr = None
         for round_no in range(VOICE_ROUNDS):
             try:
-                narr = asyncio.run(tts.synthesize(seg.text, job.voice, 0))
+                narr = asyncio.run(tts.synthesize(speech(job, seg.text), job.voice, 0))
                 break
             except tts.TTSError as exc:
                 # Edge drops requests in streaks: one bad line should not end a long video — wait, then try it again
@@ -1335,12 +1373,20 @@ def waveform(job: Job) -> Path:
     return out
 
 
+def speech(job: Job, text: str) -> str:
+    """What the voice reads for a subtitle line: the proper names of ``job.names`` in their Vietnamese reading
+    (Einstein → "Anh xtanh"). Gemini voices read foreign names well by themselves and get the line as it is."""
+    if not job.names or tts.voice_kind(job.voice) == "gemini":
+        return text
+    return dub_names.spoken(text, job.names)
+
+
 def voice_key(job: Job) -> str:
-    """What voice.wav was made from: the voice, every line, and every line's
-    slot (the timeline editor moves / stretches lines → the voice is placed
-    again; the TTS itself comes from its cache)."""
+    """What voice.wav was made from: the voice, every line as read (names in their reading), and every
+    line's slot (the timeline editor moves / stretches lines → the voice is placed again; the TTS itself
+    comes from its cache)."""
     slots = ",".join(f"{s.start:.2f}-{s.end:.2f}" for s in job.segments)
-    return job.voice + "|" + "\x1f".join(s.text for s in job.segments) + "|t:" + slots
+    return job.voice + "|" + "\x1f".join(speech(job, s.text) for s in job.segments) + "|t:" + slots
 
 
 def _legacy_voice_key(job: Job) -> str:
@@ -1805,6 +1851,7 @@ def _job_from_dict(d: dict, work: Path, fallback_time: float) -> Job:
               auto_render=bool(d.get("auto_render", True)), batch_id=str(d.get("batch_id") or ""),
               translator=normalize_translator(d.get("translator")), translated_by=str(d.get("translated_by") or ""),
               mode=normalize_mode(d.get("mode")), sub_lang=normalize_sub_lang(d.get("sub_lang")),
+              names=dub_names.normalize_names(d.get("names")), names_note=str(d.get("names_note") or ""),
               cuts=[c for c in d.get("cuts") or [] if isinstance(c, dict)],
               parts=[p for p in d.get("parts") or [] if isinstance(p, dict)],
               language=str(d.get("language") or ""),
@@ -1931,7 +1978,8 @@ def render_job(job: Job, *, lines: Optional[list[str]], voice: Optional[str], st
                layout: Optional[dict] = None, engine: Optional[str] = None,
                timings: Optional[list[list[float]]] = None,
                looks: Optional[list[Optional[dict]]] = None,
-               highlights: Optional[dict] = None, mode: Optional[str] = None, sub_lang: Optional[str] = None) -> Job:
+               highlights: Optional[dict] = None, mode: Optional[str] = None, sub_lang: Optional[str] = None,
+               names: Optional[list] = None) -> Job:
     """Render (again) with edited lines / options. Allowed from ``review``,
     ``done`` and ``error`` (after a render failure). ``timings`` = new
     [start, end] per line from the timeline editor; ``sub_lang`` = the language
@@ -1980,6 +2028,8 @@ def render_job(job: Job, *, lines: Optional[list[str]], voice: Optional[str], st
         job.sub_lang = normalize_sub_lang(sub_lang)
     if mode is not None:
         job.mode = normalize_mode(mode)
+    if names is not None:
+        job.names = dub_names.normalize_names(names)
     job.error, job.stop = None, False
     quick = job.mode == "sub" or (bool(job.work) and (job.work / "voice.wav").is_file() and job.voice_key == voice_key(job))
     job._render_only = True  # type: ignore[attr-defined]
@@ -1999,7 +2049,7 @@ def render_job(job: Job, *, lines: Optional[list[str]], voice: Optional[str], st
 TAG_PREFIX = "flowboard-dub:"
 SNAPSHOT_KEYS = ("url", "source_media_id", "voice", "keep_bgm", "style", "engine", "layout", "highlights", "width", "height",
                  "channel_id", "name", "language", "title", "duration_s", "segments", "media_id", "batch_id", "mode",
-                 "sub_lang", "cuts", "parts")
+                 "sub_lang", "cuts", "parts", "names")
 
 
 def output_tag(job: Job) -> str:

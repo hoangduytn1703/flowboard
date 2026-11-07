@@ -74,8 +74,12 @@ interface SettingsState {
   /** the dubbing voice picked last (trang Lồng tiếng, thư viện link, Edit auto CapCut) — the default for the next
    * video; "" = the built-in default. Follows the login like the model picks. */
   dubVoice: string;
+  /** "Mượt 60 fps" picked last for a clip: a new clip starts with it, and its scenes are smoothed in the background
+   * as they land (services/smooth_prewarm reads it from the account's prefs). */
+  smooth60: boolean;
   hydrateFromAccount(prefs: Record<string, string | number | boolean>): void;
   setDubVoice(voice: string): void;
+  setSmooth60(on: boolean): void;
   setImageModel(model: ImageModelKey): void;
   setImageProvider(p: ImageProviderKey): void;
   setUiMode(mode: UiMode): void;
@@ -100,6 +104,7 @@ interface PersistShape {
   imageProvider?: ImageProviderKey;
   uiMode?: UiMode;
   dubVoice?: string;
+  smooth60?: boolean;
 }
 
 const PERSIST_VERSION = 2;
@@ -161,6 +166,7 @@ function snapshotPersist(get: () => SettingsState): PersistShape {
     imageProvider: get().imageProvider,
     uiMode: get().uiMode,
     dubVoice: get().dubVoice || undefined,
+    smooth60: get().smooth60,
   };
 }
 
@@ -187,6 +193,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       : "flow",
   uiMode: persisted.uiMode === "canvas" ? "canvas" : "quicktool",
   dubVoice: isVoiceId(persisted.dubVoice) ? persisted.dubVoice : "",
+  smooth60: persisted.smooth60 === true,
   /** Apply the preferences saved with the account (called once after login). */
   hydrateFromAccount(prefs) {
     const next: Partial<SettingsState> = {};
@@ -198,6 +205,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     if (VALID_IMAGE_PROVIDERS.includes(prefs.imageProvider as ImageProviderKey)) next.imageProvider = prefs.imageProvider as ImageProviderKey;
     if (prefs.uiMode === "canvas" || prefs.uiMode === "quicktool") next.uiMode = prefs.uiMode;
     if (isVoiceId(prefs.dubVoice)) next.dubVoice = prefs.dubVoice;
+    if (typeof prefs.smooth60 === "boolean") next.smooth60 = prefs.smooth60;
     serverSync = true;
     if (Object.keys(next).length === 0) {
       // Nothing saved yet for this account: push what this browser has.
@@ -218,6 +226,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setDubVoice(voice) {
     if (!isVoiceId(voice) || voice === get().dubVoice) return;
     set({ dubVoice: voice });
+    persist(snapshotPersist(get));
+  },
+  setSmooth60(on) {
+    if (on === get().smooth60) return;
+    set({ smooth60: on });
     persist(snapshotPersist(get));
   },
   setImageProvider(p) {

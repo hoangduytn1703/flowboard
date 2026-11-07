@@ -12,6 +12,12 @@ description and selling points, keeping the template's beats (hook, detail,
 demo, call to action), who is in each shot and every constraint sentence.
 ``variant`` asks for a different angle when one product gets several clips.
 Any failure leaves the template text as it was.
+
+7/11: the scenes are written as phone footage of a real buyer (see
+``clip_style``), the model's gender is given (a male model was written as
+"she"), the template's studio place moves to where the product is really
+used unless the seller picked the place, and a ``voiceless`` clip gets no
+voice lines — the pictures and the real sounds carry it.
 """
 from __future__ import annotations
 
@@ -20,6 +26,7 @@ import logging
 import re
 from typing import Any, Optional
 
+from flowboard.services import clip_style
 from flowboard.services.llm import run_llm
 from flowboard.services.llm.base import LLMError
 from flowboard.services.prompt_synth import restore_product_guard
@@ -30,34 +37,40 @@ logger = logging.getLogger(__name__)
 #: ~8 s of natural Vietnamese speech.
 MAX_WORDS = 24
 
-_SYSTEM = (
-    "You adapt the script of a short TikTok Shop / affiliate ad (scenes of ~8 seconds) to ONE specific "
-    "product. You get the product facts and the template's scenes. For every scene return an image prompt, "
-    "a motion prompt and a voice line, rewritten so they fit THIS product.\n"
+_BASE = (
+    "You adapt the script of a short TikTok Shop / affiliate clip (scenes of ~8 seconds) to ONE specific "
+    "product, so that it looks like a real buyer filmed it on a phone. You get the product facts and the "
+    "template's scenes. For every scene return an image prompt, a motion prompt and a voice line.\n"
     "Rules:\n"
-    "- Keep each scene's beat and purpose (hook, detail, tasting/demo, call to action) and keep exactly who "
-    "is in the shot: a 'no people' scene stays without people, a scene with the model keeps the model.\n"
-    "- Describe only what is true for this product, taken from its description and selling points. Remove "
-    "template details that do not apply (e.g. cheese, buns, sauces, ingredients or features the product "
-    "does not have). Use concrete details of this product instead.\n"
-    "- image_prompt and video_prompt are in English. Copy the product's name/description words verbatim, "
-    "never shorten them to 'the product'. Keep every constraint sentence of the template prompt (lighting, "
-    "framing, 'The product must match the reference photo…', 'Locked-off camera…', empty space for a "
-    "logo) word for word. The video_prompt keeps the '0-3s: … 3-6s: … 6-8s: …' timeline with small, "
-    "physically plausible motions of THIS product; no on-screen text.\n"
-    "- Scenes with the model: let the product and the hands lead — medium or waist-up framing, three-quarter "
-    "or side angles, the face turned partly away or small in frame. No tight face close-ups, and never words "
-    "like celebrity, idol, K-pop, influencer, famous or flawless (Flow drops clips of faces it reads as famous). "
-    "One clear, simple action per beat in the video_prompt (Flow renders simple motion faster and cleaner).\n"
-    f"- voice is natural spoken Vietnamese, at most {MAX_WORDS} words, like a seller talking to camera "
-    "(xưng 'mình', gọi 'mọi người'), warm and specific: each line names a concrete selling point of this "
-    "product (texture, taste, ingredient, how it is made, size, use…). The first line hooks and names the "
-    "product, the last ends with a short call to action. Mention the price only if it is given. No "
-    "hashtags, no emoji, no quotation marks, no made-up claims (no health/medical promises, no discounts "
-    "that are not given).\n"
+    "- Keep each scene's beat and purpose (hook, detail, demo, call to action) and exactly who is in the shot: a "
+    "'no people' scene stays without people, a scene with the model keeps the model, hands stay hands.\n"
+    "- Describe only what is true for this product, taken from its description and selling points; drop template "
+    "details that do not apply (e.g. cheese, buns, features the product does not have). Show the product doing its "
+    "real job.\n"
+    "- image_prompt and video_prompt are in English. Name the product by its concrete visual words (what it is, "
+    "colour, material, the parts that matter, e.g. 'grey long-sleeved work jacket with two small fans on the lower "
+    "back') — never just 'the product' — and leave out sizes, colour options, prices and marketing claims. An "
+    "image_prompt is ONE still moment (where the motion starts) described as a phone photo: where the phone is, "
+    "framing, the person and what they are doing, the place with one or two details, the light, the texture — "
+    "at most about 550 characters (the product sentence is added after it); a video_prompt at most about 450.\n"
+    "- Scenes with the model: the product and the hands lead — waist-up or medium framing, three-quarter or side "
+    "angles, the face partly turned away, small in frame, or half hidden by the phone in a mirror selfie. No tight "
+    "face close-ups, and never words like celebrity, idol, K-pop, influencer, famous or flawless (Flow drops clips "
+    "of faces it reads as famous).\n"
+)
+
+_OUTPUT = (
     "Output ONLY a JSON array, one object per scene in the given order: "
     '[{"image_prompt": "...", "video_prompt": "...", "voice": "..."}] — no prose, no code fences.'
 )
+
+
+def system_prompt(voiceless: bool = False) -> str:
+    return _BASE + clip_style.scene_rules(voiceless=voiceless, words=MAX_WORDS) + _OUTPUT
+
+
+#: The voice-over version, kept under its old name for callers and tests.
+_SYSTEM = system_prompt(False)
 
 
 class TailorError(RuntimeError):
@@ -123,14 +136,29 @@ def _hands_tail(prompt: str) -> str:
     return "" if i < 0 else " " + prompt[i:].strip()
 
 
+def _place_note(place: Optional[str], fixed: bool) -> str:
+    place = (place or "").strip()
+    if not place:
+        return ""
+    if fixed:
+        return f"\nPLACE (the seller picked it — use it in every scene, it wins over the rules): {place}"
+    return (f"\nPLACE (the template's suggestion): {place} — keep it only if a real buyer would use this product "
+            "there; otherwise move the scenes to the place where it is really used.")
+
+
 async def tailor_scenes(scenes: list[dict[str, str]], product: dict, *, variant: int = 0, of: int = 1,
                         template_title: str = "", shown_as: Optional[str] = None,
-                        instructions: Optional[str] = None, timeout: float = 120.0) -> list[dict[str, str]]:
+                        instructions: Optional[str] = None, timeout: float = 120.0,
+                        voiceless: bool = False, person: Optional[str] = None,
+                        place: Optional[str] = None, place_fixed: bool = False) -> list[dict[str, str]]:
     """Rewrite ``scenes`` (each ``{title, image_prompt, video_prompt, voice}``,
     in order) for ``product``. Returns, per scene, the final
     ``{image_prompt, video_prompt, voice}`` with the product guard and any
     hands-mode sentence of the old prompts put back; an empty string means
-    "keep the old text". Raises :class:`TailorError`."""
+    "keep the old text" (a ``voiceless`` clip always gets an empty voice).
+    ``person`` is :func:`clip_style.person_line` of who is in the shots;
+    ``place`` the clip's setting, which the seller chose when ``place_fixed``.
+    Raises :class:`TailorError`."""
     if not scenes:
         raise TailorError("no scenes")
     brief = [{
@@ -153,10 +181,12 @@ async def tailor_scenes(scenes: list[dict[str, str]], product: dict, *, variant:
     wish = ""
     if instructions and instructions.strip():
         wish = f"\n\nTHE SELLER ALSO ASKS (Vietnamese, follow it within the rules): {instructions.strip()}"
-    user = (f"PRODUCT\n{_product_facts(product)}{shown}\n\nTEMPLATE: {template_title}\n"
+    who = f"\n{person}" if person else ""
+    user = (f"PRODUCT\n{_product_facts(product)}{shown}\n\nTEMPLATE: {template_title}{who}"
+            f"{_place_note(place, place_fixed)}\n"
             f"SCENES (current version, adapt each):\n{json.dumps(brief, ensure_ascii=False, indent=1)}{variation}{wish}")
     try:
-        text = await run_llm("auto_prompt", user, system_prompt=_SYSTEM, timeout=timeout)
+        text = await run_llm("auto_prompt", user, system_prompt=system_prompt(voiceless), timeout=timeout)
     except LLMError as exc:
         raise TailorError(f"LLM failed: {exc}") from exc
     rewritten = _parse(text, len(scenes))
@@ -171,13 +201,14 @@ async def tailor_scenes(scenes: list[dict[str, str]], product: dict, *, variant:
         if new["video_prompt"] and old_vid:
             vid = new["video_prompt"].rstrip() + _hands_tail(old_vid)
         out.append({"image_prompt": img, "video_prompt": vid,
-                    "voice": _clip_words(new["voice"]) if new["voice"] else ""})
+                    "voice": _clip_words(new["voice"]) if new["voice"] and not voiceless else ""})
     return out
 
 
 async def tailor_spec(spec: dict, product: dict, *, variant: int = 0, of: int = 1,
                       template_title: str = "", shown_as: Optional[str] = None,
-                      timeout: float = 120.0) -> dict:
+                      timeout: float = 120.0, voiceless: bool = False, person: Optional[str] = None,
+                      place: Optional[str] = None, place_fixed: bool = False) -> dict:
     """``spec`` with every scene rewritten for ``product`` (see module doc).
     Raises :class:`TailorError` on any failure; the caller keeps ``spec``."""
     nodes = [dict(n) for n in spec["nodes"]]
@@ -190,7 +221,8 @@ async def tailor_spec(spec: dict, product: dict, *, variant: int = 0, of: int = 
         scenes.append({"title": str(idata.get("title") or ""), "image_prompt": str(idata.get("prompt") or ""),
                        "video_prompt": str(vdata.get("prompt") or ""), "voice": str(vdata.get("narration") or "")})
     rewritten = await tailor_scenes(scenes, product, variant=variant, of=of, template_title=template_title,
-                                    shown_as=shown_as, timeout=timeout)
+                                    shown_as=shown_as, timeout=timeout, voiceless=voiceless, person=person,
+                                    place=place, place_fixed=place_fixed)
     for (img, vid), new in zip(pairs, rewritten):
         if new["image_prompt"]:
             img["data"] = {**(img.get("data") or {}), "prompt": new["image_prompt"]}
@@ -202,6 +234,14 @@ async def tailor_spec(spec: dict, product: dict, *, variant: int = 0, of: int = 
                 vdata["narration"] = new["voice"]
             vid["data"] = vdata
     return {**spec, "nodes": nodes}
+
+
+def setting_choice(template: dict, inputs: Optional[dict]) -> tuple[str, bool]:
+    """``(the clip's setting, whether the seller picked it)``: a setting that
+    differs from the template's default was typed / chosen in the dialog."""
+    default = next((str(i.get("default") or "") for i in template.get("inputs") or [] if i.get("key") == "setting"), "")
+    typed = str((inputs or {}).get("setting") or "").strip()
+    return (typed or default), bool(typed) and typed != default
 
 
 #: Shown as "Lần trước đã yêu cầu …" in the scene's "Tạo lại…" box, whose
@@ -229,7 +269,9 @@ async def tailor_board(board_id: int, scene_ids: list[tuple[int, Optional[int]]]
         if board is None:
             raise TailorError("clip not found")
         qt = dict((board.data or {}).get("quicktool") or {})
-        rows = {n.id: dict(n.data or {}) for n in s.exec(select(Node).where(Node.board_id == board_id)).all()}
+        all_nodes = s.exec(select(Node).where(Node.board_id == board_id)).all()
+        rows = {n.id: dict(n.data or {}) for n in all_nodes}
+        model = next((dict(n.data or {}) for n in all_nodes if n.type == "character"), None)
     product = get_product(int(qt["product_id"])) if qt.get("product_id") else None
     if product is None:
         raise TailorError("Clip này không gắn với sản phẩm đã lưu, AI không có mô tả để viết.")
@@ -242,8 +284,19 @@ async def tailor_board(board_id: int, scene_ids: list[tuple[int, Optional[int]]]
         vdata = rows[vid_id] if vid_id is not None else {}
         scenes.append({"title": str(idata.get("title") or ""), "image_prompt": str(idata.get("prompt") or ""),
                        "video_prompt": str(vdata.get("prompt") or ""), "voice": str(vdata.get("narration") or "")})
+    inputs = qt.get("inputs") or {}
+    hands = qt.get("hands") or {}
+    if hands.get("gender"):
+        person = clip_style.person_line(hands["gender"], hands.get("country"))
+    elif model is not None:
+        person = clip_style.person_line(model.get("charGender"), model.get("charCountry"))
+    else:
+        person = clip_style.person_line(inputs.get("charGender"), inputs.get("charCountry"))
+    place, fixed = setting_choice(template, inputs)
     rewritten = await tailor_scenes(scenes, product, template_title=template.get("title") or "",
-                                    shown_as=(qt.get("inputs") or {}).get("product"), instructions=instructions)
+                                    shown_as=inputs.get("product"), instructions=instructions,
+                                    voiceless=bool(qt.get("voiceless")), person=person,
+                                    place=place, place_fixed=fixed)
     updated: dict[str, dict] = {}
     for (img_id, vid_id), sc, new in zip(scene_ids, scenes, rewritten):
         if new["image_prompt"]:

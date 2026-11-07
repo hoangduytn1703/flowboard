@@ -71,7 +71,7 @@ def test_routes_upload_analyze_build(client, tmp_path, monkeypatch):
     assert client.get(f"/media/{media_id}").status_code == 200
     assert client.post("/api/reference-video/upload", files={"file": ("x.txt", b"hi", "text/plain")}).status_code == 415
 
-    async def fake_analyze(path, product, *, scenes=None, model=None):
+    async def fake_analyze(path, product, *, scenes=None, model=None, voiceless=False):
         return rv.normalize(_analysis(score=0.2 if product and product["category"] == "food" else 0.9,
                                       relevant=not (product and product["category"] == "food")), product)
 

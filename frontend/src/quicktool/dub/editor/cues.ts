@@ -1,4 +1,4 @@
-import type { DubHighlights, DubLayout, SubLang, SubLook } from "../../../api/dub";
+import type { DubHighlights, DubLayout, DubName, SubLang, SubLook } from "../../../api/dub";
 
 /** One dubbed line as the editor holds it: its slot on the timeline, the source text and the Vietnamese line. */
 export interface EditCue {
@@ -38,6 +38,8 @@ export interface EditDoc {
   highlights: DubHighlights;
   /** the language the lines are in ("Ngôn ngữ phụ đề" — switching it rewrites every line, one undo step) */
   lang: SubLang;
+  /** "🔤 Tên riêng": the subtitle shows `write`, the voice reads `say` */
+  names: DubName[];
 }
 
 // Mirrors services/dub.py (SUB_MAX_CHARS, SUB_MARGIN_X_FRAC, sub_font_px, sub_max_chars, split_cue)

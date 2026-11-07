@@ -90,8 +90,11 @@ match them to the closest catalog entry, e.g. "chú ta hay tò mò" = "Chúng ta
    one per day from `at`). auto = publish by itself on the channel's Facebook Page (only when the catalog says the channel is
    connected; default true then, false otherwise). Work out `at` from NOW: "12h hôm nay" = today 12:00, "tối nay" = today
    20:00, "sáng mai" = tomorrow 08:00. If that time has already passed, ask instead of planning.
-5. create_clip {product_id, template_id?, channel_id?} — a new ad clip for a product (catalog id or "previous") with its
-   script written for the product. template_id from the catalog's clip kinds (pick one fitting the product's category).
+5. create_clip {product_id, template_id?, channel_id?, voiceless?: bool} — a new ad clip for a product (catalog id or
+   "previous") with its script written for the product, filmed like a real buyer on a phone. template_id from the catalog's
+   clip kinds (pick one fitting the product's category). voiceless = true when the seller wants no voice / no talking /
+   only the product being worn or used ("không lời", "không cần lời thoại", "chỉ quay mặc thử", "kiểu ASMR"): no voice-over,
+   no subtitles, the real sounds of the clip.
    Making its pictures and videos in the background is coming soon: say the seller opens the clip and presses
    "⚡ Tạo video tự động".
 6. auto_post {channel_id, days: [0-6, 0 = Monday … 6 = Sunday], times: ["HH:MM" Vietnam time], kind?, topic?, series?,
@@ -439,7 +442,8 @@ def _clean_args(tool: str, a: dict[str, Any], cat: dict[str, Any]) -> tuple[Opti
         tids = {t["id"] for t in cat["templates"]}
         tid = str(a.get("template_id") or "")
         return {"product_id": pid, "template_id": tid if tid in tids else "",
-                "channel_id": _channel_id(a.get("channel_id") or a.get("channel"), cat)}, None
+                "channel_id": _channel_id(a.get("channel_id") or a.get("channel"), cat),
+                "voiceless": a.get("voiceless") is True or str(a.get("voiceless")).lower() == "true"}, None
     return None, None
 
 
@@ -516,7 +520,8 @@ def _plan_summary(actions: list[dict[str, Any]], cat: dict[str, Any]) -> list[st
                          + (" + 📲 thêm vào tin" if g.get("story") else ""))
         elif a["tool"] == "create_clip":
             prod = products.get(g["product_id"]) if isinstance(g["product_id"], int) else "sản phẩm vừa thêm"
-            lines.append(f"{i}. Tạo clip quảng cáo cho “{prod}” (kịch bản theo sản phẩm)")
+            lines.append(f"{i}. Tạo clip quảng cáo cho “{prod}” (kịch bản theo sản phẩm"
+                         + (", 🔇 không lời — chỉ hình + tiếng thật)" if g.get("voiceless") else ")"))
     return lines
 
 
@@ -790,7 +795,7 @@ def model_prompt(args: dict[str, Any], traits: Optional[str] = None) -> str:
         a, b = random.sample(OWN_TRAITS, 2)
         traits = f"{a} and {b}"
     return ", ".join(x for x in [
-        f"Studio portrait headshot of a {subject} character",
+        f"Natural daylight head-and-shoulders portrait photo of a {subject} character",
         "subject directly faces the camera, head perfectly straight with zero tilt and zero turn",
         "shoulders square to camera, axially symmetric pose, nose centered, both eyes equally visible at the same height",
         f"an ordinary, non-famous everyday person with their own distinctive face ({traits}), natural skin texture with visible pores, "
@@ -996,12 +1001,14 @@ async def _do_create_clip(task_id: int, i: int, args: dict[str, Any], ctx: dict[
         try:
             board = await create_board_from_template(FromTemplateBody(
                 template_id=tid, name=f"{product['name'][:60]}", inputs={}, product_id=int(product["id"]),
-                channel_id=args.get("channel_id") or ctx.get("channel_id"), tailor=True))
+                channel_id=args.get("channel_id") or ctx.get("channel_id"), tailor=True,
+                voiceless=bool(args.get("voiceless"))))
         except HTTPException as exc:
             raise AssistantError(f"Không tạo được clip: {exc.detail}")
         board_id = board["id"]
         _save(task_id, **{f"s{i}_board": board_id})
-    return {"line": f"🎬 Đã tạo clip “{product['name'][:60]}” với kịch bản viết theo sản phẩm — mở clip rồi bấm **⚡ Tạo video tự động** "
+    silent = " (🔇 không lời)" if args.get("voiceless") else ""
+    return {"line": f"🎬 Đã tạo clip “{product['name'][:60]}”{silent} với kịch bản viết theo sản phẩm — mở clip rồi bấm **⚡ Tạo video tự động** "
                     "để làm ảnh + video (chạy ngầm hoàn toàn sẽ có ở bản sau).",
             "links": [{"label": "Mở clip", "href": f"/clips/{board_id}/script"}], "link": f"/clips/{board_id}/script",
             "media": list(product.get("media_ids") or [])[:1], "ctx": {"board_id": board_id}}

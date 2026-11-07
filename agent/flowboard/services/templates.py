@@ -279,6 +279,24 @@ def apply_product(spec: dict, product: dict) -> dict:
     return {"nodes": nodes, "edges": edges}
 
 
+def voiceless_spec(spec: dict) -> dict:
+    """``spec`` as a "🔇 Không lời" clip: no voice line on any scene, and the
+    script note says so instead of explaining the voice-over."""
+    from flowboard.services.clip_style import NOTE_VOICE, NOTE_VOICELESS
+
+    nodes = []
+    for n in spec["nodes"]:
+        data = dict(n.get("data") or {})
+        if n.get("type") == "video" and data.get("narration"):
+            data["narration"] = ""
+        elif n.get("type") == "note" and data.get("prompt"):
+            note = str(data["prompt"])
+            data["prompt"] = (note.replace(NOTE_VOICE, NOTE_VOICELESS) if NOTE_VOICE in note
+                              else note.rstrip() + "\n" + NOTE_VOICELESS)
+        nodes.append({**n, "data": data})
+    return {**spec, "nodes": nodes}
+
+
 def _edge_pair(edge: Any) -> tuple[str, str]:
     if isinstance(edge, dict):
         return str(edge.get("from")), str(edge.get("to"))

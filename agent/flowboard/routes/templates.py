@@ -13,8 +13,9 @@ from flowboard.services.board_builder import BoardSpecError, build_board
 from flowboard.services.products import TemplateBuildError, template_board_spec
 from flowboard.services.templates import PersonRequiredError
 from flowboard.services.product_gender import GenderMismatchError
-from flowboard.services.templates import list_templates
-from flowboard.services.script_tailor import TailorError, tailor_board, tailor_spec
+from flowboard.services.templates import list_templates, voiceless_spec
+from flowboard.services.script_tailor import TailorError, setting_choice, tailor_board, tailor_spec
+from flowboard.services import clip_style
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,16 @@ class FromTemplateBody(BaseModel):
     variant_of: int = Field(default=1, ge=1, le=20)
     # The channel (page) the clip is made for; optional.
     channel_id: Optional[int] = None
+    # "🔇 Không lời": no voice-over, no subtitles — the pictures and the real sounds.
+    voiceless: bool = False
+
+
+def _person(template: dict, inputs: dict[str, str]) -> str:
+    gender = inputs.get("charGender") or next(
+        (str(i.get("default") or "") for i in template.get("inputs", []) if i.get("key") == "charGender"), "")
+    if not gender and not any(n.get("type") == "character" for n in template.get("nodes", [])):
+        gender = "none"
+    return clip_style.person_line(gender, inputs.get("charCountry") or "vn")
 
 
 @router.get("/templates")
@@ -53,14 +64,18 @@ async def create_board_from_template(body: FromTemplateBody) -> dict:
         raise HTTPException(404, str(exc))
     tailored = False
     if product is not None and body.tailor:
+        place, fixed = setting_choice(template, body.inputs)
         try:
             spec = await tailor_spec(spec, product, variant=body.variant, of=body.variant_of,
                                      template_title=template.get("title") or "",
-                                     shown_as=(body.inputs or {}).get("product"))
+                                     shown_as=(body.inputs or {}).get("product"), voiceless=body.voiceless,
+                                     person=_person(template, body.inputs or {}), place=place, place_fixed=fixed)
             tailored = True
         except TailorError as exc:
             # The template's own text still makes a usable clip.
             logger.warning("from-template: script not tailored for product %s: %s", body.product_id, exc)
+    if body.voiceless:
+        spec = voiceless_spec(spec)  # also when the LLM failed or there is no product to tailor for
     default_name = template["title"] if product is None else f"{product['name']} — {template['title']}"
     with get_session() as s:
         # The Quicktool wizard reopens the clip from this: which template it
@@ -69,7 +84,8 @@ async def create_board_from_template(body: FromTemplateBody) -> dict:
             name=(body.name or "").strip() or default_name,
             data={"quicktool": {"template_id": template["id"], "product_id": body.product_id,
                                 "channel_id": body.channel_id,
-                                "inputs": body.inputs, "step": 1, "tailored": tailored}},
+                                "inputs": body.inputs, "step": 1, "tailored": tailored,
+                                **({"voiceless": True} if body.voiceless else {})}},
         )
         s.add(board)
         s.commit()

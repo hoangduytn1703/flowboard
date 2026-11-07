@@ -269,6 +269,7 @@ interface BoardState {
     inputs: Record<string, string>,
     productId?: number | null,
     channelId?: number | null,
+    voiceless?: boolean,
   ): Promise<number | null>;
   // Delete a board. If it's the active one, switch to first remaining
   // board (or create a fresh "Untitled" if list ends up empty).
@@ -544,9 +545,9 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     }
   },
 
-  async createNewBoardFromTemplate(templateId, name, inputs, productId, channelId) {
+  async createNewBoardFromTemplate(templateId, name, inputs, productId, channelId, voiceless) {
     try {
-      const board = await createBoardFromTemplate(templateId, name, inputs, productId, undefined, channelId);
+      const board = await createBoardFromTemplate(templateId, name, inputs, productId, undefined, channelId, voiceless);
       set((s) => ({ boards: [board, ...s.boards] }));
       // switchBoard loads the nodes the template already put on it.
       await get().switchBoard(board.id);
