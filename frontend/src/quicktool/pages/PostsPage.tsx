@@ -15,6 +15,7 @@ import { ScheduleDialog, type ScheduleTarget } from "../schedule/ScheduleDialog"
 import { StatsLine } from "../schedule/FbStats";
 import { createSlot, publishSlot, slotLabel, suggestSlots, syncFacebook, type FbFormat } from "../../api/schedule";
 import { FormatPicker, StoryToggle } from "../schedule/FormatPicker";
+import { AutoPilot, type AutoSeed } from "../posts/AutoPilot";
 import "../posts.css";
 
 /** The one-click "Viết Tập N+1" buttons are hidden for now (29/10): the tool cannot tell which episodes were
@@ -87,6 +88,9 @@ export function PostsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [saved, setSaved] = useState<SavedPost[]>([]);
   const [tab, setTab] = useState<"form" | "chat">("form");
+  // "✍️ Viết & đăng" by hand ⇄ "🤖 Tự động đăng" (fixed schedules, services/autopilot); /posts?auto=1 opens the latter
+  const [mode, setMode] = useState<"write" | "auto">(() => (params.get("auto") ? "auto" : "write"));
+  const [autoSeed, setAutoSeed] = useState<AutoSeed | null>(null);
   const [brief, setBrief] = useState<PostBrief>(DEFAULT_BRIEF);
   const [productId, setProductId] = useState<number | null>(null);
   const [channelId, setChannelId] = useState<number | null>(() => Number(params.get("channel")) || null);
@@ -186,10 +190,19 @@ export function PostsPage() {
   useEffect(() => {
     if (!wanted || !saved.length) return;
     const p = saved.find((x) => x.id === wanted);
+    setMode("write");
     if (p) open(p);
     setParams({}, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wanted, saved.length]);
+
+  // /posts?auto=1 (the "việc đang chạy" button) while already on the page
+  useEffect(() => {
+    if (!params.get("auto")) return;
+    setMode("auto");
+    setParams({}, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params]);
 
   // /posts?clip=38 — step 5 "✍️ Viết bài & đăng": a post for that clip, its finished video going with it (the AI
   // reads the clip's lines; channel + product come from the clip). The clip's latest saved post opens instead.
@@ -677,6 +690,13 @@ export function PostsPage() {
         <span className="qt-header__crumb">Bài viết Facebook</span>
       </header>
       <div className="qt-home qt-posts">
+        <div className="qt-posts__modes" role="tablist" aria-label="Cách đăng">
+          <button type="button" role="tab" aria-selected={mode === "write"} className={mode === "write" ? "is-on" : ""} onClick={() => setMode("write")}>✍️ Viết & đăng</button>
+          <button type="button" role="tab" aria-selected={mode === "auto"} className={mode === "auto" ? "is-on" : ""} onClick={() => setMode("auto")}>🤖 Tự động đăng theo lịch</button>
+        </div>
+        {mode === "auto" ? (
+          <AutoPilot options={options} products={products} allSeries={allSeries} seed={autoSeed} onSeedUsed={() => setAutoSeed(null)} />
+        ) : (<>
         <div className="qt-posts__grid">
           <section className="qt-card qt-posts__left">
             <div className="qt-posts__tabs" role="tablist">
@@ -899,6 +919,11 @@ export function PostsPage() {
                   </button>
                   {noChannel && <small className="qt-posts__need">Chọn <strong>Kênh / page</strong> ở bước 1 trước — AI viết theo giọng của page đó.</small>}
                   {!noChannel && noSeries && <small className="qt-posts__need">Đang chọn <strong>Câu chuyện nhiều kỳ</strong> — chọn loạt truyện hoặc đặt tên loạt mới.</small>}
+                  <button type="button" className="qt-btn qt-btn--small qt-btn--ghost qt-posts__autolink" disabled={noChannel || noSeries || boardId !== null}
+                          title={boardId !== null ? "Bài gắn clip không chạy theo lịch được" : "Dùng đúng cài đặt này (kênh, kiểu bài, ý chính, ảnh, sản phẩm, loạt truyện) cho lịch tự động đăng"}
+                          onClick={() => { setAutoSeed({ channel_id: channelId, brief: { ...brief }, product_id: productId, series: seriesWriting ? series.trim() : "" }); setMode("auto"); }}>
+                    🤖 Tự động đăng theo lịch với cài đặt này
+                  </button>
                 </div>
               </div>
             ) : (
@@ -1118,6 +1143,7 @@ export function PostsPage() {
             </nav>
           )}
         </section>
+        </>)}
       </div>
       {schedule && <ScheduleDialog target={schedule} onClose={() => setSchedule(null)}
                                    onSaved={(slot) => { if (slot.post_id) setSlots((m) => ({ ...m, [slot.post_id!]: slotLabel(slot.scheduled_at) })); setSchedule(null); reloadSaved(); }} />}

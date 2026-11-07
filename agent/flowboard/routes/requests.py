@@ -1,8 +1,10 @@
+import threading
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+from sqlmodel import select
 
 from flowboard.db import get_session
 from flowboard.db.models import Node, Request
@@ -17,11 +19,33 @@ class RequestCreate(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
 
 
+#: One export at a time per node: a double click on "Ghép" sent two identical exports 80 ms apart and the second
+#: redid the whole join (~10 min with 60 fps) while the page waited on it (7/11). The same export asked again while
+#: one is queued / running gets that one back.
+_ONE_AT_A_TIME = {"export_video"}
+_create_lock = threading.Lock()
+
+
 @router.post("")
 def create_request(body: RequestCreate):
+    if body.type in _ONE_AT_A_TIME and body.node_id is not None:
+        with _create_lock:  # the check and the insert together, or two requests 80 ms apart both pass the check
+            return _create(body)
+    return _create(body)
+
+
+def _create(body: RequestCreate):
     with get_session() as s:
         if body.node_id is not None and not s.get(Node, body.node_id):
             raise HTTPException(404, "node not found")
+        if body.type in _ONE_AT_A_TIME and body.node_id is not None:
+            same = s.exec(
+                select(Request).where(Request.node_id == body.node_id, Request.type == body.type,
+                                      Request.status.in_(("queued", "running")))  # type: ignore[union-attr]
+            ).all()
+            for row in same:
+                if (row.params or {}) == dict(body.params):
+                    return row
         req = Request(
             node_id=body.node_id,
             type=body.type,

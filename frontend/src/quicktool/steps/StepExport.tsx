@@ -118,6 +118,8 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
   const voiceGroups = useVoiceGroups();
   const navigate = useNavigate();
   const [scheduling, setScheduling] = useState(false);
+  // "Ghép" clicked, the export not queued yet (the clips are being wired): the button greys out at once
+  const [sending, setSending] = useState(false);
   const ensureExportNode = useQuicktoolStore((s) => s.ensureExportNode);
   const exportClip = useQuicktoolStore((s) => s.exportClip);
   const writeNarrations = useQuicktoolStore((s) => s.writeNarrations);
@@ -431,7 +433,7 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
           <SubtitleField value={subChoiceOf(exp?.data)} disabled={busy} onChange={(key) => setOption(subChoicePatch(key))} />
           <label className="qt-check">
             <input type="checkbox" checked={smooth60} disabled={busy} onChange={(e) => setOption({ smooth60: e.target.checked })} />
-            Mượt 60 fps (chậm, ~15 s xử lý cho mỗi giây video)
+            Mượt 60 fps (thêm ~2–3 phút cho clip 4 cảnh; ghép lại lần sau thì nhanh vì đã làm mượt sẵn)
           </label>
         </div>
 
@@ -440,10 +442,10 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
         <button
           type="button"
           className="qt-btn qt-btn--accent qt-btn--big"
-          disabled={busy || clips.length === 0}
-          onClick={() => void exportClip()}
+          disabled={busy || sending || clips.length === 0}
+          onClick={() => { setSending(true); void exportClip().finally(() => setSending(false)); }}
         >
-          {busy ? "Đang ghép + lồng tiếng…" : hasMedia(exp) ? "Ghép lại" : "Ghép video hoàn chỉnh"}
+          {busy || sending ? "Đang ghép + lồng tiếng…" : hasMedia(exp) ? "Ghép lại" : "Ghép video hoàn chỉnh"}
         </button>
         {exp?.data.error && <div className="product-form__error">{String(exp.data.error)}</div>}
       </section>

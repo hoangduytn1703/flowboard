@@ -147,6 +147,15 @@ def _assistant_items() -> list[dict[str, Any]]:
             for t in assistant.running_tasks()]
 
 
+def _autopilot_items() -> list[dict[str, Any]]:
+    from flowboard.services import autopilot
+
+    return [{"key": f"autopilot:{r['run_id']}", "kind": "autopilot", "title": f"Tự động đăng · {r['plan']}",
+             "detail": ("AI đang viết bài" if r["status"] == "writing" else "Flow đang vẽ ảnh cho bài") + f" — khung {r['slot']}",
+             "progress": None, "started_at": r["started_at"], "link": "/posts?auto=1"}
+            for r in autopilot.active_runs()]
+
+
 def _op_items() -> list[dict[str, Any]]:
     from flowboard.services import op_tracker
 
@@ -174,8 +183,8 @@ def _flow_items() -> list[dict[str, Any]]:
         boards = {b.id: b.name for b in s.exec(select(Board).where(Board.id.in_(board_ids))).all()} if board_ids else {}  # type: ignore[union-attr]
     groups: dict[Optional[int], dict[str, Any]] = {}
     for r in rows:
-        if (r.params or {}).get("origin") == "assistant":
-            continue  # the assistant's own row (_assistant_items) says it, with a link back to the chat
+        if (r.params or {}).get("origin") in ("assistant", "autopilot"):
+            continue  # the assistant's / auto posting's own row says it, with a link back
         bid = node_board.get(r.node_id) if r.node_id else None
         g = groups.setdefault(bid, {"kinds": {}, "first": r.created_at, "running": 0})
         label = FLOW_TYPES[r.type]
@@ -198,7 +207,7 @@ def _flow_items() -> list[dict[str, Any]]:
 @router.get("")
 def running() -> dict[str, Any]:
     items: list[dict[str, Any]] = []
-    for source in (_dub_items, _dub_split_items, _dub_link_items, _clean_items, _capcut_items, _assistant_items, _flow_items, _op_items):
+    for source in (_dub_items, _dub_split_items, _dub_link_items, _clean_items, _capcut_items, _assistant_items, _autopilot_items, _flow_items, _op_items):
         try:
             items += source()
         except Exception:  # noqa: BLE001 — one broken source must not hide the others
@@ -239,6 +248,14 @@ def outcome(key: str = Query(..., max_length=80)) -> dict[str, Any]:
         if t and t["status"] == "error":
             return {"ok": False, "message": t["error"] or "Trợ lý gặp lỗi"}
         return {"ok": True, "message": f"{t['title']} — xong" if t else "Đã xong"}
+    if kind == "autopilot" and ident.isdigit():
+        from flowboard.db.models import AutoRun
+
+        with get_session() as s:
+            run = s.get(AutoRun, int(ident))
+        if run is not None and run.status in ("failed", "waiting", "skipped"):
+            return {"ok": False, "message": run.error or "Soạn bài tự động lỗi"}
+        return {"ok": True, "message": "Bài tự động đã soạn xong, chờ tới giờ đăng"}
     if kind == "dublinks":
         return {"ok": True, "message": "Đã đưa hết link trong thư viện vào lồng tiếng"}
     if kind == "dubsplit":

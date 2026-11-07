@@ -90,7 +90,9 @@ interface QuicktoolStore {
    * Flow render still running on the scene is cancelled first, so its late
    * result cannot replace the Muse clip. */
   attachMuseVideo(sceneIndex: number, file: File): Promise<boolean>;
+  /** Join the clips (step 5 / the auto run); a call while one is still sending joins it. */
   exportClip(): Promise<boolean>;
+  _exportClip(): Promise<boolean>;
   // Drama clips: the play order (beat stills + spliced-in footage).
   isDrama(): boolean;
   sequenceItems(): SequenceItem[];
@@ -130,6 +132,10 @@ const VIDEO_AR = "VIDEO_ASPECT_RATIO_PORTRAIT";
 
 /** The export-node creation currently running, shared by concurrent callers. */
 let exportNodeInFlight: Promise<string | null> | null = null;
+/** The "Ghép" in progress (wiring the clips + sending the export): a second click joins it instead of sending a
+ * second export — the button only greys out once the request is queued, and a double click used to redo the
+ * whole join (7/11). */
+let exportInFlight: Promise<boolean> | null = null;
 
 function nodeById(id: string): FlowNode | undefined {
   return useBoardStore.getState().nodes.find((n) => n.id === id);
@@ -568,7 +574,13 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
       }));
   },
 
-  async exportClip() {
+  exportClip() {
+    if (exportInFlight) return exportInFlight;
+    exportInFlight = get()._exportClip().finally(() => { exportInFlight = null; });
+    return exportInFlight;
+  },
+
+  async _exportClip() {
     const board = useBoardStore.getState();
     const roles = get().roles();
     const drama = get().isDrama();

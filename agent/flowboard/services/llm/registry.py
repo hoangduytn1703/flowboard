@@ -14,6 +14,8 @@ end-user CLI, so it was dropped from both UI and registry.
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Literal, Optional
 
 from .base import LLMError, LLMProvider
@@ -38,6 +40,40 @@ _PROVIDERS: dict[str, LLMProvider] = {
     "openai": OpenAIProvider(),
     "muse": MuseProvider(),
 }
+
+
+#: Which AI answers every ``run_llm`` in this context, whatever the feature config says: "claude" (the Claude CLI) |
+#: "gemini" (the Gemini API key pool, services/llm/gemini_api) | None (the config). Set with :func:`use_ai` — the
+#: auto posting schedule (services/autopilot) lets the seller pick per schedule. A ContextVar, so it follows the
+#: awaits and tasks of that one job only.
+AI_OVERRIDE: ContextVar[Optional[str]] = ContextVar("flowboard_ai_override", default=None)
+AI_CHOICES = ("claude", "gemini")
+#: Gemini model for writing through the key pool: 3.5-flash writes well in ~20 s (3.8-flash took over 40 s).
+GEMINI_TEXT_MODEL = "gemini-3.5-flash"
+
+
+@contextmanager
+def use_ai(choice: Optional[str]):
+    """Inside the block every ``run_llm`` goes to ``choice`` ("claude" | "gemini"; anything else = the config)."""
+    token = AI_OVERRIDE.set(choice if choice in AI_CHOICES else None)
+    try:
+        yield
+    finally:
+        AI_OVERRIDE.reset(token)
+
+
+async def _run_gemini_keys(user_prompt: str, *, system_prompt: Optional[str], attachments: Optional[list[str]],
+                           timeout: float) -> str:
+    from . import gemini_api
+
+    if not gemini_api.configured():
+        raise LLMError("Chưa có Gemini API key — thêm ở Cài đặt → Gemini key.")
+    logger.info("llm: provider=gemini-key model=%s attachments=%d", GEMINI_TEXT_MODEL, len(attachments or []))
+    try:
+        return await gemini_api.generate_text(user_prompt, system=system_prompt, attachments=attachments,
+                                              model=GEMINI_TEXT_MODEL, timeout=timeout)
+    except gemini_api.GeminiAPIError as exc:
+        raise LLMError(f"Gemini: {exc}") from exc
 
 
 def get_provider(name: str) -> Optional[LLMProvider]:
@@ -78,6 +114,15 @@ async def run_llm(
       5. Dispatch.
     """
     config = secrets.read_feature_config()
+    pick = AI_OVERRIDE.get()
+    if pick == "gemini":
+        return await _run_gemini_keys(user_prompt, system_prompt=system_prompt, attachments=attachments, timeout=timeout)
+    if pick == "claude":
+        # the Claude CLI the seller already uses: their pinned model / effort when Claude is the configured provider
+        entry = config.get(feature)
+        same = bool(entry) and entry.get("provider") == "claude"
+        config = {**config, feature: {"provider": "claude", "model": entry.get("model") if same else None,
+                                      "effort": entry.get("effort") if same else None}}
     entry = config.get(feature)
     if entry is None:
         raise LLMError(

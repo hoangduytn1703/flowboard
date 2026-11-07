@@ -317,6 +317,12 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   Trước đây dính khi cắt cảnh (Bước 5) một clip câm không có lời thoại.
 - `Product.media_ids` là media id của **Flow**, thuộc project lúc upload; ảnh gốc nằm trong `storage/media` (đổi project thì `media_project_sync` upload lại).
 
+- **Clip 4 cảnh từ link mất hơn 30 phút** (7/11, áo khoác có quạt, clip #67): (1) ô **"Mượt 60 fps"** chạy `minterpolate` trên CẢ clip đã ghép
+  sau cùng — **minterpolate chỉ dùng 1 nhân**, ~14 s xử lý cho mỗi giây video → 8 phút 49 s cho clip 32 s (ghép lần đó 10 phút 18 s, giọng VieNeu thêm ~1,5 phút
+  vì nạp model lại cho từng cảnh); (2) **nút "Ghép" bấm 2 lần** → 2 request export giống hệt cách nhau 80 ms (nút chỉ khoá khi request đã vào hàng, còn lúc nối
+  cạnh thì chưa) → lượt 2 làm lại từ đầu, trang theo dõi lượt 2 nên vẫn "Đang ghép"; (3) agent chạy từ phiên Claude Code (`run_in_background`) **chết theo phiên**
+  khi phiên đó đóng (03:12, giống start127 20:39 — log không có lỗi nào). Sửa (1)(2) xem "Chỗ cần biết" → "Ghép nhanh"; (3): người dùng nên tự chạy `.\start.ps1`.
+  Đo lỗi chậm: bảng `request` (created_at / finished_at) + các file trung gian `media/export_*.mp4` (giờ ghép xong) so với giờ request xong.
 ## Chỗ cần biết trong code
 - Backend `agent/flowboard/`: `routes/products.py` (CRUD, `from-link`, `open-tabs` + `import-tabs`, `bulk-delete`), `services/product_link.py` (đọc trang sản phẩm bằng httpx + Gemini; chặn IP nội bộ), `services/tiktok_import.py`, `services/reference_video.py` (clip từ video mẫu / link: `/api/reference-video/analyze`, `analyze-link`, `build`), `services/video_export.py`, `services/flow_sdk.py`, `templates/*.json` (8 kiểu clip), `services/llm/gemini_api.py` (gọi Gemini bằng API key: xoay vòng nhiều key khi 429, key lỗi 400/401/403 nghỉ 6 h, 503 thử lại + lùi model `3.8-flash → 3.7 → 3.6 → 3.5 → 3.1-flash-lite`; `speak()` cho giọng Gemini TTS).
 - Frontend `frontend/src/quicktool/`: `QuicktoolApp.tsx` (route + wizard 5 bước), `NewClipDialog.tsx` (chọn sản phẩm, kiểu clip, "Số clip" N clip/1 sản phẩm), `quicktool.css`. `components/ProductsPanel.tsx` (trang `/products`, chọn nhiều + xoá). Cỡ chữ: thang riêng (chữ nội dung 16px); Canvas cố ý giữ chữ nhỏ.
@@ -1355,6 +1361,41 @@ của người dùng (console.neon.tech, secure.backblaze.com).
 - **Đăng xuất Flow phải bấm 2 lần** (21/10, `SettingsPanel.tsx`): lần đầu nút đổi thành "Bấm lần nữa để đăng xuất…" + "Huỷ",
   tự quay lại sau 5 s / khi đóng hộp; xong có toast (`AccountPanel.handleLogout`). Nút chỉ có ở hộp Cài đặt mở từ ⚙ cạnh tài khoản.
 
+- **Ghép nhanh** (7/11, `video_export.py`): **60 fps làm trên từng clip nguồn, song song, có lưu lại** — `smooth_sources(paths)` chạy `smoothed_copy`
+  cho mỗi clip (bản đã xoá logo) trong `SMOOTH_PARALLEL` (= nửa số luồng CPU, tối đa 6) ffmpeg cùng lúc, lưu `<thư mục tài khoản>/media/smooth60/<tên>.<cỡ>.60.mp4`
+  (ghi qua `.part.mp4` + `os.replace`, khoá theo file nên 2 lượt ghép cùng clip chờ nhau) **trước** khi lồng giọng / phụ đề; `_voice_clip(fps=60)` mã hoá 60 fps
+  nên phụ đề in trên hình đã mượt (trước đây nội suy cả chữ) và ghép vẫn stream-copy; Remotion vẽ phụ đề ở 60 fps (`_remotion_subtitles(fps=)`); clip nào làm mượt
+  hỏng thì giữ khung gốc (lặp lên 60), `report.smooth60_error`. Drama (ảnh) và đường ghép trơn (không giọng / không logo) vẫn làm mượt clip ghép như cũ.
+  **Đọc giọng trước** `_prefetch_voices` (luồng riêng, chạy cùng lúc làm mượt): VieNeu đọc mọi câu một lần nạp model (`tts.synthesize_many`), Edge đọc song song,
+  vòng từng cảnh chỉ lấy cache; `_synth_to_fit` không đọc lại "nhanh hơn" với VieNeu / FPT (giọng đó bỏ qua tốc độ, đọc lại chỉ tốn nạp model ~20 s).
+  **Một lượt ghép mỗi node**: `routes/requests.py` — `export_video` cùng node + cùng params khi đã có một cái queued / running thì trả lại cái đó (khoá
+  `_create_lock` để 2 request 80 ms không cùng lọt); frontend `exportClip` dùng chung lượt đang gửi (`exportInFlight`), nút Bước 5 khoá ngay khi bấm (`sending`).
+  Đo thật 4 clip áo khoác (Ryzen 7 5800H): ghép 60 fps + giọng VieNeu chưa có cache **179 s** (trước 618 s), "Ghép lại" đổi giọng **29 s** (đã có bản mượt).
+  Test `test_export_speed.py` (6).
+- **🤖 Tự động đăng theo lịch** (7/11, người dùng: "tự soạn content xong tự post lên page mà user không phải làm gì, set cứng lịch, tới lúc đó mà có
+  bài thôi"; chỉ Facebook Page, nằm trong trang Bài viết; AI: Claude CLI mặc định + Gemini): bảng **`AutoPlan`** (kênh, `days` 0 = T2…6 = CN, `times` "HH:MM"
+  giờ VN ≤ 6, `lead_minutes` 30–1440 mặc định 180, `brief` = form Bài viết (`autopilot.clean_brief`), `series`, `product_mode` none | fixed | rotate +
+  `product_ids`, `ai` claude | gemini, `fb_story`, `enabled`, `enabled_at`) + **`AutoRun`** (một dòng cho mỗi khung giờ; **unique (plan_id, slot_at) = giữ
+  chỗ** → 2 máy không cùng viết; `lease_until` 10 phút gia hạn mỗi bước; status writing → pictures → ready | waiting (thử lại sau 10 phút, tối đa 3 lần) |
+  failed | skipped | missed; `post_id`, `schedule_id`, `image_requests`, `ai_used`, `note`). `services/autopilot.py`: vòng `run_loop` (task `autopilot-loop`
+  trong `main.lifespan`, 60 s) — `tick()` lấy khung trong `(now, now + lead]` → `_claim` → `_prepare`: kiểm Page còn nối (`scheduler.can_auto`) → `_write`
+  (brief + sản phẩm theo lượt `_pick_product` (lâu nhất chưa nhắc), cta "link" khi sản phẩm có link aff, câu mở đầu xoay `ROTATE_HOOKS`, khối `extra` "AUTO
+  SCHEDULE … nobody reads it — không bịa" + 8 bài gần nhất của lịch để không trùng chủ đề / câu mở đầu, loạt truyện = `_series_context` tập kế; AI của lịch
+  trước, lỗi thì cái còn lại, ghi `note`) → `_save_written` (brief có `auto_plan`) → `_pictures` (gửi hết `gen_image` vuông một lượt, ảnh sản phẩm làm tham
+  chiếu, chờ tới `slot − 2 phút`; ảnh hỏng thì đăng không ảnh + `note`) → `scheduler.create(auto=True, note "🤖 Tự động: …")` lúc `max(slot, now)`; xong trễ quá
+  `LATE_OK` 10 phút → skipped. Khung trôi qua lúc agent tắt (sau `enabled_at`, trong 12 h) → **missed, không đăng bù**. Tạm dừng / xoá / đổi giờ →
+  `_cancel_future` bỏ các khung chưa đăng (lịch `planned` → skipped; bài vẫn trong Bài đã lưu). `prepare_next` = "⚡ Soạn ngay bài kế tiếp". **Chọn AI**:
+  `services/llm/registry.py` `use_ai("claude" | "gemini")` (ContextVar `AI_OVERRIDE`) — mọi `run_llm` trong khối đó đi Claude CLI (model / effort đang ghim nếu
+  provider là claude) hoặc **pool Gemini API key** `gemini_api.generate_text` model `GEMINI_TEXT_MODEL` = gemini-3.5-flash (provider "gemini" của registry là CLI
+  `agy`, không phải pool key). Routes `routes/autopilot.py`: `GET/POST /api/autopilot/plans`, `GET/PATCH/DELETE /plans/{id}` (PATCH `enabled:false` = tạm dừng),
+  `POST /plans/{id}/prepare`, `GET /runs`, `GET /status` (AI nào chạy được). Nút "việc đang chạy": `running._autopilot_items` (`/posts?auto=1`), request
+  `origin: autopilot` không hiện thêm dòng ảnh. Frontend: `api/autopilot.ts` (`RUN_STATUS`), `quicktool/posts/AutoPilot.tsx` + `autopilot.css` (tiền tố `ap-`):
+  trang Bài viết có công tắc **"✍️ Viết & đăng" ⇄ "🤖 Tự động đăng theo lịch"** (`mode`, `?auto=1`); trái danh sách lịch (công tắc bật / dừng, bài kế + trạng thái,
+  lần trước), phải form 3 khối (Page + ngày + giờ + soạn trước + 📲 tin / Đăng gì: kiểu, loạt truyện, ý chính, ảnh, kêu gọi, giọng, độ dài, sản phẩm / AI viết),
+  "Sắp tới" + "Nhật ký" (bấm tên bài → mở bài ở tab viết). Form viết có nút **"🤖 Tự động đăng theo lịch với cài đặt này"** (mang kênh, brief, sản phẩm, loạt
+  sang lịch mới). Trợ lý AI: kỹ năng **`auto_post`** {channel_id, days, times, kind?, topic?, series?, images?, product_id?, ai?, story?} — luôn chờ "✅ Làm luôn".
+  Test `test_autopilot.py` (10), `test_assistant.py` (+1). Thử thật 7/11 (Page "Chúng ta hay tò mò", khung 6 ngày sau, đã dừng + xoá ngay, không đăng gì):
+  Claude CLI viết 19 s đúng kiểu "Mẹo" (ngắm Sao Thổ), lịch auto được tạo; ảnh Flow lỗi `CAPTCHA_FAILED: grecaptcha not available` → bài vẫn sẵn sàng, ghi chú.
 ## Lộ trình (chốt với người dùng 30/10) — làm theo thứ tự A → B, C chạy song song khi cần
 Mục tiêu cuối: **bán DFlow** cho người làm affiliate (2 gói **Pro** / **Premium**), dạng **app desktop Tauri 2** — mọi thao tác trong app,
 Chrome chỉ để cài extension và mở tab Flow đúng project. Người dùng nói rõ: không cần bàn chuyện đúng sai pháp lý, họ tự chịu trách nhiệm.
@@ -1409,6 +1450,7 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
   Chrome Web Store từ chối → giữ cách cài tay kèm video.
 
 ## Việc đang dở / chưa kiểm chứng
+- **Tự động đăng theo lịch (7/11)**: chưa để một khung chạy tới giờ và đăng thật lên Page (vòng đăng là `scheduler.tick` có sẵn, đã đăng thật nhiều lần; phần mới mới thử tới bước "chờ tới giờ đăng"). Ảnh Flow trong lần thử lỗi `CAPTCHA_FAILED: grecaptcha not available` ngay sau khi khởi động lại agent — xem tab Flow / reload extension; ảnh lỗi thì bài đăng không ảnh. **Máy phải bật + agent chạy**: agent chạy từ phiên Claude Code chết theo phiên — nên tự khởi động agent khi đăng nhập Windows (chưa làm). Chưa có: video / Reel tự động (clip từ sản phẩm, video lồng tiếng thư viện link), học từ số liệu Facebook (bài nhiều view → kiểu đó), giới hạn số bài / ngày toàn kênh, lịch tự động cho YouTube (người dùng bảo chỉ FB).
 - **Rà soát 30/10 — lỗi & cải thiện CHƯA SỬA** (người dùng bảo chỉ log; quét 20 trang bằng Playwright + đo API + cả bộ test; ưu tiên từ trên xuống):
   **Mục 1–4 ĐÃ SỬA 30/10** (xem Nhật ký; 5–15 còn đó). Ảnh hỏng cũ trên máy cty chỉ tự lành khi máy nhà (bản ảnh lành) chạy `repair_images` đẩy lại lên B2.
   1. **Bài bị đăng 2 lần lên Page**: bài #39 "Tập 7 | Hành tinh lăn nghiêng…" — lịch #18 "Đăng ngay từ trang Bài viết" 11:22 30/10 + lịch #17 tự đăng 12:00
@@ -1454,6 +1496,7 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
   clip phần (`dub_part`) vẫn hiện Bước 1–4 + nút "Tạo video tự động" vô nghĩa (giống mục 7 rà soát); cắt chỉ cắt bản đã xuất — sửa phụ đề thì Xuất lại rồi
   Cắt lại; chưa cắt được cả loạt video một lần; **chưa dạy trợ lý AI** (trợ lý chưa có kỹ năng lồng tiếng nào — nên thêm cả cụm: lồng tiếng / chỉ phụ đề /
   cắt theo link).
+- **Logo Gemini thứ hai NHẤP NHÁY không xoá được** (thấy 7/11, clip cảnh 2 của áo khoác `2ef707ea…`): ngoài sao cố định ~120 px (xoá tốt) có sao ~90 px mà độ đậm đổi từng khung (mờ → trắng hẳn) — `clean_video` trừ theo một độ đậm nên còn lại sao trắng / sao nâu sẫm trong video cuối. Chưa sửa (cần đo độ đậm theo từng khung cho sao đó). Video cũ của clip #67 cũng dính.
 - **Xoá logo video (1/11)**: còn vệt viền rất mờ ở chỗ nền tối–sáng (thấy khi phóng to); mới đo trên Omni 720×1280 — clip Veo / cỡ khác chưa thử (vị trí
   tính theo tỉ lệ `k`, có thể lệch); video Flow đã về máy trước 1/11 chỉ được xoá lúc ghép (lần ghép đầu chậm thêm ~8 s / clip, 3 clip một lúc); "Xoá trên ảnh đã có"
   ở Cài đặt chưa quét video. Phụ đề Remotion cho clip: chưa có kéo vị trí / cỡ (luôn y 0,84), chưa có nhấn chữ quan trọng như lồng tiếng.
@@ -1683,3 +1726,5 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
 - **1/11** — Lồng tiếng: giọng chọn lần cuối thành **giọng mặc định** theo tài khoản (`dubVoice`, cả trang Lồng tiếng, Edit auto CapCut) + chọn giọng ngay trong hộp **Thư viện link** trước khi "🎙 Lồng tiếng N link". `store/settings.ts`, `DubPage.tsx`, `DubLinksDialog.tsx`, `CapcutPage.tsx`, `dub.css`. Chỉ frontend (không khởi động lại agent — đang có video lồng tiếng chạy). `tsc` sạch; Playwright: chọn Hải Đăng trong hộp → form đổi theo, prefs tài khoản lưu `vieneu:Hải Đăng`, trình duyệt mới (xoá localStorage) mở ra vẫn Hải Đăng. Commit + push 2/11.
 - **1/11** — Sửa: chuyển clip "chỉ phụ đề" (câu đang là tiếng gốc) sang "Lồng tiếng Việt" thì nút Xuất lại video bị khoá chờ người dùng tự bấm "Dịch sang tiếng Việt" → giờ tự dịch ngay khi chuyển (toast "Đã dịch N câu…"), nút xuất mở luôn; trang Lồng tiếng luôn mở ở "Lồng tiếng Việt" (bỏ nhớ `flowboard.dub.mode`). `DubEditor.tsx`, `DubPage.tsx`. `tsc` sạch; Playwright trên clip 25465e5804d3 của người dùng (chỉ chuyển, không xuất — gọi `POST …/subtitles`, không lưu gì): 234 câu dịch xong, nút "✓ Xuất lại video (đọc lại giọng)" bấm được; form mở ở Lồng tiếng dù localStorage cũ ghi "sub". Commit + push 2/11.
 - **1/11** — Bước 4 có khung **"🎙 Giọng đọc & phụ đề khi ghép"** (giọng + nghe thử; phụ đề: Không / ffmpeg 3 kiểu / Remotion 3 kiểu — Bước 5 cùng ô chọn, "⚡ Tạo video tự động" dùng luôn; giọng mặc định = giọng yêu thích); **xoá logo Gemini ✦ trên video** chạy ngầm khi video Flow về máy + lúc ghép (cả sao sót từ ảnh cảnh); sửa Remotion lỗi khi cổng 3000 bị app khác chiếm. `video_watermark.py` (mới), `media.py`, `video_export.py`, `tts.py`, `processor.py`, `render.mjs`, `JoinOptions.tsx` (mới), `StepMedia.tsx`, `StepExport.tsx`, `generation.ts`, `board.ts`, `GeminiMarkSection.tsx`, CSS. Test `test_clip_stamp_subs.py` 6, cả bộ 1211 pass (9 lỗi môi trường Windows đã biết), `tsc` sạch. Thử thật: 4 clip của clip #61 sạch logo (ảnh so trước / sau), ghép thử bằng request riêng (không đụng clip #61) với Hải Đăng + Remotion: 60 s, khung hình không còn sao, phụ đề hộp vàng; Playwright Bước 4 / 5 không lỗi. Agent `start125`. Commit + push 2/11.
+- **7/11** — Tìm lý do clip áo khoác có quạt (link → video) mất hơn 30 phút: ghép 60 fps chạy một nhân trên cả clip ghép (8 phút 49 s), giọng VieNeu nạp model mỗi cảnh, nút Ghép bấm 2 lần chạy 2 lượt, agent chết theo phiên Claude Code. Sửa: 60 fps từng clip song song + lưu lại, đọc giọng trước một lượt, không đọc lại VieNeu, chặn export trùng (agent + nút). `video_export.py`, `routes/requests.py`, `store/quicktool.ts`, `StepExport.tsx`. Test `test_export_speed.py` 6 + export / tts / requests / drama 87 pass, `tsc` sạch. Đo thật bằng request riêng (không gắn clip #67): 179 s → ghép lại 29 s (trước 618 s). Agent `start130`. Commit 7/11.
+- **7/11** — **🤖 Tự động đăng theo lịch** cho Facebook Page trong trang Bài viết: đặt ngày + giờ cố định, agent tự soạn trước (Claude CLI mặc định, lỗi thì Gemini), vẽ ảnh Flow, lên lịch tự đăng; tới giờ chưa có bài thì bỏ khung; máy tắt lúc tới giờ thì bỏ lỡ (không đăng bù); tạm dừng huỷ bài chưa đăng; nút lấy cài đặt từ form viết; trợ lý AI có kỹ năng `auto_post`. `services/autopilot.py`, `routes/autopilot.py`, bảng `AutoPlan` / `AutoRun`, `llm/registry.use_ai`, `main.py`, `routes/running.py`, `assistant.py`, `api/autopilot.ts`, `posts/AutoPilot.tsx`, `autopilot.css`, `PostsPage.tsx`. Test autopilot 10 + assistant / running / posts / schedule / fb_sync / llm 200+ pass, `tsc` sạch. Thử thật an toàn (khung 6 ngày sau, đã dừng + xoá lịch, bài, slot thử). Agent `start131`. Commit 7/11.

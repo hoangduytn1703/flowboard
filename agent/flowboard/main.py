@@ -29,6 +29,7 @@ from flowboard.routes import dub as dub_route
 from flowboard.routes import capcut as capcut_route
 from flowboard.routes import running as running_route
 from flowboard.routes import assistant as assistant_route
+from flowboard.routes import autopilot as autopilot_route
 from flowboard.services import op_tracker
 from flowboard.services.account_pool import account_pool
 from flowboard.routes import history as history_route
@@ -161,6 +162,9 @@ async def lifespan(app: FastAPI):
     # …and reads the connected Pages' own posts back (posts made by hand show on the calendar).
     from flowboard.services import fb_sync
     fb_sync_task = asyncio.create_task(fb_sync.run_loop(), name="fb-sync-loop")
+    # 🤖 Tự động đăng: writes each fixed-schedule slot's post ahead of time and puts it on the calendar.
+    from flowboard.services import autopilot
+    autopilot_task = asyncio.create_task(autopilot.run_loop(), name="autopilot-loop")
     logger.info("flowboard agent started (ws:%d + worker)", EXTENSION_WS_PORT)
     try:
         yield
@@ -170,9 +174,9 @@ async def lifespan(app: FastAPI):
             await asyncio.wait_for(worker.drain(), timeout=5.0)
         except asyncio.TimeoutError:
             logger.warning("worker drain timed out")
-        for t in (ws_task, worker_task, schedule_task, fb_sync_task):
+        for t in (ws_task, worker_task, schedule_task, fb_sync_task, autopilot_task):
             t.cancel()
-        await asyncio.gather(ws_task, worker_task, schedule_task, fb_sync_task, return_exceptions=True)
+        await asyncio.gather(ws_task, worker_task, schedule_task, fb_sync_task, autopilot_task, return_exceptions=True)
         logger.info("flowboard agent stopped")
 
 
@@ -261,6 +265,7 @@ app.include_router(export_extras_route.router)
 app.include_router(requests_route.router)
 app.include_router(running_route.router)
 app.include_router(assistant_route.router)
+app.include_router(autopilot_route.router)
 app.include_router(media.bytes_router)
 app.include_router(media.api_router)
 app.include_router(upload.router)

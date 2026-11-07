@@ -11,6 +11,8 @@ Skills (one plan may chain several, a step can use what the step before made):
 - ``schedule_post`` put the posts just written (or a saved one) on "Lịch đăng", auto-published on the Page
 - ``create_clip``   a new ad clip for a product with its script written for it (making the pictures and
                     videos in the background is milestone A1)
+- ``auto_post``     a fixed posting schedule for a Page ("🤖 Tự động đăng", services/autopilot): on given days / times a
+                    post is written ahead, pictured and auto-posted — nobody has to do anything (waits for a go-ahead)
 
 The LLM gets the catalog (channels, series, products, clip kinds, models — with
 ids) so names typed with typos or without accents still land on the right
@@ -61,7 +63,7 @@ OWN_TRAITS = (
     "a few light freckles across the nose", "a slightly wider nose bridge", "a small dimple on one side when smiling",
     "naturally fuller cheeks", "a faint mole above the lip", "slightly hooded eyes", "a gently asymmetrical smile",
 )
-TOOLS = ("create_model", "add_product", "write_post", "schedule_post", "create_clip")
+TOOLS = ("create_model", "add_product", "write_post", "schedule_post", "create_clip", "auto_post")
 
 _SYSTEM = """You are "Trợ lý DFlow", the AI assistant inside DFlow — a tool that makes ad clips, Facebook posts and posting
 schedules for a Vietnamese TikTok Shop / Shopee affiliate seller. Answer in natural, short, friendly Vietnamese (xưng "mình",
@@ -92,6 +94,13 @@ match them to the closest catalog entry, e.g. "chú ta hay tò mò" = "Chúng ta
    script written for the product. template_id from the catalog's clip kinds (pick one fitting the product's category).
    Making its pictures and videos in the background is coming soon: say the seller opens the clip and presses
    "⚡ Tạo video tự động".
+6. auto_post {channel_id, days: [0-6, 0 = Monday … 6 = Sunday], times: ["HH:MM" Vietnam time], kind?, topic?, series?,
+   images?, product_id?, ai?: "claude"|"gemini", story?: bool} — a FIXED posting schedule ("🤖 Tự động đăng"): from now on, on
+   those days at those times DFlow writes a post by itself a few hours ahead (with its AI pictures) and posts it on the
+   channel's Facebook Page, no one has to do anything. Use it for "tự động đăng / đăng đều / mỗi ngày / T2-T6 … giờ … cho kênh …".
+   Only for a channel the catalog says is connected (fb_connected) — else say it must be connected on the Kênh page first.
+   "mỗi ngày" = all 7 days, "ngày thường" / "T2-T6" = [0,1,2,3,4], "cuối tuần" = [5,6]. series = a catalog series of that
+   channel (each slot = its next episode) or a new name. images default 1. ai default "claude" (the seller's Claude CLI).
 
 Chain steps in order in "actions" (e.g. write_post then schedule_post with post "previous"; add_product then write_post
 with product_id "previous"). Ask back (actions []) only when something essential is missing or ambiguous (which channel,
@@ -188,7 +197,7 @@ _WORK_PLAIN = ("model", "nguoi mau", "nhan vat", "kol", "clip", "video", "san ph
                "tiktok", "lazada", "post", "fanpage", "facebook", "fb", "reel", "long tieng", "dub", "capcut", "phu de",
                "kich ban", "quang cao", "affiliate", "huong dan", "chuc nang", "tinh nang", "lam duoc", "lam gi", "credit",
                "flow", "dflow", "tro ly", "tao mau", "ve mau", "luu mau", "tao clip", "lam clip", "viet bai", "dang bai",
-               "series", "loat", "len lich", "hen gio", "kenh",
+               "series", "loat", "len lich", "hen gio", "kenh", "tu dong", "dang deu", "moi ngay", "hang ngay",
                # how people ask for a model in everyday talk
                "co gai", "con gai", "con nho", "em gai", "chang trai", "anh chang", "co nang", "hot girl", "hotgirl", "hot boy",
                "gai xinh", "trai dep", "mau nu", "mau nam")
@@ -204,7 +213,7 @@ _YES = {"ok", "oke", "okay", "uh", "u", "um", "vang", "da", "yes", "co", "dong y
         "ok lam di", "ok lam luon", "duoc", "dc", "dung roi", "chuan", "go", "xac nhan"}
 _NO = {"khong", "ko", "k", "thoi", "huy", "dung", "stop", "no", "khong can", "thoi khoi", "huy di", "bo di"}
 SKILLS_VI = ("tạo người mẫu AI, thêm sản phẩm từ link, viết bài Facebook (cả tập tiếp của loạt truyện) kèm ảnh, lên lịch "
-             "đăng / tự đăng lên Page, tạo clip quảng cáo có kịch bản theo sản phẩm")
+             "đăng / tự đăng lên Page, đặt lịch tự động đăng đều (VD T2–T6 20h), tạo clip quảng cáo có kịch bản theo sản phẩm")
 GREETING_REPLY = (f"Chào bạn 👋 Mình là trợ lý của DFlow. Mình làm được: **{SKILLS_VI}**. Cứ nói việc cần làm, ví dụ “viết tập tiếp "
                   "của loạt … cho kênh … rồi lên lịch 20h tối nay”.")
 THANKS_REPLY = "Dạ 👍 Cần gì trong DFlow cứ nhắn mình nha."
@@ -399,6 +408,30 @@ def _clean_args(tool: str, a: dict[str, Any], cat: dict[str, Any]) -> tuple[Opti
         fmt = str(a.get("format") or "post").lower()
         return {"post": "previous" if post in (None, "", "previous") else _int(post), "at": utc_iso(when),
                 "auto": a.get("auto"), "format": fmt if fmt in ("post", "reel") else "post", "story": bool(a.get("story"))}, None
+    if tool == "auto_post":
+        cid = _channel_id(a.get("channel_id") or a.get("channel"), cat)
+        if cid is None:
+            if len(cat["channels"]) == 1:
+                cid = cat["channels"][0]["id"]
+            else:
+                names = ", ".join(c["name"] for c in cat["channels"]) or "chưa có kênh nào"
+                return None, f"Tự động đăng cho kênh nào bạn? ({names})"
+        ch = next((c for c in cat["channels"] if c["id"] == cid), None)
+        if ch is not None and not ch.get("fb_connected"):
+            return None, f"Kênh “{ch['name']}” chưa kết nối Facebook Page nên chưa tự đăng được — kết nối ở trang Kênh rồi nhờ mình lại nhé."
+        days = sorted({d for d in (_int(x) for x in a.get("days") or []) if d is not None and 0 <= d <= 6})
+        times = sorted({f"{int(m.group(1)):02d}:{m.group(2)}" for x in a.get("times") or []
+                        if (m := re.match(r"^\s*([01]?\d|2[0-3]):([0-5]\d)\s*$", str(x)))})
+        if not days or not times:
+            return None, "Bạn muốn đăng vào những ngày nào, mấy giờ? (VD: T2–T6 lúc 20:00)"
+        kind = str(a.get("kind") or "").lower()
+        images = _int(a.get("images")) if a.get("images") is not None else 1
+        out = {"channel_id": cid, "days": days, "times": times[:6], "kind": kind if kind in POST_KINDS else "",
+               "topic": str(a.get("topic") or "").strip()[:600], "series": _series_name(a.get("series"), cid, cat),
+               "images": max(0, min(4, images or 0)),
+               "product_id": _product_id(a.get("product_id") or a.get("product"), cat),
+               "ai": a.get("ai") if a.get("ai") in ("claude", "gemini") else "claude", "story": bool(a.get("story"))}
+        return out, None
     if tool == "create_clip":
         pid = _product_id(a.get("product_id") or a.get("product"), cat)
         if pid is None:
@@ -447,6 +480,8 @@ def needs_go_ahead(actions: list[dict[str, Any]], cat: dict[str, Any]) -> bool:
             channel = act["args"]["channel_id"]
         if act["tool"] == "schedule_post" and act["args"].get("auto") is not False and (channel in connected or act["args"].get("auto")):
             return True
+        if act["tool"] == "auto_post":
+            return True
     return False
 
 
@@ -471,6 +506,14 @@ def _plan_summary(actions: list[dict[str, Any]], cat: dict[str, Any]) -> list[st
             auto = g.get("auto") is not False and channel in {c["id"] for c in cat["channels"] if c.get("fb_connected")}
             lines.append(f"{i}. Lên lịch {local}" + (" — ⚡ tự đăng lên Facebook Page" if auto else " — nhắc đăng tay")
                          + (" + 📲 thêm vào tin" if g.get("story") and auto else ""))
+        elif a["tool"] == "auto_post":
+            from flowboard.services.autopilot import describe_when
+
+            what = f"tập tiếp của loạt “{g['series']}”" if g.get("series") else "một bài mới"
+            lines.append(f"{i}. 🤖 Tự động đăng lên Page “{names.get(g['channel_id'], '?')}” — {describe_when(g['days'], g['times'])}: "
+                         f"mỗi khung AI ({'Claude CLI' if g['ai'] == 'claude' else 'Gemini'}) viết {what}"
+                         + (f" kèm {g['images']} ảnh" if g.get("images") else "") + " rồi tự đăng"
+                         + (" + 📲 thêm vào tin" if g.get("story") else ""))
         elif a["tool"] == "create_clip":
             prod = products.get(g["product_id"]) if isinstance(g["product_id"], int) else "sản phẩm vừa thêm"
             lines.append(f"{i}. Tạo clip quảng cáo cho “{prod}” (kịch bản theo sản phẩm)")
@@ -562,7 +605,7 @@ def cancel(task_id: int) -> bool:
 
 _RUNNING: set[int] = set()
 _TITLES = {"create_model": "Tạo người mẫu", "add_product": "Thêm sản phẩm", "write_post": "Viết bài",
-           "schedule_post": "Lên lịch đăng", "create_clip": "Tạo clip"}
+           "schedule_post": "Lên lịch đăng", "create_clip": "Tạo clip", "auto_post": "Đặt lịch tự động đăng"}
 
 
 def start_task(actions: list[dict[str, Any]], *, plan: Optional[list[str]] = None, pending: bool = False) -> dict[str, Any]:
@@ -964,5 +1007,35 @@ async def _do_create_clip(task_id: int, i: int, args: dict[str, Any], ctx: dict[
             "media": list(product.get("media_ids") or [])[:1], "ctx": {"board_id": board_id}}
 
 
+async def _do_auto_post(task_id: int, i: int, args: dict[str, Any], ctx: dict[str, Any], prefix: str) -> dict[str, Any]:
+    from flowboard.services import autopilot
+
+    st = _state(task_id)
+    plan_id = st.get(f"s{i}_plan")
+    if not plan_id:
+        _save(task_id, step=f"{prefix}Đang đặt lịch tự động đăng…", link="/posts?auto=1")
+        pid = ctx.get("product_id") if args.get("product_id") == "previous" else args.get("product_id")
+        brief: dict[str, Any] = {"images": args.get("images", 1)}
+        if args.get("kind"):
+            brief["kind"] = args["kind"]
+        if args.get("topic"):
+            brief["topic"] = args["topic"]
+        try:
+            plan = autopilot.create_plan({"channel_id": args["channel_id"], "days": args["days"], "times": args["times"],
+                                          "brief": brief, "series": args.get("series") or "", "ai": args.get("ai") or "claude",
+                                          "product_mode": "fixed" if pid else "none", "product_ids": [pid] if pid else [],
+                                          "fb_story": bool(args.get("story")), "enabled": True})
+        except autopilot.AutopilotError as exc:
+            raise AssistantError(f"Không đặt được lịch tự động: {exc}")
+        plan_id = plan["id"]
+        _save(task_id, **{f"s{i}_plan": plan_id})
+    plan = autopilot.get_plan(plan_id)
+    nxt = plan["next"][0]["label"] if plan["next"] else "—"
+    return {"line": f"🤖 Đã bật **tự động đăng** cho Page “{plan['channel']}” — {plan['when']}. Bài đầu tiên: **{nxt}** "
+                    "(AI soạn trước vài tiếng, bài nằm trong Bài đã lưu, sửa được trước giờ đăng).",
+            "links": [{"label": "Mở Tự động đăng", "href": "/posts?auto=1"}], "link": "/posts?auto=1",
+            "ctx": {"plan_id": plan_id, "channel_id": plan["channel_id"]}}
+
+
 _HANDLERS = {"create_model": _do_create_model, "add_product": _do_add_product, "write_post": _do_write_post,
-             "schedule_post": _do_schedule_post, "create_clip": _do_create_clip}
+             "schedule_post": _do_schedule_post, "create_clip": _do_create_clip, "auto_post": _do_auto_post}

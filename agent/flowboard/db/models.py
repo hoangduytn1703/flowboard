@@ -524,3 +524,50 @@ class ProviderJob(SQLModel, table=True):
     error_message: Optional[str] = None
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class AutoPlan(SQLModel, table=True):
+    """A fixed posting schedule for one Facebook Page ("🤖 Tự động đăng" on the Posts page, services/autopilot):
+    on ``days`` at ``times`` (Vietnam time) a post is written ``lead_minutes`` ahead with ``brief`` (the Posts form),
+    pictured through Flow, and put on the calendar as an auto slot — nobody has to do anything. A slot that has no
+    post ready by its time is skipped, never filled with something half-made. ``create_all`` adds the table."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    channel_id: int = Field(index=True)
+    name: str = ""
+    enabled: bool = Field(default=True, index=True)
+    days: list = Field(default_factory=list, sa_column=Column(JSON))  # weekdays 0 = Monday … 6 = Sunday
+    times: list = Field(default_factory=list, sa_column=Column(JSON))  # "HH:MM", Vietnam time
+    lead_minutes: int = 180  # how long before the slot the post is written
+    brief: dict = Field(default_factory=dict, sa_column=Column(JSON))  # kind, topic, tone, length, cta, images…
+    series: str = ""  # every slot = the next episode of this story
+    product_mode: str = "none"  # none | fixed | rotate (product_ids taken in turn)
+    product_ids: list = Field(default_factory=list, sa_column=Column(JSON))
+    ai: str = "claude"  # claude (the Claude CLI) | gemini (the Gemini API key pool); the other one if it fails
+    fb_story: bool = False  # "📲 Thêm vào tin" on every post
+    enabled_at: datetime = Field(default_factory=_utcnow)
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class AutoRun(SQLModel, table=True):
+    """One slot of an :class:`AutoPlan`: the post written for it and the calendar slot it went on. Unique per
+    (plan, slot time) — inserting the row is the claim, so two machines on the same database never both write
+    for one slot; ``lease_until`` keeps a second machine off a run another one is still working on."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    plan_id: int = Field(index=True)
+    slot_at: datetime = Field(index=True)  # UTC
+    # writing → pictures → ready (then the Schedule slot says posted / failed) | waiting (retry) | failed | skipped | missed
+    status: str = Field(default="writing", index=True)
+    post_id: Optional[int] = None
+    schedule_id: Optional[int] = None
+    product_id: Optional[int] = None
+    ai_used: str = ""
+    image_requests: list = Field(default_factory=list, sa_column=Column(JSON))  # Flow request ids, kept for a restart
+    attempts: int = 0
+    error: str = ""
+    note: str = ""
+    lease_until: Optional[datetime] = None
+    next_try_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+    __table_args__ = (UniqueConstraint("plan_id", "slot_at", name="uq_autorun_plan_slot"),)

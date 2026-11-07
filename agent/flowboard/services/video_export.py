@@ -8,12 +8,16 @@ speech runs longer than the footage, Veo's own soundtrack is ducked under
 the voice (or muted / kept), and the subtitle cues are burned in with
 libass. The voiced clips share one encode so the join is a stream copy.
 
-Smoothing is frame interpolation after the join: Veo renders 24 fps and
-has no other rate, so 60 fps can only come from synthesising the
-in-between frames. ffmpeg's ``minterpolate`` (motion-compensated) does that
-on the CPU at roughly 15 s of work per second of 720p footage; the encode
-goes through NVENC when the build has it. A RIFE path (GPU, better edges)
-can slot in here later — BUGLOG FB-017.
+Smoothing is frame interpolation: Veo renders 24 fps and has no other
+rate, so 60 fps can only come from synthesising the in-between frames.
+ffmpeg's ``minterpolate`` (motion-compensated) does that on the CPU at
+roughly 14 s of work per second of 720p footage and on ONE core — so on the
+per-clip path every source clip is smoothed in its own ffmpeg, side by side
+(:func:`smooth_sources`, cached per clip: a re-export reuses them), before
+the voice and subtitles go on; 4 clips of 8 s took 156 s instead of ~9 min
+for the joined clip (measured 7/11 on a Ryzen 7 5800H). The encode goes
+through NVENC when the build has it. A RIFE path (GPU, better edges) can
+slot in here later — BUGLOG FB-017.
 """
 from __future__ import annotations
 
@@ -21,9 +25,11 @@ import asyncio
 import json
 import logging
 import math
+import os
 import shutil
 import subprocess
 import tempfile
+import threading
 import uuid
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -41,6 +47,8 @@ logger = logging.getLogger(__name__)
 _SMOOTH_TIMEOUT_S = 1800
 _MINTERPOLATE = "minterpolate=fps=60:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1"
 _CLIP_TIMEOUT_S = 600
+#: Clips smoothed at once: minterpolate keeps one core busy, leave the rest of the machine some room.
+SMOOTH_PARALLEL = max(1, min(6, (os.cpu_count() or 4) // 2))
 
 #: Veo's own audio under the voice-over, as a volume factor.
 ORIGINAL_AUDIO_LEVELS = {"duck": 0.2, "keep": 1.0, "mute": 0.0}
@@ -208,6 +216,43 @@ def smooth_to_60fps(src: Path, dst: Path) -> Optional[str]:
     return err
 
 
+_smooth_locks: dict[str, threading.Lock] = {}
+_smooth_locks_guard = threading.Lock()
+
+
+def smoothed_copy(src: Path, cache_dir: Path) -> tuple[Path, Optional[str]]:
+    """``src`` at 60 fps, made once into ``cache_dir`` (named by the source file + size, written through a temp file);
+    (the copy, None) or (``src``, why) when the smoothing failed. Two exports of the same clip wait for one run."""
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    dst = cache_dir / f"{src.stem}.{src.stat().st_size}.60.mp4"
+    with _smooth_locks_guard:
+        lock = _smooth_locks.setdefault(str(dst), threading.Lock())
+    with lock:
+        if dst.is_file() and dst.stat().st_size > 0:
+            return dst, None
+        part = dst.with_name(dst.stem + ".part.mp4")
+        err = smooth_to_60fps(src, part)
+        if err is None and part.is_file() and part.stat().st_size > 0:
+            os.replace(part, dst)
+            return dst, None
+        part.unlink(missing_ok=True)
+        return src, err or "no output file"
+
+
+def smooth_sources(paths: list[Path]) -> tuple[list[Path], Optional[str]]:
+    """Every clip at 60 fps, :data:`SMOOTH_PARALLEL` ffmpegs side by side (minterpolate runs on one core); a clip
+    that fails keeps its own frames (the clip encode repeats them up to 60 fps) and the first reason comes back."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from flowboard.services import media as media_service
+
+    cache = media_service.MEDIA_CACHE_DIR / "smooth60"
+    with ThreadPoolExecutor(max_workers=max(1, min(SMOOTH_PARALLEL, len(paths)))) as pool:
+        done = list(pool.map(lambda p: smoothed_copy(p, cache), paths))
+    errors = [err for _p, err in done if err]
+    return [p for p, _err in done], (errors[0][:200] if errors else None)
+
+
 # ── probing ────────────────────────────────────────────────────────────────
 
 @dataclass
@@ -260,6 +305,34 @@ def _synth_line(text: str, opts: NarrationOptions, rate: int, voice: Optional[st
     return asyncio.run(tts.synthesize(text, voice, rate, opts.style))
 
 
+def _prefetch_voices(lines: list[str], opts: NarrationOptions) -> None:
+    """Every plain line read into the TTS cache before the clips are cut, so the clip loop only hits the cache: a
+    VieNeu voice does all its lines in one model load (it loaded the model again for every clip, ~20 s each), Edge
+    lines go side by side. Gemini (per-minute quota) and dialogue lines are left to the loop, and so is any failure —
+    the loop reports it per clip."""
+    groups: dict[str, list[str]] = {}
+    for i, line in enumerate(lines):
+        text = line.strip()
+        if text and not tts.has_speaker_tags(text):
+            groups.setdefault(opts.voice_for(i), []).append(text)
+
+    async def read_all() -> None:
+        jobs = []
+        for voice, texts in groups.items():
+            kind = tts.voice_kind(voice)
+            if kind == "vieneu":
+                jobs.append(tts.synthesize_many(texts, voice, opts.rate, opts.style))
+            elif kind == "edge":
+                jobs += [tts.synthesize(t, voice, opts.rate, opts.style) for t in texts]
+        if jobs:
+            await asyncio.gather(*jobs, return_exceptions=True)
+
+    try:
+        asyncio.run(read_all())
+    except Exception as exc:  # noqa: BLE001 — a head start only; the loop reads (and reports) whatever is missing
+        logger.warning("video_export: reading the voices ahead failed: %s", str(exc)[:200])
+
+
 def _synth_to_fit(text: str, opts: NarrationOptions, clip_s: float,
                   voice: Optional[str] = None) -> tuple[tts.Narration, int]:
     """Synthesise ``text``; when it runs well past the clip, speak faster
@@ -268,7 +341,9 @@ def _synth_to_fit(text: str, opts: NarrationOptions, clip_s: float,
     narration = _synth_line(text, opts, opts.rate, voice)
     rate = opts.rate
     room = clip_s - _TAIL_S
-    if room > 1.0 and narration.duration > room + 0.75:
+    # VieNeu / FPT.AI ignore the rate: asking again only reloads the model (~20 s) for the same audio
+    rate_works = tts.voice_kind(voice if voice in tts.VOICES else opts.voice) not in ("vieneu", "fpt")
+    if rate_works and room > 1.0 and narration.duration > room + 0.75:
         needed = math.ceil((narration.duration / room - 1.0) * 100)
         rate = opts.rate + min(MAX_AUTO_RATE, needed)
         narration = _synth_line(text, opts, rate, voice)
@@ -383,13 +458,14 @@ def fit_filter(src_w: int, src_h: int, size: tuple[int, int]) -> Optional[str]:
 def _voice_clip(ffmpeg: str, src: Path, text: str, opts: NarrationOptions,
                 dst: Path, work: Path, caption: str = "", original_audio: Optional[str] = None,
                 voice: Optional[str] = None, trim: Optional[tuple[float, Optional[float]]] = None,
-                size: Optional[tuple[int, int]] = None) -> ClipReport:
+                size: Optional[tuple[int, int]] = None, fps: int = 24) -> ClipReport:
     """``src`` re-encoded into ``dst`` with the voice line, ducked original
     sound and burned subtitles. The clip is held on its last frame when the
     speech outlasts it. ``voice`` overrides the export's voice for this
     clip; ``[A] … [B] …`` tags in ``text`` switch voices mid-line.
     ``size`` fits the clip to that frame first (see :func:`common_size`):
-    the join stream-copies, so every clip has to come out the same size."""
+    the join stream-copies, so every clip has to come out the same size —
+    and the same ``fps`` (60 when the sources were smoothed first)."""
     info = probe_clip(src)
     if info is None:
         return ClipReport(0.0, error="unreadable clip")
@@ -457,7 +533,7 @@ def _voice_clip(ffmpeg: str, src: Path, text: str, opts: NarrationOptions,
 
     cmd = [ffmpeg, "-y", *inputs, "-filter_complex", ";".join(chains),
            "-map", "[v]", "-map", "[a]", "-t", f"{length:.3f}",
-           *_encode_args(ffmpeg), "-pix_fmt", "yuv420p", "-r", "24",
+           *_encode_args(ffmpeg), "-pix_fmt", "yuv420p", "-r", str(fps),
            "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2",
            "-movflags", "+faststart", str(dst)]
     err = _run(cmd, _CLIP_TIMEOUT_S)
@@ -621,8 +697,10 @@ def _timeline_cues(clips: list[ClipReport], voiced: list[Path]) -> list[tuple[fl
     return out
 
 
-def _remotion_subtitles(joined: Path, cues: list[tuple[float, float, str]], style: str, out_dir: Path) -> Path:
-    """The joined clip with its subtitles drawn by Remotion (the dubbing tool's composition, sound kept)."""
+def _remotion_subtitles(joined: Path, cues: list[tuple[float, float, str]], style: str, out_dir: Path,
+                        fps: Optional[int] = None) -> Path:
+    """The joined clip with its subtitles drawn by Remotion (the dubbing tool's composition, sound kept);
+    ``fps`` = render rate when not Remotion's default (60 for a smoothed clip, so the smoothing is kept)."""
     from flowboard.services import dub_remotion
 
     info = probe_clip(joined)
@@ -631,7 +709,8 @@ def _remotion_subtitles(joined: Path, cues: list[tuple[float, float, str]], styl
     out = out_dir / f"subs_{uuid.uuid4().hex}.mp4"
     # where the ffmpeg subtitles sit (16 % above the bottom), so both engines look alike
     spec = dub_remotion.build_spec(src=joined, out=out, cues=cues, layout={"x": 0.5, "y": 0.84, "scale": 1.0},
-                                   style=style, width=info.width, height=info.height, duration_s=info.duration)
+                                   style=style, width=info.width, height=info.height, duration_s=info.duration,
+                                   fps=fps or dub_remotion.FPS)
     try:
         return dub_remotion.render(spec)
     finally:
@@ -704,6 +783,8 @@ def export_video(
     report = ExportReport(smooth60=smooth60)
     out_dir = config.STORAGE_DIR / "media"
     out_dir.mkdir(parents=True, exist_ok=True)
+    # frame rate of the clip encode; 60 + smoothed_first when the sources were smoothed before the voice went on
+    fps, smoothed_first = 24, False
 
     if items:
         asset_ids = [it.asset_id for it in items]
@@ -729,6 +810,19 @@ def export_video(
             return None, err, report.as_dict()
         paths = [stamp_free.get(i, p) for i, p in enumerate(paths)]
         lines = list(narration.lines) + [""] * (len(paths) - len(narration.lines))
+        # The voices are read while the clips are smoothed: both take long and neither needs the other.
+        reader = threading.Thread(target=_prefetch_voices, args=(lines, narration), name="export-voices", daemon=True)
+        reader.start()
+        # 60 fps: every source clip smoothed side by side (cached) before the voice and subtitles go on. Drama
+        # stills are animated at 24 fps by _image_clip — those still smooth the joined clip at the end.
+        if smooth60 and not items:
+            smoothed, smooth_err = smooth_sources(paths)
+            report.smooth60_error = smooth_err
+            if any(s != p for s, p in zip(smoothed, paths)):
+                paths, fps, smoothed_first = smoothed, 60, True
+            else:  # nothing came out: the 24 fps join, as the old path did on a failed smoothing
+                report.smooth60 = False
+        reader.join()
         work = out_dir / "tts" / f"export_{uuid.uuid4().hex}"
         work.mkdir(parents=True, exist_ok=True)
         voiced: list[Path] = []
@@ -744,7 +838,7 @@ def export_video(
                                    caption=item.caption if item else "",
                                    original_audio=item.original_audio if item else None,
                                    voice=line_voice, trim=trims[i] if i < len(trims) else None,
-                                   size=fit_size)
+                                   size=fit_size, fps=fps)
             report.clips.append(clip)
             # ffmpeg leaves a 0-byte file behind when an encode fails, so
             # "exists" is not "worked".
@@ -761,7 +855,7 @@ def export_video(
         cues = _timeline_cues(report.clips, voiced) if narration.subtitles and narration.sub_engine == "remotion" else []
         if cues:
             try:
-                drawn = _remotion_subtitles(joined_path, cues, narration.sub_style, out_dir)
+                drawn = _remotion_subtitles(joined_path, cues, narration.sub_style, out_dir, fps=fps if smoothed_first else None)
             except Exception as exc:  # noqa: BLE001 — Remotion missing / failed: the same lines burned by ffmpeg
                 logger.warning("video_export: Remotion subtitles failed (%s); burning them with ffmpeg", str(exc)[:200])
                 report.subtitles_error = str(exc)[:200]
@@ -806,7 +900,7 @@ def export_video(
                 joined_path = bgm_path
                 joined_media = _register(bgm_path)
 
-    if not smooth60:
+    if not smooth60 or smoothed_first or (report.smooth60_error and not report.smooth60):
         return joined_media, None, report.as_dict()
 
     out_path = out_dir / f"smooth60_{uuid.uuid4().hex}.mp4"

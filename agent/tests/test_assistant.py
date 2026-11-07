@@ -254,3 +254,40 @@ async def test_a_canned_reply_spends_no_tokens(monkeypatch):
     monkeypatch.setattr(assistant, "run_llm", never)
     out = await assistant.chat("ê m 1+1= mấy?")
     assert out["task"] is None and out["messages"][1]["text"] == assistant.OFF_TOPIC_REPLY and out["messages"][1]["data"]["canned"]
+
+
+@pytest.mark.asyncio
+async def test_auto_post_sets_a_fixed_schedule_after_the_go_ahead(client, monkeypatch):
+    """"tự động đăng kênh … T2-T6 20h": checked against the catalog, waits for "ok", then the plan is on (services/autopilot)."""
+    a = assistant.parse_answer(json.dumps({"reply": "Ok", "actions": [{"tool": "auto_post", "args": {
+        "channel_id": "chung ta hay to mo", "days": [0, 1, 2, 3, 4, 9], "times": ["20:00", "7:5", "8:30"],
+        "series": "nhung thu vi ve he mat troi"}}]}, ensure_ascii=False), _cat())
+    g = a["actions"][0]["args"]
+    assert g["channel_id"] == 2 and g["days"] == [0, 1, 2, 3, 4] and g["times"] == ["08:30", "20:00"]
+    assert g["series"] == "những thú vị về hệ mặt trời" and g["images"] == 1 and g["ai"] == "claude"
+    assert assistant.needs_go_ahead(a["actions"], _cat())
+    assert "T2 T3 T4 T5 T6" in assistant._plan_summary(a["actions"], _cat())[0]
+    q = assistant.parse_answer(json.dumps({"reply": "", "actions": [{"tool": "auto_post", "args": {
+        "channel_id": 3, "days": [0], "times": ["20:00"]}}]}), _cat())
+    assert q["actions"] == [] and "chưa kết nối Facebook Page" in q["reply"]
+    assert "đặt lịch tự động" in assistant.SKILLS_VI and assistant.quick_reply("tự động đăng kênh mẹ bầu mỗi ngày 20h") is None
+
+    ch = client.post("/api/channels", json={"name": "Chúng ta hay tò mò", "platforms": ["facebook"]}).json()["id"]
+    monkeypatch.setattr("flowboard.services.scheduler.can_auto", lambda cid: True)
+
+    async def fake_llm(feature, prompt, *, system_prompt=None, timeout=0):
+        return json.dumps({"reply": "Ok.", "actions": [{"tool": "auto_post", "args": {
+            "channel_id": ch, "days": [5, 6], "times": ["09:00"], "kind": "tips", "ai": "gemini"}}]}, ensure_ascii=False)
+
+    monkeypatch.setattr(assistant, "run_llm", fake_llm)
+    out = await assistant.chat("tự động đăng mẹo vặt cho kênh chúng ta hay tò mò cuối tuần 9h sáng")
+    assert out["task"]["status"] == "pending"
+    from flowboard.services import autopilot
+
+    assert autopilot.list_plans() == []  # nothing before the go-ahead
+    await assistant.chat("ok")
+    assert await _until(lambda: assistant.task_outcome(out["task"]["id"])["status"] != "running")
+    plans = autopilot.list_plans()
+    assert len(plans) == 1 and plans[0]["days"] == [5, 6] and plans[0]["times"] == ["09:00"] and plans[0]["ai"] == "gemini"
+    assert plans[0]["brief"]["kind"] == "tips" and plans[0]["enabled"] is True
+    assert "tự động đăng" in assistant.state()["messages"][-1]["text"]
