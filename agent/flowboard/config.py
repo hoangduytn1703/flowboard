@@ -21,7 +21,9 @@ def _load_dotenv(path: Path) -> None:
         # Explicit UTF-8: Windows' default is cp1252, and one non-ASCII
         # character in a comment (a Vietnamese note, say) made the agent
         # refuse to start with a UnicodeDecodeError at import time.
-        raw = path.read_text(encoding="utf-8", errors="replace")
+        # "-sig": a .env saved by an older Notepad starts with a BOM, which
+        # would otherwise glue itself to the first key and hide it.
+        raw = path.read_text(encoding="utf-8-sig", errors="replace")
     except OSError:
         return
     for line in raw.splitlines():

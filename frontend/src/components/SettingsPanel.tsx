@@ -7,6 +7,7 @@ import {
 } from "../store/settings";
 import { getLatestRelease, isNewerVersion, type LatestRelease } from "../api/github";
 import { GeminiKeysSection } from "./GeminiKeysSection";
+import { AiProvidersSection } from "./settings/AiProvidersSection";
 import { FlowAccountsSection } from "./settings/FlowAccountsSection";
 import { AccountPoolSection } from "./settings/AccountPoolSection";
 import { ImageProvidersSection } from "./settings/ImageProvidersSection";
@@ -100,10 +101,12 @@ const OMNI_HINT =
   "Tạo video từ ảnh tham chiếu. Thời lượng 4 / 6 / 8 / 10 s chọn cho mỗi lần tạo. Hỗ trợ cả dọc lẫn ngang. " +
   "Khuyên dùng: Veo 3.1 Lite hiện bị Flow nhận rồi huỷ trên tài khoản Pro thường.";
 
-type SettingsTab = "gen" | "flow" | "keys" | "data" | "about";
+type SettingsTab = "gen" | "flow" | "ai" | "keys" | "data" | "about";
 const TABS: { key: SettingsTab; icon: string; label: string }[] = [
   { key: "gen", icon: "🎬", label: "Tạo ảnh & video" },
   { key: "flow", icon: "⚡", label: "Google Flow" },
+  // which AI writes scripts / posts (Claude CLI, Gemini CLI, Codex…): only the Canvas toolbar had it, and Canvas is hidden
+  { key: "ai", icon: "🤖", label: "AI viết" },
   { key: "keys", icon: "🔑", label: "Gemini key" },
   { key: "data", icon: "☁", label: "Dữ liệu" },
   { key: "about", icon: "ℹ", label: "Thông tin" },
@@ -556,6 +559,8 @@ export function SettingsPanel({
                 )}
               </>
             )}
+
+            {tab === "ai" && <AiProvidersSection />}
 
             {tab === "keys" && <GeminiKeysSection />}
 

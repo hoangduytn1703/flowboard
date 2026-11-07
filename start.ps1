@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Start Flowboard with one command: agent + frontend.
+  Start DFlow (code name flowboard) with one command: agent + frontend.
 
 .DESCRIPTION
   Run it after a reboot or after changing code. It:
@@ -244,16 +244,16 @@ if ($projectId -and $state.flow_project_id -ne $projectId) {
 
 # -- 7. Agent (foreground) ---------------------------------------------------
 Write-Host ''
-Write-Host 'Flowboard' -ForegroundColor Green
+Write-Host 'DFlow' -ForegroundColor Green
 if ($projectId) { Write-Host "  Flow project : $projectId" }
 if ($tier) { Write-Host "  Flow plan    : $tier" }
 Write-Host "  API          : $api   (try it: $api/docs)"
 if ($front) { Write-Host "  App          : http://localhost:$frontPort   (log: storage\logs\frontend.log)" }
 if ($pinJob) { Write-Host '  Boards       : will be moved onto this Flow project once the agent is up' }
 if ($extChanged) {
-    Write-Host '  Extension    : changed - reload "Flowboard Bridge" in chrome://extensions, then F5 the Flow tab' -ForegroundColor Yellow
+    Write-Host '  Extension    : changed - reload "DFlow Bridge" in chrome://extensions, then F5 the Flow tab' -ForegroundColor Yellow
 }
-Write-Host '  Chrome       : Flowboard extension ON, Flow Kit extension OFF, one flow.google.com tab open'
+Write-Host '  Chrome       : DFlow Bridge extension ON, Flow Kit extension OFF, one flow.google.com tab open'
 Write-Host '  Stop         : Ctrl+C'
 Write-Host ''
 

@@ -76,3 +76,12 @@ def test_a_directory_in_place_of_the_file_is_not_an_error(tmp_path):
     d = tmp_path / ".env"
     d.mkdir()
     _load_dotenv(d)
+
+
+def test_a_bom_from_an_older_notepad_does_not_hide_the_first_key(tmp_path, monkeypatch):
+    """The README tells non-technical users to add a line with Notepad; older Notepads save UTF-8 with a BOM."""
+    monkeypatch.delenv("FB_TEST_BOM", raising=False)
+    path = tmp_path / ".env"
+    path.write_bytes("﻿FB_TEST_BOM=ok\n".encode("utf-8"))
+    _load_dotenv(path)
+    assert os.environ["FB_TEST_BOM"] == "ok"
