@@ -27,6 +27,9 @@ Tạo ảnh/video đi qua Google Flow (cần gói Pro/Ultra) bằng extension Ch
 - `make agent` (FastAPI :8434, WebSocket extension :8355) và `make frontend` (Vite :5174).
 - Extension: `chrome://extensions` → Load unpacked → `extension/`. Sửa extension thì phải **reload** nó. Cần một tab `flow.google.com` đã đăng nhập, để mở.
 - Project Flow: đặt trong Cài đặt (`PUT /api/flow/projects/pinned`, tự chuyển các board sang project mới). Gói Pro/Ultra: `FLOWBOARD_PAYGATE_TIER` trong `.env`.
+- **App desktop (7/11, Phase B bản đầu)**: bộ cài `DFlow_<ver>_x64-setup.exe` build trên **GitHub Actions** (`.github/workflows/desktop.yml`: Actions →
+  "Desktop app" → Run workflow → tải ở Artifacts; hoặc đẩy tag `v*` → GitHub Release). Không cần Rust / Visual Studio trên máy (máy nhà không có). Xem
+  "Chỗ cần biết" → "App desktop".
 - **Windows**: `.\start.ps1` (ghi `.env`, dừng bản cũ, cài dependency khi đổi, chạy frontend + agent); chạy nền thì
   `powershell -ExecutionPolicy Bypass -File .\start.ps1 *> storage\logs\startN.log` (dùng tên log mới mỗi lần, file cũ hay bị khoá).
   Cổng cố định: flowboard UI **5174** / API 8434 / WS 8355; flowkit 5173 / 8100 / 9222 — chạy song song, không đổi.
@@ -1490,6 +1493,38 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   `api/dub.ts`: `DubName`, `normNames`, `checkDubNames`, `DubJob.names|names_note`, `DubRender.names`. Thử thật read-only trên job 46bfc7232d1b (813 câu): 43 s, sửa 28 câu
   (Anyinstein → Einstein, Losey → Roche, Billing Star → Proxima Centauri, Ultra Cloud → đám mây Oort, Neptune → Sao Hải Vương, Du hành 1 → Voyager 1, 插绒 → Charon),
   11 tên có cách đọc (Einstein → Anh xtanh, Roche → Rốt sơ, Oort → Ót). Còn sót vài chữ ("Taitan", "Olet Yunwai", "Sora"). Test `test_dub_names.py` (8).
+- **App desktop (Tauri 2 + agent đóng gói PyInstaller, 7/11)** — người dùng chọn build trên GitHub Actions, bản đầu cho chính họ + vài người tin cậy (chưa làm Phase C):
+  - **Agent chế độ app**: `config.HOME` (= `FLOWBOARD_HOME`, app truyền `%LOCALAPPDATA%\DFlowData`), `config.APP_MODE` (`FLOWBOARD_APP=1`), `config.ENV_FILE`
+    (= `HOME/.env`, không có HOME thì `.env` ở gốc repo như cũ), `STORAGE_DIR` mặc định `HOME/storage`. Entry `agent/packaging/dflow_agent.py`: log ra `HOME/logs/agent.log`
+    (xoay vòng 5 MB), vá `subprocess.Popen` thêm `CREATE_NO_WINDOW` (ffmpeg / yt-dlp / claude không nháy cửa sổ đen), tự thoát khi tiến trình cha
+    (`FLOWBOARD_PARENT_PID` = DFlow.exe) mất — để bộ cài cập nhật không bị khoá file, `uvicorn.run(app, 127.0.0.1, FLOWBOARD_HTTP_PORT|8434)`. Spec
+    `agent/packaging/dflow-agent.spec` (onedir `agent/dflow-agent.exe` + `_internal`, console build vì app chạy nó với CREATE_NO_WINDOW; data: `templates/`, `assets/`,
+    `prompt_seeds.json`, **`dub_runner.py` + `video_clean_runner.py` dạng file thật** — pyvideotrans chạy chúng theo đường dẫn; collect_all psycopg / psycopg_binary /
+    edge_tts / certifi; ~250 MB, build 2 phút trên máy nhà).
+  - **Agent tự phục vụ giao diện**: `flowboard/web_ui.py` `mount(app)` (gọi CUỐI `main.py`) — `FLOWBOARD_WEB_DIR` = bản `vite build`; GET không route nào nhận → file
+    trong đó hoặc `index.html` (F5 ở `/clips/12/export` vẫn đúng), `/api/*` và `/media/*` không bao giờ rơi vào; `assets/` cache immutable, index no-cache; chặn đọc file
+    ngoài thư mục. Chạy từ repo cũng dùng được (`FLOWBOARD_WEB_DIR=frontend/dist`).
+  - **Cài đặt → 🖥 Máy này** (`components/settings/MachineSection.tsx`, `routes/app.py`, `services/app_env.py`): gói Flow Pro / Ultra (**có hiệu lực ngay** —
+    `app_env.apply_tier` gán `flow_sdk.DEFAULT_PAYGATE_TIER` + `config` + env; trước đây chỉ đọc lúc khởi động), dòng dữ liệu cloud (dán cả `FLOWBOARD_CENTRAL_DB_URL=…`
+    cũng được; chỉ trả `host`, không bao giờ trả mật khẩu), thư mục dữ liệu (`FLOWBOARD_STORAGE`, thử ghi trước khi lưu), đường dẫn VieDub (`FLOWBOARD_ERASE_ROOT|PYTHON`,
+    có hiệu lực ngay), thư mục extension + hướng dẫn Load unpacked, mở thư mục dữ liệu / log / `.env` (Windows: `os.startfile`, notepad), **↻ Khởi động lại** khi có khoá
+    cần restart (`restart_pending` = giá trị file khác lúc agent khởi động). Routes `GET /api/app/status`, `PUT /api/app/settings`, `POST /api/app/open {what}`,
+    `POST /api/app/restart {force}` (chỉ `APP_MODE`; có việc đang chạy → 409 trừ khi force; thoát mã **75** sau 0,6 s, app khởi động lại agent). `app_env.write_values`
+    giữ dòng viết tay, ghi UTF-8 không BOM qua file tạm. Dùng được cả khi chạy bằng start.ps1 (ghi `.env` gốc repo; restart thì chạy lại start.ps1).
+    Cài đặt cũng có tab **🤖 AI viết** (AiProvidersSection).
+  - **Vỏ Tauri** `desktop/` (`src-tauri/src/main.rs`, `tauri.conf.json` identifier `vn.dflow.desktop`, NSIS currentUser, `embedBootstrapper` WebView2, resources
+    `resources/` → `$RESOURCE` gồm `agent/`, `web/`, `ffmpeg/`, `extension/` do CI gom; icon sinh từ `frontend/public/dflow-logo.png` bằng `npx tauri icon`, đã commit):
+    khởi động `resources/agent/dflow-agent.exe` (env `FLOWBOARD_APP/HOME/WEB_DIR/EXTENSION_DIR/PARENT_PID`, PATH thêm `resources/ffmpeg` đầu tiên, CREATE_NO_WINDOW) —
+    bỏ qua nếu cổng 8434 đã có agent trả lời (dev đang chạy); theo dõi: thoát mã 75 → chạy lại, crash → chạy lại tối đa 3 lần liền; thoát app → `taskkill /T /F` cả cây.
+    Cửa sổ mở trang chờ `desktop/ui/index.html` (fetch no-cors `/api/health` mỗi 0,7 s → `location.replace("http://127.0.0.1:8434/")`, 120 s không lên thì chỉ chỗ log).
+    Link mở cửa sổ mới (`on_new_window`): trang của app → điều hướng ngay cửa sổ chính, còn lại → trình duyệt mặc định (`explorer <url>`). Đóng cửa sổ = ẩn xuống khay
+    (lịch đăng / tự động đăng vẫn chạy); khay: Mở DFlow / Mở thư mục dữ liệu / Thoát DFlow; `tauri-plugin-single-instance` (mở lần 2 = hiện cửa sổ cũ). Dữ liệu app ở
+    `%LOCALAPPDATA%\DFlowData` (không phải thư mục cài, gỡ / cập nhật không đụng). Cookie đăng nhập nằm trong WebView2 của app.
+  - **Bản app chưa có**: Remotion (cần Node + `frontend/node_modules` → `dub_remotion` tự báo không dùng được, chọn kiểu ffmpeg), auto-update, ký số (Windows hiện màn
+    "Windows protected your PC" → More info → Run anyway), Chrome Web Store cho extension. Lồng tiếng / CapCut / Claude CLI / yt-dlp vẫn dùng đồ cài trên máy như bản repo.
+  - Test `test_app_mode.py` (5: `.env` giữ dòng tay + BOM, settings áp gói ngay + cờ restart + không lộ mật khẩu, restart chỉ ở app + 409 khi bận, phục vụ UI + SPA + không
+    đọc ngoài thư mục, status chỉ thư mục extension). Thử thật bản PyInstaller trên cổng phụ 8534 / 8455 với HOME tạm: giao diện, F5 trang con, 8 mẫu clip, 43 prompt mẫu,
+    đổi gói Pro có hiệu lực ngay, dán dòng cloud → cờ restart.
 ## Lộ trình (chốt với người dùng 30/10) — làm theo thứ tự A → B, C chạy song song khi cần
 Mục tiêu cuối: **bán DFlow** cho người làm affiliate (2 gói **Pro** / **Premium**), dạng **app desktop Tauri 2** — mọi thao tác trong app,
 Chrome chỉ để cài extension và mở tab Flow đúng project. Người dùng nói rõ: không cần bàn chuyện đúng sai pháp lý, họ tự chịu trách nhiệm.
@@ -1517,7 +1552,7 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
   xác nhận credit → A3 từ link / ảnh lạ đến clip ghép xong → A4 thêm bài viết + lịch đăng + nhiều clip một lần ("làm 3 clip cho 3 sản phẩm này") →
   A5 khoá Premium. Mỗi mốc chạy thật một clip qua Flow trước khi sang mốc sau.
 
-### Phase B — App desktop **Tauri 2** (sau A)
+### Phase B — App desktop **Tauri 2** (sau A) — **bản đầu đã làm 7/11** (xem "Chỗ cần biết" → "App desktop"; người dùng bảo làm app trước web)
 - **Đã chọn Tauri 2** (Electron quá nặng). Vỏ dùng WebView2 có sẵn trên Windows (~5–10 MB, ~100 MB RAM); **agent Python chạy làm sidecar** (đóng gói
   PyInstaller / Nuitka, Tauri tự bật / tắt cùng app); cửa sổ app mở `http://127.0.0.1:8434` do agent phục vụ bản frontend đã build (cookie đăng nhập
   chạy như cũ, khách không cần Node). Bộ cài NSIS / MSI, tự cập nhật có chữ ký (plugin updater), icon khay, chặn mở 2 lần, ký mã Windows (tránh cảnh báo
@@ -1544,6 +1579,9 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
   Chrome Web Store từ chối → giữ cách cài tay kèm video.
 
 ## Việc đang dở / chưa kiểm chứng
+- **App desktop (7/11)**: vỏ Tauri **chưa build được trên máy** (không có Rust) — chỉ CI build; phần Rust chưa chạy thử thật (khay, đóng-ẩn, mở link ra trình duyệt,
+  khởi động lại mã 75, tự thoát theo tiến trình cha) tới khi người dùng cài bộ cài. Chưa có: auto-update (plugin updater cần kênh phát hành công khai / token vì repo riêng
+  tư), ký số, Remotion, nút "Chọn thư mục" (đang gõ đường dẫn), chuyển dữ liệu cũ khi đổi thư mục, Phase C (bán cho khách).
 - **Tên riêng khi lồng tiếng (7/11)**: chưa nghe giọng VieNeu / Edge đọc các cách đọc AI ghi ("Anh xtanh", "Prốc xi ma Xen tau ri") — có thể phải sửa tay ở khung
   "🔤 Tên riêng"; gợi ý `hotwords` cho Whisper chưa chạy thật trên video mới (job cũ đã nhận dạng rồi — dùng nút "✨ AI rà tên riêng" trong trình chỉnh sửa rồi Xuất lại);
   nút "▶ Nghe câu" của trình chỉnh sửa vẫn đọc chữ phụ đề (chưa theo bảng tên); Edit auto CapCut lồng tiếng trước dùng chung luồng dub nên có rà tên, còn phụ đề video
@@ -1840,3 +1878,4 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
 - **7/11 khuya** — README viết lại: bảng "Cần gì cho nhu cầu nào" (lõi / clip Flow / AI CLI / Gemini key / giọng đọc / Remotion / yt-dlp / lồng tiếng + xoá phụ đề AI (pyvideotrans) / CapCut / Facebook Page / tự động đăng / cloud), cài phần lõi Windows (`start.ps1 -FlowProjectId -Plan`) và Linux, cài thêm theo nhu cầu (đường dẫn model Whisper / spleeter / LaMa / VieNeu, `FLOWBOARD_ERASE_*`), lỗi hay gặp. Commit + push toàn bộ việc 7/11.
 - **7/11 khuya** — README: uv là bước cài khuyên dùng (tự tải Python 3.11, lệnh `winget install` từng gói), cách đặt `UV_CACHE_DIR` sang ổ khác (máy nhà: cache uv 10,7 GB ở `%LOCALAPPDATA%\uv\cache` trên ổ C chỉ còn 13 GB trống; venv của agent và pyvideotrans nằm ổ D nên uv đã phải chép file thay vì hardlink — cache trên C chỉ là bản thừa, xoá được; Python do uv tải ở `%APPDATA%\uv\python` (0,13 GB) là `home` của cả 2 venv — đừng dời). Đã làm trên máy nhà: `UV_CACHE_DIR=D:\uv-cache` (biến môi trường User), `uv cache clean` xoá 10,7 GB (ổ C 13 → 22,6 GB trống), 2 venv vẫn chạy. Máy khác chưa đặt.
 - **7/11 khuya** — README viết lại cho người không rành công nghệ (người dùng: "đối tượng dùng không phải ai cũng rành công nghệ, dev"): mục lục, DFlow làm được gì, chuẩn bị tài khoản (GitHub được mời vào kho riêng tư, Flow Pro / Ultra, Claude, Gemini key, tên đăng nhập DFlow), bảng nhu cầu → cần cài gì, 9 bước cài Windows có "gõ gì / sẽ thấy gì" (mở PowerShell, `winget install -e --id … --accept-*`, dời cache uv, Claude Code, `gh auth login` + `gh repo clone … D:\DFlow`, lấy mã project Flow, `powershell -ExecutionPolicy Bypass -File .\start.ps1 -FlowProjectId … -Plan …`, nạp extension, đăng nhập + chọn AI + Gemini key), lối tắt Desktop (WScript.Shell, icon favicon.ico), cập nhật (`git pull`), cài thêm theo nhu cầu (yt-dlp, VieDub, CapCut, token Page, dùng chung dữ liệu), bảng lỗi thường gặp, phần dev. Kèm: `config._load_dotenv` đọc `utf-8-sig` (Notepad cũ thêm BOM làm mất khoá đầu, test mới trong `test_config_dotenv.py`), `start.ps1` in "DFlow" / "DFlow Bridge" thay tên cũ, Cài đặt thêm tab 🤖 AI viết. `tsc` sạch.
+- **7/11 khuya** — **App desktop bản đầu** (người dùng: "build app luôn, triển luôn"; chọn GitHub Actions + bản cho mình và người tin cậy): agent chế độ app (`config.HOME/APP_MODE/ENV_FILE`, `agent/packaging/dflow_agent.py` + `dflow-agent.spec`), agent tự phục vụ giao diện (`web_ui.py`), Cài đặt → 🖥 Máy này (`routes/app.py`, `services/app_env.py`, `MachineSection.tsx`: gói Flow áp ngay, dòng cloud, thư mục dữ liệu, VieDub, extension, mở thư mục, khởi động lại), vỏ Tauri `desktop/` (agent ngầm, trang chờ, khay, một instance, link ra trình duyệt), workflow `.github/workflows/desktop.yml`, README thêm "Cách 1 — file cài đặt". Test `test_app_mode.py` 5 pass, `tsc` sạch; bản PyInstaller chạy thật trên cổng phụ. Commit + push, chạy workflow trên GitHub.

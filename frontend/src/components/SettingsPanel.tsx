@@ -8,6 +8,7 @@ import {
 import { getLatestRelease, isNewerVersion, type LatestRelease } from "../api/github";
 import { GeminiKeysSection } from "./GeminiKeysSection";
 import { AiProvidersSection } from "./settings/AiProvidersSection";
+import { MachineSection } from "./settings/MachineSection";
 import { FlowAccountsSection } from "./settings/FlowAccountsSection";
 import { AccountPoolSection } from "./settings/AccountPoolSection";
 import { ImageProvidersSection } from "./settings/ImageProvidersSection";
@@ -101,7 +102,7 @@ const OMNI_HINT =
   "Tạo video từ ảnh tham chiếu. Thời lượng 4 / 6 / 8 / 10 s chọn cho mỗi lần tạo. Hỗ trợ cả dọc lẫn ngang. " +
   "Khuyên dùng: Veo 3.1 Lite hiện bị Flow nhận rồi huỷ trên tài khoản Pro thường.";
 
-type SettingsTab = "gen" | "flow" | "ai" | "keys" | "data" | "about";
+type SettingsTab = "gen" | "flow" | "ai" | "keys" | "data" | "machine" | "about";
 const TABS: { key: SettingsTab; icon: string; label: string }[] = [
   { key: "gen", icon: "🎬", label: "Tạo ảnh & video" },
   { key: "flow", icon: "⚡", label: "Google Flow" },
@@ -109,6 +110,8 @@ const TABS: { key: SettingsTab; icon: string; label: string }[] = [
   { key: "ai", icon: "🤖", label: "AI viết" },
   { key: "keys", icon: "🔑", label: "Gemini key" },
   { key: "data", icon: "☁", label: "Dữ liệu" },
+  // the Flow plan, cloud line, folders, extension, restart — instead of editing .env by hand (the desktop app)
+  { key: "machine", icon: "🖥", label: "Máy này" },
   { key: "about", icon: "ℹ", label: "Thông tin" },
 ];
 const TAB_STORAGE = "flowboard.settings.tab";
@@ -565,6 +568,8 @@ export function SettingsPanel({
             {tab === "keys" && <GeminiKeysSection />}
 
             {tab === "data" && <DataFolderSection />}
+
+            {tab === "machine" && <MachineSection />}
 
             {tab === "about" && (
               <div className="settings-panel__section">

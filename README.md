@@ -13,7 +13,7 @@ DFlow chạy trên máy của bạn (không phải trang web có sẵn), nên c�
 
 1. [DFlow làm được gì](#1-dflow-làm-được-gì)
 2. [Bạn cần chuẩn bị gì](#2-bạn-cần-chuẩn-bị-gì)
-3. [Cài đặt lần đầu (Windows)](#3-cài-đặt-lần-đầu-windows)
+3. [Cài đặt lần đầu (Windows)](#3-cài-đặt-lần-đầu-windows) — [bằng file cài đặt](#cách-1--cài-bằng-file-dflow-setupexe-dễ-nhất) hoặc [từ mã nguồn](#cách-2--chạy-từ-mã-nguồn)
 4. [Mỗi ngày dùng thế nào](#4-mỗi-ngày-dùng-thế-nào)
 5. [Cập nhật bản mới](#5-cập-nhật-bản-mới)
 6. [Cài thêm theo nhu cầu](#6-cài-thêm-theo-nhu-cầu)
@@ -53,7 +53,7 @@ DFlow chạy trên máy của bạn (không phải trang web có sẵn), nên c�
 
 | Bạn muốn | Cần cài | Hướng dẫn |
 |---|---|---|
-| **Cơ bản**: mở app, làm clip quảng cáo, sản phẩm, bài viết, lịch đăng | uv, Node.js, Git, ffmpeg, Chrome, Claude Code + extension DFlow Bridge | [Mục 3](#3-cài-đặt-lần-đầu-windows) |
+| **Cơ bản**: mở app, làm clip quảng cáo, sản phẩm, bài viết, lịch đăng | File cài **DFlow-Setup.exe** + Chrome + Claude Code + extension DFlow Bridge (chạy từ mã nguồn thì thêm uv, Node.js, Git, ffmpeg) | [Mục 3](#3-cài-đặt-lần-đầu-windows) |
 | Tải video từ link TikTok / YouTube / Instagram / Facebook | yt-dlp (Douyin không cần) | [Mục 6.1](#61-tải-video-từ-link) |
 | **Lồng tiếng video**, xoá phụ đề có sẵn bằng AI, giọng VieNeu miễn phí | Bộ VieDub (pyvideotrans) — nặng, nên có card đồ hoạ NVIDIA | [Mục 6.2](#62-lồng-tiếng-video-xoá-phụ-đề-ai-giọng-vieneu) |
 | Edit auto CapCut | CapCut bản máy tính | [Mục 6.3](#63-edit-auto-capcut) |
@@ -66,16 +66,53 @@ DFlow chạy trên máy của bạn (không phải trang web có sẵn), nên c�
 
 ## 3. Cài đặt lần đầu (Windows)
 
+Có 2 cách. **Cách 1 (file cài đặt)** dễ nhất — không phải cài Python, Node, Git; cập nhật bằng cách chạy file cài bản mới.
+**Cách 2 (mã nguồn)** dành cho người sửa code hoặc muốn luôn có bản mới nhất.
+
+### Cách 1 — Cài bằng file DFlow-Setup.exe (dễ nhất)
+
+1. **Lấy file cài đặt** `DFlow_..._x64-setup.exe` (~150 MB): chủ DFlow gửi cho bạn, hoặc (nếu được mời vào kho code) vào trang
+   **github.com/hoangduytn1703/flowboard/releases** tải file mới nhất.
+2. **Chạy file đó.** Windows có thể hiện màn hình xanh *"Windows protected your PC"* (vì file chưa ký số) → bấm **More info** → **Run anyway**.
+   Bấm Next / Install, không cần quyền quản trị.
+3. **Mở DFlow** từ menu Start (hoặc biểu tượng trên màn hình). Lần đầu mất 20–40 giây để khởi động.
+   Đóng cửa sổ thì DFlow **vẫn chạy ngầm** ở khay hệ thống (góc dưới phải, cạnh đồng hồ) để lịch đăng bài vẫn chạy —
+   muốn tắt hẳn: chuột phải biểu tượng DFlow → **Thoát DFlow**.
+4. **Cài Claude Code** (AI viết kịch bản, bài viết) — mở PowerShell (bấm Start, gõ `powershell`) và dán:
+
+   ```powershell
+   irm https://claude.ai/install.ps1 | iex
+   ```
+
+   Xong gõ `claude` rồi Enter → trình duyệt mở ra để đăng nhập tài khoản Claude → quay lại gõ `/exit`.
+5. **Mở Google Flow**: vào **flow.google.com** trong Chrome, đăng nhập tài khoản có gói Pro / Ultra, tạo một project mới. Để tab này mở.
+6. Trong DFlow, đăng nhập bằng tên + mật khẩu được cấp. Lần đầu sẽ hiện hộp **AI Providers**: chọn **Claude** cho cả ba mục → **Áp dụng thay đổi**.
+7. Vào **⚙ Cài đặt → 🖥 Máy này**:
+   - chọn gói **Pro** hoặc **Ultra** (giống gói Flow của bạn);
+   - phần **Extension DFlow Bridge**: làm theo hướng dẫn hiện ở đó (mở `chrome://extensions` → bật Developer mode → Load unpacked → chọn
+     thư mục DFlow chỉ cho, có nút 📂 mở sẵn thư mục), rồi F5 tab flow.google.com;
+   - ổ C ít chỗ: đổi **Thư mục lưu ảnh, video** sang ổ khác (ví dụ `D:\DFlow-data`) rồi bấm **↻ Khởi động lại DFlow**;
+   - dùng chung dữ liệu với máy khác: dán dòng kết nối được gửi riêng vào ô **Dùng chung dữ liệu** → Lưu → Khởi động lại.
+8. **⚙ Cài đặt → 🔑 Gemini key**: dán Gemini key (lấy ở aistudio.google.com/apikey). **⚙ Cài đặt → ⚡ Google Flow**: chọn project Flow vừa tạo.
+
+**Cập nhật bản mới**: tải file cài bản mới, chạy đè lên (dữ liệu giữ nguyên) — trước khi chạy, thoát DFlow ở khay hệ thống. Sau đó vào
+`chrome://extensions` bấm nút tải lại (↻) ở ô DFlow Bridge.
+
+> Bản app đã kèm sẵn ffmpeg. Lồng tiếng video vẫn cần bộ VieDub cài riêng ([Mục 6.2](#62-lồng-tiếng-video-xoá-phụ-đề-ai-giọng-vieneu)) —
+> khai báo đường dẫn ở Cài đặt → 🖥 Máy này. Phụ đề kiểu Remotion chưa có trong bản app (dùng kiểu ffmpeg).
+
+### Cách 2 — Chạy từ mã nguồn
+
 Mất khoảng 20–30 phút, phần lớn là chờ tải.
 
-### Bước 1 — Mở PowerShell
+#### Bước 1 — Mở PowerShell
 
 Bấm nút **Start** (góc dưới trái) → gõ `powershell` → bấm **Windows PowerShell**. Một cửa sổ nền xanh / đen hiện ra — mọi lệnh bên dưới đều gõ ở đây.
 
 - **Dán lệnh**: copy lệnh trong README (nút copy ở góc khung lệnh), rồi **bấm chuột phải** vào cửa sổ PowerShell để dán, bấm **Enter** để chạy.
 - Chờ lệnh chạy xong (hiện lại dòng `PS C:\Users\...>`) rồi mới dán lệnh tiếp theo.
 
-### Bước 2 — Cài các phần mềm cần thiết
+#### Bước 2 — Cài các phần mềm cần thiết
 
 Dán cả khối này vào PowerShell (nó cài lần lượt từng phần mềm, mỗi cái 1–3 phút):
 
@@ -104,7 +141,7 @@ Nếu cửa sổ hiện hộp hỏi quyền (User Account Control) thì bấm **
 
 > Báo `winget is not recognized`? Mở **Microsoft Store**, tìm **App Installer**, bấm Cập nhật / Cài đặt, rồi làm lại bước này.
 
-### Bước 3 — (Nên làm) Để dữ liệu tạm của uv sang ổ D
+#### Bước 3 — (Nên làm) Để dữ liệu tạm của uv sang ổ D
 
 uv giữ một bản sao các thư viện đã tải, có thể lên tới hơn 10 GB nếu dùng lồng tiếng. Mặc định nó nằm ở ổ C. Nếu máy có ổ D, chạy lệnh này để nó
 nằm ở ổ D (máy chỉ có ổ C thì bỏ qua bước này):
@@ -115,7 +152,7 @@ nằm ở ổ D (máy chỉ có ổ C thì bỏ qua bước này):
 
 Rồi **đóng PowerShell và mở lại**.
 
-### Bước 4 — Cài Claude Code (AI viết kịch bản, bài viết)
+#### Bước 4 — Cài Claude Code (AI viết kịch bản, bài viết)
 
 ```powershell
 npm install -g @anthropic-ai/claude-code
@@ -126,7 +163,7 @@ Lệnh `claude` mở trình duyệt để đăng nhập tài khoản Claude. Đ�
 
 > Đã quen dùng Gemini CLI (`agy`) hoặc Codex thì dùng cái đó cũng được — chọn trong app ở Bước 9 (hoặc Cài đặt → 🤖 AI viết).
 
-### Bước 5 — Đăng nhập GitHub và tải DFlow về
+#### Bước 5 — Đăng nhập GitHub và tải DFlow về
 
 ```powershell
 gh auth login
@@ -145,7 +182,7 @@ cd D:\DFlow
 
 > Báo `Could not resolve to a Repository`? Tài khoản GitHub của bạn chưa được mời vào kho — nhờ chủ DFlow mời, mở email bấm chấp nhận lời mời.
 
-### Bước 6 — Lấy mã project Google Flow
+#### Bước 6 — Lấy mã project Google Flow
 
 1. Mở Chrome, vào **flow.google.com**, đăng nhập đúng tài khoản Google có gói Pro / Ultra.
 2. Bấm **tạo project mới** (New project).
@@ -154,7 +191,7 @@ cd D:\DFlow
 
 **Để tab Flow này mở** — DFlow cần nó để tạo ảnh và video.
 
-### Bước 7 — Chạy DFlow lần đầu
+#### Bước 7 — Chạy DFlow lần đầu
 
 Trong PowerShell (đang ở `D:\DFlow`), dán lệnh sau, **thay** `MÃ-PROJECT` bằng mã ở Bước 6 và `Ultra` bằng `Pro` nếu gói của bạn là Pro:
 
@@ -167,7 +204,7 @@ Lần đầu nó tự cài mọi thứ còn thiếu, mất **5–10 phút**. Xon
 
 **Giữ nguyên cửa sổ này** (thu nhỏ được, đừng đóng) — đóng là DFlow tắt.
 
-### Bước 8 — Cài extension DFlow Bridge vào Chrome
+#### Bước 8 — Cài extension DFlow Bridge vào Chrome
 
 Extension là "cầu nối" để DFlow điều khiển Google Flow trong Chrome của bạn.
 
@@ -177,7 +214,7 @@ Extension là "cầu nối" để DFlow điều khiển Google Flow trong Chrome
 4. Thấy ô **DFlow Bridge** hiện ra là được. Bấm biểu tượng mảnh ghép 🧩 trên thanh Chrome → ghim 📌 DFlow Bridge cho dễ thấy.
 5. Quay lại tab **flow.google.com** và bấm **F5** để tải lại.
 
-### Bước 9 — Mở DFlow và cài đặt
+#### Bước 9 — Mở DFlow và cài đặt
 
 1. Mở tab mới, vào **http://localhost:5174**.
 2. Đăng nhập bằng tên + mật khẩu DFlow được cấp.
@@ -193,7 +230,9 @@ Extension là "cầu nối" để DFlow điều khiển Google Flow trong Chrome
 
 ## 4. Mỗi ngày dùng thế nào
 
-**Tạo lối tắt trên màn hình** (làm một lần) — dán lệnh này vào PowerShell (đổi `D:\DFlow` nếu bạn để chỗ khác):
+**Cài bằng file cài đặt (Cách 1)**: mở **DFlow** từ menu Start / màn hình, mở tab flow.google.com trong Chrome — vậy thôi.
+
+**Chạy từ mã nguồn (Cách 2) — tạo lối tắt trên màn hình** (làm một lần) — dán lệnh này vào PowerShell (đổi `D:\DFlow` nếu bạn để chỗ khác):
 
 ```powershell
 $s = (New-Object -ComObject WScript.Shell).CreateShortcut([Environment]::GetFolderPath('Desktop') + '\DFlow.lnk')
@@ -301,7 +340,8 @@ Vẫn không được: chụp màn hình cửa sổ DFlow (PowerShell) và trang
 
 ## 8. Dành cho dev
 
-- Code: `agent/` (Python, FastAPI + SQLModel), `frontend/` (React + Vite), `extension/` (Chrome MV3). Tên trong code vẫn là `flowboard`.
+- Code: `agent/` (Python, FastAPI + SQLModel), `frontend/` (React + Vite), `extension/` (Chrome MV3), `desktop/` (vỏ app Tauri 2). Tên trong code vẫn là `flowboard`.
+- App desktop: `agent/packaging/` (PyInstaller → `dflow-agent.exe`, agent tự phục vụ giao diện đã build qua `FLOWBOARD_WEB_DIR`), `desktop/src-tauri/` (chạy agent ngầm, khay hệ thống, một instance). Bộ cài build trên GitHub Actions (`.github/workflows/desktop.yml`): Actions → Desktop app → Run workflow, hoặc đẩy tag `v*` để có Release.
 - Cổng cố định (đừng đổi — extension và Vite ghi cứng): giao diện **5174**, API **8434**, WebSocket extension **8355**. Chạy song song được với flowkit (5173 / 8100 / 9222).
 - Linux / macOS:
 

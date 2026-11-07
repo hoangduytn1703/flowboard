@@ -59,3 +59,8 @@ coverage/
 # JunOps CapCut skills: compiled files and the per-machine learned store
 .claude/skills/**/__pycache__/
 .claude/skills/junops-edit-capcut/du_lieu/
+
+# Desktop app (desktop/): built in CI (.github/workflows/desktop.yml)
+desktop/src-tauri/target/
+desktop/src-tauri/resources/
+desktop/src-tauri/gen/

@@ -30,6 +30,7 @@ from flowboard.routes import capcut as capcut_route
 from flowboard.routes import running as running_route
 from flowboard.routes import assistant as assistant_route
 from flowboard.routes import autopilot as autopilot_route
+from flowboard.routes import app as app_route
 from flowboard.services import op_tracker
 from flowboard.services.account_pool import account_pool
 from flowboard.routes import history as history_route
@@ -266,6 +267,7 @@ app.include_router(requests_route.router)
 app.include_router(running_route.router)
 app.include_router(assistant_route.router)
 app.include_router(autopilot_route.router)
+app.include_router(app_route.router)
 app.include_router(media.bytes_router)
 app.include_router(media.api_router)
 app.include_router(upload.router)
@@ -320,3 +322,9 @@ async def ext_callback(
 
     matched = flow_client.resolve_callback(payload)
     return {"ok": matched}
+
+
+# Last: the built web UI's catch-all (the desktop app, FLOWBOARD_WEB_DIR) must come after every API route.
+from flowboard import web_ui  # noqa: E402
+
+web_ui.mount(app)

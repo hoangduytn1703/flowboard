@@ -1,0 +1,12 @@
+{
+  "name": "dflow-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "DFlow desktop shell (Tauri 2). The installer is built by .github/workflows/desktop.yml.",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

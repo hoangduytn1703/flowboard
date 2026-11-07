@@ -40,9 +40,16 @@ def _load_dotenv(path: Path) -> None:
         os.environ[key] = value
 
 
-_load_dotenv(ROOT / ".env")
+#: The desktop app (DFlow.exe runs resources/agent/dflow-agent.exe) passes the folder where it keeps its
+#: settings (.env), logs and data — %LOCALAPPDATA%\DFlowData; there is no repo there. Unset = running from
+#: the repo (start.ps1 / make agent), where all of it sits at the repo root as before.
+HOME = Path(os.environ["FLOWBOARD_HOME"]) if os.getenv("FLOWBOARD_HOME") else None
+APP_MODE = os.getenv("FLOWBOARD_APP") == "1"
+ENV_FILE = (HOME or ROOT) / ".env"
 
-STORAGE_DIR = Path(os.getenv("FLOWBOARD_STORAGE", ROOT / "storage"))
+_load_dotenv(ENV_FILE)
+
+STORAGE_DIR = Path(os.getenv("FLOWBOARD_STORAGE", (HOME or ROOT) / "storage"))
 DB_PATH = Path(os.getenv("FLOWBOARD_DB", STORAGE_DIR / "flowboard.db"))
 
 # There is deliberately no HTTP_PORT here. Nothing in `flowboard` reads

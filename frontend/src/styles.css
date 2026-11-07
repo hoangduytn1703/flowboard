@@ -6534,3 +6534,10 @@ button.chat-dock__presence[aria-expanded="true"] {
   letter-spacing: 0.02em;
 }
 .account-panel__copyright strong { color: var(--text); font-weight: 600; }
+
+/* Settings → 🖥 Máy này (settings/MachineSection) */
+.settings-machine__row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.settings-machine__row .settings-panel__select { flex: 1 1 260px; }
+.settings-machine__pending { border: 1px solid rgba(255, 106, 43, 0.55); border-radius: 10px; padding: 10px 12px;
+  background: rgba(255, 106, 43, 0.08); }
+
