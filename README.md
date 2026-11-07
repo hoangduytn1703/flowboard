@@ -74,7 +74,9 @@ Có 2 cách. **Cách 1 (file cài đặt)** dễ nhất — không phải cài P
 1. **Lấy file cài đặt** `DFlow_..._x64-setup.exe` (~150 MB): chủ DFlow gửi cho bạn, hoặc (nếu được mời vào kho code) vào trang
    **github.com/hoangduytn1703/flowboard/releases** tải file mới nhất.
 2. **Chạy file đó.** Windows có thể hiện màn hình xanh *"Windows protected your PC"* (vì file chưa ký số) → bấm **More info** → **Run anyway**.
-   Bấm Next / Install, không cần quyền quản trị.
+   Bấm Next / Install, không cần quyền quản trị. Ở trang **Choose Install Location** có thể đổi sang ổ khác (ví dụ `D:\DFlow`) cho đỡ tốn ổ C.
+   Dữ liệu (ảnh, video, cài đặt, nhật ký) **tự để ngoài ổ C**: DFlow chọn ổ D (hoặc ổ khác còn trống trên 5 GB) và tạo thư mục `D:\DFlowData`;
+   chỉ máy có mỗi ổ C mới để ở ổ C.
 3. **Mở DFlow** từ menu Start (hoặc biểu tượng trên màn hình). Lần đầu mất 20–40 giây để khởi động.
    Đóng cửa sổ thì DFlow **vẫn chạy ngầm** ở khay hệ thống (góc dưới phải, cạnh đồng hồ) để lịch đăng bài vẫn chạy —
    muốn tắt hẳn: chuột phải biểu tượng DFlow → **Thoát DFlow**.
@@ -91,7 +93,7 @@ Có 2 cách. **Cách 1 (file cài đặt)** dễ nhất — không phải cài P
    - chọn gói **Pro** hoặc **Ultra** (giống gói Flow của bạn);
    - phần **Extension DFlow Bridge**: làm theo hướng dẫn hiện ở đó (mở `chrome://extensions` → bật Developer mode → Load unpacked → chọn
      thư mục DFlow chỉ cho, có nút 📂 mở sẵn thư mục), rồi F5 tab flow.google.com;
-   - ổ C ít chỗ: đổi **Thư mục lưu ảnh, video** sang ổ khác (ví dụ `D:\DFlow-data`) rồi bấm **↻ Khởi động lại DFlow**;
+   - muốn để ảnh / video ở chỗ khác (ổ ngoài, ổ E…): đổi **Thư mục lưu ảnh, video** rồi bấm **↻ Khởi động lại DFlow**;
    - dùng chung dữ liệu với máy khác: dán dòng kết nối được gửi riêng vào ô **Dùng chung dữ liệu** → Lưu → Khởi động lại.
 8. **⚙ Cài đặt → 🔑 Gemini key**: dán Gemini key (lấy ở aistudio.google.com/apikey). **⚙ Cài đặt → ⚡ Google Flow**: chọn project Flow vừa tạo.
 

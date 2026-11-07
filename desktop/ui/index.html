@@ -33,7 +33,7 @@
     <p id="msg">Đang khởi động… (lần đầu sau khi cài có thể mất 20–40 giây)</p>
     <div class="err" id="err">
       <p>DFlow chưa khởi động được. Thử tắt hẳn DFlow (chuột phải biểu tượng DFlow ở góc dưới phải màn hình → <b>Thoát DFlow</b>) rồi mở lại.</p>
-      <p>Vẫn không được: gửi file nhật ký <code>%LOCALAPPDATA%\DFlowData\logs\agent.log</code> cho người hỗ trợ.</p>
+      <p>Vẫn không được: gửi file nhật ký <code id="logpath">DFlowData\logs\agent.log</code> cho người hỗ trợ.</p>
       <button type="button" onclick="location.reload()">Thử lại</button>
     </div>
   </main>
@@ -62,6 +62,8 @@
       }
       setTimeout(poll, 700);
     }
+    // the shell tells where the log really is (the data folder sits on D: when the machine has one)
+    if (window.__DFLOW_LOG__) document.getElementById("logpath").textContent = window.__DFLOW_LOG__;
     poll();
   </script>
 </body>

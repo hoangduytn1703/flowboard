@@ -42,14 +42,95 @@ struct Agent {
     quitting: AtomicBool,
 }
 
-/// Where the app keeps its settings (.env), logs and — unless moved — its data:
-/// %LOCALAPPDATA%\DFlowData. Not the install folder, so an update / uninstall never touches it.
+/// A drive needs this much free space to hold the app's data (pictures, videos, the WebView cache).
+const MIN_FREE_BYTES: u64 = 5 * 1024 * 1024 * 1024;
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+extern "system" {
+    fn GetDriveTypeW(root: *const u16) -> u32;
+    fn GetDiskFreeSpaceExW(dir: *const u16, avail: *mut u64, total: *mut u64, free: *mut u64) -> i32;
+}
+
+/// The first fixed drive other than C: with room to spare (D:, E:…), as `X:\`.
+#[cfg(windows)]
+fn roomy_data_drive() -> Option<PathBuf> {
+    const DRIVE_FIXED: u32 = 3;
+    for letter in b'D'..=b'Z' {
+        let root = format!("{}:\\", letter as char);
+        let wide: Vec<u16> = root.encode_utf16().chain(std::iter::once(0)).collect();
+        // SAFETY: `wide` is a NUL-terminated UTF-16 path that outlives both calls; the out-pointers are valid u64s.
+        let (kind, ok, avail) = unsafe {
+            let kind = GetDriveTypeW(wide.as_ptr());
+            let (mut avail, mut total, mut free) = (0u64, 0u64, 0u64);
+            let ok = GetDiskFreeSpaceExW(wide.as_ptr(), &mut avail, &mut total, &mut free);
+            (kind, ok, avail)
+        };
+        if kind == DRIVE_FIXED && ok != 0 && avail >= MIN_FREE_BYTES {
+            return Some(PathBuf::from(root));
+        }
+    }
+    None
+}
+
+#[cfg(not(windows))]
+fn roomy_data_drive() -> Option<PathBuf> {
+    None
+}
+
+fn writable(dir: &std::path::Path) -> bool {
+    if std::fs::create_dir_all(dir).is_err() {
+        return false;
+    }
+    let probe = dir.join(".dflow-write-test");
+    let ok = std::fs::write(&probe, b"ok").is_ok();
+    let _ = std::fs::remove_file(&probe);
+    ok
+}
+
+/// Where the app keeps its settings (.env), logs, data and WebView cache — kept OFF drive C when the machine has
+/// another fixed drive with room (C is usually the small one): `X:\DFlowData` on the first such drive, else
+/// `%LOCALAPPDATA%\DFlowData`. Picked once and remembered in `%APPDATA%\vn.dflow.desktop\home.txt` (so a later
+/// USB disk or a fuller D: never moves it); never the install folder, so an update / uninstall leaves it alone.
 fn dflow_home(app: &AppHandle) -> PathBuf {
-    let base = app
+    let fallback = app
         .path()
         .local_data_dir()
-        .unwrap_or_else(|_| std::env::temp_dir());
-    base.join("DFlowData")
+        .unwrap_or_else(|_| std::env::temp_dir())
+        .join("DFlowData");
+    let pointer = app.path().app_config_dir().ok().map(|d| d.join("home.txt"));
+    if let Some(saved) = pointer.as_ref().and_then(|p| std::fs::read_to_string(p).ok()) {
+        let saved = PathBuf::from(saved.trim());
+        if !saved.as_os_str().is_empty() && writable(&saved) {
+            return saved;
+        }
+    }
+    let chosen = roomy_data_drive()
+        .map(|root| root.join("DFlowData"))
+        .filter(|dir| writable(dir))
+        .unwrap_or(fallback);
+    if let Some(p) = pointer {
+        if let Some(parent) = p.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&p, chosen.to_string_lossy().as_bytes());
+    }
+    chosen
+}
+
+/// A string as a JavaScript literal (the log path for the loading page).
+fn js_string(s: &str) -> String {
+    let mut out = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 fn hidden(cmd: &mut Command) -> &mut Command {
@@ -174,11 +255,16 @@ fn main() {
         .manage(Agent { child: Mutex::new(None), quitting: AtomicBool::new(false) })
         .setup(|app| {
             let handle = app.handle().clone();
+            let home = dflow_home(&handle);
             watch_agent(handle.clone());
 
             let nav = handle.clone();
+            let log_path = home.join("logs").join("agent.log");
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("DFlow")
+                // the WebView2 profile (cookies, cache) next to the data, off drive C as well
+                .data_directory(home.join("webview"))
+                .initialization_script(&format!("window.__DFLOW_LOG__ = {};", js_string(&log_path.to_string_lossy())))
                 .inner_size(1440.0, 900.0)
                 .min_inner_size(1024.0, 640.0)
                 .maximized(true)
