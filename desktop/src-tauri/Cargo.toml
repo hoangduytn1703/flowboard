@@ -13,6 +13,8 @@ tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
+# tauri::generate_context!() expands to serde_json code once there are plugin configs / remote capabilities
+serde_json = "1"
 
 [profile.release]
 codegen-units = 1

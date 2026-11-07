@@ -343,7 +343,9 @@ của người dùng (console.neon.tech, secure.backblaze.com).
 - **Vỏ app Tauri chỉ build được trên CI** (máy nhà không có Rust): lỗi biên dịch chỉ thấy ở log Actions — `gh run view <id> --log-failed`
   (máy nhà đã `gh auth login` 7/11; trong phiên Claude Code chạy `echo "" | gh auth login -h github.com -p ssh --skip-ssh-key -w` ở nền để lấy mã 8 ký tự,
   vì `! gh auth login` kiểu hỏi-đáp không chạy trong khung chat). Lần đầu lỗi E0597: `if let Ok(mut g) = state.child.lock() { … }` ở cuối hàm — guard tạm sống
-  lâu hơn `state` (`app.state::<T>()`); lấy giá trị ra trước (`let child = state.child.lock().ok().and_then(|mut g| g.take());`). Một vòng build ~13 phút.
+  lâu hơn `state` (`app.state::<T>()`); lấy giá trị ra trước (`let child = state.child.lock().ok().and_then(|mut g| g.take());`). Một vòng build ~13 phút. Lần 2 (tag v0.1.2, 7/11) lỗi E0433
+  "cannot find `serde_json`" ở `tauri::generate_context!()`: có config plugin (updater) / capability remote thì macro sinh code dùng `serde_json` → crate phải có
+  `serde_json` trong `[dependencies]` (template Tauri luôn có, mình đã bỏ).
 - **App desktop (WebView2 của Tauri) không hiện `window.confirm` / `window.prompt`** (7/11, người dùng: "tạo bài xong… không post được"): hàm trả về false
   ngay, không hiện gì → mọi nút có hộp hỏi im lặng không làm gì ("🚀 Đăng ngay" chưa từng gửi request nào; nút xoá 2 bước thì chạy). Giờ **không dùng
   `window.confirm` / `window.prompt` nữa**: `components/Dialogs.tsx` `askConfirm(msg, {ok, cancel, danger})` / `askText(msg, value)` (Promise, hộp riêng của app,
@@ -1545,7 +1547,8 @@ của người dùng (console.neon.tech, secure.backblaze.com).
     `tauri.conf.json > plugins.updater.pubkey`, bản build có `createUpdaterArtifacts` (ra thêm `.exe.sig`). **Phát hành**: tăng `version` ở `tauri.conf.json`
     + `Cargo.toml`, commit, `git tag vX.Y.Z && git push origin vX.Y.Z` → workflow build, kiểm tag = version, viết `latest.json`, `gh release create` trên
     dflow-releases (`GH_TOKEN = secrets.RELEASES_TOKEN`). Secrets repo code: `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, `RELEASES_TOKEN`
-    (người dùng tự đặt — lệnh ghi secret của Claude bị chặn quyền). **Khoá ký chỉ có ở máy nhà**: `%USERPROFILE%\.flowboard\dflow-updater.key` + `.password`
+    (người dùng đã đặt 7/11 bằng script — lệnh ghi secret của Claude bị chặn quyền; `RELEASES_TOKEN` = token `gh` của người dùng, có quyền mọi repo — muốn gọn
+    thì thay bằng fine-grained token chỉ cho dflow-releases). Đẩy tag thì đừng `git push --tags`: repo còn tag cũ v1.x trên máy (không có trên origin). **Khoá ký chỉ có ở máy nhà**: `%USERPROFILE%\.flowboard\dflow-updater.key` + `.password`
     (ngoài git) — mất khoá thì mọi app đã cài không nhận bản cập nhật nữa (phải cài tay bản có khoá mới). `api/github.ts` cũng trỏ sang dflow-releases (hết 404).
   - **Bản app chưa có**: Remotion (cần Node + `frontend/node_modules` → `dub_remotion` tự báo không dùng được, chọn kiểu ffmpeg), ký số (Windows hiện màn
     "Windows protected your PC" → More info → Run anyway), Chrome Web Store cho extension. Lồng tiếng / CapCut / Claude CLI / yt-dlp vẫn dùng đồ cài trên máy như bản repo.
@@ -1607,8 +1610,9 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
 
 ## Việc đang dở / chưa kiểm chứng
 - **App desktop (7/11)**: vỏ Tauri **chưa build được trên máy** (không có Rust) — chỉ CI build; phần Rust chưa chạy thử thật (khay, đóng-ẩn, mở link ra trình duyệt,
-  khởi động lại mã 75, tự thoát theo tiến trình cha) tới khi người dùng cài bộ cài. Chưa có: auto-update (plugin updater cần kênh phát hành công khai / token vì repo riêng
-  tư), ký số, Remotion, nút "Chọn thư mục" (đang gõ đường dẫn), chuyển dữ liệu cũ khi đổi thư mục, Phase C (bán cho khách).
+  khởi động lại mã 75, tự thoát theo tiến trình cha) tới khi người dùng cài bộ cài. **Tự cập nhật chưa chạy thật lần nào**: 0.1.1 không có updater nên người
+  dùng phải cài tay 0.1.2 một lần; lần cập nhật thật đầu tiên chỉ thử được khi phát hành 0.1.3 (xem lệnh có tới được trang 127.0.0.1:8434 qua capability không,
+  cài passive, mở lại app). Chưa có: ký số, Remotion, nút "Chọn thư mục" (đang gõ đường dẫn), chuyển dữ liệu cũ khi đổi thư mục, Phase C (bán cho khách).
 - **Tên riêng khi lồng tiếng (7/11)**: chưa nghe giọng VieNeu / Edge đọc các cách đọc AI ghi ("Anh xtanh", "Prốc xi ma Xen tau ri") — có thể phải sửa tay ở khung
   "🔤 Tên riêng"; gợi ý `hotwords` cho Whisper chưa chạy thật trên video mới (job cũ đã nhận dạng rồi — dùng nút "✨ AI rà tên riêng" trong trình chỉnh sửa rồi Xuất lại);
   nút "▶ Nghe câu" của trình chỉnh sửa vẫn đọc chữ phụ đề (chưa theo bảng tên); Edit auto CapCut lồng tiếng trước dùng chung luồng dub nên có rà tên, còn phụ đề video
@@ -1909,4 +1913,4 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
 - **7/11 khuya** — App desktop: dữ liệu mặc định **ngoài ổ C** (`D:\DFlowData` hoặc ổ cố định khác còn ≥ 5 GB, nhớ trong `home.txt`; máy chỉ có ổ C mới dùng `%LOCALAPPDATA%\DFlowData`), hồ sơ WebView2 theo cùng thư mục, trang chờ hiện đúng đường dẫn log. `desktop/src-tauri/src/main.rs`, `desktop/ui/index.html`, README. Chưa build thử (CI).
 - **7/11 khuya** — **Bộ cài app đầu tiên build thành công** trên GitHub Actions (run 42378801551, 13 phút, sau 1 lần sửa E0597): `DFlow_0.1.0_x64-setup.exe` 185 MB, đã tải về máy nhà `D:\DFlow-Setup\`. Chưa cài thử (người dùng tự cài). Actions báo Node 20 bị ép lên Node 24 cho checkout / setup-node / upload-artifact / setup-uv v4–v6 — chỉ là cảnh báo.
 - **7/11 khuya** — App 0.1.1: hộp hỏi riêng `components/Dialogs.tsx` thay 41 chỗ `window.confirm` / `window.prompt` (WebView2 của app không hiện hộp gốc → "Đăng ngay" không đăng được); `tsc` sạch. Phát hiện qua `agent.log` của app: cả phiên không có `POST /api/posts` / `/api/schedule`. Người dùng tự xoá 16 bài đã lưu trên Neon lúc 21:59 (cố ý). Ảnh cũ 404 = file chưa lên B2 (xem Bẫy). Build lại bộ cài qua `gh workflow run desktop.yml`.
-- **7/11 khuya** — App tự cập nhật (0.1.2): updater plugin + 2 lệnh Rust, capability cho trang 127.0.0.1:8434, thanh "Có bản DFlow mới" + mục phiên bản ở 🖥 Máy này, repo công khai `dflow-releases` (đã tạo), workflow ký + đăng `latest.json` khi đẩy tag `v*`, khoá ký ở `%USERPROFILE%\.flowboard`. README cập nhật. `tsc` sạch. **Chờ người dùng chạy script đặt 3 secret** (Claude bị chặn ghi secret) rồi mới push + tag v0.1.2.
+- **7/11 khuya** — App tự cập nhật (0.1.2): updater plugin + 2 lệnh Rust, capability cho trang 127.0.0.1:8434, thanh "Có bản DFlow mới" + mục phiên bản ở 🖥 Máy này, repo công khai `dflow-releases` (đã tạo), workflow ký + đăng `latest.json` khi đẩy tag `v*`, khoá ký ở `%USERPROFILE%\.flowboard`. README cập nhật. `tsc` sạch. Người dùng tự chạy script đặt 3 secret (Claude bị chặn ghi secret); push `main` + tag `v0.1.2` → run 42395099764 lỗi (thiếu `serde_json`, xem Bẫy) → thêm vào `Cargo.toml`, gắn lại tag `v0.1.2` vào commit sửa.
