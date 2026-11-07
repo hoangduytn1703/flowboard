@@ -3,6 +3,7 @@ import { connectFacebookPage, disconnectFacebookPage, inspectFacebookToken, type
 import { toast } from "../../store/toast";
 import { invalidateChannels } from "./ChannelPicker";
 import "../schedule.css";
+import { askConfirm } from "../../components/Dialogs";
 
 /**
  * "Kết nối Facebook Page": paste an access token, see which pages it can
@@ -44,7 +45,7 @@ export function FacebookConnect({ channel, onUpdated }: { channel: Channel; onUp
     }
   }
   async function disconnect() {
-    if (!window.confirm(`Ngắt kết nối Page "${channel.fb_page_name}"? Lịch đang chờ tự đăng sẽ không đăng được nữa.`)) return;
+    if (!await askConfirm(`Ngắt kết nối Page "${channel.fb_page_name}"? Lịch đang chờ tự đăng sẽ không đăng được nữa.`)) return;
     setBusy(true);
     try {
       const row = await disconnectFacebookPage(channel.id);

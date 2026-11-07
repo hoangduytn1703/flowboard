@@ -4,6 +4,7 @@ import {
   type DecorPreset, type LookPresetData,
 } from "../../../api/dub";
 import { toast } from "../../../store/toast";
+import { askConfirm, askText } from "../../../components/Dialogs";
 
 /**
  * "★ Mẫu chỉnh sửa": the whole look of a dubbed clip — subtitle place / size / style, blur boxes, output format, frame,
@@ -35,7 +36,7 @@ export function LookPresets({ current, readOnly, onApply }: {
 
   async function save() {
     const n = (presets ?? []).length + 1;
-    const name = window.prompt("Tên mẫu (VD: Page vũ trụ — phụ đề vàng, khung 9:16):", `Mẫu ${n}`);
+    const name = await askText("Tên mẫu (VD: Page vũ trụ — phụ đề vàng, khung 9:16):", `Mẫu ${n}`);
     if (name === null) return;
     setBusy(true);
     try {
@@ -64,7 +65,7 @@ export function LookPresets({ current, readOnly, onApply }: {
     }
   }
   async function remove(p: DecorPreset) {
-    if (!window.confirm(`Xoá mẫu "${p.name}"? Các clip đã dùng không đổi.`)) return;
+    if (!await askConfirm(`Xoá mẫu "${p.name}"? Các clip đã dùng không đổi.`)) return;
     try {
       await deleteDecorPreset(p.id);
       setPresets((list) => (list ?? []).filter((x) => x.id !== p.id));

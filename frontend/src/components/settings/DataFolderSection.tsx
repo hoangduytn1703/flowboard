@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getCloudStatus, syncCloudFiles, type CloudStatus } from "../../api/cloud";
 import { toast } from "../../store/toast";
+import { askConfirm } from "../Dialogs";
 
 async function detail(res: Response): Promise<string> {
   try {
@@ -62,7 +63,7 @@ export function DataFolderSection() {
   }
 
   async function migrate() {
-    if (!window.confirm("Chuyển dữ liệu của tài khoản này lên cloud? Bản SQLite trên máy được giữ lại làm sao lưu.")) return;
+    if (!await askConfirm("Chuyển dữ liệu của tài khoản này lên cloud? Bản SQLite trên máy được giữ lại làm sao lưu.")) return;
     setBusy("migrate");
     try {
       const res = await fetch("/api/cloud/migrate", { method: "POST" });

@@ -15,6 +15,7 @@ import { DropTimeDialog } from "../schedule/DropTimeDialog";
 import { StatsLine, StatsPanel } from "../schedule/FbStats";
 import "../schedule.css";
 import "../today.css";
+import { askConfirm } from "../../components/Dialogs";
 
 const DAY_MS = 86_400_000;
 
@@ -154,7 +155,7 @@ export function SchedulePage() {
     }
   }
   async function remove(s: Slot) {
-    if (!window.confirm("Xoá lịch này? (bài / clip vẫn còn)")) return;
+    if (!await askConfirm("Xoá lịch này? (bài / clip vẫn còn)")) return;
     try {
       await deleteSlot(s.id);
       setSlots((list) => (list ?? []).filter((x) => x.id !== s.id));
@@ -165,7 +166,7 @@ export function SchedulePage() {
     }
   }
   async function publish(s: Slot) {
-    if (!window.confirm(`Đăng ngay lên Facebook Page của kênh "${s.channel}"?`)) return;
+    if (!await askConfirm(`Đăng ngay lên Facebook Page của kênh "${s.channel}"?`)) return;
     setBusy(true);
     try {
       const out = await publishSlot(s.id);

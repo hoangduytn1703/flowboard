@@ -10,6 +10,7 @@ import { toast } from "../../store/toast";
 import { ChannelPicker, useChannels } from "../channels/ChannelPicker";
 import { PageEmpty, PageLoading } from "../PageState";
 import "./autopilot.css";
+import { askConfirm } from "../../components/Dialogs";
 
 /** What "🤖 Tự động đăng theo lịch với cài đặt này" brings over from the write form. */
 export interface AutoSeed {
@@ -110,8 +111,8 @@ export function AutoPilot({ options, products, allSeries, seed, onSeedUsed }: {
     return () => window.clearInterval(t);
   }, [active]);
 
-  function pick(p: AutoPlan) {
-    if (dirty && !window.confirm("Lịch đang sửa chưa lưu — bỏ thay đổi?")) return;
+  async function pick(p: AutoPlan) {
+    if (dirty && !await askConfirm("Lịch đang sửa chưa lưu — bỏ thay đổi?")) return;
     setSelected(p.id);
     setForm(inputOf(p));
     setNewSeries(false);
@@ -119,8 +120,8 @@ export function AutoPilot({ options, products, allSeries, seed, onSeedUsed }: {
     setConfirmDelete(false);
   }
 
-  function startNew() {
-    if (dirty && !window.confirm("Lịch đang sửa chưa lưu — bỏ thay đổi?")) return;
+  async function startNew() {
+    if (dirty && !await askConfirm("Lịch đang sửa chưa lưu — bỏ thay đổi?")) return;
     setSelected("new");
     setForm(blank(null));
     setNewSeries(false);

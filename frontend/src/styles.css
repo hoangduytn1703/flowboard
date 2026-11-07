@@ -6541,3 +6541,8 @@ button.chat-dock__presence[aria-expanded="true"] {
 .settings-machine__pending { border: 1px solid rgba(255, 106, 43, 0.55); border-radius: 10px; padding: 10px 12px;
   background: rgba(255, 106, 43, 0.08); }
 
+/* The app's own confirm / prompt (components/Dialogs) — above every other modal and the toasts */
+.dlg-backdrop { z-index: 1300; }
+.project-modal.dlg { width: min(92vw, 480px); display: flex; flex-direction: column; gap: 14px; }
+.dlg__message { margin: 0; font-size: 15px; line-height: 1.55; color: var(--text); white-space: pre-wrap; }
+

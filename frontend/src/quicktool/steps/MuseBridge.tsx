@@ -8,6 +8,7 @@ import {
   FLOW_SLOW_AFTER_S, MUSE_MAX_VIDEOS, MUSE_URL, clockOf, isPortrait916, museBatches, museMessage,
   orderMuseFiles, slugOf, stillFileName, type MuseScene,
 } from "../muse";
+import { askConfirm } from "../../components/Dialogs";
 
 const MAX_FILE_BYTES = 200 * 1024 * 1024; // /api/reference-video/upload
 
@@ -323,7 +324,7 @@ export function MuseBridge({ roles, productName, boardName, boardId, focus, wait
     const running = assigned
       .map((f) => scenes.find((s) => s.index === f.scene))
       .filter((s): s is (typeof scenes)[number] => !!s && isBusy(s.video));
-    if (running.length && !window.confirm(
+    if (running.length && !await askConfirm(
       `Cảnh ${running.map((s) => s.index).join(", ")} vẫn đang chạy trên Flow. Dừng chờ Flow và dùng video Muse cho ${running.length > 1 ? "các cảnh này" : "cảnh này"}?\n`
       + "(Nếu Flow vẫn làm xong lượt đó thì credit vẫn có thể bị trừ — chỉ là kết quả không được dùng.)")) return;
     setAttaching(true);

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { logoutAccount } from "../api/account";
 import { useAccountStore } from "../store/account";
 import { toast } from "../store/toast";
+import { askConfirm } from "./Dialogs";
 
 /** Sidebar row: who is logged in to DFlow + sign out. Hidden when the
  * agent runs without login (FLOWBOARD_AUTH=off). */
@@ -12,7 +13,7 @@ export function UserChip() {
 
   async function logout() {
     if (busy) return;
-    if (!window.confirm(`Đăng xuất ${me!.username}? Việc đang tạo sẽ vẫn chạy tiếp trên máy này.`)) return;
+    if (!await askConfirm(`Đăng xuất ${me!.username}? Việc đang tạo sẽ vẫn chạy tiếp trên máy này.`)) return;
     setBusy(true);
     try {
       await logoutAccount();

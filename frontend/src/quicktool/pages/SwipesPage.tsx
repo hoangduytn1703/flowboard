@@ -7,6 +7,7 @@ import { toast } from "../../store/toast";
 import { ChannelPicker } from "../channels/ChannelPicker";
 import { PageEmpty, PageLoading } from "../PageState";
 import "../swipes.css";
+import { askConfirm } from "../../components/Dialogs";
 
 const PLATFORM_ICON: Record<string, string> = { tiktok: "🎵", douyin: "🎵", youtube: "▶️", instagram: "📸", facebook: "📘", threads: "🧵", x: "𝕏", zalo: "💬", text: "📝" };
 
@@ -60,7 +61,7 @@ export function SwipesPage() {
     }
   }
   async function remove(s: Swipe) {
-    if (!window.confirm(`Xoá mẫu "${s.title}"? (bài / clip đã viết từ mẫu vẫn còn)`)) return;
+    if (!await askConfirm(`Xoá mẫu "${s.title}"? (bài / clip đã viết từ mẫu vẫn còn)`)) return;
     try {
       await deleteSwipe(s.id);
       setItems((list) => (list ?? []).filter((x) => x.id !== s.id));

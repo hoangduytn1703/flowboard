@@ -13,6 +13,7 @@ import { knownFlowCheck } from "../flowModelCheck";
 import { FLOW_SLOW_AFTER_S, clockOf } from "../muse";
 import { MuseBridge, flowWaitS, useFlowWaits, useNow, type MuseFocus } from "./MuseBridge";
 import { JoinOptions } from "./JoinOptions";
+import { askConfirm } from "../../components/Dialogs";
 
 function statusLabel(n: FlowNode | null, waitS: number | null = null): string {
   if (!n) return "chưa có node";
@@ -183,7 +184,7 @@ export function StepMedia({ roles, kind, productName = "", boardName = "", voice
     void (kind === "image" ? generateScene(sceneIndex, request) : generateVideo(sceneIndex, request));
   }
 
-  function startAll() {
+  async function startAll() {
     if (kind === "video" && roles.model && modelCheck?.status === "blocked") {
       toast.warning("Flow chặn video có gương mặt người mẫu của clip này — đổi người mẫu ở Bước 1 trước khi tạo video.");
       return;
@@ -191,7 +192,7 @@ export function StepMedia({ roles, kind, productName = "", boardName = "", voice
     if (kind === "video") {
       const cost = missing * creditsPerClip(videoModel, videoQuality);
       const balance = flowCredits === null ? "" : ` Tài khoản còn ${flowCredits.toLocaleString("vi-VN")} credit${cost > flowCredits ? " — KHÔNG ĐỦ" : ""}.`;
-      if (!window.confirm(`Tạo ${missing} video (~${cost} credit Flow, 1–3 phút mỗi clip).${balance} Tiếp tục?`)) return;
+      if (!await askConfirm(`Tạo ${missing} video (~${cost} credit Flow, 1–3 phút mỗi clip).${balance} Tiếp tục?`)) return;
     }
     void generateAll();
   }

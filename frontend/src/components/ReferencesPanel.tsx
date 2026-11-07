@@ -128,7 +128,7 @@ function ReferenceCard({
   // Inline 2-step delete confirm: first click arms the button (label →
   // "Confirm?", colour shifts to red), second click within 3s commits
   // the DELETE. Anywhere else (timeout, blur, panel scroll) → revert.
-  // Replaces the native window.confirm() which was modal + ugly.
+  // Replaces the native await askConfirm() which was modal + ugly.
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);

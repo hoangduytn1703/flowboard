@@ -7,6 +7,7 @@ import {
 } from "../../api/dub";
 import { toast } from "../../store/toast";
 import { generateStandaloneImage } from "../standaloneImage";
+import { askConfirm } from "../../components/Dialogs";
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const pct = (v: number) => `${Math.round(v * 100)}%`;
@@ -177,7 +178,7 @@ export function DecorControls({ layout, onChange, orientation = "portrait" }: {
     toast.info(`Đã dùng "${p.name}".`);
   }
   async function removePreset(p: DecorPreset) {
-    if (!window.confirm(`Xoá mẫu "${p.name}"?`)) return;
+    if (!await askConfirm(`Xoá mẫu "${p.name}"?`)) return;
     try {
       await deleteDecorPreset(p.id);
       setPresets((list) => (list ?? []).filter((x) => x.id !== p.id));

@@ -3,6 +3,7 @@ import { mediaUrl } from "../../api/client";
 import { postHooks, postText, replaceOpening, reviseImagePrompt, splitTags, type HookVariant, type PostDraft } from "../../api/posts";
 import { toast } from "../../store/toast";
 import { generateStandaloneImage, generateStandaloneVideo } from "../standaloneImage";
+import { askConfirm } from "../../components/Dialogs";
 
 const ASPECTS = [
   { key: "IMAGE_ASPECT_RATIO_SQUARE", label: "Vuông 1:1" },
@@ -160,7 +161,7 @@ export function PostEditor({
   async function makeVideo(source: string | null, confirmFirst: boolean) {
     if (!onVideo) return;
     let src = source;
-    if (confirmFirst && !window.confirm("Tạo video 8 giây bằng Flow (Omni Flash, khoảng 12 credit, 1–3 phút)? Video sẽ thay ảnh khi đăng.")) return;
+    if (confirmFirst && !await askConfirm("Tạo video 8 giây bằng Flow (Omni Flash, khoảng 12 credit, 1–3 phút)? Video sẽ thay ảnh khi đăng.")) return;
     setVideoBusy(true);
     try {
       if (!src) {

@@ -5,6 +5,7 @@ import { groupPrompts, tagsForContext, type PromptContext } from "./promptTags";
 import { useBoardStore } from "../store/board";
 import "./prompts.css";
 import { toast } from "../store/toast";
+import { askText } from "../components/Dialogs";
 
 /**
  * "★ Lưu" + "📚 Chọn prompt" next to a prompt field in step 2. Saving keeps
@@ -41,7 +42,7 @@ export function PromptLibraryButtons({ kind, getText, onApply, context }: {
       toast.warning("Ô này đang trống, chưa có gì để lưu.");
       return;
     }
-    const title = window.prompt("Tên gợi nhớ cho prompt này", text.split(/\s+/).slice(0, 6).join(" "));
+    const title = await askText("Tên gợi nhớ cho prompt này", text.split(/\s+/).slice(0, 6).join(" "));
     if (title === null) return;
     const tags = tagsForContext(context);
     try {

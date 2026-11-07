@@ -13,6 +13,7 @@ import { FormatPicker } from "../schedule/FormatPicker";
 import { PostEditor } from "../posts/PostEditor";
 import { ScheduleDialog } from "../schedule/ScheduleDialog";
 import "../posts.css";
+import { askConfirm } from "../../components/Dialogs";
 
 /**
  * Step 5, optional and folded away: a Facebook post to go with this clip.
@@ -121,7 +122,7 @@ export function ClipPost({ boardId, productId, channelId: clipChannel = null }: 
    * The scheduler sends a clip's post with the clip as its video. */
   async function publishNow() {
     if (!channel?.fb_connected || !draft) return;
-    if (!window.confirm(`Đăng clip này ${fbFormat === "reel" ? "dạng Reel" : "kèm bài viết"} lên Page "${channel.fb_page_name || channel.name}" ngay bây giờ?`
+    if (!await askConfirm(`Đăng clip này ${fbFormat === "reel" ? "dạng Reel" : "kèm bài viết"} lên Page "${channel.fb_page_name || channel.name}" ngay bây giờ?`
       + (draft.first_comment ? " Bình luận đầu (link) sẽ được thêm sau khi đăng." : ""))) return;
     setPublishing(true);
     try {

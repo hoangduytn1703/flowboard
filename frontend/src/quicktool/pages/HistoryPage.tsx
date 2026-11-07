@@ -28,6 +28,7 @@ import { tierLabel, useFlowCredits } from "../../components/credits";
 import "../history.css";
 import { toast } from "../../store/toast";
 import { PageEmpty } from "../PageState";
+import { askConfirm } from "../../components/Dialogs";
 
 const PAGE_SIZE = 50;
 /** Re-poll the list while something is still queued / running. */
@@ -174,7 +175,7 @@ export function HistoryPage() {
       const balance = typeof flow.credits === "number"
         ? `Số dư hiện tại: ${formatCredits(flow.credits)} credit (gói ${tierLabel(flow.tier, flow.sku)}).`
         : "Chưa đọc được số dư credit.";
-      const ok = window.confirm(
+      const ok = await askConfirm(
         `Chạy lại "${detail.type_label_vi}" cho ${detail.node?.title || detail.node?.short_id || "cảnh này"}?\n\n${costLine}\n${balance}`,
       );
       if (!ok) return;

@@ -10,6 +10,7 @@ import { ChatDock } from "./components/ChatDock";
 import { ProjectSidebar } from "./components/ProjectSidebar";
 import { ReferencesPanel } from "./components/ReferencesPanel";
 import { Toaster } from "./components/Toaster";
+import { DialogHost } from "./components/Dialogs";
 import { AppLoading } from "./components/AppLoading";
 import { GenerationDialog } from "./components/GenerationDialog";
 import { ResultViewer } from "./components/ResultViewer";
@@ -90,6 +91,7 @@ function AppInner() {
         <Route path="/*" element={<QuicktoolApp />} />
       </Routes>
       <Toaster />
+      <DialogHost />
       <GenerationDialog />
       <ResultViewer />
       <ForcedSetupGate />

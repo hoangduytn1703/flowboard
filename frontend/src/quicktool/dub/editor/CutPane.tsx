@@ -7,6 +7,7 @@ import {
 } from "../../../api/dub";
 import { toast } from "../../../store/toast";
 import { clock, type EditCue } from "./cues";
+import { askConfirm } from "../../../components/Dialogs";
 
 const CUT_MIN = 3;
 const SNAP_S = 2.5;
@@ -149,7 +150,7 @@ export function CutPane({ job, cues, duration, now, dirty, readOnly, onSeek, onP
   });
 
   async function suggest(ai: boolean) {
-    if (rows.length && !window.confirm(`Thay ${rows.length} đoạn đang có bằng đoạn ${ai ? "AI gợi ý" : "chia đều"}?`)) return;
+    if (rows.length && !await askConfirm(`Thay ${rows.length} đoạn đang có bằng đoạn ${ai ? "AI gợi ý" : "chia đều"}?`)) return;
     setBusy(ai ? "ai" : "even");
     setNote("");
     try {
@@ -168,7 +169,7 @@ export function CutPane({ job, cues, duration, now, dirty, readOnly, onSeek, onP
   async function cut() {
     const bad = rows.map((r, i) => (problem(r, dur) ? `Đoạn ${i + 1}: ${problem(r, dur)}` : "")).filter(Boolean);
     if (bad.length) { toast.warning(bad.slice(0, 3).join(" · ")); return; }
-    if (dirty && !window.confirm("Còn thay đổi chưa xuất — các phần sẽ cắt từ bản đã xuất (chưa có thay đổi đó). Cắt luôn?")) return;
+    if (dirty && !await askConfirm("Còn thay đổi chưa xuất — các phần sẽ cắt từ bản đã xuất (chưa có thay đổi đó). Cắt luôn?")) return;
     setBusy("cut");
     try {
       await saveDubCuts(job.job_id, rows);

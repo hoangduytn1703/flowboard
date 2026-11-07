@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../../api/client";
 import { toast } from "../../store/toast";
+import { askConfirm } from "../Dialogs";
 
 interface AppStatus {
   /** the desktop app (DFlow.exe) — not start.ps1 */
@@ -85,7 +86,7 @@ export function MachineSection() {
     } catch (e) {
       setRestarting(false);
       const msg = errMessage(e);
-      if (msg.includes("Đang có việc chạy") && window.confirm(`${msg}\n\nVẫn khởi động lại ngay? (việc đang chạy sẽ dừng giữa chừng)`)) {
+      if (msg.includes("Đang có việc chạy") && await askConfirm(`${msg}\n\nVẫn khởi động lại ngay? (việc đang chạy sẽ dừng giữa chừng)`)) {
         void restart(true);
       } else {
         toast.error(msg);
@@ -183,8 +184,10 @@ export function MachineSection() {
           </button>
           {st.cloud_db.set && (
             <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" disabled={busy}
-                    onClick={() => window.confirm("Bỏ kết nối cloud? Sau khi khởi động lại, DFlow dùng dữ liệu trên máy này (dữ liệu cloud vẫn còn nguyên).")
-                      && void save({ central_db_url: "" }, "Đã bỏ — khởi động lại để dùng dữ liệu trên máy này.")}>
+                    onClick={async () => {
+                      if (await askConfirm("Bỏ kết nối cloud? Sau khi khởi động lại, DFlow dùng dữ liệu trên máy này (dữ liệu cloud vẫn còn nguyên).", { ok: "Bỏ kết nối" }))
+                        void save({ central_db_url: "" }, "Đã bỏ — khởi động lại để dùng dữ liệu trên máy này.");
+                    }}>
               Bỏ kết nối
             </button>
           )}

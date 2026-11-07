@@ -8,6 +8,7 @@ import { clipHooks, type HookVariant } from "../../api/posts";
 import { useBoardStore, type FlowNode } from "../../store/board";
 import { useQuicktoolStore } from "../../store/quicktool";
 import type { ClipRoles } from "../roles";
+import { askConfirm } from "../../components/Dialogs";
 
 /** A voice line that fits the 8-second clip. */
 const MAX_VOICE_WORDS = 24;
@@ -61,7 +62,7 @@ export function StepScript({ roles, category, productId = null, boardId = null, 
   const [switching, setSwitching] = useState(false);
   async function switchVoice(on: boolean) {
     const lines = roles.scenes.filter((s) => typeof s.video?.data.narration === "string" && s.video.data.narration.trim()).length;
-    if (on && lines > 0 && !window.confirm(`Chuyển thành clip không lời: bỏ ${lines} lời thoại đang có, khi ghép giữ tiếng động thật của từng video. Tiếp tục?`)) return;
+    if (on && lines > 0 && !await askConfirm(`Chuyển thành clip không lời: bỏ ${lines} lời thoại đang có, khi ghép giữ tiếng động thật của từng video. Tiếp tục?`)) return;
     setSwitching(true);
     await setVoiceless(on);
     setVoiceWords({});
@@ -103,7 +104,7 @@ export function StepScript({ roles, category, productId = null, boardId = null, 
     const existing = roles.scenes.filter(
       (s) => s.video && typeof s.video.data.narration === "string" && s.video.data.narration.trim(),
     ).length;
-    if (existing > 0 && !window.confirm(`Ghi đè ${existing} lời thoại đang có?`)) return;
+    if (existing > 0 && !await askConfirm(`Ghi đè ${existing} lời thoại đang có?`)) return;
     setWriting(true);
     await writeNarrations();
     setVoiceWords({});
@@ -113,7 +114,7 @@ export function StepScript({ roles, category, productId = null, boardId = null, 
   async function tailorAll() {
     if (boardId === null || tailoring) return;
     const made = roles.scenes.filter((s) => s.image.data.mediaId || s.video?.data.mediaId).length;
-    if (!window.confirm(`AI viết lại mô tả ảnh, chuyển động${voiceless ? "" : " và lời thoại"} của ${roles.scenes.length} cảnh theo mô tả + điểm bán của sản phẩm.`
+    if (!await askConfirm(`AI viết lại mô tả ảnh, chuyển động${voiceless ? "" : " và lời thoại"} của ${roles.scenes.length} cảnh theo mô tả + điểm bán của sản phẩm.`
       + (made ? ` ${made} cảnh đã có ảnh/video sẽ cần "Tạo lại" để theo kịch bản mới.` : "")
       + " Mỗi cảnh có \"↺ Về prompt trước đó\" ở nút Tạo lại… nếu không ưng. Tiếp tục?")) return;
     setTailoring(true);

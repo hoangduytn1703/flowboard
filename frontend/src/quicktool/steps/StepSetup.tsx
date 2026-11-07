@@ -21,6 +21,7 @@ import { useSettingsStore } from "../../store/settings";
 import { hasMedia, isBusy, type ClipRoles } from "../roles";
 import "../models.css";
 import { toast, useToastOn } from "../../store/toast";
+import { askConfirm, askText } from "../../components/Dialogs";
 
 function setNodeData(n: FlowNode, patch: Record<string, unknown>) {
   useBoardStore.getState().updateNodeData(n.id, patch);
@@ -49,7 +50,7 @@ function FlowCheckButton({ node }: { node: FlowNode }) {
   const check = knownFlowCheck(node);
   const running = busy || check?.status === "running";
   async function run() {
-    if (!window.confirm("Thử tạo 1 video 8 giây chỉ từ ảnh người mẫu để xem Flow có chặn gương mặt này không (~12 credit nếu qua, bị chặn thì được hoàn, mất 1–3 phút). Tiếp tục?")) return;
+    if (!await askConfirm("Thử tạo 1 video 8 giây chỉ từ ảnh người mẫu để xem Flow có chặn gương mặt này không (~12 credit nếu qua, bị chặn thì được hoàn, mất 1–3 phút). Tiếp tục?")) return;
     setBusy(true);
     try {
       const v = await checkModelNode(node);
@@ -184,7 +185,7 @@ export function StepSetup({ roles, sourceMediaId = null, personRequired = false,
     if (!model || !modelMediaId || savingModel) return;
     const meta = modelMeta(model, boardName);
     const fallback = defaultCharacterLabel(meta);
-    const name = window.prompt("Đặt tên cho người mẫu này (để dùng lại cho sản phẩm khác):", fallback);
+    const name = await askText("Đặt tên cho người mẫu này (để dùng lại cho sản phẩm khác):", fallback);
     if (name === null) return;
     setSavingModel(true);
     try {

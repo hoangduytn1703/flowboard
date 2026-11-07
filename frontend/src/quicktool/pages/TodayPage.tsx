@@ -12,6 +12,7 @@ import { copyPost, copyText } from "../posts/PostEditor";
 import { DueList } from "./SchedulePage";
 import "../today.css";
 import "../schedule.css";
+import { askConfirm } from "../../components/Dialogs";
 
 /** Where to send someone who opens a clip from "Hôm nay". */
 function stepFor(b: BoardSummary): string {
@@ -218,7 +219,7 @@ export function TodayPage() {
                      empty="Chưa có bài hoặc clip nào đến giờ đăng."
                      action={<button type="button" className="qt-btn qt-btn--small qt-btn--ghost td-btn-icon" onClick={() => navigate("/schedule")}>Lịch đăng <Icon name="arrow" size={14} /></button>}>
               <DueList items={due} busy={slotBusy} onCopy={copySlot}
-                       onPublish={(s) => { if (window.confirm(`Đăng ngay lên Facebook Page của kênh "${s.channel}"?`)) void slotAction(() => publishSlot(s.id), "Đã đăng lên Facebook."); }}
+                       onPublish={async (s) => { if (await askConfirm(`Đăng ngay lên Facebook Page của kênh "${s.channel}"?`)) void slotAction(() => publishSlot(s.id), "Đã đăng lên Facebook."); }}
                        onPosted={(s) => void slotAction(() => updateSlot(s.id, { status: "posted" }), "Đã đánh dấu đã đăng.")}
                        onSkip={(s) => void slotAction(() => updateSlot(s.id, { status: "skipped" }), "")}
                        openLink={(s) => channels.find((c) => c.id === s.channel_id)?.link || "https://www.facebook.com/"} />

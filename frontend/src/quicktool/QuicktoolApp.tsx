@@ -44,6 +44,7 @@ import { BackgroundTasks } from "../components/BackgroundTasks";
 import { AssistantWidget } from "../components/AssistantWidget";
 import { toast, useToastOn } from "../store/toast";
 import { PageEmpty, PageLoading } from "./PageState";
+import { askConfirm, askText } from "../components/Dialogs";
 
 /** Wizard steps and their URL slugs: /clips/:id/<slug>. */
 const STEPS = [
@@ -264,13 +265,13 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
     });
   }
 
-  function startQueue(targets: BoardSummary[]) {
+  async function startQueue(targets: BoardSummary[]) {
     if (targets.length === 0 || queue.running) return;
     const videos = targets.reduce((t, b) => t + Math.max(b.summary.clips - b.summary.clips_done, 0), 0);
     const images = targets.reduce((t, b) => t + Math.max(b.summary.scenes - b.summary.scenes_done, 0), 0);
     const cost = videos * perClip;
     const balance = flowCredits === null ? "" : ` Tài khoản còn ${flowCredits.toLocaleString("vi-VN")} credit${cost > flowCredits ? " — KHÔNG ĐỦ cho cả hàng đợi" : ""}.`;
-    const ok = window.confirm(
+    const ok = await askConfirm(
       `Chạy tự động ${targets.length} clip, lần lượt từng clip: ` +
       `${images} ảnh + ${videos} video (~${cost} credit Flow).${balance} ` +
       `Khoảng ${Math.max(1, Math.round(videos * 2 + images * 0.5))} phút. Tiếp tục?`,
@@ -495,7 +496,7 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
   useTitle(loaded && boardName ? `${boardName} · Bước ${step ?? qt.step ?? 1}` : "Đang mở clip…");
 
   /** The auto run, after saying what it will spend. */
-  function startAuto() {
+  async function startAuto() {
     const images = roles.scenes.filter((s) => !hasMedia(s.image)).length + (roles.model && !hasMedia(roles.model) ? 1 : 0);
     const videos = isDrama ? 0 : roles.scenes.filter((s) => s.video && !hasMedia(s.video)).length;
     const cost = videos * creditsPerClip(videoModel, videoQuality);
@@ -505,7 +506,7 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
     // (measured 26/10: 5 stills + 4 clips + export in ~4.5 min).
     const mins = Math.max(1, Math.round(Math.ceil(images / 2) * 0.5 + Math.ceil(videos / 3) * 1.2 + 1.5));
     const balance = flowCredits === null ? "" : `\nTài khoản Flow còn ${flowCredits.toLocaleString("vi-VN")} credit${cost > flowCredits ? " — KHÔNG ĐỦ, clip sẽ hỏng giữa chừng" : ""}.`;
-    if (!window.confirm(`${what}${balance}\nKhoảng ${mins} phút. Tiếp tục?`)) return;
+    if (!await askConfirm(`${what}${balance}\nKhoảng ${mins} phút. Tiếp tục?`)) return;
     void runAuto();
   }
 
@@ -591,8 +592,8 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
     navigate("/clips");
   }
 
-  function rename() {
-    const next = window.prompt("Tên clip", boardName);
+  async function rename() {
+    const next = await askText("Tên clip", boardName);
     if (next && next.trim() && next.trim() !== boardName) void renameBoard(next.trim());
   }
 

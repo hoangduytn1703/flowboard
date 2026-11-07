@@ -17,6 +17,7 @@ import { createSlot, publishSlot, slotLabel, suggestSlots, syncFacebook, type Fb
 import { FormatPicker, StoryToggle } from "../schedule/FormatPicker";
 import { AutoPilot, type AutoSeed } from "../posts/AutoPilot";
 import "../posts.css";
+import { askConfirm } from "../../components/Dialogs";
 
 /** The one-click "Viết Tập N+1" buttons are hidden for now (29/10): the tool cannot tell which episodes were
  * posted by hand vs. automatically, so the next episode and its thread drift. "Câu chuyện nhiều kỳ" itself stays
@@ -518,7 +519,7 @@ export function PostsPage() {
     if (!ch?.fb_connected) return;
     const withWhat = video ? " (kèm video)" : boardId !== null ? " (kèm video của clip)" : images.length ? ` (kèm ${images.length} ảnh)` : "";
     const asReel = fbFormat === "reel" && (video || boardId !== null);
-    if (!window.confirm(`Đăng ${asReel ? "Reel" : "bài này"} lên Page "${ch.fb_page_name || ch.name}" ngay bây giờ?${withWhat}${draft.first_comment ? " Bình luận đầu sẽ được thêm sau khi đăng." : ""}`)) return;
+    if (!await askConfirm(`Đăng ${asReel ? "Reel" : "bài này"} lên Page "${ch.fb_page_name || ch.name}" ngay bây giờ?${withWhat}${draft.first_comment ? " Bình luận đầu sẽ được thêm sau khi đăng." : ""}`)) return;
     setPublishing(true);
     try {
       const id = dirty || postId === null ? await save(true) : postId;

@@ -15,6 +15,7 @@ import "../prompts.css";
 import { toast, useToastOn } from "../../store/toast";
 import { PageEmpty, PageLoading } from "../PageState";
 import { ANY_INDUSTRY, INDUSTRY_TAGS, SCENE_TAGS } from "../promptTags";
+import { askConfirm, askText } from "../../components/Dialogs";
 
 const KINDS: PromptKind[] = ["image", "video", "narration"];
 /** Three cards a row, five rows a page. */
@@ -67,7 +68,7 @@ export function PromptsPage() {
   }
 
   async function rename(p: SavedPrompt) {
-    const next = window.prompt("Tên gợi nhớ", p.title);
+    const next = await askText("Tên gợi nhớ", p.title);
     if (next === null || next.trim() === p.title) return;
     await patchSavedPrompt(p.id, { title: next.trim() });
     await load();
@@ -115,7 +116,7 @@ export function PromptsPage() {
   const shown = filtered.slice((current - 1) * PER_PAGE, current * PER_PAGE);
 
   async function remove(p: SavedPrompt) {
-    if (!window.confirm(`Xoá prompt "${p.title}"?`)) return;
+    if (!await askConfirm(`Xoá prompt "${p.title}"?`)) return;
     await deleteSavedPrompt(p.id);
     await load();
   }
@@ -246,9 +247,9 @@ export function PromptsPage() {
 function Labels({ tags, onChange }: { tags: string[]; onChange: (tags: string[]) => void }) {
   const shown = tags.filter((t) => t !== SAMPLE_TAG);
   const free = [...INDUSTRY_TAGS, ...SCENE_TAGS].filter((t) => !tags.includes(t));
-  function add(value: string) {
+  async function add(value: string) {
     if (!value) return;
-    const label = value === "__custom" ? window.prompt("Nhãn mới (ví dụ: livestream, giảm giá)")?.trim() : value;
+    const label = value === "__custom" ? (await askText("Nhãn mới (ví dụ: livestream, giảm giá)"))?.trim() : value;
     if (label && !tags.includes(label)) onChange([...tags, label]);
   }
   return (

@@ -8,6 +8,7 @@ import {
   type PoolStatus,
 } from "../../api/accountPool";
 import { toast } from "../../store/toast";
+import { askConfirm } from "../Dialogs";
 
 function fmt(n: number | null): string {
   return n === null ? "—" : n.toLocaleString("vi-VN");
@@ -123,7 +124,7 @@ export function AccountPoolSection({ onProjectChange }: { onProjectChange?: () =
                     {a.enabled ? "Tắt" : "Bật"}
                   </button>
                   <button type="button" className="flow-accounts__btn" disabled={busy !== ""}
-                          onClick={() => { if (window.confirm(`Bỏ ${a.email} khỏi danh sách?`)) void run(a.email, () => removePoolAccount(a.email)); }}>
+                          onClick={async () => { if (await askConfirm(`Bỏ ${a.email} khỏi danh sách?`, { ok: "Bỏ", danger: true })) void run(a.email, () => removePoolAccount(a.email)); }}>
                     Bỏ
                   </button>
                 </div>

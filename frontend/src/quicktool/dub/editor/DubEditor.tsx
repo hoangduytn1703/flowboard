@@ -18,6 +18,7 @@ import { EditorTimeline, type TimelineHandle } from "./EditorTimeline";
 import { Inspector, type InspectorTab, type OutSettings } from "./Inspector";
 import { CutPane } from "./CutPane";
 import "./editor.css";
+import { askConfirm } from "../../../components/Dialogs";
 
 const MIN_SLOT = 0.3;
 const COALESCE_MS = 900;
@@ -360,7 +361,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
   async function setSubLang(lang: SubLang, auto = false) {
     if (lang === docRef.current.lang || readOnly || langBusy) return;
     const handEdits = langDirty || auto ? 0 : textEdits;
-    if (handEdits && !window.confirm(`Đổi ngôn ngữ sẽ viết lại chữ của mọi câu — ${handEdits} câu bạn đã sửa tay sẽ thay bằng bản mới (Ctrl+Z để lấy lại). Tiếp tục?`)) return;
+    if (handEdits && !await askConfirm(`Đổi ngôn ngữ sẽ viết lại chữ của mọi câu — ${handEdits} câu bạn đã sửa tay sẽ thay bằng bản mới (Ctrl+Z để lấy lại). Tiếp tục?`)) return;
     setLangBusy(true);
     try {
       const r = await dubSubtitleLines(job.job_id, lang);
@@ -398,13 +399,13 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
       setNamesBusy(false);
     }
   }
-  function close() {
-    if (dirty && !window.confirm(`Còn ${changes.join(", ")} chưa xuất. Đóng trình chỉnh sửa và bỏ các thay đổi?`)) return;
+  async function close() {
+    if (dirty && !await askConfirm(`Còn ${changes.join(", ")} chưa xuất. Đóng trình chỉnh sửa và bỏ các thay đổi?`)) return;
     onClose();
   }
-  function switchTo(id: string) {
+  async function switchTo(id: string) {
     if (id === job.job_id || !onSwitch) return;
-    if (dirty && !window.confirm(`Còn ${changes.join(", ")} chưa xuất ở clip này. Chuyển sang clip khác và bỏ các thay đổi?`)) return;
+    if (dirty && !await askConfirm(`Còn ${changes.join(", ")} chưa xuất ở clip này. Chuyển sang clip khác và bỏ các thay đổi?`)) return;
     onSwitch(id);
   }
   /** This clip's look → every other clip of the batch (and this one is exported first when it has changes). */
@@ -416,7 +417,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
     const parts = ["vị trí / cỡ / độ rộng phụ đề", "kiểu chữ", nBlurs ? `${nBlurs} vùng mờ` : "",
                    doc.layout.canvas ? `khung xuất ${doc.layout.canvas.aspect}` : "", doc.layout.frame ? "khung" : "",
                    doc.layout.mascot?.media_id ? "nhân vật" : "", doc.highlights.on ? "nhấn chữ quan trọng (AI chọn chỗ riêng cho từng clip)" : ""].filter(Boolean).join(", ");
-    if (!window.confirm(`Áp ${parts} của clip này cho ${others.length} clip còn lại của loạt?\nCác clip đó sẽ được in lại (giữ giọng đã đọc). Chữ, giờ và câu chỉnh riêng của từng clip không đổi.`)) return;
+    if (!await askConfirm(`Áp ${parts} của clip này cho ${others.length} clip còn lại của loạt?\nCác clip đó sẽ được in lại (giữ giọng đã đọc). Chữ, giờ và câu chỉnh riêng của từng clip không đổi.`)) return;
     setApplyingAll(true);
     try {
       if (dirty || neverRendered) await exportNow();

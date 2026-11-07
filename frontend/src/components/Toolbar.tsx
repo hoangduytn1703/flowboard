@@ -5,6 +5,7 @@ import { useSettingsStore } from "../store/settings";
 import { clearBoardMedia } from "../api/client";
 import { ActivityBell } from "./activity/ActivityBell";
 import { AiProviderBadge } from "./AiProviderBadge";
+import { askConfirm } from "./Dialogs";
 
 export function Toolbar() {
   const boardName = useBoardStore((s) => s.boardName);
@@ -92,7 +93,7 @@ function ClearMediaButton() {
 
   async function run(includeRefs: boolean) {
     if (boardId === null || busy) return;
-    const sure = window.confirm(
+    const sure = await askConfirm(
       includeRefs
         ? "Xóa HẾT ảnh/video trên board, kể cả ảnh Nhân vật / Sản phẩm (tham chiếu)?\n\nNode và prompt được giữ lại."
         : "Xóa ảnh cảnh, video và bản xuất đã tạo?\n\nNode, prompt và ảnh tham chiếu (Nhân vật / Sản phẩm) được giữ lại.\n(Giữ Shift khi bấm để xóa cả tham chiếu.)",

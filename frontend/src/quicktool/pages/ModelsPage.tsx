@@ -26,6 +26,7 @@ import { generateStandaloneImage } from "../standaloneImage";
 import "../models.css";
 import { toast, useToastOn } from "../../store/toast";
 import { PageEmpty } from "../PageState";
+import { askConfirm } from "../../components/Dialogs";
 
 /** Longest model line: one 8-second clip holds about 24 words. */
 const MAX_LINE = 200;
@@ -152,7 +153,7 @@ function ModelCard({ item, active, onEdit, onCloned }: {
   }
 
   async function onDelete() {
-    if (!window.confirm(`Xoá người mẫu "${item.label}" khỏi thư viện? Clip đã dùng người mẫu này vẫn giữ ảnh.`)) return;
+    if (!await askConfirm(`Xoá người mẫu "${item.label}" khỏi thư viện? Clip đã dùng người mẫu này vẫn giữ ảnh.`)) return;
     setBusy(true);
     try {
       await remove(item.id);
