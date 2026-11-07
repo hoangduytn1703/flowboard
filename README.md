@@ -39,15 +39,15 @@ DFlow chạy trên máy của bạn (không phải trang web có sẵn), nên c�
 
 **Máy tính**: Windows 10 hoặc 11, RAM từ 8 GB, ổ cứng trống khoảng **10 GB** (cộng thêm ~15 GB nếu dùng lồng tiếng), có Internet.
 
-**Tài khoản** (tất cả đều cần trước khi cài):
+**Tài khoản** (chuẩn bị trước khi cài):
 
 | Cần gì | Để làm gì | Lấy ở đâu |
 |---|---|---|
-| Tài khoản **GitHub** được mời vào kho code | Tải DFlow về (kho riêng tư) | Tạo ở github.com, rồi nhờ chủ DFlow mời vào kho `hoangduytn1703/flowboard` |
 | Tài khoản Google có **Google Flow gói Pro hoặc Ultra** | Tạo ảnh và video | Đăng ký Google AI Pro / Ultra, vào flow.google.com |
 | Tài khoản **Claude** (gói Pro hoặc Max) | AI viết kịch bản, bài viết, trợ lý | claude.ai |
 | **Gemini API key** (miễn phí) | Đọc sản phẩm từ link, clip theo link, giọng Gemini, sửa tên riêng khi lồng tiếng | aistudio.google.com/apikey |
-| **Tên đăng nhập DFlow** | Đăng nhập vào app | Người cài / quản lý DFlow cấp cho bạn |
+| **Tên đăng nhập DFlow** (+ dòng kết nối dữ liệu) | Đăng nhập vào app, dữ liệu của bạn nằm trên cloud | Người quản lý DFlow tạo và gửi cho bạn ([Mục 6.6](#66-cấp-tài-khoản-cho-người-khác-chỉ-người-quản-lý)) |
+| Tài khoản **GitHub** được mời vào kho code | **Chỉ khi chạy từ mã nguồn** (Cách 2) — người cài bằng file không cần | Tạo ở github.com, rồi nhờ chủ DFlow mời vào kho `hoangduytn1703/flowboard` |
 
 **Không phải ai cũng cần hết.** Bảng dưới cho biết tính năng nào cần cài thêm gì. Phần **Cơ bản** là bắt buộc, các dòng còn lại chỉ cài khi bạn dùng tới.
 
@@ -66,7 +66,7 @@ DFlow chạy trên máy của bạn (không phải trang web có sẵn), nên c�
 
 ## 3. Cài đặt lần đầu (Windows)
 
-Có 2 cách. **Cách 1 (file cài đặt)** dễ nhất — không phải cài Python, Node, Git; cập nhật bằng cách chạy file cài bản mới.
+Có 2 cách. **Cách 1 (file cài đặt)** dễ nhất — **không phải cài Python, Node, Git** (app đã có sẵn bên trong); app tự cập nhật.
 **Cách 2 (mã nguồn)** dành cho người sửa code hoặc muốn luôn có bản mới nhất.
 
 ### Cách 1 — Cài bằng file DFlow-Setup.exe (dễ nhất)
@@ -80,27 +80,34 @@ Có 2 cách. **Cách 1 (file cài đặt)** dễ nhất — không phải cài P
 3. **Mở DFlow** từ menu Start (hoặc biểu tượng trên màn hình). Lần đầu mất 20–40 giây để khởi động.
    Đóng cửa sổ thì DFlow **vẫn chạy ngầm** ở khay hệ thống (góc dưới phải, cạnh đồng hồ) để lịch đăng bài vẫn chạy —
    muốn tắt hẳn: chuột phải biểu tượng DFlow → **Thoát DFlow**.
-4. **Cài Claude Code** (AI viết kịch bản, bài viết) — mở PowerShell (bấm Start, gõ `powershell`) và dán:
+4. **Đăng nhập lần đầu** (theo đúng thứ tự):
+   - Được gửi **dòng kết nối dữ liệu** (bắt đầu bằng `postgresql://…`)? Ở trang đăng nhập bấm **🌐 Dán dòng kết nối trước** → dán nguyên dòng →
+     **Kết nối**. DFlow tự kiểm tra rồi khởi động lại (20–40 giây). Làm một lần trên mỗi máy. Chưa dán dòng này thì tài khoản được cấp sẽ báo
+     *"Sai tên đăng nhập hoặc mật khẩu"*.
+   - Đăng nhập bằng **tên + mật khẩu được cấp**.
+   - Bấm **Đổi mật khẩu** (góc dưới trái, cạnh tên của bạn) để đặt mật khẩu riêng.
+5. **Cài Claude Code** (AI viết kịch bản, bài viết) — mở PowerShell (bấm Start, gõ `powershell`) và dán:
 
    ```powershell
    irm https://claude.ai/install.ps1 | iex
    ```
 
    Xong gõ `claude` rồi Enter → trình duyệt mở ra để đăng nhập tài khoản Claude → quay lại gõ `/exit`.
-5. **Mở Google Flow**: vào **flow.google.com** trong Chrome, đăng nhập tài khoản có gói Pro / Ultra, tạo một project mới. Để tab này mở.
-6. Trong DFlow, đăng nhập bằng tên + mật khẩu được cấp. Lần đầu sẽ hiện hộp **AI Providers**: chọn **Claude** cho cả ba mục → **Áp dụng thay đổi**.
-7. Vào **⚙ Cài đặt → 🖥 Máy này**:
+   Claude Code cài thẳng, **không cần Node.js hay Git**. Cần gói Claude Pro / Max.
+6. **Mở Google Flow**: vào **flow.google.com** trong Chrome, đăng nhập tài khoản có gói Pro / Ultra, tạo một project mới. Để tab này mở.
+7. Trong DFlow, lần đầu sẽ hiện hộp **AI Providers**: chọn **Claude** cho cả ba mục → **Áp dụng thay đổi** (đổi sau ở **⚙ Cài đặt → 🤖 AI viết**).
+8. Vào **⚙ Cài đặt → 🖥 Máy này**:
    - chọn gói **Pro** hoặc **Ultra** (giống gói Flow của bạn);
    - phần **Extension DFlow Bridge**: làm theo hướng dẫn hiện ở đó (mở `chrome://extensions` → bật Developer mode → Load unpacked → chọn
      thư mục DFlow chỉ cho, có nút 📂 mở sẵn thư mục), rồi F5 tab flow.google.com;
    - muốn để ảnh / video ở chỗ khác (ổ ngoài, ổ E…): đổi **Thư mục lưu ảnh, video** rồi bấm **↻ Khởi động lại DFlow**;
-   - dùng chung dữ liệu với máy khác: dán dòng kết nối được gửi riêng vào ô **Dùng chung dữ liệu** → Lưu → Khởi động lại.
-8. **⚙ Cài đặt → 🔑 Gemini key**: dán Gemini key (lấy ở aistudio.google.com/apikey). **⚙ Cài đặt → ⚡ Google Flow**: chọn project Flow vừa tạo.
+   - đổi dòng kết nối dữ liệu sau này: ô **Dùng chung dữ liệu** → Lưu → Khởi động lại.
+9. **⚙ Cài đặt → 🔑 Gemini key**: dán Gemini key (lấy ở aistudio.google.com/apikey). **⚙ Cài đặt → ⚡ Google Flow**: chọn project Flow vừa tạo.
 
 **Cập nhật bản mới**: app **tự báo** khi có bản mới (thanh "🎉 Có bản DFlow …" ở dưới màn hình, hoặc **⚙ Cài đặt → 🖥 Máy này → ↻ Kiểm tra
 cập nhật**) → bấm **⬇ Cập nhật ngay**: app tự tải, đóng, cài và mở lại — dữ liệu, đăng nhập giữ nguyên, không phải gỡ ra cài lại. Sau đó vào
 `chrome://extensions` bấm nút tải lại (↻) ở ô DFlow Bridge. File cài mới nhất luôn có ở **github.com/hoangduytn1703/dflow-releases/releases**
-(bản 0.1.1 trở về trước chưa biết tự cập nhật: cài đè bản mới một lần).
+(bản **trước 1.5.1** chưa tự cập nhật được: tải file cài mới nhất về cài đè một lần, dữ liệu giữ nguyên).
 
 > Bản app đã kèm sẵn ffmpeg. Lồng tiếng video vẫn cần bộ VieDub cài riêng ([Mục 6.2](#62-lồng-tiếng-video-xoá-phụ-đề-ai-giọng-vieneu)) —
 > khai báo đường dẫn ở Cài đặt → 🖥 Máy này. Phụ đề kiểu Remotion chưa có trong bản app (dùng kiểu ffmpeg).
@@ -316,8 +323,29 @@ Các bước này hơi rắc rối — nhờ người cài làm giúp. Chi tiế
 
 ### 6.5 Dùng chung dữ liệu trên nhiều máy
 
-Để mở DFlow ở máy nào cũng thấy cùng sản phẩm, clip, bài viết…: chủ DFlow sẽ gửi riêng cho bạn một dòng bắt đầu bằng `FLOWBOARD_CENTRAL_DB_URL=`
-(**giữ bí mật**, đừng đăng lên đâu). Mở `notepad D:\DFlow\.env`, dán dòng đó xuống cuối, lưu, tắt DFlow mở lại rồi đăng nhập.
+Để mở DFlow ở máy nào cũng thấy cùng sản phẩm, clip, bài viết… (và để đăng nhập được bằng tài khoản người quản lý tạo): người quản lý gửi riêng
+cho bạn một dòng bắt đầu bằng `postgresql://` hoặc `FLOWBOARD_CENTRAL_DB_URL=` (**giữ bí mật**, đừng đăng lên đâu).
+
+- **Bản app (Cách 1)**: ở trang đăng nhập bấm **🌐 Dán dòng kết nối trước** → dán → **Kết nối** (app tự khởi động lại). Đã đăng nhập rồi thì đổi ở
+  **⚙ Cài đặt → 🖥 Máy này → Dùng chung dữ liệu**.
+- **Chạy từ mã nguồn (Cách 2)**: cũng dán ở trang đăng nhập được (xong tắt DFlow, chạy lại `start.ps1`), hoặc mở `notepad D:\DFlow\.env`, dán dòng
+  đó xuống cuối, lưu, tắt DFlow mở lại rồi đăng nhập.
+
+### 6.6 Cấp tài khoản cho người khác (chỉ người quản lý)
+
+Chỉ tài khoản **quản trị** (`akiragosho`) thấy menu **👥 Quản lý tài khoản** (nhóm Nâng cao). Mỗi tài khoản có dữ liệu riêng — không ai thấy của ai.
+
+1. **👥 Quản lý tài khoản → Tạo tài khoản cho người khác**: gõ tên đăng nhập (chữ không dấu, số, `.` `_` `-`), mật khẩu (🎲 tạo ngẫu nhiên),
+   ghi chú (ai dùng, hết hạn khi nào) → **Tạo tài khoản** → **📋 Copy để gửi** (mật khẩu chỉ hiện lúc này).
+2. Gửi cho họ: thông tin đăng nhập vừa copy + **dòng kết nối dữ liệu** (dòng `FLOWBOARD_CENTRAL_DB_URL=…` trong file `.env` của bạn) + link file cài
+   **github.com/hoangduytn1703/dflow-releases/releases**.
+3. Họ quên mật khẩu → **🔑 Đặt lại mật khẩu** (copy luôn thông tin mới để gửi). Ngừng cho dùng → **🔒 Khoá** (họ bị đăng xuất, không đăng nhập được;
+   dữ liệu giữ nguyên, **🔓 Mở khoá** là dùng lại). **⎋ Đăng xuất mọi máy** khi nghi lộ mật khẩu.
+
+Người khác chỉ đổi được mật khẩu của chính họ (nút **Đổi mật khẩu** ở góc dưới trái).
+
+> **Lưu ý bảo mật**: dòng kết nối dữ liệu cho **toàn quyền** với cơ sở dữ liệu (người rành kỹ thuật đọc được dữ liệu của mọi tài khoản). Chỉ gửi
+> cho người bạn tin. Đổi mật khẩu quản trị ngay sau khi cài (mật khẩu mặc định ghi trong mã nguồn).
 
 ---
 
@@ -332,6 +360,9 @@ Các bước này hơi rắc rối — nhờ người cài làm giúp. Chi tiế
 | Trang `localhost:5174` không mở được | Cửa sổ DFlow còn mở không? Lần đầu chờ cài xong (5–10 phút) rồi F5 |
 | `Could not create agent\.venv` | uv chưa cài được — làm lại Bước 2, đóng mở lại PowerShell |
 | `ffmpeg is not on PATH` | `winget install -e --id Gyan.FFmpeg`, rồi đóng mở lại PowerShell |
+| Tài khoản được cấp báo *"Sai tên đăng nhập hoặc mật khẩu"* | Máy này chưa nối dữ liệu cloud: ở trang đăng nhập bấm **🌐 Dán dòng kết nối trước** (Mục 6.5) |
+| *"Tài khoản này đã bị khoá"* | Hỏi người quản lý DFlow mở khoá |
+| Quên mật khẩu | Nhờ người quản lý **🔑 Đặt lại mật khẩu** (Mục 6.6) |
 | App báo **mất kết nối extension** | Kiểm tra DFlow Bridge đang bật ở `chrome://extensions` (bấm ↻ tải lại), tab flow.google.com còn mở, rồi F5 tab Flow |
 | AI không viết được / báo lỗi AI | **⚙ Cài đặt → 🤖 AI viết** đã chọn Claude chưa; chạy `claude` trong PowerShell xem còn đăng nhập không, gói Claude còn lượt không |
 | Tạo ảnh / video báo lỗi, "Flow bỏ lượt" | Tab Flow đúng tài khoản có gói Pro / Ultra; Cài đặt → Google Flow đúng project; ở Bước 1 của clip bấm "🎬 Kiểm tra với Flow" xem người mẫu có bị chặn không |

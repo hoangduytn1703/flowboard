@@ -1,7 +1,11 @@
 """Settings → 🖥 Máy này: what only this machine knows — the Flow plan, the cloud database line, where data and
 the dubbing kit live — and, in the desktop app, opening its folders and restarting the agent.
 
-The desktop shell (desktop/src-tauri) starts the agent again when it exits with :data:`RESTART_CODE`."""
+The desktop shell (desktop/src-tauri) starts the agent again when it exits with :data:`RESTART_CODE`.
+
+``/api/app/connect`` is open (no login): a fresh install has only its own empty account store, so the accounts the
+admin made on the cloud database cannot log in until the cloud line is pasted — the login page offers that box.
+"""
 from __future__ import annotations
 
 import os
@@ -10,7 +14,7 @@ import threading
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from flowboard import config
@@ -89,12 +93,7 @@ def save_settings(body: SettingsBody) -> dict[str, Any]:
     if body.paygate_tier:
         updates["FLOWBOARD_PAYGATE_TIER"] = body.paygate_tier
     if body.central_db_url is not None:
-        url = body.central_db_url.strip()
-        if url.startswith("FLOWBOARD_CENTRAL_DB_URL="):  # the whole line pasted
-            url = url.split("=", 1)[1].strip()
-        if url and not url.startswith(("postgresql://", "postgres://")):
-            raise HTTPException(400, "Dòng kết nối phải bắt đầu bằng postgresql:// (chép nguyên dòng chủ DFlow gửi)")
-        updates["FLOWBOARD_CENTRAL_DB_URL"] = url or None
+        updates["FLOWBOARD_CENTRAL_DB_URL"] = _db_line(body.central_db_url) or None
     if body.storage_dir is not None:
         updates["FLOWBOARD_STORAGE"] = _folder(body.storage_dir, "Thư mục dữ liệu", create=True) if body.storage_dir.strip() else None
     if body.erase_root is not None:
@@ -116,6 +115,83 @@ def save_settings(body: SettingsBody) -> dict[str, Any]:
             else:
                 os.environ.pop(key, None)
     return status()
+
+
+def _db_line(raw: str) -> str:
+    """The cloud line as pasted: the URL alone or the whole ``FLOWBOARD_CENTRAL_DB_URL=…`` line ("" = none)."""
+    url = raw.strip().strip('"').strip()
+    if url.startswith("FLOWBOARD_CENTRAL_DB_URL="):  # the whole line pasted
+        url = url.split("=", 1)[1].strip().strip('"')
+    if url and not url.startswith(("postgresql://", "postgres://")):
+        raise HTTPException(400, "Dòng kết nối phải bắt đầu bằng postgresql:// (chép nguyên dòng chủ DFlow gửi)")
+    return url
+
+
+_LOCAL_CALLERS = {"127.0.0.1", "::1", "localhost", "testclient"}
+
+
+def _probe_cloud(url: str) -> None:
+    """Connects once before saving, and insists on an existing DFlow account store (a typo'd or wrong database is
+    refused instead of silently starting an empty one). Never echoes the password."""
+    from sqlalchemy import create_engine, inspect, text
+    from sqlalchemy.pool import NullPool
+
+    dsn = url.replace("postgres://", "postgresql+psycopg://", 1).replace("postgresql://", "postgresql+psycopg://", 1)
+    try:
+        eng = create_engine(dsn, poolclass=NullPool, connect_args={"connect_timeout": 12})
+    except Exception as exc:  # noqa: BLE001 — a malformed URL
+        raise HTTPException(400, f"Dòng kết nối không đúng dạng ({type(exc).__name__}). Chép lại nguyên dòng được gửi.")
+    try:
+        with eng.connect() as c:
+            c.execute(text("SELECT 1"))
+            has_accounts = inspect(c).has_table("account_user")
+    except Exception as exc:  # noqa: BLE001 — wrong password / host / no network
+        import re
+
+        first = str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__
+        first = re.sub(r"^\([\w.]+\)\s*", "", first)  # SQLAlchemy's "(psycopg.errors.X) " prefix
+        raise HTTPException(400, f"Không kết nối được tới dữ liệu cloud: {first[:200]}. Kiểm tra mạng và chép lại nguyên dòng được gửi.")
+    finally:
+        eng.dispose()
+    if not has_accounts:
+        raise HTTPException(400, "Kết nối được nhưng cơ sở dữ liệu này chưa có tài khoản DFlow nào — kiểm tra lại dòng kết nối với người quản lý DFlow.")
+
+
+class ConnectBody(BaseModel):
+    central_db_url: str = Field(max_length=1000)
+
+
+@router.get("/connect")
+def connect_status() -> dict[str, Any]:
+    """Open: does this machine use the cloud database yet (the login page shows the paste box when not)."""
+    from flowboard import accounts
+
+    saved = bool(app_env.read_values().get("FLOWBOARD_CENTRAL_DB_URL"))
+    cloud = accounts.central_url() is not None
+    return {"app": config.APP_MODE, "cloud": cloud, "restart_pending": saved and not cloud}
+
+
+@router.post("/connect")
+def connect(body: ConnectBody, request: Request) -> dict[str, Any]:
+    """Open, from the login page of a fresh install only: save the cloud line after a test connection, then restart
+    the agent (the app does it; start.ps1 users run it again). Once the machine is on the cloud the line changes
+    only from Settings → 🖥 Máy này, after logging in."""
+    from flowboard import accounts
+
+    if accounts.central_url() is not None:
+        raise HTTPException(409, "Máy này đã nối dữ liệu cloud. Muốn đổi: đăng nhập rồi vào Cài đặt → 🖥 Máy này.")
+    caller = request.client.host if request.client else ""
+    if caller not in _LOCAL_CALLERS:
+        raise HTTPException(403, "Chỉ dán được trên chính máy chạy DFlow.")
+    url = _db_line(body.central_db_url)
+    if not url:
+        raise HTTPException(400, "Dán dòng kết nối được gửi (bắt đầu bằng postgresql://).")
+    _probe_cloud(url)
+    app_env.write_values({"FLOWBOARD_CENTRAL_DB_URL": url})
+    if config.APP_MODE:
+        threading.Timer(0.6, lambda: os._exit(RESTART_CODE)).start()
+        return {"ok": True, "restarting": True}
+    return {"ok": True, "restarting": False}
 
 
 class OpenBody(BaseModel):

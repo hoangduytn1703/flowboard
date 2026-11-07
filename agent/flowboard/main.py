@@ -194,7 +194,7 @@ app.add_middleware(
 
 #: Reachable without a login: logging in itself, health, and the extension's
 #: callback (authenticated by its own secret).
-OPEN_PATHS = {"/api/account/login", "/api/account/me", "/api/health", "/api/ext/callback"}
+OPEN_PATHS = {"/api/account/login", "/api/account/me", "/api/health", "/api/ext/callback", "/api/app/connect"}
 
 
 @app.middleware("http")

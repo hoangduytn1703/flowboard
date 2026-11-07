@@ -58,6 +58,34 @@ def test_restart_is_only_for_the_app(client, monkeypatch):
     assert client.post("/api/app/restart", json={"force": True}).json() == {"ok": True, "restarting": True} and exits
 
 
+def test_a_fresh_install_takes_the_cloud_line_from_the_login_page(client, env_file, monkeypatch):
+    """Open endpoint: the friend's accounts live on the cloud store, so the line must be pasted before logging in."""
+    monkeypatch.setenv("FLOWBOARD_CENTRAL_DB_URL", "")
+    assert client.get("/api/app/connect").json()["cloud"] is False
+    assert client.post("/api/app/connect", json={"central_db_url": "mysql://nope"}).status_code == 400
+    assert client.post("/api/app/connect", json={"central_db_url": "  "}).status_code == 400
+    probed = []
+    monkeypatch.setattr(app_route, "_probe_cloud", lambda url: probed.append(url))
+    monkeypatch.setattr(config, "APP_MODE", True)
+    exits = []
+    monkeypatch.setattr(app_route.threading, "Timer", lambda delay, fn: type("T", (), {"start": lambda self: exits.append(delay)})())
+    r = client.post("/api/app/connect", json={"central_db_url": "FLOWBOARD_CENTRAL_DB_URL=postgresql://u:secret@ep-a.neon.tech/db"})
+    assert r.json() == {"ok": True, "restarting": True} and exits and "secret" not in r.text
+    assert probed == ["postgresql://u:secret@ep-a.neon.tech/db"]
+    assert app_env.read_values()["FLOWBOARD_CENTRAL_DB_URL"] == "postgresql://u:secret@ep-a.neon.tech/db"
+    assert client.get("/api/app/connect").json() == {"app": True, "cloud": False, "restart_pending": True}
+    # Once this machine is on the cloud, the open door is shut (changes go through Settings after login).
+    monkeypatch.setenv("FLOWBOARD_CENTRAL_DB_URL", "postgresql://u:secret@ep-a.neon.tech/db")
+    assert client.post("/api/app/connect", json={"central_db_url": "postgresql://x@evil/db"}).status_code == 409
+
+
+def test_a_wrong_cloud_line_is_refused_before_saving(client, env_file, monkeypatch):
+    monkeypatch.setenv("FLOWBOARD_CENTRAL_DB_URL", "")
+    r = client.post("/api/app/connect", json={"central_db_url": "postgresql://u:pw@127.0.0.1:1/db"})
+    assert r.status_code == 400 and "Không kết nối được" in r.json()["detail"] and "pw@" not in r.text
+    assert "FLOWBOARD_CENTRAL_DB_URL" not in app_env.read_values()
+
+
 def test_the_built_ui_is_served_with_a_spa_fallback(tmp_path, monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient

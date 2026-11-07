@@ -125,6 +125,26 @@ export async function loginWithMessage(username: string, password: string): Prom
   return res.json();
 }
 
+/** Login page of a fresh install: is this machine on the cloud account store yet (no login needed). */
+export interface ConnectStatus {
+  /** the desktop app (restarts itself) vs start.ps1 */
+  app: boolean;
+  cloud: boolean;
+  /** a line is saved but the agent has not restarted with it */
+  restart_pending: boolean;
+}
+
+export function getConnectStatus() {
+  return call<ConnectStatus>("/api/app/connect");
+}
+
+/** Paste the cloud line before logging in: tested, saved, then the app restarts (`restarting`). */
+export function connectCloud(line: string) {
+  return call<{ ok: boolean; restarting: boolean }>("/api/app/connect", {
+    method: "POST", body: JSON.stringify({ central_db_url: line }),
+  });
+}
+
 /** UI preferences saved with the account (model picks, UI mode …). */
 export type AccountPrefs = Record<string, string | number | boolean>;
 
