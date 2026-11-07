@@ -32,6 +32,7 @@ import { ModelsPage } from "./pages/ModelsPage";
 import { PromptsPage } from "./pages/PromptsPage";
 import { PostsPage } from "./pages/PostsPage";
 import { ChannelsPage } from "./pages/ChannelsPage";
+import { AccountsPage } from "./pages/AccountsPage";
 import { DubPage } from "./pages/DubPage";
 import { CapcutPage } from "./pages/CapcutPage";
 import { ClipChannel } from "./steps/ClipChannel";
@@ -122,6 +123,7 @@ export function QuicktoolApp() {
           <Route path="/tools/clean" element={<CleanToolPage />} />
           <Route path="/posts" element={<PostsPage />} />
           <Route path="/channels" element={<ChannelsPage />} />
+          <Route path="/accounts" element={<AccountsPage />} />
           <Route path="/schedule" element={<SchedulePage />} />
           <Route path="/swipes" element={<SwipesPage />} />
           <Route path="/tools/dub" element={<DubPage />} />

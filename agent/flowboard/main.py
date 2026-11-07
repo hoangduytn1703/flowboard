@@ -17,6 +17,7 @@ from flowboard.routes import provider_jobs as provider_jobs_route
 from flowboard.routes import drama as drama_route
 from flowboard.routes import export_extras as export_extras_route
 from flowboard.routes import account as account_route
+from flowboard.routes import account_admin as account_admin_route
 from flowboard.routes import cloud as cloud_route
 from flowboard import accounts
 from flowboard.routes import exports as exports_route
@@ -193,7 +194,7 @@ app.add_middleware(
 
 #: Reachable without a login: logging in itself, health, and the extension's
 #: callback (authenticated by its own secret).
-OPEN_PATHS = {"/api/account/login", "/api/account/me", "/api/account/register", "/api/health", "/api/ext/callback"}
+OPEN_PATHS = {"/api/account/login", "/api/account/me", "/api/health", "/api/ext/callback"}
 
 
 @app.middleware("http")
@@ -246,6 +247,7 @@ async def _require_login(request: FastAPIRequest, call_next):
 
 
 app.include_router(account_route.router)
+app.include_router(account_admin_route.router)
 app.include_router(cloud_route.router)
 app.include_router(boards.router)
 app.include_router(templates.router)

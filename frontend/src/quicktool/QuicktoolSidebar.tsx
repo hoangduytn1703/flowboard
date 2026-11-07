@@ -2,6 +2,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { AccountPanel } from "../components/AccountPanel";
 import { UserChip } from "../components/UserChip";
 import { CreditBadge } from "../components/CreditBadge";
+import { useAccountStore } from "../store/account";
 import { useBoardStore } from "../store/board";
 import { useSettingsStore } from "../store/settings";
 
@@ -16,6 +17,7 @@ const CANVAS_IN_MENU = false;
 export function QuicktoolSidebar() {
   const setUiMode = useSettingsStore((s) => s.setUiMode);
   const boardId = useBoardStore((s) => s.boardId);
+  const isAdmin = useAccountStore((s) => !!s.me?.is_admin);
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const homeActive = pathname === "/clips" || pathname === "/clips/new" || pathname === "/clips/from-video";
@@ -93,6 +95,12 @@ export function QuicktoolSidebar() {
           <button type="button" className="qt-nav__item" onClick={() => { setUiMode("canvas"); navigate(boardId !== null ? `/canvas/${boardId}` : "/canvas"); }}
                   title="Bảng node kéo thả — chỉnh từng node, nối dây, chat AI">
             <span className="qt-nav__icon">🧩</span> Canvas (kéo thả node)
+          </button>
+        )}
+        {isAdmin && (
+          <button type="button" className={`qt-nav__item${is("/accounts") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/accounts")}
+                  title="Chỉ tài khoản quản trị: tạo tài khoản cho người khác, đặt lại mật khẩu, khoá / mở khoá">
+            <span className="qt-nav__icon">👥</span> Quản lý tài khoản
           </button>
         )}
         <button type="button" className={`qt-nav__item${is("/settings") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/settings")}

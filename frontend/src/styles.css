@@ -6387,6 +6387,18 @@ button.chat-dock__presence[aria-expanded="true"] {
   color: var(--muted);
 }
 .user-chip__name { color: var(--text); font-weight: 600; }
+.user-chip { flex-wrap: wrap; row-gap: 4px; }
+.user-chip__actions { display: flex; gap: 12px; margin-left: auto; }
+.user-chip__role { margin-left: 6px; padding: 1px 6px; border-radius: 999px; font-size: 11px; font-weight: 700;
+  color: #ffb489; background: rgba(255, 106, 43, 0.14); border: 1px solid rgba(255, 106, 43, 0.4); vertical-align: 1px; }
+
+/* "Đổi mật khẩu" (components/ChangePasswordDialog) */
+.pw-backdrop { z-index: 1250; } /* the sidebar / page sit above the plain modal layer (240) */
+.project-modal.pw-dialog { width: min(92vw, 440px); display: flex; flex-direction: column; gap: 12px; }
+.pw-dialog__title { margin: 0; font-size: 17px; color: var(--text); }
+.pw-dialog__field { display: flex; flex-direction: column; gap: 5px; font-size: 14px; color: var(--muted); }
+.pw-dialog__show { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); }
+.pw-dialog__hint { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
 
 /* Settings → Dữ liệu: the bucket form */
 .data-sync__box { display: flex; flex-direction: column; gap: 6px; padding: 10px; margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; }

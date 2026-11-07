@@ -40,6 +40,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # One version for everything (the sidebar shows frontend/package.json, the updater compares tauri.conf.json):
+      # a release tag must match all of them — checked before the 13-minute build, not after it.
+      - name: Version check (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          $want = "${{ github.ref_name }}".TrimStart("v")
+          $have = [ordered]@{
+            "desktop/src-tauri/tauri.conf.json" = (Get-Content desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+            "desktop/src-tauri/Cargo.toml" = ([regex]::Match((Get-Content desktop/src-tauri/Cargo.toml -Raw), '(?m)^version = "([^"]+)"')).Groups[1].Value
+            "frontend/package.json" = (Get-Content frontend/package.json -Raw | ConvertFrom-Json).version
+            "agent/pyproject.toml" = ([regex]::Match((Get-Content agent/pyproject.toml -Raw), '(?m)^version = "([^"]+)"')).Groups[1].Value
+          }
+          $bad = $have.GetEnumerator() | Where-Object { $_.Value -ne $want }
+          if ($bad) { throw "tag v$want does not match: " + (($bad | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ", ") }
+
       # ── 1. the agent → resources/agent/dflow-agent.exe ─────────────────────
       - uses: astral-sh/setup-uv@v6
       - name: Agent (PyInstaller)

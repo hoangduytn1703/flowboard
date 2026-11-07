@@ -56,8 +56,8 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   metadata riêng — KHÔNG nằm trong `SQLModel.metadata` để `create_all`/`drop_all` của dữ liệu không đụng tới; sau này
   `FLOWBOARD_CENTRAL_DB_URL` trỏ lên cloud). Mật khẩu `pbkdf2_sha256` 200k vòng (stdlib). Phiên = cookie `fb_session`
   (httponly, 30 ngày), cache 5 phút trong RAM. Tài khoản tạo sẵn khi kho trống: **`akiragosho` / `Password@123`**
-  (`FLOWBOARD_SEED_USER/PASSWORD`). Đăng ký thêm chỉ khi `FLOWBOARD_ALLOW_REGISTER=1` (`POST /api/account/register`),
-  hoặc gọi `accounts.create_user()` trong Python.
+  (`FLOWBOARD_SEED_USER/PASSWORD`). **Không còn đăng ký tự do** (8/11 bỏ `POST /api/account/register` + `FLOWBOARD_ALLOW_REGISTER`):
+  chỉ tài khoản quản trị tạo tài khoản ở menu **👥 Quản lý tài khoản** (xem "Chỗ cần biết" → "Quản lý tài khoản"), hoặc `accounts.create_user()` trong Python.
 - **Dữ liệu mỗi tài khoản**: `storage/accounts/<username>/` (`flowboard.db`, `media/`, `chat_uploads/`). Cột `backend` (JSON)
   của user nói dữ liệu ở đâu: `{"type":"sqlite"}` hôm nay, `{"type":"postgres","url":…}` ở bước B.
 - **Một tài khoản active tại một thời điểm** (agent lái Chrome bên cạnh): request có cookie hợp lệ → middleware `_require_login`
@@ -1409,6 +1409,26 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   toast báo "+ đã thêm vào tin" hoặc cảnh báo lỗi tin; Lịch đăng: "📲" trên thẻ + dòng "Tin" trong chi tiết. Trợ lý AI: `schedule_post` có `story`
   ("thêm vào tin", "đăng tin", "lên story"), chỉ khi tự đăng. Test `test_schedule.py` (+2: ảnh / video / chữ / Facebook từ chối / đổi lựa chọn; cắt video 70 s
   bằng ffmpeg thật), `test_assistant.py`. **Chưa đăng tin thật lên Page.**
+- **👥 Quản lý tài khoản + Đổi mật khẩu** (8/11, người dùng: "chỉ account akiragosho tạo được tài khoản, có menu quản lý; tài khoản khác chỉ đổi mật khẩu"):
+  bảng `account_user` (kho trung tâm) thêm cột `role` ("admin" | "user"), `disabled` (0/1), `note` — `accounts._ensure_user_columns` ALTER vào kho cũ
+  (Neon) lúc mở `central_engine()` và gán `role = admin` cho `SEED_USER` khi chưa ai là admin; cột NULL = user / không khoá, nên agent bản cũ chạy cùng
+  kho vẫn được. `accounts.is_admin`, `new_account_backend` (máy có `FLOWBOARD_CENTRAL_DB_URL` → `{"type":"postgres","schema":"acct_<tên>"}`, tài khoản mới lên
+  cloud ngay, không cần "Chuyển lên cloud"; `init_db` tự `CREATE SCHEMA`), `revoke_sessions(username, keep=)`, `set_disabled` (khoá = xoá mọi phiên),
+  `set_note`, `account_overview` (phiên gần nhất + tên máy). `authenticate` từ chối tài khoản khoá ("đã bị khoá…"), `resolve_session` trả None. Đăng nhập
+  ghi tên máy chạy agent (`socket.gethostname()`), chỉ ghi IP khi gọi từ máy khác. Routes `routes/account_admin.py` (chỉ admin, còn lại 403):
+  `GET /api/admin/accounts`, `POST` {username, password, note, cloud}, `PATCH /{username}` {disabled, note} (không khoá được admin),
+  `POST /{username}/password` {new} (không áp cho admin — admin đổi ở "Đổi mật khẩu"; đăng xuất mọi phiên của người đó), `POST /{username}/logout`.
+  `POST /api/account/password` từ chối mật khẩu mới trùng cũ, đăng xuất các máy khác (giữ trình duyệt đang dùng), trả `logged_out`. `/api/account/me`
+  có `is_admin`. Frontend: `api/account.ts` (`call()` giữ câu lỗi của agent, `listAccounts`, `createAccount`, `updateAccount`, `resetAccountPassword`,
+  `logoutAccountEverywhere`, `randomPassword` — bỏ 0/O/1/l/I), `components/ChangePasswordDialog.tsx` (portal ra `<body>`, lớp `.pw-backdrop` z 1250 — sidebar /
+  trang nằm trên lớp modal 240), `UserChip` có nhãn "quản trị" + "Đổi mật khẩu" · "Đăng xuất", sidebar mục **👥 Quản lý tài khoản** chỉ hiện khi `me.is_admin`,
+  route `/accounts` (`pages/AccountsPage.tsx` + `accounts.css`, tiền tố `acc-`): tạo tài khoản (mật khẩu ngẫu nhiên 🎲, ghi chú, ô "lưu trên cloud"), khung
+  "✓ Đã tạo" + "📋 Copy để gửi" (mật khẩu chỉ hiện lúc đó), bảng tài khoản (vai trò, khoá, ghi chú ✎, ☁ Cloud / 💻 Một máy, đăng nhập gần nhất + máy + số phiên,
+  🔑 Đặt lại mật khẩu (copy luôn thông tin đăng nhập), 🔒 Khoá / 🔓 Mở khoá, ⎋ Đăng xuất mọi máy); tài khoản thường mở `/accounts` thấy "Chỉ tài khoản quản
+  trị…". Khoá / đổi mật khẩu có hiệu lực ngay trên máy đó; máy khác nhận ra trong ≤ 5 phút (cache phiên trong RAM). Không xoá tài khoản (dữ liệu) — chỉ khoá.
+  **Không dạy trợ lý AI** (tạo tài khoản / mật khẩu qua chat không hợp). Test `test_account_admin.py` (7), `test_account_login.py` (open sign-up test thay bằng
+  "không có đăng ký tự do"). Thử thật bằng Playwright trên agent tách riêng (cổng 8534, `FLOWBOARD_HOME` tạm, kho SQLite, không Neon). **Bảo mật chỉ ở mức
+  app**: máy bạn bè vẫn phải có chuỗi Neon đầy đủ quyền (đọc được mọi schema / bảng trung tâm) — muốn chặn thật phải làm Phase C (API riêng đứng giữa).
 - **Đăng xuất Flow phải bấm 2 lần** (21/10, `SettingsPanel.tsx`): lần đầu nút đổi thành "Bấm lần nữa để đăng xuất…" + "Huỷ",
   tự quay lại sau 5 s / khi đóng hộp; xong có toast (`AccountPanel.handleLogout`). Nút chỉ có ở hộp Cài đặt mở từ ⚙ cạnh tài khoản.
 
@@ -1544,8 +1564,9 @@ của người dùng (console.neon.tech, secure.backblaze.com).
     `frontend/src/lib/desktopApp.ts` (`inDesktopApp`, `checkAppUpdate`, `installAppUpdate`), `components/AppUpdate.tsx` (`AppUpdateBanner` ở `App.tsx`: kiểm
     sau 20 s rồi mỗi 6 giờ, "Để sau" giấu đúng bản đó; `AppVersionSection` ở 🖥 Máy này; có việc đang chạy thì hỏi trước). Nguồn bản mới: repo **công khai**
     `hoangduytn1703/dflow-releases` (chỉ chứa bản cài; người dùng chọn 7/11) — `latest.json` ở `releases/latest/download/latest.json`, khoá công khai trong
-    `tauri.conf.json > plugins.updater.pubkey`, bản build có `createUpdaterArtifacts` (ra thêm `.exe.sig`). **Phát hành**: tăng `version` ở `tauri.conf.json`
-    + `Cargo.toml`, commit, `git tag vX.Y.Z && git push origin vX.Y.Z` → workflow build, kiểm tag = version, viết `latest.json`, `gh release create` trên
+    `tauri.conf.json > plugins.updater.pubkey`, bản build có `createUpdaterArtifacts` (ra thêm `.exe.sig`). **Phát hành**: **một số phiên bản chung** (8/11, trước đó giao diện 1.4.0 còn app 0.1.x — gộp thành 1.5.0): tăng `version` ở
+    `frontend/package.json` (+ 2 dòng gốc của `package-lock.json`), `agent/pyproject.toml`, `tauri.conf.json`, `Cargo.toml` (workflow bước "Version check" từ chối tag
+    lệch trước khi build), commit, `git tag vX.Y.Z && git push origin vX.Y.Z` → workflow build, kiểm tag = version, viết `latest.json`, `gh release create` trên
     dflow-releases (`GH_TOKEN = secrets.RELEASES_TOKEN`). Secrets repo code: `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, `RELEASES_TOKEN`
     (người dùng đã đặt 7/11 bằng script — lệnh ghi secret của Claude bị chặn quyền; `RELEASES_TOKEN` = token `gh` của người dùng, có quyền mọi repo — muốn gọn
     thì thay bằng fine-grained token chỉ cho dflow-releases). Đẩy tag thì đừng `git push --tags`: repo còn tag cũ v1.x trên máy (không có trên origin). **Khoá ký chỉ có ở máy nhà**: `%USERPROFILE%\.flowboard\dflow-updater.key` + `.password`
@@ -1913,4 +1934,6 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
 - **7/11 khuya** — App desktop: dữ liệu mặc định **ngoài ổ C** (`D:\DFlowData` hoặc ổ cố định khác còn ≥ 5 GB, nhớ trong `home.txt`; máy chỉ có ổ C mới dùng `%LOCALAPPDATA%\DFlowData`), hồ sơ WebView2 theo cùng thư mục, trang chờ hiện đúng đường dẫn log. `desktop/src-tauri/src/main.rs`, `desktop/ui/index.html`, README. Chưa build thử (CI).
 - **7/11 khuya** — **Bộ cài app đầu tiên build thành công** trên GitHub Actions (run 42378801551, 13 phút, sau 1 lần sửa E0597): `DFlow_0.1.0_x64-setup.exe` 185 MB, đã tải về máy nhà `D:\DFlow-Setup\`. Chưa cài thử (người dùng tự cài). Actions báo Node 20 bị ép lên Node 24 cho checkout / setup-node / upload-artifact / setup-uv v4–v6 — chỉ là cảnh báo.
 - **7/11 khuya** — App 0.1.1: hộp hỏi riêng `components/Dialogs.tsx` thay 41 chỗ `window.confirm` / `window.prompt` (WebView2 của app không hiện hộp gốc → "Đăng ngay" không đăng được); `tsc` sạch. Phát hiện qua `agent.log` của app: cả phiên không có `POST /api/posts` / `/api/schedule`. Người dùng tự xoá 16 bài đã lưu trên Neon lúc 21:59 (cố ý). Ảnh cũ 404 = file chưa lên B2 (xem Bẫy). Build lại bộ cài qua `gh workflow run desktop.yml`.
-- **7/11 khuya** — App tự cập nhật (0.1.2): updater plugin + 2 lệnh Rust, capability cho trang 127.0.0.1:8434, thanh "Có bản DFlow mới" + mục phiên bản ở 🖥 Máy này, repo công khai `dflow-releases` (đã tạo), workflow ký + đăng `latest.json` khi đẩy tag `v*`, khoá ký ở `%USERPROFILE%\.flowboard`. README cập nhật. `tsc` sạch. Người dùng tự chạy script đặt 3 secret (Claude bị chặn ghi secret); push `main` + tag `v0.1.2` → run 42395099764 lỗi (thiếu `serde_json`, xem Bẫy) → thêm vào `Cargo.toml`, gắn lại tag `v0.1.2` vào commit sửa.
+- **7/11 khuya** — App tự cập nhật (0.1.2): updater plugin + 2 lệnh Rust, capability cho trang 127.0.0.1:8434, thanh "Có bản DFlow mới" + mục phiên bản ở 🖥 Máy này, repo công khai `dflow-releases` (đã tạo), workflow ký + đăng `latest.json` khi đẩy tag `v*`, khoá ký ở `%USERPROFILE%\.flowboard`. README cập nhật. `tsc` sạch. Người dùng tự chạy script đặt 3 secret (Claude bị chặn ghi secret); push `main` + tag `v0.1.2` → run 42395099764 lỗi (thiếu `serde_json`, xem Bẫy) → thêm vào `Cargo.toml`, gắn lại tag `v0.1.2` vào commit sửa. Run 42395718864 xong (~13 phút): release v0.1.2 trên dflow-releases có `DFlow_0.1.2_x64-setup.exe` (186 MB) + `latest.json` (chữ ký, 2 khoá platform); đã tải về `D:\DFlow-Setup\` cho người dùng cài tay.
+- **8/11** — 👥 Quản lý tài khoản (chỉ akiragosho, vai trò `admin` trên kho trung tâm): tạo tài khoản (lên cloud ngay khi máy có Neon), đặt lại mật khẩu, khoá / mở khoá, ghi chú, đăng xuất mọi máy; mọi tài khoản có "Đổi mật khẩu" ở chân sidebar (đăng xuất các máy khác); bỏ đăng ký tự do. `accounts.py` (cột `role` / `disabled` / `note` + ALTER cho kho cũ), `routes/account_admin.py`, `routes/account.py`, `main.py`, `api/account.ts`, `ChangePasswordDialog.tsx`, `UserChip.tsx`, `AccountsPage.tsx`, `accounts.css`, `QuicktoolSidebar.tsx`, `QuicktoolApp.tsx`, `styles.css`. Test `test_account_admin.py` 7 + login / cloud / app / assistant / running 37 pass, cả bộ 1161 pass / 2 skip (bỏ các file lỗi môi trường Windows đã biết), `tsc` sạch; Playwright trên agent tách riêng (tạo, khoá → đăng nhập bị từ chối, mở khoá, tài khoản thường không thấy menu + đổi mật khẩu, đặt lại mật khẩu → bị đăng xuất). **Chưa chạy trên Neon thật** — lần đầu agent / app bản mới mở kho trung tâm sẽ ALTER thêm 3 cột (không mất gì). Commit + phát hành trong v1.5.0.
+- **8/11** — Gộp số phiên bản (người dùng thấy sidebar ghi v1.4 mà app là 0.1.2): mọi chỗ thành **1.5.0** (`frontend/package.json` + lock, `agent/pyproject.toml`, `tauri.conf.json`, `Cargo.toml`, `desktop/package.json` + lock); workflow thêm bước "Version check (tags only)" ngay sau checkout. App 0.1.2 vẫn nhận 1.5.0 là bản mới. Commit + push + tag `v1.5.0` (người dùng đồng ý).

@@ -18,6 +18,11 @@ Switching accounts waits for the worker to finish the job in flight.
 
 ``FLOWBOARD_AUTH=off`` keeps the old single-user behaviour (the tests run
 that way): no login, the default ``storage/flowboard.db``.
+
+Roles (8/11): the seed account is the **admin** — the only one that creates
+accounts, resets passwords and locks accounts (``routes/account_admin.py``);
+every other account can only change its own password. A locked account
+cannot log in and its sessions are dropped.
 """
 from __future__ import annotations
 
@@ -35,7 +40,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, Text, select
+from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, Text, func, inspect, select
 from sqlalchemy.engine import Engine
 
 from flowboard import config
@@ -60,7 +65,16 @@ users = Table(
     Column("password_hash", String(256), nullable=False),
     Column("created_at", DateTime, nullable=False),
     Column("backend", Text, nullable=False, default="{}"),
+    # Added 8/11 (ALTERed onto older stores by _ensure_user_columns; NULL = "user" / not locked / no note,
+    # so agents still running older code keep working against the same store).
+    Column("role", String(16)),
+    Column("disabled", Integer),
+    Column("note", Text),
 )
+ROLE_ADMIN = "admin"
+ROLE_USER = "user"
+#: Columns added after the first release: name → SQL type for ALTER TABLE.
+_LATE_USER_COLUMNS = {"role": "VARCHAR(16)", "disabled": "INTEGER", "note": "TEXT"}
 #: Settings every machine should share once it logs in (the media bucket…).
 settings_t = Table(
     "account_setting", central_md,
@@ -119,7 +133,21 @@ def central_engine() -> Engine:
         Path(config.STORAGE_DIR).mkdir(parents=True, exist_ok=True)
         _central["engine"] = make_engine(url)
         central_md.create_all(_central["engine"])
+        _ensure_user_columns(_central["engine"])
     return _central["engine"]
+
+
+def _ensure_user_columns(eng: Engine) -> None:
+    """Older central stores (Neon since 22/10) lack the 8/11 columns: add them,
+    and make the seed account the admin when nobody is one yet."""
+    have = {c["name"] for c in inspect(eng).get_columns("account_user")}
+    with eng.begin() as c:
+        for name, sql_type in _LATE_USER_COLUMNS.items():
+            if name not in have:
+                c.exec_driver_sql(f"ALTER TABLE account_user ADD COLUMN {name} {sql_type}")
+                logger.info("accounts: added account_user.%s", name)
+        if c.execute(select(users.c.id).where(users.c.role == ROLE_ADMIN)).first() is None:
+            c.execute(users.update().where(users.c.username == SEED_USER).values(role=ROLE_ADMIN))
 
 
 def reset_central() -> None:
@@ -175,7 +203,12 @@ def _row_to_user(row: Any) -> dict:
     except ValueError:
         backend = {}
     return {"id": row.id, "username": row.username, "created_at": row.created_at, "backend": backend,
-            "password_hash": row.password_hash}
+            "password_hash": row.password_hash, "role": getattr(row, "role", None) or ROLE_USER,
+            "disabled": bool(getattr(row, "disabled", None)), "note": getattr(row, "note", None) or ""}
+
+
+def is_admin(user: Optional[dict]) -> bool:
+    return bool(user) and user.get("role") == ROLE_ADMIN  # type: ignore[union-attr]
 
 
 def get_user(username: str) -> Optional[dict]:
@@ -190,7 +223,8 @@ def list_users() -> list[dict]:
     return [{k: v for k, v in _row_to_user(r).items() if k != "password_hash"} for r in rows]
 
 
-def create_user(username: str, password: str, backend: Optional[dict] = None) -> dict:
+def create_user(username: str, password: str, backend: Optional[dict] = None, *,
+                role: str = ROLE_USER, note: str = "") -> dict:
     username = username.strip().lower()
     if not username or len(username) > 64 or not all(ch.isalnum() or ch in "._-" for ch in username):
         raise AuthError("Tên đăng nhập chỉ gồm chữ, số, dấu . _ - (tối đa 64 ký tự).")
@@ -200,8 +234,74 @@ def create_user(username: str, password: str, backend: Optional[dict] = None) ->
         raise AuthError("Tên đăng nhập đã có.")
     with central_engine().begin() as c:
         c.execute(users.insert().values(username=username, password_hash=hash_password(password),
-                                        created_at=_now(), backend=json.dumps(backend or {"type": "sqlite"})))
+                                        created_at=_now(), backend=json.dumps(backend or {"type": "sqlite"}),
+                                        role=role, disabled=0, note=(note or "").strip()[:500] or None))
     return get_user(username)  # type: ignore[return-value]
+
+
+def new_account_backend(username: str, cloud: bool = True) -> dict:
+    """Where a new account keeps its data: its own schema in the cloud database
+    when this machine has one (log in from any machine, no "move to cloud"
+    step), else a SQLite file on this machine."""
+    if cloud and central_url():
+        return {"type": "postgres", "schema": schema_for(username)}
+    return {"type": "sqlite"}
+
+
+def _forget_user_sessions(user_id: int, keep: Optional[str] = None) -> None:
+    for tok, (u, _at) in list(_session_cache.items()):
+        if u["id"] == user_id and tok != keep:
+            _session_cache.pop(tok, None)
+
+
+def revoke_sessions(username: str, keep: Optional[str] = None) -> int:
+    """Log the account out everywhere (but the session ``keep``). Other machines
+    notice within their 5-minute session cache."""
+    user = get_user(username)
+    if user is None:
+        return 0
+    with central_engine().begin() as c:
+        q = sessions.delete().where(sessions.c.user_id == user["id"])
+        if keep:
+            q = q.where(sessions.c.token != keep)
+        n = c.execute(q).rowcount or 0
+    _forget_user_sessions(user["id"], keep)
+    return n
+
+
+def set_disabled(username: str, disabled: bool) -> None:
+    with central_engine().begin() as c:
+        c.execute(users.update().where(users.c.username == username).values(disabled=1 if disabled else 0))
+    if disabled:
+        revoke_sessions(username)
+
+
+def set_note(username: str, note: str) -> None:
+    with central_engine().begin() as c:
+        c.execute(users.update().where(users.c.username == username).values(note=(note or "").strip()[:500] or None))
+
+
+def account_overview() -> list[dict]:
+    """Every account for the admin page: role, locked, note, where the data
+    lives, and its last session (when / from which machine)."""
+    with central_engine().connect() as c:
+        rows = c.execute(select(users).order_by(users.c.id)).all()
+        stats = c.execute(select(sessions.c.user_id, func.count(), func.max(sessions.c.last_seen))
+                          .group_by(sessions.c.user_id)).all()
+        last_host: dict[int, Optional[str]] = {}
+        for r in c.execute(select(sessions.c.user_id, sessions.c.host).order_by(sessions.c.last_seen)).all():
+            last_host[r.user_id] = r.host
+    by_user = {s[0]: (s[1], s[2]) for s in stats}
+    out = []
+    for r in rows:
+        u = _row_to_user(r)
+        n, last = by_user.get(u["id"], (0, None))
+        out.append({"username": u["username"], "role": u["role"], "disabled": u["disabled"], "note": u["note"],
+                    "created_at": u["created_at"].isoformat() if u["created_at"] else None,
+                    "backend": (u["backend"] or {}).get("type", "sqlite"),
+                    "sessions": int(n or 0), "last_seen": last.isoformat() if last else None,
+                    "last_host": last_host.get(u["id"])})
+    return out
 
 
 def set_password(username: str, new_password: str) -> None:
@@ -215,7 +315,7 @@ def seed_default() -> bool:
     """The seed account, once, when there is no user at all."""
     if list_users():
         return False
-    create_user(SEED_USER, SEED_PASSWORD)
+    create_user(SEED_USER, SEED_PASSWORD, role=ROLE_ADMIN)
     logger.info("accounts: seeded user %s", SEED_USER)
     return True
 
@@ -224,6 +324,8 @@ def authenticate(username: str, password: str) -> dict:
     user = get_user(username or "")
     if user is None or not verify_password(password or "", user["password_hash"]):
         raise AuthError("Sai tên đăng nhập hoặc mật khẩu.")
+    if user["disabled"]:
+        raise AuthError("Tài khoản này đã bị khoá. Hỏi người quản trị DFlow để mở lại.")
     return user
 
 
@@ -258,6 +360,8 @@ def resolve_session(token: Optional[str]) -> Optional[dict]:
     if urow is None:
         return None
     user = _row_to_user(urow)
+    if user["disabled"]:
+        return None
     with central_engine().begin() as c:
         c.execute(sessions.update().where(sessions.c.token == token).values(last_seen=_now()))
     _session_cache[token] = (user, time.time())

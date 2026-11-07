@@ -100,12 +100,12 @@ def test_first_login_adopts_the_old_single_user_data(auth_app, tmp_path):
     assert not (tmp_path / "flowboard.db").exists()
 
 
-def test_register_is_closed_unless_enabled(auth_app, monkeypatch):
-    assert auth_app.post("/api/account/register", json={"username": "new", "password": "secret123"}).status_code == 403
+def test_there_is_no_open_sign_up(auth_app, monkeypatch):
+    """Accounts are made by the admin only (test_account_admin.py)."""
     monkeypatch.setenv("FLOWBOARD_ALLOW_REGISTER", "1")
-    assert auth_app.post("/api/account/register", json={"username": "new", "password": "secret123"}).status_code == 201
-    assert auth_app.post("/api/account/register", json={"username": "new", "password": "secret123"}).status_code == 400
-    assert auth_app.post("/api/account/register", json={"username": "bad name!", "password": "secret123"}).status_code == 400
+    r = auth_app.post("/api/account/register", json={"username": "new", "password": "secret123"})
+    assert r.status_code in (401, 404, 405)
+    assert accounts.get_user("new") is None
 
 
 def test_change_password(auth_app):

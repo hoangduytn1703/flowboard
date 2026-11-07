@@ -3,14 +3,15 @@
   POST /api/account/login     {username, password} → sets the session cookie
   POST /api/account/logout
   GET  /api/account/me        → 401 when not logged in
-  POST /api/account/password  {current, new}
-  POST /api/account/register  {username, password}  (only with FLOWBOARD_ALLOW_REGISTER=1)
+  POST /api/account/password  {current, new}  (logs the account out on its other machines)
   GET  /api/account/prefs     → the UI preferences saved for this account (model picks …)
   PUT  /api/account/prefs     {…} → stored in the account's database (follows the login)
+
+New accounts are made by the admin only (routes/account_admin.py) — there is
+no open sign-up.
 """
 from __future__ import annotations
 
-import os
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -43,7 +44,7 @@ def _set_cookie(resp: Response, token: str) -> None:
 
 def _me_payload(user: dict) -> dict:
     return {"auth": True, "username": user["username"], "created_at": user["created_at"].isoformat() if user.get("created_at") else None,
-            "backend": (user.get("backend") or {}).get("type", "sqlite")}
+            "backend": (user.get("backend") or {}).get("type", "sqlite"), "is_admin": accounts.is_admin(user)}
 
 
 @router.post("/login")
@@ -58,7 +59,11 @@ def login(body: LoginBody, request: Request, response: Response) -> dict:
         accounts.activate(user)
     except accounts.AccountBusy as exc:
         raise HTTPException(409, str(exc))
-    token = accounts.create_session(user, host=request.client.host if request.client else None)
+    # The agent runs on the user's own machine, so a local caller is "this machine" (its name);
+    # only a caller from elsewhere is recorded by address.
+    client = request.client.host if request.client else None
+    remote = client not in (None, "127.0.0.1", "::1", "localhost", "testclient")
+    token = accounts.create_session(user, host=client if remote else None)
     _set_cookie(response, token)
     return _me_payload(user)
 
@@ -87,22 +92,15 @@ def change_password(body: PasswordBody, request: Request) -> dict:
         raise HTTPException(401, "Chưa đăng nhập")
     if not accounts.verify_password(body.current, user["password_hash"]):
         raise HTTPException(400, "Mật khẩu hiện tại không đúng.")
+    if body.new == body.current:
+        raise HTTPException(400, "Mật khẩu mới phải khác mật khẩu hiện tại.")
     try:
         accounts.set_password(user["username"], body.new)
     except accounts.AuthError as exc:
         raise HTTPException(400, str(exc))
-    return {"ok": True}
-
-
-@router.post("/register", status_code=201)
-def register(body: LoginBody) -> dict:
-    if os.getenv("FLOWBOARD_ALLOW_REGISTER") != "1":
-        raise HTTPException(403, "Chưa mở đăng ký. Đặt FLOWBOARD_ALLOW_REGISTER=1 trong .env để tạo tài khoản mới.")
-    try:
-        user = accounts.create_user(body.username, body.password)
-    except accounts.AuthError as exc:
-        raise HTTPException(400, str(exc))
-    return {"username": user["username"]}
+    # Whoever else knew the old password is logged out; this browser stays in.
+    others = accounts.revoke_sessions(user["username"], keep=request.cookies.get(accounts.SESSION_COOKIE))
+    return {"ok": True, "logged_out": others}
 
 
 @router.get("/prefs")
