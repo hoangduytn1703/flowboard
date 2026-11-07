@@ -19,7 +19,7 @@ Không phải ai cũng cần hết. Phần **lõi** là bắt buộc; các dòng
 
 | Nhu cầu | Bắt buộc | Tuỳ chọn |
 |---|---|---|
-| **Lõi** (mở app, sản phẩm, người mẫu, prompt, lịch) | Python 3.11+, Node 20+, `ffmpeg` + `ffprobe` trên PATH, Chrome | `uv` (cài nhanh hơn pip) |
+| **Lõi** (mở app, sản phẩm, người mẫu, prompt, lịch) | **uv** (khuyên dùng — tự tải Python 3.11) hoặc Python 3.11 từ python.org, Node 20+, `ffmpeg` + `ffprobe` trên PATH, Chrome | — |
 | **Clip quảng cáo** (ảnh + video) | Lõi + tài khoản Google có **Flow gói Pro / Ultra**, extension **DFlow Bridge** trong Chrome, một tab `flow.google.com` đã đăng nhập, một project Flow | — |
 | **AI viết kịch bản, bài viết, trợ lý, lời thoại** | Một AI trong Cài đặt → AI Providers: **Claude Code CLI** (`claude`), **Gemini CLI** (`agy`) hoặc **Codex CLI** (`codex`) đã đăng nhập | — |
 | **Đọc sản phẩm từ link, clip theo link / video mẫu, giọng Gemini, rà tên riêng khi lồng tiếng** | **Gemini API key** (miễn phí ở aistudio.google.com, nhập ở Cài đặt → Gemini key; nên có nhiều key) | — |
@@ -36,7 +36,24 @@ Không phải ai cũng cần hết. Phần **lõi** là bắt buộc; các dòng
 
 ### Windows (khuyên dùng)
 
-1. Cài Python 3.11, Node 20, Git, ffmpeg (`winget install Gyan.FFmpeg`), Chrome. Mở terminal mới để PATH nhận ffmpeg.
+1. Cài **uv**, Node 20, Git, ffmpeg, Chrome rồi mở terminal mới (để PATH nhận các lệnh vừa cài):
+
+   ```powershell
+   winget install astral-sh.uv
+   winget install OpenJS.NodeJS.LTS
+   winget install Git.Git
+   winget install Gyan.FFmpeg
+   ```
+
+   uv là trình cài thư viện Python (thay pip, nhanh hơn nhiều) và **tự tải Python 3.11** khi tạo môi trường — không cần cài Python riêng.
+   Không dùng uv thì cài Python 3.11 từ python.org (tick "py launcher"); `start.ps1` sẽ dùng `py -3.11` + pip.
+
+   **Giữ ổ C gọn**: uv lưu bản sao mọi thư viện đã tải (cache) ở `%LOCALAPPDATA%\uv\cache` — có thể lên hơn 10 GB nếu cài thêm bộ lồng tiếng (torch).
+   Đặt cache cùng ổ với code thì vừa đỡ tốn ổ C vừa cài nhanh hơn (uv liên kết file thay vì chép khi cùng ổ):
+
+   ```powershell
+   [Environment]::SetEnvironmentVariable('UV_CACHE_DIR', 'D:\uv-cache', 'User')   # rồi mở terminal mới
+   ```
 2. Lấy code: `git clone git@github.com:hoangduytn1703/flowboard.git` rồi `cd flowboard`.
 3. Chạy lần đầu, kèm project Flow và gói:
 
@@ -60,7 +77,8 @@ make agent              # API :8434, WebSocket extension :8355
 make frontend           # giao diện :5174 (terminal khác)
 ```
 
-Bước extension, tab Flow và đăng nhập giống Windows. Không có `sudo`: cài `uv` và ffmpeg vào `~/.local/bin`.
+Bước extension, tab Flow và đăng nhập giống Windows. Cài uv: `curl -LsSf https://astral.sh/uv/install.sh | sh` (vào `~/.local/bin`, không cần `sudo`);
+ffmpeg cũng có thể đặt ở `~/.local/bin`. Cache của uv ở `~/.cache/uv` (đổi bằng `UV_CACHE_DIR`).
 
 **Cổng cố định** (đừng đổi — extension và Vite ghi cứng): giao diện **5174**, API **8434**, WebSocket extension **8355**.
 Chạy song song được với flowkit (5173 / 8100 / 9222).
