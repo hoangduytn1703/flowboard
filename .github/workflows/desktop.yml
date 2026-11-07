@@ -1,6 +1,7 @@
 # Builds the Windows installer of the DFlow desktop app (Tauri 2 shell + the agent bundled with PyInstaller).
 #
 #   Actions → "Desktop app" → Run workflow   → the installer is attached to the run (Artifacts: DFlow-Setup)
+#   a push to main that touches desktop/, agent/packaging/ or this file → same
 #   git tag v0.1.1 && git push origin v0.1.1 → same, plus a GitHub Release with the installer
 #
 # No Rust / Visual Studio is needed on anyone's machine: windows-latest has both.
@@ -10,6 +11,12 @@ on:
   workflow_dispatch:
   push:
     tags: ["v*"]
+    # a change to the app itself builds an installer too (Artifacts of the run)
+    branches: [main]
+    paths:
+      - "desktop/**"
+      - "agent/packaging/**"
+      - ".github/workflows/desktop.yml"
 
 permissions:
   contents: write
