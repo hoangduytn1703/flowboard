@@ -6,6 +6,8 @@
 - **Lồng tiếng** video nước ngoài (Douyin, TikTok, YouTube…) sang tiếng Việt, có phụ đề.
 - **Viết bài Facebook**, **lên lịch** và **tự đăng** lên Facebook Page.
 
+> **Người mới chỉ cần cài app?** Gửi họ trang hướng dẫn ngắn: **https://hoangduytn1703.github.io/dflow-releases/** (không cần tài khoản GitHub).
+
 DFlow chạy trên máy của bạn (không phải trang web có sẵn), nên cần cài một lần theo hướng dẫn dưới đây. Làm lần lượt từng bước, mỗi bước
 đều ghi rõ **phải gõ gì** và **sẽ thấy gì**.
 
