@@ -71,8 +71,8 @@ Có 2 cách. **Cách 1 (file cài đặt)** dễ nhất — không phải cài P
 
 ### Cách 1 — Cài bằng file DFlow-Setup.exe (dễ nhất)
 
-1. **Lấy file cài đặt** `DFlow_..._x64-setup.exe` (~150 MB): chủ DFlow gửi cho bạn, hoặc (nếu được mời vào kho code) vào trang
-   **github.com/hoangduytn1703/flowboard/releases** tải file mới nhất.
+1. **Lấy file cài đặt** `DFlow_..._x64-setup.exe` (~185 MB) ở trang **github.com/hoangduytn1703/dflow-releases/releases** (bản mới nhất ở
+   trên cùng, mục Assets) — hoặc chủ DFlow gửi cho bạn.
 2. **Chạy file đó.** Windows có thể hiện màn hình xanh *"Windows protected your PC"* (vì file chưa ký số) → bấm **More info** → **Run anyway**.
    Bấm Next / Install, không cần quyền quản trị. Ở trang **Choose Install Location** có thể đổi sang ổ khác (ví dụ `D:\DFlow`) cho đỡ tốn ổ C.
    Dữ liệu (ảnh, video, cài đặt, nhật ký) **tự để ngoài ổ C**: DFlow chọn ổ D (hoặc ổ khác còn trống trên 5 GB) và tạo thư mục `D:\DFlowData`;
@@ -97,8 +97,10 @@ Có 2 cách. **Cách 1 (file cài đặt)** dễ nhất — không phải cài P
    - dùng chung dữ liệu với máy khác: dán dòng kết nối được gửi riêng vào ô **Dùng chung dữ liệu** → Lưu → Khởi động lại.
 8. **⚙ Cài đặt → 🔑 Gemini key**: dán Gemini key (lấy ở aistudio.google.com/apikey). **⚙ Cài đặt → ⚡ Google Flow**: chọn project Flow vừa tạo.
 
-**Cập nhật bản mới**: tải file cài bản mới, chạy đè lên (dữ liệu giữ nguyên) — trước khi chạy, thoát DFlow ở khay hệ thống. Sau đó vào
-`chrome://extensions` bấm nút tải lại (↻) ở ô DFlow Bridge.
+**Cập nhật bản mới**: app **tự báo** khi có bản mới (thanh "🎉 Có bản DFlow …" ở dưới màn hình, hoặc **⚙ Cài đặt → 🖥 Máy này → ↻ Kiểm tra
+cập nhật**) → bấm **⬇ Cập nhật ngay**: app tự tải, đóng, cài và mở lại — dữ liệu, đăng nhập giữ nguyên, không phải gỡ ra cài lại. Sau đó vào
+`chrome://extensions` bấm nút tải lại (↻) ở ô DFlow Bridge. File cài mới nhất luôn có ở **github.com/hoangduytn1703/dflow-releases/releases**
+(bản 0.1.1 trở về trước chưa biết tự cập nhật: cài đè bản mới một lần).
 
 > Bản app đã kèm sẵn ffmpeg. Lồng tiếng video vẫn cần bộ VieDub cài riêng ([Mục 6.2](#62-lồng-tiếng-video-xoá-phụ-đề-ai-giọng-vieneu)) —
 > khai báo đường dẫn ở Cài đặt → 🖥 Máy này. Phụ đề kiểu Remotion chưa có trong bản app (dùng kiểu ffmpeg).

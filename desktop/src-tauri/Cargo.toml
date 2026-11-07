@@ -1,6 +1,6 @@
 [package]
 name = "dflow"
-version = "0.1.1"
+version = "0.1.2"
 description = "DFlow desktop: the agent (Python, bundled with PyInstaller) in the background + its web UI in a window"
 authors = ["DuyNH"]
 edition = "2021"
@@ -11,6 +11,8 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-single-instance = "2"
+tauri-plugin-updater = "2"
+serde = { version = "1", features = ["derive"] }
 
 [profile.release]
 codegen-units = 1

@@ -6546,3 +6546,8 @@ button.chat-dock__presence[aria-expanded="true"] {
 .project-modal.dlg { width: min(92vw, 480px); display: flex; flex-direction: column; gap: 14px; }
 .dlg__message { margin: 0; font-size: 15px; line-height: 1.55; color: var(--text); white-space: pre-wrap; }
 
+/* "Có bản DFlow mới" (components/AppUpdate, desktop app only) */
+.app-update { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 1150; display: flex; align-items: center;
+  gap: 10px; padding: 10px 14px; border-radius: 12px; border: 1px solid rgba(255, 106, 43, 0.6); background: #1f232c;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5); font-size: 14.5px; color: var(--text); max-width: calc(100vw - 32px); flex-wrap: wrap; }
+

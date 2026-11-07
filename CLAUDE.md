@@ -1536,7 +1536,18 @@ của người dùng (console.neon.tech, secure.backblaze.com).
     nữa → chọn lại). Không phải thư mục cài, gỡ / cập nhật không đụng. Hồ sơ WebView2 (cookie đăng nhập, cache) cũng ở `<home>\webview` (`data_directory`);
     trang chờ nhận đường dẫn log thật qua `initialization_script` (`window.__DFLOW_LOG__`). Thư mục cài (~300 MB) mặc định `%LOCALAPPDATA%\DFlow`, đổi ở trang
     Choose Install Location của bộ cài (Tauri NSIS không có tuỳ chọn thư mục cài mặc định).
-  - **Bản app chưa có**: Remotion (cần Node + `frontend/node_modules` → `dub_remotion` tự báo không dùng được, chọn kiểu ffmpeg), auto-update, ký số (Windows hiện màn
+  - **Tự cập nhật (7/11, từ 0.1.2)**: `tauri-plugin-updater` + lệnh riêng `dflow_check_update` / `dflow_install_update` (`main.rs`; tải trước, rồi
+    `stop_agent`, rồi `install` — NSIS chế độ passive, Windows tự đóng app, bộ cài mở lại; cài lỗi → `app.restart()`). Giao diện (trang web ở
+    `http://127.0.0.1:8434`) gọi được nhờ `capabilities/ui.json` (`remote.urls` 127.0.0.1:8434) qua `window.__TAURI_INTERNALS__.invoke` —
+    `frontend/src/lib/desktopApp.ts` (`inDesktopApp`, `checkAppUpdate`, `installAppUpdate`), `components/AppUpdate.tsx` (`AppUpdateBanner` ở `App.tsx`: kiểm
+    sau 20 s rồi mỗi 6 giờ, "Để sau" giấu đúng bản đó; `AppVersionSection` ở 🖥 Máy này; có việc đang chạy thì hỏi trước). Nguồn bản mới: repo **công khai**
+    `hoangduytn1703/dflow-releases` (chỉ chứa bản cài; người dùng chọn 7/11) — `latest.json` ở `releases/latest/download/latest.json`, khoá công khai trong
+    `tauri.conf.json > plugins.updater.pubkey`, bản build có `createUpdaterArtifacts` (ra thêm `.exe.sig`). **Phát hành**: tăng `version` ở `tauri.conf.json`
+    + `Cargo.toml`, commit, `git tag vX.Y.Z && git push origin vX.Y.Z` → workflow build, kiểm tag = version, viết `latest.json`, `gh release create` trên
+    dflow-releases (`GH_TOKEN = secrets.RELEASES_TOKEN`). Secrets repo code: `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, `RELEASES_TOKEN`
+    (người dùng tự đặt — lệnh ghi secret của Claude bị chặn quyền). **Khoá ký chỉ có ở máy nhà**: `%USERPROFILE%\.flowboard\dflow-updater.key` + `.password`
+    (ngoài git) — mất khoá thì mọi app đã cài không nhận bản cập nhật nữa (phải cài tay bản có khoá mới). `api/github.ts` cũng trỏ sang dflow-releases (hết 404).
+  - **Bản app chưa có**: Remotion (cần Node + `frontend/node_modules` → `dub_remotion` tự báo không dùng được, chọn kiểu ffmpeg), ký số (Windows hiện màn
     "Windows protected your PC" → More info → Run anyway), Chrome Web Store cho extension. Lồng tiếng / CapCut / Claude CLI / yt-dlp vẫn dùng đồ cài trên máy như bản repo.
   - Test `test_app_mode.py` (5: `.env` giữ dòng tay + BOM, settings áp gói ngay + cờ restart + không lộ mật khẩu, restart chỉ ở app + 409 khi bận, phục vụ UI + SPA + không
     đọc ngoài thư mục, status chỉ thư mục extension). Thử thật bản PyInstaller trên cổng phụ 8534 / 8455 với HOME tạm: giao diện, F5 trang con, 8 mẫu clip, 43 prompt mẫu,
@@ -1898,3 +1909,4 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
 - **7/11 khuya** — App desktop: dữ liệu mặc định **ngoài ổ C** (`D:\DFlowData` hoặc ổ cố định khác còn ≥ 5 GB, nhớ trong `home.txt`; máy chỉ có ổ C mới dùng `%LOCALAPPDATA%\DFlowData`), hồ sơ WebView2 theo cùng thư mục, trang chờ hiện đúng đường dẫn log. `desktop/src-tauri/src/main.rs`, `desktop/ui/index.html`, README. Chưa build thử (CI).
 - **7/11 khuya** — **Bộ cài app đầu tiên build thành công** trên GitHub Actions (run 42378801551, 13 phút, sau 1 lần sửa E0597): `DFlow_0.1.0_x64-setup.exe` 185 MB, đã tải về máy nhà `D:\DFlow-Setup\`. Chưa cài thử (người dùng tự cài). Actions báo Node 20 bị ép lên Node 24 cho checkout / setup-node / upload-artifact / setup-uv v4–v6 — chỉ là cảnh báo.
 - **7/11 khuya** — App 0.1.1: hộp hỏi riêng `components/Dialogs.tsx` thay 41 chỗ `window.confirm` / `window.prompt` (WebView2 của app không hiện hộp gốc → "Đăng ngay" không đăng được); `tsc` sạch. Phát hiện qua `agent.log` của app: cả phiên không có `POST /api/posts` / `/api/schedule`. Người dùng tự xoá 16 bài đã lưu trên Neon lúc 21:59 (cố ý). Ảnh cũ 404 = file chưa lên B2 (xem Bẫy). Build lại bộ cài qua `gh workflow run desktop.yml`.
+- **7/11 khuya** — App tự cập nhật (0.1.2): updater plugin + 2 lệnh Rust, capability cho trang 127.0.0.1:8434, thanh "Có bản DFlow mới" + mục phiên bản ở 🖥 Máy này, repo công khai `dflow-releases` (đã tạo), workflow ký + đăng `latest.json` khi đẩy tag `v*`, khoá ký ở `%USERPROFILE%\.flowboard`. README cập nhật. `tsc` sạch. **Chờ người dùng chạy script đặt 3 secret** (Claude bị chặn ghi secret) rồi mới push + tag v0.1.2.

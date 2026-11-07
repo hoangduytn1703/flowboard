@@ -11,6 +11,7 @@ import { ProjectSidebar } from "./components/ProjectSidebar";
 import { ReferencesPanel } from "./components/ReferencesPanel";
 import { Toaster } from "./components/Toaster";
 import { DialogHost } from "./components/Dialogs";
+import { AppUpdateBanner } from "./components/AppUpdate";
 import { AppLoading } from "./components/AppLoading";
 import { GenerationDialog } from "./components/GenerationDialog";
 import { ResultViewer } from "./components/ResultViewer";
@@ -92,6 +93,7 @@ function AppInner() {
       </Routes>
       <Toaster />
       <DialogHost />
+      <AppUpdateBanner />
       <GenerationDialog />
       <ResultViewer />
       <ForcedSetupGate />

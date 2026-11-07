@@ -11,7 +11,10 @@
 //     once it answers;
 //   * keeps one instance, and keeps running in the tray when the window is
 //     closed (scheduled posts need the agent alive);
-//   * opens links that want a new window in the normal browser.
+//   * opens links that want a new window in the normal browser;
+//   * updates itself: the web UI calls dflow_check_update / dflow_install_update (capabilities/ui.json lets
+//     http://127.0.0.1:8434 reach them), which read latest.json from the public dflow-releases repo and install
+//     the signed NSIS installer in passive mode.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::net::{SocketAddr, TcpStream};
@@ -24,7 +27,9 @@ use std::time::{Duration, Instant};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::webview::NewWindowResponse;
+use serde::Serialize;
 use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri_plugin_updater::UpdaterExt;
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -246,13 +251,63 @@ fn open_external(target: &str) {
     let _ = hidden(Command::new("explorer").arg(target)).spawn();
 }
 
+#[derive(Serialize)]
+struct UpdateInfo {
+    current: String,
+    /// the newer version on offer, None = up to date
+    version: Option<String>,
+    notes: Option<String>,
+}
+
+/// "Kiểm tra cập nhật": the version running and the newest one published (latest.json of dflow-releases).
+#[tauri::command]
+async fn dflow_check_update(app: AppHandle) -> Result<UpdateInfo, String> {
+    let current = app.package_info().version.to_string();
+    let update = app
+        .updater()
+        .map_err(|e| e.to_string())?
+        .check()
+        .await
+        .map_err(|e| format!("Không kiểm tra được bản mới: {e}"))?;
+    Ok(UpdateInfo {
+        current,
+        version: update.as_ref().map(|u| u.version.clone()),
+        notes: update.and_then(|u| u.body.clone()),
+    })
+}
+
+/// "Cập nhật ngay": download first (the app keeps working), then stop the agent (the installer replaces its
+/// files) and run the signed installer; Windows closes the app and the installer opens the new one.
+#[tauri::command]
+async fn dflow_install_update(app: AppHandle) -> Result<(), String> {
+    let update = app
+        .updater()
+        .map_err(|e| e.to_string())?
+        .check()
+        .await
+        .map_err(|e| format!("Không kiểm tra được bản mới: {e}"))?
+        .ok_or_else(|| "Đang là bản mới nhất".to_string())?;
+    let bytes = update
+        .download(|_, _| {}, || {})
+        .await
+        .map_err(|e| format!("Tải bản mới lỗi: {e}"))?;
+    stop_agent(&app);
+    if let Err(e) = update.install(bytes) {
+        eprintln!("update install failed: {e}");
+        app.restart(); // the agent is already stopped: start everything again on the old version
+    }
+    Ok(())
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             // a second launch only brings the running one forward
             show_main(app);
         }))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Agent { child: Mutex::new(None), quitting: AtomicBool::new(false) })
+        .invoke_handler(tauri::generate_handler![dflow_check_update, dflow_install_update])
         .setup(|app| {
             let handle = app.handle().clone();
             let home = dflow_home(&handle);

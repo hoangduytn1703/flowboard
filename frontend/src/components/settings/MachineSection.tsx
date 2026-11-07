@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../../api/client";
 import { toast } from "../../store/toast";
+import { AppVersionSection } from "../AppUpdate";
 import { askConfirm } from "../Dialogs";
 
 interface AppStatus {
@@ -116,6 +117,7 @@ export function MachineSection() {
   const pending = st.restart_pending.length > 0;
   return (
     <>
+      <AppVersionSection />
       {pending && (
         <div className="settings-panel__section settings-machine__pending">
           <div className="settings-panel__label">Cần khởi động lại để áp dụng</div>
