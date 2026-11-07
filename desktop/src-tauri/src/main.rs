@@ -181,10 +181,10 @@ fn kill_tree(child: &mut Child) {
 fn stop_agent(app: &AppHandle) {
     let state = app.state::<Agent>();
     state.quitting.store(true, Ordering::SeqCst);
-    if let Ok(mut guard) = state.child.lock() {
-        if let Some(mut child) = guard.take() {
-            kill_tree(&mut child);
-        }
+    // take the child out first: the lock guard must not outlive `state`
+    let child = state.child.lock().ok().and_then(|mut guard| guard.take());
+    if let Some(mut child) = child {
+        kill_tree(&mut child);
     }
 }
 
