@@ -119,7 +119,19 @@ jobs:
           Copy-Item extension desktop/src-tauri/resources/extension -Recurse
           $zip = Join-Path $env:RUNNER_TEMP "ffmpeg.zip"
           $out = Join-Path $env:RUNNER_TEMP "ffmpeg"
-          Invoke-WebRequest "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -OutFile $zip
+          # (all of github.com/*/releases/download answered 504 for hours on 8/11) — gyan.dev as a second source
+          $sources = @("https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
+                       "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip")
+          $got = $false
+          foreach ($try in 1..4) {
+            foreach ($src in $sources) {
+              try { Invoke-WebRequest $src -OutFile $zip; $got = $true; break }
+              catch { Write-Host "ffmpeg download failed from $src ($($_.Exception.Message))" }
+            }
+            if ($got) { break }
+            Start-Sleep -Seconds (20 * $try)
+          }
+          if (-not $got) { throw "ffmpeg download failed from every source" }
           Expand-Archive $zip $out
           $bin = Get-ChildItem $out -Recurse -Filter ffmpeg.exe | Select-Object -First 1
           New-Item -ItemType Directory -Force desktop/src-tauri/resources/ffmpeg | Out-Null
@@ -138,7 +150,13 @@ jobs:
         run: |
           npm ci --prefix desktop --no-audit --no-fund
           Push-Location desktop
-          npx tauri build
+          # the bundler downloads NSIS from GitHub releases — retry when that times out (504, seen 8/11)
+          foreach ($try in 1..3) {
+            npx tauri build
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($try -eq 3) { exit 1 }
+            Write-Host "tauri build failed - retry $try"; Start-Sleep -Seconds (30 * $try)
+          }
           Pop-Location
           Get-ChildItem desktop/src-tauri/target/release/bundle/nsis | Format-Table Name, Length
 
