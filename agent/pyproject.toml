@@ -1,6 +1,6 @@
 [project]
 name = "flowboard-agent"
-version = "1.5.2"
+version = "1.6.0"
 description = "Flowboard local agent: FastAPI + SQLite + extension bridge"
 requires-python = ">=3.10"
 dependencies = [
@@ -19,6 +19,8 @@ dependencies = [
     # Account data in the cloud (phase 1.5 B): Postgres (Neon) + S3 bucket (B2).
     "psycopg[binary]>=3.2",
     "boto3>=1.35",
+    # Signed licences of the accounts / plans / bank settings (licensing.py, Ed25519).
+    "cryptography>=42",
 ]
 
 [project.optional-dependencies]

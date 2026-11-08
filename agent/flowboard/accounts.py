@@ -22,7 +22,8 @@ that way): no login, the default ``storage/flowboard.db``.
 Roles (8/11): the seed account is the **admin** — the only one that creates
 accounts, resets passwords and locks accounts (``routes/account_admin.py``);
 every other account can only change its own password. A locked account
-cannot log in and its sessions are dropped.
+cannot log in and its sessions are dropped. Each account is on a plan
+(``plan`` column, see ``flowboard/plans.py``) that decides its features.
 """
 from __future__ import annotations
 
@@ -43,7 +44,7 @@ from typing import Any, Callable, Optional
 from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, Text, func, inspect, select
 from sqlalchemy.engine import Engine
 
-from flowboard import config
+from flowboard import config, licensing
 from flowboard.db import init_db, make_engine, set_engine
 
 logger = logging.getLogger(__name__)
@@ -70,11 +71,17 @@ users = Table(
     Column("role", String(16)),
     Column("disabled", Integer),
     Column("note", Text),
+    Column("plan", String(32)),  # plans.py id; NULL = the default plan
+    Column("plan_expires", DateTime),  # the trial plan ends then (naive UTC); NULL = no end
+    Column("profile", Text),  # JSON the account fills in itself: display name, phone, email, contact
+    Column("license", Text),  # the admin's signature over role / plan / features / end / lock (licensing.py)
 )
 ROLE_ADMIN = "admin"
 ROLE_USER = "user"
 #: Columns added after the first release: name → SQL type for ALTER TABLE.
-_LATE_USER_COLUMNS = {"role": "VARCHAR(16)", "disabled": "INTEGER", "note": "TEXT"}
+_LATE_USER_COLUMNS = {"role": "VARCHAR(16)", "disabled": "INTEGER", "note": "TEXT", "plan": "VARCHAR(32)",
+                      "plan_expires": "TIMESTAMP", "profile": "TEXT", "license": "TEXT"}
+PROFILE_KEYS = ("display_name", "phone", "email", "contact")
 #: Settings every machine should share once it logs in (the media bucket…).
 settings_t = Table(
     "account_setting", central_md,
@@ -100,26 +107,46 @@ class AccountBusy(RuntimeError):
 
 
 def auth_enabled() -> bool:
+    if config.PACKAGED:  # the installed app: FLOWBOARD_AUTH=off in .env must not unlock everything
+        return True
     return os.getenv("FLOWBOARD_AUTH", "on").lower() not in ("off", "0", "false")
 
 
 # ── passwords ───────────────────────────────────────────────────────────────
 
-def hash_password(password: str) -> str:
+#: Password hashes since the licences (8/11): pbkdf2 over the app's pepper + the username + the password. A hash cannot be
+#: made by hand without the compiled app, cannot be copied onto another account (bound to the username), and app builds
+#: from before cannot verify it (so they cannot be used to log in).
+PASSWORD_SCHEME = "dflow2"
+
+
+def _peppered(password: str, username: str) -> bytes:
+    return licensing.PEPPER + b"\0" + username.strip().lower().encode("utf-8") + b"\0" + password.encode("utf-8")
+
+
+def hash_password(password: str, username: str) -> str:
     salt = secrets.token_hex(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt), 200_000).hex()
-    return f"pbkdf2_sha256$200000${salt}${digest}"
+    digest = hashlib.pbkdf2_hmac("sha256", _peppered(password, username), bytes.fromhex(salt), 200_000).hex()
+    return f"{PASSWORD_SCHEME}$200000${salt}${digest}"
 
 
-def verify_password(password: str, stored: str) -> bool:
+def verify_password(password: str, stored: str, username: str) -> bool:
     try:
         algo, iters, salt, digest = stored.split("$")
-        if algo != "pbkdf2_sha256":
+        if algo == PASSWORD_SCHEME:
+            data = _peppered(password, username)
+        elif algo == "pbkdf2_sha256":  # made before 8/11; re-hashed at the next login in the installed app
+            data = password.encode("utf-8")
+        else:
             return False
-        calc = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt), int(iters)).hex()
+        calc = hashlib.pbkdf2_hmac("sha256", data, bytes.fromhex(salt), int(iters)).hex()
         return hmac.compare_digest(calc, digest)
     except (ValueError, TypeError):
         return False
+
+
+def needs_rehash(stored: str) -> bool:
+    return not (stored or "").startswith(PASSWORD_SCHEME + "$")
 
 
 # ── central store ───────────────────────────────────────────────────────────
@@ -152,8 +179,12 @@ def _ensure_user_columns(eng: Engine) -> None:
 
 def reset_central() -> None:
     """Tests: forget the central engine (the storage dir changed)."""
+    from flowboard import plans
+
     _central["engine"] = None
     _session_cache.clear()
+    plans.forget()
+    licensing.reset()
 
 
 def central_url() -> Optional[str]:
@@ -202,9 +233,30 @@ def _row_to_user(row: Any) -> dict:
         backend = json.loads(row.backend or "{}")
     except ValueError:
         backend = {}
-    return {"id": row.id, "username": row.username, "created_at": row.created_at, "backend": backend,
+    user = {"id": row.id, "username": row.username, "created_at": row.created_at, "backend": backend,
             "password_hash": row.password_hash, "role": getattr(row, "role", None) or ROLE_USER,
-            "disabled": bool(getattr(row, "disabled", None)), "note": getattr(row, "note", None) or ""}
+            "disabled": bool(getattr(row, "disabled", None)), "note": getattr(row, "note", None) or "",
+            "plan": getattr(row, "plan", None) or None, "plan_expires": getattr(row, "plan_expires", None),
+            "profile": _profile(getattr(row, "profile", None))}
+    # role / plan / end / lock come from the admin's signed licence, not from the row (anyone with the Neon line can edit it)
+    licensing.apply(user, getattr(row, "license", None))
+    return user
+
+
+def _profile(raw: Any) -> dict:
+    try:
+        data = json.loads(raw) if raw else {}
+    except ValueError:
+        data = {}
+    return {k: str(data.get(k) or "") for k in PROFILE_KEYS} if isinstance(data, dict) else {k: "" for k in PROFILE_KEYS}
+
+
+def expired(user: Optional[dict]) -> bool:
+    """The account's plan has an end date (the trial, a paid term) that has passed — it cannot log in, like a locked account."""
+    if not user or user.get("role") == ROLE_ADMIN:
+        return False
+    end = user.get("plan_expires")
+    return bool(end) and end <= _now()
 
 
 def is_admin(user: Optional[dict]) -> bool:
@@ -224,18 +276,23 @@ def list_users() -> list[dict]:
 
 
 def create_user(username: str, password: str, backend: Optional[dict] = None, *,
-                role: str = ROLE_USER, note: str = "") -> dict:
+                role: str = ROLE_USER, note: str = "", plan: Optional[str] = None,
+                plan_expires: Optional[datetime] = None) -> dict:
     username = username.strip().lower()
     if not username or len(username) > 64 or not all(ch.isalnum() or ch in "._-" for ch in username):
         raise AuthError("Tên đăng nhập chỉ gồm chữ, số, dấu . _ - (tối đa 64 ký tự).")
+    licensing.guard()  # a signed store: only the admin's machine adds accounts
     if len(password) < MIN_PASSWORD:
         raise AuthError(f"Mật khẩu cần ít nhất {MIN_PASSWORD} ký tự.")
     if get_user(username):
         raise AuthError("Tên đăng nhập đã có.")
     with central_engine().begin() as c:
-        c.execute(users.insert().values(username=username, password_hash=hash_password(password),
+        c.execute(users.insert().values(username=username, password_hash=hash_password(password, username),
                                         created_at=_now(), backend=json.dumps(backend or {"type": "sqlite"}),
-                                        role=role, disabled=0, note=(note or "").strip()[:500] or None))
+                                        role=role, disabled=0, note=(note or "").strip()[:500] or None,
+                                        plan=plan or None, plan_expires=plan_expires))
+    if licensing.store_licensed():  # (a store nobody signed yet gets its licences from licensing.ensure_epoch)
+        licensing.issue(username, plan=plan or None, expires=plan_expires, disabled=False)
     return get_user(username)  # type: ignore[return-value]
 
 
@@ -263,17 +320,74 @@ def revoke_sessions(username: str, keep: Optional[str] = None) -> int:
     with central_engine().begin() as c:
         q = sessions.delete().where(sessions.c.user_id == user["id"])
         if keep:
-            q = q.where(sessions.c.token != keep)
+            q = q.where(sessions.c.token != _token_key(keep))
         n = c.execute(q).rowcount or 0
     _forget_user_sessions(user["id"], keep)
     return n
 
 
 def set_disabled(username: str, disabled: bool) -> None:
-    with central_engine().begin() as c:
-        c.execute(users.update().where(users.c.username == username).values(disabled=1 if disabled else 0))
+    user = get_user(username)
+    if licensing.store_licensed() and user is not None and user.get("license") == "ok":
+        licensing.issue(username, disabled=disabled)  # the lock goes into the licence: flipping the row back does nothing
+    else:
+        with central_engine().begin() as c:
+            c.execute(users.update().where(users.c.username == username).values(disabled=1 if disabled else 0))
+        _refresh_cached(username)
     if disabled:
         revoke_sessions(username)
+
+
+def _refresh_cached(username: str) -> None:
+    """Sessions cached in RAM carry the user row: re-read it after a plan / role change."""
+    fresh = get_user(username)
+    if fresh is None:
+        return
+    for tok, (u, at) in list(_session_cache.items()):
+        if u["username"] == username:
+            _session_cache[tok] = (fresh, at)
+    if _active["user"] and _active["user"]["username"] == username:
+        _active["user"].update({k: v for k, v in fresh.items() if k != "password_hash"})
+
+
+def set_plan(username: str, plan_id: Optional[str], expires: Optional[datetime] = None) -> None:
+    """Move an account to a plan; ``expires`` = when it ends (the trial), None = no end. A signed store: a new licence."""
+    if licensing.store_licensed():
+        licensing.issue(username, plan=plan_id, expires=expires)
+        return
+    with central_engine().begin() as c:
+        c.execute(users.update().where(users.c.username == username).values(plan=plan_id or None, plan_expires=expires))
+    _refresh_cached(username)
+
+
+def set_profile(username: str, profile: dict) -> None:
+    clean = {k: " ".join(str(profile.get(k) or "").split())[:120] for k in PROFILE_KEYS}
+    with central_engine().begin() as c:
+        c.execute(users.update().where(users.c.username == username).values(profile=json.dumps(clean, ensure_ascii=False)))
+    _refresh_cached(username)
+
+
+def fill_null_plans(plan_id: str) -> int:
+    """Accounts on "the default plan" (NULL) get that plan written down — before the default changes."""
+    with central_engine().begin() as c:
+        n = c.execute(users.update().where(users.c.plan.is_(None), users.c.role.is_distinct_from(ROLE_ADMIN))
+                      .values(plan=plan_id)).rowcount or 0
+    for tok, (u, at) in list(_session_cache.items()):
+        _refresh_cached(u["username"])
+    return n
+
+
+def reassign_missing_plans(valid_ids: set[str], default_id: str, expires: Optional[datetime] = None) -> int:
+    """After plans were edited: accounts on a deleted plan go to the default one (the trial: it starts now)."""
+    with central_engine().begin() as c:
+        rows = c.execute(select(users.c.username).where(users.c.plan.is_not(None))
+                         .where(users.c.plan.not_in(list(valid_ids)))).all()
+        if rows:
+            c.execute(users.update().where(users.c.username.in_([r.username for r in rows]))
+                      .values(plan=default_id, plan_expires=expires))
+    for r in rows:
+        _refresh_cached(r.username)
+    return len(rows)
 
 
 def set_note(username: str, note: str) -> None:
@@ -296,7 +410,10 @@ def account_overview() -> list[dict]:
     for r in rows:
         u = _row_to_user(r)
         n, last = by_user.get(u["id"], (0, None))
-        out.append({"username": u["username"], "role": u["role"], "disabled": u["disabled"], "note": u["note"],
+        out.append({"username": u["username"], "role": u["role"], "disabled": u["disabled"], "note": u["note"], "plan": u["plan"],
+                    "license": u.get("license", "missing"), "tampered": bool(u.get("tampered")),
+                    "plan_expires": u["plan_expires"].isoformat() if u["plan_expires"] else None, "expired": expired(u),
+                    "display_name": u["profile"]["display_name"],
                     "created_at": u["created_at"].isoformat() if u["created_at"] else None,
                     "backend": (u["backend"] or {}).get("type", "sqlite"),
                     "sessions": int(n or 0), "last_seen": last.isoformat() if last else None,
@@ -308,12 +425,13 @@ def set_password(username: str, new_password: str) -> None:
     if len(new_password) < MIN_PASSWORD:
         raise AuthError(f"Mật khẩu cần ít nhất {MIN_PASSWORD} ký tự.")
     with central_engine().begin() as c:
-        c.execute(users.update().where(users.c.username == username).values(password_hash=hash_password(new_password)))
+        c.execute(users.update().where(users.c.username == username).values(password_hash=hash_password(new_password, username)))
 
 
 def seed_default() -> bool:
-    """The seed account, once, when there is no user at all."""
-    if list_users():
+    """The seed account, once, when there is no user at all. Never in the installed app: its password is public (code,
+    README), so an empty account store — e.g. the cloud line removed from .env — would hand out an admin login."""
+    if config.PACKAGED or list_users():
         return False
     create_user(SEED_USER, SEED_PASSWORD, role=ROLE_ADMIN)
     logger.info("accounts: seeded user %s", SEED_USER)
@@ -322,10 +440,27 @@ def seed_default() -> bool:
 
 def authenticate(username: str, password: str) -> dict:
     user = get_user(username or "")
-    if user is None or not verify_password(password or "", user["password_hash"]):
+    if user is None or not verify_password(password or "", user["password_hash"], user["username"]):
         raise AuthError("Sai tên đăng nhập hoặc mật khẩu.")
+    if user.get("license") == "ok" and needs_rehash(user["password_hash"]) \
+            and licensing.legacy_fp(user["password_hash"]) != user.get("license_lh"):
+        # an old-format hash the licence was not signed with: written by hand (anyone can make one) — no entry
+        raise AuthError("Mật khẩu của tài khoản này cần được người quản lý đặt lại. Liên hệ người quản lý DFlow.")
+    if user.get("unlicensed"):
+        raise AuthError(licensing.unlicensed_message())
+    old_build = licensing.outdated()
+    if old_build:
+        raise AuthError(old_build)
     if user["disabled"]:
         raise AuthError("Tài khoản này đã bị khoá. Hỏi người quản trị DFlow để mở lại.")
+    if expired(user):
+        end = user["plan_expires"].strftime("%d/%m/%Y")
+        which = "Gói dùng thử" if user.get("plan") == "trial" else "Gói đang dùng"
+        raise AuthError(f"{which} của tài khoản này đã hết hạn ({end}). Liên hệ người quản lý DFlow để gia hạn hoặc nâng gói.")
+    if licensing.strict() and needs_rehash(user["password_hash"]):
+        # the installed app: the hash gets the pepper — app builds from before the licences can no longer log in with it
+        with central_engine().begin() as c:
+            c.execute(users.update().where(users.c.id == user["id"]).values(password_hash=hash_password(password, user["username"])))
     return user
 
 
@@ -334,10 +469,17 @@ def authenticate(username: str, password: str) -> dict:
 _session_cache: dict[str, tuple[dict, float]] = {}
 
 
+def _token_key(token: str) -> str:
+    """What the store keeps for a session: a keyed hash (licensing.session_key), never the cookie itself — whoever can
+    read or write the table (every machine on the cloud store) can neither log in with what is there nor add a session."""
+    return licensing.session_key(token)
+
+
 def create_session(user: dict, host: Optional[str] = None) -> str:
-    token = secrets.token_urlsafe(32)
+    # the cookie names its account: a session row pointed at another account by hand (user_id edited) stops matching
+    token = f"{user['id']}.{secrets.token_urlsafe(32)}"
     with central_engine().begin() as c:
-        c.execute(sessions.insert().values(token=token, user_id=user["id"], created_at=_now(), last_seen=_now(),
+        c.execute(sessions.insert().values(token=_token_key(token), user_id=user["id"], created_at=_now(), last_seen=_now(),
                                            host=(host or socket.gethostname())[:128]))
     _session_cache[token] = (user, time.time())
     return token
@@ -348,10 +490,10 @@ def resolve_session(token: Optional[str]) -> Optional[dict]:
         return None
     hit = _session_cache.get(token)
     if hit and time.time() - hit[1] < 300:
-        return hit[0]
+        return None if expired(hit[0]) else hit[0]
     with central_engine().connect() as c:
-        row = c.execute(select(sessions).where(sessions.c.token == token)).first()
-        if row is None:
+        row = c.execute(select(sessions).where(sessions.c.token == _token_key(token))).first()
+        if row is None or str(row.user_id) != token.split(".", 1)[0]:
             return None
         age = (_now() - row.last_seen).total_seconds()
         if age > SESSION_TTL_S:
@@ -360,10 +502,10 @@ def resolve_session(token: Optional[str]) -> Optional[dict]:
     if urow is None:
         return None
     user = _row_to_user(urow)
-    if user["disabled"]:
+    if user["disabled"] or expired(user) or user.get("unlicensed") or licensing.outdated():
         return None
     with central_engine().begin() as c:
-        c.execute(sessions.update().where(sessions.c.token == token).values(last_seen=_now()))
+        c.execute(sessions.update().where(sessions.c.token == _token_key(token)).values(last_seen=_now()))
     _session_cache[token] = (user, time.time())
     return user
 
@@ -373,7 +515,7 @@ def delete_session(token: Optional[str]) -> None:
         return
     _session_cache.pop(token, None)
     with central_engine().begin() as c:
-        c.execute(sessions.delete().where(sessions.c.token == token))
+        c.execute(sessions.delete().where(sessions.c.token == _token_key(token)))
 
 
 # ── the active account ──────────────────────────────────────────────────────
@@ -591,6 +733,12 @@ def startup() -> None:
         return
     central_engine()
     seed_default()
+    try:  # the admin's machine signs a store nobody signed yet (once — licensing.ensure_epoch)
+        signed = licensing.ensure_epoch()
+        if signed is not None:
+            logger.info("accounts: signed %d accounts (first signing of this store)", signed)
+    except Exception:  # noqa: BLE001 — never keep the agent from starting
+        logger.exception("accounts: first signing of the store failed")
     # No account active until a request with a valid session arrives.
 
 

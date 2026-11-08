@@ -10,6 +10,7 @@ import { toast } from "../../store/toast";
 import { invalidateChannels } from "../channels/ChannelPicker";
 import { FacebookConnect } from "../channels/FacebookConnect";
 import { PageEmpty, PageLoading } from "../PageState";
+import { canUse, useFeature } from "../../lib/features";
 import "../channels.css";
 
 const EMPTY: ChannelInput = { name: "", platforms: ["facebook"], categories: [], description: "", audience: "", goal: "", link: "" };
@@ -266,6 +267,8 @@ function Direction({ channel, options, onUpdated }: { channel: Channel; options:
  */
 export function ChannelsPage() {
   const navigate = useNavigate();
+  const postsOn = useFeature("posts");
+  const fbOn = useFeature("facebook");
   const [params, setParams] = useSearchParams();
   const [options, setOptions] = useState<ChannelOptions | null>(null);
   const [channels, setChannels] = useState<Channel[] | null>(null);
@@ -301,6 +304,7 @@ export function ChannelsPage() {
 
   /** A new link is read and reviewed right away, in the background. */
   async function autoReview(row: Channel) {
+    if (!canUse("posts")) return; // the page review is part of the "Bài viết" feature
     toast.info(`Đang mở ${row.link} trong Chrome để đánh giá kênh (khoảng 1 phút)…`, { duration: 8000 });
     try {
       const out = await reviewChannelPage(row.id);
@@ -399,16 +403,16 @@ export function ChannelsPage() {
                     {open.goal && <div className="qt-stat qt-stat--text"><strong>{open.goal}</strong><span>mục tiêu</span></div>}
                   </div>
                   <div className="qt-post__actions">
-                    <button type="button" className="qt-btn qt-btn--accent" onClick={() => navigate(`/posts?channel=${open.id}`)}>✍️ Viết bài cho kênh</button>
+                    {postsOn && <button type="button" className="qt-btn qt-btn--accent" onClick={() => navigate(`/posts?channel=${open.id}`)}>✍️ Viết bài cho kênh</button>}
                     <button type="button" className="qt-btn" onClick={() => navigate(`/clips/new?channel=${open.id}`)}>🎬 Tạo clip cho kênh</button>
                   </div>
                 </section>
 
-                <FacebookConnect channel={open} onUpdated={replace} />
+                {fbOn && <FacebookConnect channel={open} onUpdated={replace} />}
 
-                <PageReviewCard channel={open} onUpdated={replace} onEdit={() => setEditing(open)} />
+                {postsOn && <PageReviewCard channel={open} onUpdated={replace} onEdit={() => setEditing(open)} />}
 
-                <Direction channel={open} options={options} onUpdated={replace} />
+                {postsOn && <Direction channel={open} options={options} onUpdated={replace} />}
 
                 <section className="qt-card">
                   <div className="qt-card__head"><h3 className="qt-card__title">📝 Bài viết của kênh</h3></div>

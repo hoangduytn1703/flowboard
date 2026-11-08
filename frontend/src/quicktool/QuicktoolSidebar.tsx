@@ -3,6 +3,7 @@ import { AccountPanel } from "../components/AccountPanel";
 import { UserChip } from "../components/UserChip";
 import { CreditBadge } from "../components/CreditBadge";
 import { useAccountStore } from "../store/account";
+import { hasFeature } from "../lib/features";
 import { useBoardStore } from "../store/board";
 import { useSettingsStore } from "../store/settings";
 
@@ -18,6 +19,8 @@ export function QuicktoolSidebar() {
   const setUiMode = useSettingsStore((s) => s.setUiMode);
   const boardId = useBoardStore((s) => s.boardId);
   const isAdmin = useAccountStore((s) => !!s.me?.is_admin);
+  const me = useAccountStore((s) => s.me);
+  const on = (key: Parameters<typeof hasFeature>[1]) => hasFeature(me, key);
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const homeActive = pathname === "/clips" || pathname === "/clips/new" || pathname === "/clips/from-video";
@@ -42,32 +45,32 @@ export function QuicktoolSidebar() {
         </button>
 
         <div className="qt-nav__group">Công cụ</div>
-        <button type="button" className={`qt-nav__item${is("/tools/dub") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/tools/dub")}
+        {on("dub") && <button type="button" className={`qt-nav__item${is("/tools/dub") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/tools/dub")}
                 title="Dán link video nước ngoài → bỏ tiếng gốc, đọc lại bằng giọng Việt, in phụ đề hộp vàng, lưu thành clip">
           <span className="qt-nav__icon">🎙</span> Lồng tiếng video
-        </button>
-        <button type="button" className={`qt-nav__item${is("/tools/capcut") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/tools/capcut")}
+        </button>}
+        {on("capcut") && <button type="button" className={`qt-nav__item${is("/tools/capcut") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/tools/capcut")}
                 title="Biến video lồng tiếng / clip / video của bạn thành dự án CapCut: phụ đề, chữ nhấn mạnh, zoom, âm thanh — mở CapCut chỉnh tiếp">
           <span className="qt-nav__icon">✂️</span> Edit auto CapCut
-        </button>
-        <button type="button" className={`qt-nav__item${is("/schedule") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/schedule")}
+        </button>}
+        {on("facebook") && <button type="button" className={`qt-nav__item${is("/schedule") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/schedule")}
                 title="Lịch tuần: bài viết và clip đăng lúc nào, giờ vàng theo nền tảng, nhắc đến giờ, tự đăng lên Facebook Page">
           <span className="qt-nav__icon">📅</span> Lịch đăng
-        </button>
-        <button type="button" className={`qt-nav__item${is("/posts") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/posts")}
+        </button>}
+        {on("posts") && <button type="button" className={`qt-nav__item${is("/posts") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/posts")}
                 title="Viết bài đăng Facebook kiếm tương tác: điền mẫu hoặc chat với AI, tạo ảnh kèm">
           <span className="qt-nav__icon qt-nav__icon--fb" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M13.5 21v-7.5h2.5l.4-3h-2.9V8.6c0-.9.3-1.4 1.5-1.4h1.5V4.5c-.3 0-1.2-.1-2.2-.1-2.2 0-3.7 1.3-3.7 3.8v2.3H8.1v3h2.5V21h2.9z" /></svg>
           </span> Bài viết Facebook
-        </button>
-        <button type="button" className={`qt-nav__item${is("/swipes") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/swipes")}
+        </button>}
+        {on("swipes") && <button type="button" className={`qt-nav__item${is("/swipes") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/swipes")}
                 title="Dán link bài / video đang hot → AI chỉ ra vì sao nó chạy, rồi viết bài / clip của bạn theo cấu trúc đó">
           <span className="qt-nav__icon">🔥</span> Mẫu đang hot
-        </button>
-        <button type="button" className={`qt-nav__item${is("/tools/clean") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/tools/clean")}
+        </button>}
+        {on("clean") && <button type="button" className={`qt-nav__item${is("/tools/clean") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/tools/clean")}
                 title="Xoá logo, watermark, phụ đề cứng khỏi video có sẵn">
           <span className="qt-nav__icon">🧽</span> Xoá chữ / logo
-        </button>
+        </button>}
 
         <div className="qt-nav__group">Thư viện</div>
         <button type="button" className={`qt-nav__item${is("/channels") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/channels")}

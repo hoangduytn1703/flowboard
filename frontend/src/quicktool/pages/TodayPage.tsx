@@ -13,6 +13,7 @@ import { DueList } from "./SchedulePage";
 import "../today.css";
 import "../schedule.css";
 import { askConfirm } from "../../components/Dialogs";
+import { canUse, useFeature } from "../../lib/features";
 
 /** Where to send someone who opens a clip from "Hôm nay". */
 function stepFor(b: BoardSummary): string {
@@ -105,6 +106,8 @@ function Section({ icon, title, count = 0, tone = "neutral", action, empty, chil
  */
 export function TodayPage() {
   const navigate = useNavigate();
+  const fbOn = useFeature("facebook");
+  const postsOn = useFeature("posts");
   const { credits, refresh: refreshCredits, loading: creditsLoading } = useFlowCredits();
   const [boards, setBoards] = useState<BoardSummary[] | null>(null);
   const [running, setRunning] = useState<HistoryRow[]>([]);
@@ -116,7 +119,9 @@ export function TodayPage() {
 
   const load = useCallback(async () => {
     const [b, r, s, d, p] = await Promise.allSettled([
-      listBoardSummaries(), listHistory({ status: "queued,running", limit: 20 }), getHistorySummary(), listDue(), listPosts(),
+      listBoardSummaries(), listHistory({ status: "queued,running", limit: 20 }), getHistorySummary(),
+      canUse("facebook") ? listDue() : Promise.resolve([] as Slot[]),
+      canUse("posts") || canUse("facebook") ? listPosts() : Promise.resolve([] as SavedPost[]),
     ]);
     if (b.status === "fulfilled") setBoards(b.value);
     if (r.status === "fulfilled") setRunning(r.value.items);
@@ -192,7 +197,7 @@ export function TodayPage() {
             </p>
           </div>
           <div className="td-hero__actions">
-            <button type="button" className="qt-btn qt-btn--ghost" onClick={() => navigate("/posts")}>Viết bài</button>
+            {postsOn && <button type="button" className="qt-btn qt-btn--ghost" onClick={() => navigate("/posts")}>Viết bài</button>}
             <button type="button" className="qt-btn qt-btn--accent td-btn-icon" onClick={() => navigate("/clips/new")}>
               <Icon name="plus" size={16} /> Clip mới
             </button>
@@ -215,7 +220,7 @@ export function TodayPage() {
 
         <div className="td-grid">
           <div className="td-col">
-            <Section icon="clock" title="Đến giờ đăng" count={due.length} tone="warn"
+            {fbOn && <Section icon="clock" title="Đến giờ đăng" count={due.length} tone="warn"
                      empty="Chưa có bài hoặc clip nào đến giờ đăng."
                      action={<button type="button" className="qt-btn qt-btn--small qt-btn--ghost td-btn-icon" onClick={() => navigate("/schedule")}>Lịch đăng <Icon name="arrow" size={14} /></button>}>
               <DueList items={due} busy={slotBusy} onCopy={copySlot}
@@ -223,7 +228,7 @@ export function TodayPage() {
                        onPosted={(s) => void slotAction(() => updateSlot(s.id, { status: "posted" }), "Đã đánh dấu đã đăng.")}
                        onSkip={(s) => void slotAction(() => updateSlot(s.id, { status: "skipped" }), "")}
                        openLink={(s) => channels.find((c) => c.id === s.channel_id)?.link || "https://www.facebook.com/"} />
-            </Section>
+            </Section>}
 
             <Section icon="alert" title="Cần xử lý" count={failed.length} tone="bad" empty="Không có clip nào bị lỗi.">
               <ul className="qt-today__list">

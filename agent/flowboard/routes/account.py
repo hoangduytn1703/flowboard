@@ -6,6 +6,13 @@
   POST /api/account/password  {current, new}  (logs the account out on its other machines)
   GET  /api/account/prefs     → the UI preferences saved for this account (model picks …)
   PUT  /api/account/prefs     {…} → stored in the account's database (follows the login)
+  GET  /api/account/upgrade              → plans with prices, current plan, a pending request (billing.py)
+  POST /api/account/upgrade/quote        {plan_id, months} → VietQR + amount + transfer text + the new end date
+  POST /api/account/upgrade/request      {plan_id, months} → "Tôi đã chuyển khoản": files a request for the admin
+  POST /api/account/upgrade/cancel       → withdraws the pending request
+  GET  /api/account/upgrades             → this account's upgrade requests (transaction history)
+  PUT  /api/account/profile              {display_name, phone, email, contact} → "Tài khoản của tôi"
+  POST /api/account/logout-others        → logged out on every other machine / browser
 
 New accounts are made by the admin only (routes/account_admin.py) — there is
 no open sign-up.
@@ -17,7 +24,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
-from flowboard import accounts
+from flowboard import accounts, billing, plans
 from flowboard.db import get_session, has_engine
 from flowboard.db.models import AppSetting
 
@@ -44,7 +51,17 @@ def _set_cookie(resp: Response, token: str) -> None:
 
 def _me_payload(user: dict) -> dict:
     return {"auth": True, "username": user["username"], "created_at": user["created_at"].isoformat() if user.get("created_at") else None,
-            "backend": (user.get("backend") or {}).get("type", "sqlite"), "is_admin": accounts.is_admin(user)}
+            "backend": (user.get("backend") or {}).get("type", "sqlite"), "is_admin": accounts.is_admin(user),
+            "profile": user.get("profile") or {k: "" for k in accounts.PROFILE_KEYS}, **_plan_payload(user)}
+
+
+def _plan_payload(user: dict) -> dict:
+    """The account's plan and the features the UI may show (plans.py)."""
+    plan = plans.plan_of(user)
+    end = user.get("plan_expires") if not accounts.is_admin(user) else None
+    return {"plan": {"id": plan["id"], "name": plan["name"], "trial": plan["id"] == plans.TRIAL_ID,
+                     "expires_at": end.isoformat() if end else None},
+            "features": list(plan["features"])}
 
 
 @router.post("/login")
@@ -78,7 +95,7 @@ def logout(request: Request, response: Response) -> dict:
 @router.get("/me")
 def me(request: Request) -> dict:
     if not accounts.auth_enabled():
-        return {"auth": False, "username": "local", "backend": "sqlite"}
+        return {"auth": False, "username": "local", "backend": "sqlite", "features": list(plans.FEATURE_KEYS)}
     user = accounts.user_from_request(request)
     if user is None:
         raise HTTPException(401, "Chưa đăng nhập")
@@ -90,7 +107,7 @@ def change_password(body: PasswordBody, request: Request) -> dict:
     user = accounts.user_from_request(request)
     if user is None:
         raise HTTPException(401, "Chưa đăng nhập")
-    if not accounts.verify_password(body.current, user["password_hash"]):
+    if not accounts.verify_password(body.current, user["password_hash"], user["username"]):
         raise HTTPException(400, "Mật khẩu hiện tại không đúng.")
     if body.new == body.current:
         raise HTTPException(400, "Mật khẩu mới phải khác mật khẩu hiện tại.")
@@ -101,6 +118,83 @@ def change_password(body: PasswordBody, request: Request) -> dict:
     # Whoever else knew the old password is logged out; this browser stays in.
     others = accounts.revoke_sessions(user["username"], keep=request.cookies.get(accounts.SESSION_COOKIE))
     return {"ok": True, "logged_out": others}
+
+
+class UpgradeBody(BaseModel):
+    plan_id: str
+    months: int = 0  # plans.TERM_MONTHS; 0 = forever
+
+
+def _me(request: Request) -> dict:
+    user = accounts.user_from_request(request)
+    if user is None:
+        raise HTTPException(401, "Chưa đăng nhập")
+    if accounts.is_admin(user):
+        raise HTTPException(400, "Tài khoản quản trị đã có mọi tính năng.")
+    return user
+
+
+@router.get("/upgrade")
+def upgrade_offer(request: Request) -> dict:
+    return billing.offer(_me(request))
+
+
+@router.post("/upgrade/quote")
+def upgrade_quote(body: UpgradeBody, request: Request) -> dict:
+    try:
+        return billing.quote(_me(request), body.plan_id, body.months)
+    except billing.BillingError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/upgrade/request")
+def upgrade_request(body: UpgradeBody, request: Request) -> dict:
+    try:
+        return billing.file_request(_me(request), body.plan_id, body.months)
+    except billing.BillingError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/upgrade/cancel")
+def upgrade_cancel(request: Request) -> dict:
+    billing.cancel_request(_me(request)["username"])
+    return {"ok": True}
+
+
+class ProfileBody(BaseModel):
+    display_name: str = ""
+    phone: str = ""
+    email: str = ""
+    contact: str = ""
+
+
+@router.put("/profile")
+def save_profile(body: ProfileBody, request: Request) -> dict:
+    user = accounts.user_from_request(request)
+    if user is None:
+        raise HTTPException(401, "Chưa đăng nhập")
+    email = body.email.strip()
+    if email and ("@" not in email or " " in email or len(email) > 120):
+        raise HTTPException(400, "Email chưa đúng dạng.")
+    accounts.set_profile(user["username"], body.model_dump())
+    return _me_payload(accounts.get_user(user["username"]) or user)
+
+
+@router.get("/upgrades")
+def my_upgrades(request: Request) -> dict:
+    user = accounts.user_from_request(request)
+    if user is None:
+        raise HTTPException(401, "Chưa đăng nhập")
+    return {"requests": billing.list_requests(50, username=user["username"])}
+
+
+@router.post("/logout-others")
+def logout_others(request: Request) -> dict:
+    user = accounts.user_from_request(request)
+    if user is None:
+        raise HTTPException(401, "Chưa đăng nhập")
+    n = accounts.revoke_sessions(user["username"], keep=request.cookies.get(accounts.SESSION_COOKIE))
+    return {"ok": True, "logged_out": n}
 
 
 @router.get("/prefs")

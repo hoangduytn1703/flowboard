@@ -7,6 +7,13 @@
 #
 # The console build is deliberate: DFlow.exe starts it with CREATE_NO_WINDOW, and the console programs it runs
 # (ffmpeg…) then share that hidden console instead of flashing their own (dflow_agent also hides each child).
+#
+# Release builds ship the agent's own code (the flowboard package) compiled to machine code by Nuitka, not as Python
+# bytecode (which decompiles back to readable source in minutes — the licence checks would be one edit away):
+#   python -m nuitka --module flowboard --include-package=flowboard --output-dir=../build/nuitka ...
+#   set DFLOW_COMPILED=<path of build/nuitka/flowboard.cp311-win_amd64.pyd>   (CI does both, .github/workflows/desktop.yml)
+# The analysis still reads the sources (to find every library to bundle); then every flowboard module is dropped from
+# the archive and the compiled extension goes in instead. Without DFLOW_COMPILED the build ships bytecode (local tests).
 import os
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules
@@ -50,6 +57,14 @@ a = Analysis(
     excludes=["tkinter", "matplotlib", "pytest", "moto", "IPython"],
     noarchive=False,
 )
+COMPILED = os.environ.get("DFLOW_COMPILED", "").strip()
+if COMPILED:
+    if not os.path.isfile(COMPILED):
+        raise SystemExit(f"DFLOW_COMPILED points to a missing file: {COMPILED}")
+    before = len(a.pure)
+    a.pure = [e for e in a.pure if not (e[0] == "flowboard" or e[0].startswith("flowboard."))]
+    a.binaries += [(os.path.basename(COMPILED), COMPILED, "EXTENSION")]
+    print(f"dflow-agent.spec: {before - len(a.pure)} flowboard modules replaced by {os.path.basename(COMPILED)}")
 pyz = PYZ(a.pure)
 
 exe = EXE(

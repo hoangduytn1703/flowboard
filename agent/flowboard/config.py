@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+import sys
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -45,6 +46,9 @@ def _load_dotenv(path: Path) -> None:
 #: the repo (start.ps1 / make agent), where all of it sits at the repo root as before.
 HOME = Path(os.environ["FLOWBOARD_HOME"]) if os.getenv("FLOWBOARD_HOME") else None
 APP_MODE = os.getenv("FLOWBOARD_APP") == "1"
+#: The installed app's agent (the PyInstaller build). Settings anyone can edit (.env, environment) must not turn off
+#: what keeps the sold app safe: it always asks for a login and never makes an admin with a known password.
+PACKAGED = bool(getattr(sys, "frozen", False))
 ENV_FILE = (HOME or ROOT) / ".env"
 
 _load_dotenv(ENV_FILE)

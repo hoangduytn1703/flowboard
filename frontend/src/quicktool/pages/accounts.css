@@ -1,6 +1,8 @@
 /* "👥 Quản lý tài khoản" (pages/AccountsPage) — admin only */
-.acc { display: flex; flex-direction: column; gap: 16px; max-width: 1180px; }
-.acc-new__grid { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(220px, 1fr) minmax(220px, 1.4fr); gap: 12px 14px; align-items: end; }
+.acc { display: flex; flex-direction: column; gap: 16px; }
+.acc-new__grid { display: grid; grid-template-columns: minmax(170px, 1fr) minmax(210px, 1fr) minmax(200px, 1.3fr) minmax(140px, 0.7fr); gap: 12px 14px; align-items: end; }
+.acc-new__grid .qt-field select, .acc-plan select { width: 100%; padding: 8px 10px; font: inherit; font-size: 14.5px; color: var(--text);
+  background: var(--panel-high, #1a1d24); border: 1px solid var(--border); border-radius: 8px; }
 .acc-new__grid .qt-field input { width: 100%; }
 .acc-new__pw { display: flex; gap: 6px; }
 .acc-new__pw input { flex: 1; min-width: 0; font-family: ui-monospace, Consolas, monospace; }
@@ -14,7 +16,7 @@
 .acc-made__btns { display: flex; gap: 8px; }
 
 .acc-table { display: flex; flex-direction: column; }
-.acc-row { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(120px, 1.2fr) 96px minmax(150px, 1fr) 450px;
+.acc-row { display: grid; grid-template-columns: minmax(140px, 1.2fr) 190px minmax(120px, 1.2fr) 92px minmax(140px, 1fr) 350px;
   gap: 12px; align-items: center; padding: 11px 4px; border-top: 1px solid var(--border); font-size: 14.5px; color: var(--text); }
 .acc-row--head { border-top: none; padding-top: 2px; font-size: 12.5px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: var(--muted); }
 .acc-row--head span:last-child { text-align: right; }
@@ -28,16 +30,185 @@
 .acc-seen { display: flex; flex-direction: column; gap: 2px; }
 .acc-seen small { font-size: 12.5px; color: var(--muted); }
 .acc-acts { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.acc-acts .qt-btn { white-space: nowrap; }
+
+/* 📦 Gói & tính năng (PlansEditor): features down, plans across */
+.plans__wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
+.plans__table { width: 100%; border-collapse: collapse; font-size: 14.5px; color: var(--text); }
+.plans__table th, .plans__table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.plans__table tbody tr:last-child td { border-bottom: none; }
+.plans__table thead th { background: rgba(255, 255, 255, 0.03); vertical-align: top; text-align: left; }
+.plans__featcol { min-width: 260px; }
+.plans__featcol b { display: block; font-weight: 700; }
+.plans__featcol small { display: block; margin-top: 2px; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+thead .plans__featcol { font-size: 12.5px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: var(--muted); }
+.plans__plan { min-width: 150px; }
+.plans__name { width: 100%; padding: 6px 8px; font: inherit; font-size: 15px; font-weight: 700; color: var(--text);
+  background: var(--panel-high, #1a1d24); border: 1px solid var(--border); border-radius: 7px; }
+.plans__name:focus { border-color: var(--qt-accent, #ff6a2b); outline: none; }
+.plans__meta { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 6px; font-size: 12.5px; font-weight: 500; color: var(--muted); }
+.plans__meta label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.plans__quick { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 4px; font-weight: 500; }
+.plans__quick .qt-link { font-size: 12.5px; }
+.plans__del { color: #fca5a5; }
+.plans__del:disabled { opacity: 0.4; cursor: not-allowed; }
+.plans__cell { text-align: center; }
+.plans__tick { position: relative; display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; cursor: pointer;
+  border: 1px solid var(--border); color: var(--muted); font-weight: 800; user-select: none; }
+.plans__tick input { position: absolute; inset: 0; margin: 0; opacity: 0; pointer-events: none; } /* stays inside the tick: an unanchored absolute input made the whole page scroll to it */
+.plans__tick.is-on { color: #fff; background: linear-gradient(180deg, #ff7a3d, #e85a1c); border-color: #ff8a52; }
+.plans__tick:focus-within { box-shadow: 0 0 0 2px rgba(255, 106, 43, 0.45); }
+.plans__save { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid rgba(255, 106, 43, 0.5); background: rgba(255, 106, 43, 0.08); font-size: 14px; color: var(--text); }
+.plans__save span { margin-right: auto; }
+
+/* 💳 Thanh toán nâng cấp (BillingEditor) */
+.bill__badge { margin-left: 8px; padding: 2px 9px; border-radius: 999px; font-size: 12.5px; font-weight: 700; vertical-align: 2px;
+  color: #1a1206; background: #fbbf24; }
+.bill__grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(240px, 1fr); gap: 18px; align-items: start; }
+.bill__form { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.bill__form .qt-field select, .bill__form .qt-field input, .bill__form .qt-field textarea { width: 100%; padding: 8px 10px; font: inherit; font-size: 14.5px;
+  color: var(--text); background: var(--panel-high, #1a1d24); border: 1px solid var(--border); border-radius: 8px; box-sizing: border-box; }
+.bill__form code { font-size: 12.5px; padding: 0 4px; border-radius: 4px; background: rgba(255, 255, 255, 0.07); }
+.bill__hint { font-size: 12.5px; color: var(--muted); }
+.bill__save { display: flex; flex-wrap: wrap; gap: 10px; padding-top: 4px; }
+.bill__sample { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px; border-radius: 12px; border: 1px solid var(--border);
+  text-align: center; font-size: 14px; color: var(--text); }
+.bill__sample h4, .bill__requests h4 { margin: 0; font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.bill__sample img { border-radius: 8px; background: #fff; padding: 6px; }
+.bill__sample p { margin: 0; }
+.bill__sample small { font-size: 12.5px; color: var(--muted); }
+.bill__qrwait { width: 220px; height: 220px; display: grid; place-items: center; color: var(--muted); }
+.bill__requests { display: flex; flex-direction: column; gap: 6px; }
+.bill__req { display: grid; grid-template-columns: minmax(170px, 1.3fr) 110px minmax(160px, 1.4fr) 140px minmax(170px, auto); gap: 10px; align-items: center;
+  padding: 9px 10px; border-radius: 9px; border: 1px solid var(--border); font-size: 14px; color: var(--text); }
+.bill__req--pending { border-color: rgba(251, 191, 36, 0.55); background: rgba(251, 191, 36, 0.07); }
+.bill__req--approved .bill__acts { color: #4ade80; }
+.bill__req--rejected .bill__acts { color: #fca5a5; }
+.bill__req--cancelled { opacity: 0.6; }
+.bill__amount { font-weight: 700; color: #ffb489; font-variant-numeric: tabular-nums; }
+.bill__content { font-family: ui-monospace, Consolas, monospace; font-size: 13.5px; overflow-wrap: anywhere; }
+.bill__when { font-size: 13px; color: var(--muted); }
+.bill__acts { display: flex; gap: 6px; justify-content: flex-end; font-size: 13.5px; }
 
 @media (max-width: 1100px) {
   .acc-new__grid { grid-template-columns: 1fr 1fr; }
   .acc-new__note { grid-column: 1 / -1; }
 }
-@media (max-width: 1360px) {
+/* tables reflow by the width of their own box, not the window (the sidebar / app window change the room a card has) */
+.acc-table, .bill__requests, .bill__terms { container-type: inline-size; }
+@container (max-width: 1120px) {
   .acc-row { grid-template-columns: 1fr 1fr; }
   .acc-row--head { display: none; }
   .acc-acts { grid-column: 1 / -1; justify-content: flex-start; }
 }
-@media (max-width: 640px) {
-  .acc-new__grid, .acc-row { grid-template-columns: 1fr; }
+@container (max-width: 840px) {
+  .bill__req { grid-template-columns: 1fr 1fr; }
+  .bill__acts { justify-content: flex-start; }
 }
+@container (max-width: 520px) {
+  .acc-row, .bill__req { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .bill__grid { grid-template-columns: 1fr; }
+  .acc-new__grid { grid-template-columns: 1fr; }
+}
+
+/* the trial ("Dùng thử"): expiry under the plan select, the trial column of the plans table, reorder buttons */
+.acc-plan { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
+.acc-trial { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; font-size: 12.5px; color: var(--muted); }
+.acc-trial .qt-link { font-size: 12.5px; }
+.acc-trial--soon { color: #fbbf24; }
+.acc-trial--over { color: #fca5a5; font-weight: 700; }
+.acc-display { width: 100%; font-size: 12.5px; color: var(--muted); }
+.plans__top { display: flex; align-items: center; min-height: 24px; margin-bottom: 6px; }
+.plans__tag { padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 700; white-space: nowrap;
+  color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.5); background: rgba(251, 191, 36, 0.1); }
+.plans__order { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.plans__mv { width: 26px; height: 24px; padding: 0; border-radius: 6px; border: 1px solid var(--border); background: transparent;
+  color: var(--text); font-size: 11px; cursor: pointer; }
+.plans__mv:hover:not(:disabled) { border-color: var(--qt-accent, #ff6a2b); color: #ffb489; }
+.plans__mv:disabled { opacity: 0.3; cursor: default; }
+.plans__days { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.plans__days select { padding: 4px 6px; font: inherit; font-size: 13px; color: var(--text); background: var(--panel-high, #1a1d24);
+  border: 1px solid rgba(251, 191, 36, 0.5); border-radius: 7px; }
+.plans__table thead th.plans__plan--trial { background: rgba(251, 191, 36, 0.06); }
+.plans__cell--trial { background: rgba(251, 191, 36, 0.03); }
+.acc-plan > .acc-chip { align-self: flex-start; }
+.plans > .qt-card__head > .qt-btn { flex-shrink: 0; white-space: nowrap; }
+
+/* 💰 Bảng giá theo thời hạn (BillingEditor): each plan, its terms as rows */
+.bill__pricing { display: flex; flex-direction: column; gap: 10px; }
+.bill__pricing h4 { margin: 0; font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.bill__plan { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--border); background: rgba(255, 255, 255, 0.015); }
+.bill__planhead { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 15px; color: var(--text); }
+.bill__planhead span { font-size: 13px; color: var(--muted); margin-right: auto; }
+.bill__terms { display: flex; flex-direction: column; gap: 6px; }
+.bill__term { display: grid; grid-template-columns: 130px 170px 190px minmax(200px, 1fr) 44px; gap: 10px; align-items: center; font-size: 14px; color: var(--text); }
+.bill__term--head { font-size: 12px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: var(--muted); }
+.bill__term select { width: 100%; padding: 7px 8px; font: inherit; font-size: 14px; color: var(--text); background: var(--panel-high, #1a1d24);
+  border: 1px solid var(--border); border-radius: 8px; }
+.bill__money { display: flex; align-items: center; gap: 6px; }
+.bill__money input { width: 100%; min-width: 0; padding: 7px 10px; font: inherit; font-size: 14px; text-align: right; font-variant-numeric: tabular-nums;
+  color: var(--text); background: var(--panel-high, #1a1d24); border: 1px solid var(--border); border-radius: 8px; box-sizing: border-box; }
+.bill__money input:focus { border-color: var(--qt-accent, #ff6a2b); outline: none; }
+.bill__seen { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-variant-numeric: tabular-nums; }
+.bill__seen s { color: var(--muted); font-size: 13px; }
+.bill__seen b { color: #ffb489; }
+.bill__seen em { font-style: normal; padding: 1px 7px; border-radius: 999px; font-size: 12px; font-weight: 800; color: #fff; background: #dc2626; }
+.bill__seen small { width: 100%; font-size: 12px; color: var(--muted); }
+.bill__warn { font-size: 12.5px; color: #fbbf24; font-style: normal; }
+
+/* the account's plan button + "Gói & thời hạn" dialog (PlanAssignDialog) */
+.acc-planbtn { display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; border-radius: 8px; cursor: pointer;
+  border: 1px solid rgba(96, 165, 250, 0.45); background: rgba(96, 165, 250, 0.1); color: #bfdbfe; font: inherit; font-size: 14px; text-align: left; }
+.acc-planbtn--trial { border-color: rgba(251, 191, 36, 0.5); background: rgba(251, 191, 36, 0.08); color: #fde68a; }
+.acc-planbtn:hover:not(:disabled) { filter: brightness(1.2); }
+.acc-planbtn span { font-size: 12px; opacity: 0.8; }
+.pa-backdrop { z-index: 1250; }
+.project-modal.pa { width: min(94vw, 560px); display: flex; flex-direction: column; gap: 10px; }
+.pa__title { margin: 0; font-size: 18px; color: var(--text); }
+.pa__now { margin: 0; font-size: 14px; color: var(--muted); }
+.pa__label { margin-top: 4px; font-size: 12.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.pa__chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.pa__chip { padding: 7px 12px; border-radius: 999px; cursor: pointer; border: 1px solid var(--border); background: rgba(255, 255, 255, 0.03);
+  color: var(--text); font: inherit; font-size: 14px; font-weight: 600; }
+.pa__chip:hover { border-color: rgba(255, 106, 43, 0.6); }
+.pa__chip.is-on { color: #fff; border-color: #ff8a52; background: linear-gradient(180deg, #ff7a3d, #e85a1c); }
+.pa__chip--trial:not(.is-on) { border-color: rgba(251, 191, 36, 0.45); color: #fde68a; }
+.pa__chip--forever:not(.is-on) { border-style: dashed; }
+.pa__stack { display: flex; align-items: flex-start; gap: 8px; font-size: 14px; line-height: 1.45; color: var(--text); cursor: pointer; }
+.pa__stack input { margin-top: 3px; }
+.pa__result { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 10px; font-size: 15px; color: var(--text);
+  border: 1px solid rgba(96, 165, 250, 0.45); background: rgba(96, 165, 250, 0.08); }
+.pa__result--forever { border-color: rgba(34, 197, 94, 0.45); background: rgba(34, 197, 94, 0.08); }
+.pa__result small { font-size: 12.5px; color: var(--muted); }
+.pa__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.pa__chip--sold { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 1px; border-radius: 10px; padding: 6px 12px; }
+.pa__chip--sold small { font-size: 12px; font-weight: 700; color: #ffb489; }
+.pa__chip--sold.is-on small { color: #fff; }
+.pa__chip--date:not(.is-on) { border-style: dashed; }
+.pa__chip--small { padding: 4px 10px; font-size: 13px; font-weight: 500; }
+.pa__others { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.pa__date { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--text); }
+.pa__date input { padding: 6px 10px; font: inherit; color: var(--text); background: var(--panel-high, #1a1d24); border: 1px solid var(--border); border-radius: 8px;
+  color-scheme: dark; }
+.pa__result--past { border-color: rgba(248, 113, 113, 0.55); background: rgba(248, 113, 113, 0.08); }
+/* the plan table: a plan's terms under its name */
+.plans__price { margin-top: 6px; font-size: 12.5px; font-weight: 700; line-height: 1.4; color: #ffb489; }
+.plans__price--none { color: var(--muted); font-weight: 500; }
+/* after the .bill__term base rule (a container rule earlier in the file loses to it) */
+@container (max-width: 800px) {
+  .bill__term { grid-template-columns: 1fr 1fr; }
+  .bill__term--head { display: none; }
+}
+@container (max-width: 520px) {
+  .bill__term { grid-template-columns: 1fr; }
+}
+
+/* signed licences (licensing.py): the key banner + warnings */
+.acc-lic { padding: 10px 14px; border-radius: 10px; font-size: 14px; line-height: 1.55; color: var(--text); overflow-wrap: anywhere; }
+.acc-lic code { font-size: 12.5px; padding: 0 4px; border-radius: 4px; background: rgba(255, 255, 255, 0.07); }
+.acc-lic--key { border: 1px solid rgba(34, 197, 94, 0.45); background: rgba(34, 197, 94, 0.07); }
+.acc-lic--nokey { border: 1px solid rgba(251, 191, 36, 0.5); background: rgba(251, 191, 36, 0.08); }
+.acc-chip--warn { color: #fbbf24; border-color: rgba(251, 191, 36, 0.5); background: rgba(251, 191, 36, 0.1); }

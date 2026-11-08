@@ -1,4 +1,5 @@
 import asyncio
+import re
 import json
 import os
 import hmac
@@ -19,7 +20,8 @@ from flowboard.routes import export_extras as export_extras_route
 from flowboard.routes import account as account_route
 from flowboard.routes import account_admin as account_admin_route
 from flowboard.routes import cloud as cloud_route
-from flowboard import accounts
+from flowboard import accounts, licensing
+from flowboard import plans as account_plans  # service plans; `plans` below is the Canvas route
 from flowboard.routes import exports as exports_route
 from flowboard.routes import posts as posts_route
 from flowboard.routes import channels as channels_route
@@ -184,9 +186,19 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="DFlow Agent", version="0.0.2", lifespan=lifespan)
 
+#: Who may call the agent from a browser: the app's own pages (the agent itself, the Vite dev server, the desktop shell's
+#: start page) and the Chrome extension. Any other website the user opens must not drive the local agent.
+ALLOWED_ORIGIN = re.compile(
+    r"^(https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?|chrome-extension://[a-p]{32}|https?://tauri\.localhost|tauri://localhost)$")
+
+@app.exception_handler(licensing.LicenseError)
+async def _licence_error(_request: FastAPIRequest, exc: licensing.LicenseError):
+    return JSONResponse({"detail": str(exc)}, status_code=403)
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=ALLOWED_ORIGIN.pattern,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -243,11 +255,27 @@ async def _require_login(request: FastAPIRequest, call_next):
             await asyncio.to_thread(accounts.activate, user)
         except accounts.AccountBusy as exc:
             return JSONResponse({"detail": str(exc)}, status_code=409)
+        # The account's plan (plans.py) decides which feature routes it may call.
+        need = account_plans.feature_for(request.method, path)
+        if need and not any(account_plans.allows(user, f) for f in need):
+            return JSONResponse({"detail": account_plans.refusal(user, need), "feature": need[0]}, status_code=403)
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def _refuse_foreign_pages(request: FastAPIRequest, call_next):
+    """A page of another website (or a sandboxed / file page, Origin "null") may not change anything here: CORS only
+    hides the answer, the request itself would still run."""
+    origin = request.headers.get("origin")
+    if request.method not in ("GET", "HEAD", "OPTIONS") and origin and not ALLOWED_ORIGIN.match(origin):
+        return JSONResponse({"detail": "Yêu cầu từ trang web lạ bị chặn."}, status_code=403)
     return await call_next(request)
 
 
 app.include_router(account_route.router)
 app.include_router(account_admin_route.router)
+app.include_router(account_admin_route.plans_router)
+app.include_router(account_admin_route.billing_router)
 app.include_router(cloud_route.router)
 app.include_router(boards.router)
 app.include_router(templates.router)

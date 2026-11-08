@@ -443,7 +443,9 @@ def _claim(plan_id: int, slot_at: datetime, status: str, error: str = "") -> Opt
 async def tick() -> int:
     """Claim and start the slots coming up within each enabled plan's lead time; list the ones missed; pick up runs
     left halfway (restart) or waiting to retry. Returns how many runs were started."""
-    if not has_engine():
+    from flowboard import plans
+
+    if not has_engine() or not plans.active_allows("autopilot"):  # not in the account's plan (any more)
         return 0
     now = _now()
     started = 0

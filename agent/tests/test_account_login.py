@@ -31,10 +31,11 @@ def auth_app(tmp_path, monkeypatch):
 
 
 def test_password_hashing_round_trip():
-    h = accounts.hash_password("Password@123")
-    assert h.startswith("pbkdf2_sha256$") and accounts.verify_password("Password@123", h)
-    assert not accounts.verify_password("password@123", h)
-    assert not accounts.verify_password("x", "garbage")
+    h = accounts.hash_password("Password@123", "akiragosho")
+    assert h.startswith("dflow2$") and accounts.verify_password("Password@123", h, "akiragosho")
+    assert not accounts.verify_password("password@123", h, "akiragosho")
+    assert not accounts.verify_password("Password@123", h, "ban")  # bound to the account: no copying it onto another row
+    assert not accounts.verify_password("x", "garbage", "akiragosho")
 
 
 def test_seed_account_exists_and_api_needs_login(auth_app):

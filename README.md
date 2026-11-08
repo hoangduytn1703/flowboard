@@ -87,7 +87,7 @@ Có 2 cách. **Cách 1 (file cài đặt)** dễ nhất — **không phải cài
      **Kết nối**. DFlow tự kiểm tra rồi khởi động lại (20–40 giây). Làm một lần trên mỗi máy. Chưa dán dòng này thì tài khoản được cấp sẽ báo
      *"Sai tên đăng nhập hoặc mật khẩu"*.
    - Đăng nhập bằng **tên + mật khẩu được cấp**.
-   - Bấm **Đổi mật khẩu** (góc dưới trái, cạnh tên của bạn) để đặt mật khẩu riêng.
+   - Bấm vào **tên của bạn** ở góc dưới trái → trang **Tài khoản của tôi** → **Đổi mật khẩu** để đặt mật khẩu riêng (trang này còn có tên hiển thị, gói đang dùng, nâng cấp gói, lịch sử giao dịch).
 5. **Cài Claude Code** (AI viết kịch bản, bài viết) — mở PowerShell (bấm Start, gõ `powershell`) và dán:
 
    ```powershell
@@ -343,11 +343,22 @@ Chỉ tài khoản **quản trị** (`akiragosho`) thấy menu **👥 Quản lý
    **github.com/hoangduytn1703/dflow-releases/releases**.
 3. Họ quên mật khẩu → **🔑 Đặt lại mật khẩu** (copy luôn thông tin mới để gửi). Ngừng cho dùng → **🔒 Khoá** (họ bị đăng xuất, không đăng nhập được;
    dữ liệu giữ nguyên, **🔓 Mở khoá** là dùng lại). **⎋ Đăng xuất mọi máy** khi nghi lộ mật khẩu.
+4. **Gói của từng người**: bấm ô **Gói** của tài khoản → **Gói & thời hạn** (chọn gói + thời hạn đã bán, cộng thêm vào hạn còn lại; hoặc 📅 chọn ngày hết
+   hạn). Hết hạn là không đăng nhập được → **Gia hạn**. Bảng gói (tên, tính năng, giá theo thời hạn) sửa ở **📦 Gói & tính năng**; số tài khoản nhận chuyển khoản
+   và duyệt yêu cầu nâng cấp ở **💳 Thanh toán nâng cấp**.
+5. **Khoá ký — chỉ máy của người quản lý**: gói, thời hạn, khoá tài khoản, bảng gói và thông tin chuyển khoản được **ký số** bằng file khoá riêng
+   `C:\Users\<tên bạn>\.flowboard\dflow-license.key` — ai sửa tay cơ sở dữ liệu cũng không tự lên gói được. Vì vậy các việc đổi quyền (tạo tài khoản, đổi gói /
+   hạn, khoá, lưu bảng gói / thanh toán, duyệt nâng cấp) **chỉ làm được trên máy có file này**; máy khác đăng nhập quản trị chỉ xem (trang quản lý báo 🔒).
+   - **Sao lưu file khoá** (USB, trình quản lý mật khẩu) — mất là không cấp / đổi gói được nữa.
+   - Muốn quản lý ở máy khác: chép file đó vào đúng chỗ trên máy kia.
+   - **Không bao giờ gửi file này cho ai, không đưa lên mạng.**
 
-Người khác chỉ đổi được mật khẩu của chính họ (nút **Đổi mật khẩu** ở góc dưới trái).
+Người khác chỉ đổi được mật khẩu / thông tin của chính họ (bấm vào tên ở góc dưới trái → **Tài khoản của tôi**).
 
-> **Lưu ý bảo mật**: dòng kết nối dữ liệu cho **toàn quyền** với cơ sở dữ liệu (người rành kỹ thuật đọc được dữ liệu của mọi tài khoản). Chỉ gửi
-> cho người bạn tin. Đổi mật khẩu quản trị ngay sau khi cài (mật khẩu mặc định ghi trong mã nguồn).
+> **Lưu ý bảo mật**: nhờ chữ ký số, người có dòng kết nối dữ liệu không tự nâng gói / gia hạn / mở khoá được — nhưng người rành kỹ thuật vẫn **đọc được
+> dữ liệu của mọi tài khoản** (sản phẩm, clip, key AI, token Page). Chỉ gửi dòng đó cho người bạn tin. Chạy từ mã nguồn trên kho trống sẽ tạo sẵn tài khoản
+> `akiragosho / Password@123` (ghi công khai trong mã nguồn) — **đổi mật khẩu quản trị ngay**. Người được mời vào kho mã nguồn (Cách 2) sửa được code trên máy
+> họ để bỏ mọi giới hạn gói — khách chỉ nên dùng file cài (Cách 1).
 
 ---
 
@@ -365,6 +376,10 @@ Người khác chỉ đổi được mật khẩu của chính họ (nút **Đ�
 | Tài khoản được cấp báo *"Sai tên đăng nhập hoặc mật khẩu"* | Máy này chưa nối dữ liệu cloud: ở trang đăng nhập bấm **🌐 Dán dòng kết nối trước** (Mục 6.5) |
 | *"Tài khoản này đã bị khoá"* | Hỏi người quản lý DFlow mở khoá |
 | Quên mật khẩu | Nhờ người quản lý **🔑 Đặt lại mật khẩu** (Mục 6.6) |
+| *"Tài khoản này chưa được người quản lý cấp quyền trên app"* | Người quản lý mở **👥 Quản lý tài khoản** trên máy có khoá ký → **Gói & thời hạn** của tài khoản đó → chọn gói → Lưu (máy ký lại) |
+| *"Mật khẩu của tài khoản này cần được người quản lý đặt lại"* | Mật khẩu từng được đổi bằng app bản cũ (≤ 1.5.2) — nhờ người quản lý **🔑 Đặt lại mật khẩu** |
+| *"Bản DFlow trên máy này (…) đã cũ"* | Cập nhật app (Mục 5) rồi đăng nhập lại |
+| *"🔒 Máy này không có khoá ký…"* (người quản lý) | Làm việc đó trên máy có file khoá ký, hoặc chép file khoá sang (Mục 6.6) |
 | App báo **mất kết nối extension** | Kiểm tra DFlow Bridge đang bật ở `chrome://extensions` (bấm ↻ tải lại), tab flow.google.com còn mở, rồi F5 tab Flow |
 | AI không viết được / báo lỗi AI | **⚙ Cài đặt → 🤖 AI viết** đã chọn Claude chưa; chạy `claude` trong PowerShell xem còn đăng nhập không, gói Claude còn lượt không |
 | Tạo ảnh / video báo lỗi, "Flow bỏ lượt" | Tab Flow đúng tài khoản có gói Pro / Ultra; Cài đặt → Google Flow đúng project; ở Bước 1 của clip bấm "🎬 Kiểm tra với Flow" xem người mẫu có bị chặn không |
@@ -392,6 +407,8 @@ Vẫn không được: chụp màn hình cửa sổ DFlow (PowerShell) và trang
 
 - Test: `cd agent && .venv/Scripts/python.exe -m pytest -q -p no:cacheprovider tests` (Windows; Linux `.venv/bin/python`). Typecheck: `cd frontend && npx tsc -b --noEmit`.
 - Cấu hình máy nằm ở `.env` (không commit); bí mật của tài khoản (key AI, token Page, bucket) nằm trong kho trung tâm, nhập qua Cài đặt.
+- Quyền dùng (vai trò / gói / hạn / khoá, bảng gói, thông tin chuyển khoản) ký số Ed25519 — `agent/flowboard/licensing.py`, khoá riêng chỉ ở máy người quản lý;
+  bản cài dịch mã agent bằng Nuitka (`flowboard.*.pyd`, trên CI). Chi tiết: CLAUDE.md → "Chữ ký số quyền dùng".
 - Ghi chú đầy đủ cho người phát triển — cách chạy, cấu trúc code, các bẫy đã gặp, nhật ký thay đổi: **[CLAUDE.md](CLAUDE.md)**.
 
 ---

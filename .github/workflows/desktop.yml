@@ -1,4 +1,5 @@
-# Builds the Windows installer of the DFlow desktop app (Tauri 2 shell + the agent bundled with PyInstaller).
+# Builds the Windows installer of the DFlow desktop app (Tauri 2 shell + the agent: its own code compiled by Nuitka,
+# bundled with its libraries by PyInstaller).
 #
 #   Actions → "Desktop app" → Run workflow   → the installer is attached to the run (Artifacts: DFlow-Setup)
 #   a push to main that touches desktop/, agent/packaging/ or this file → same
@@ -51,21 +52,52 @@ jobs:
             "desktop/src-tauri/Cargo.toml" = ([regex]::Match((Get-Content desktop/src-tauri/Cargo.toml -Raw), '(?m)^version = "([^"]+)"')).Groups[1].Value
             "frontend/package.json" = (Get-Content frontend/package.json -Raw | ConvertFrom-Json).version
             "agent/pyproject.toml" = ([regex]::Match((Get-Content agent/pyproject.toml -Raw), '(?m)^version = "([^"]+)"')).Groups[1].Value
+            # the agent checks it against the signed oldest-build-allowed (licensing.outdated)
+            "agent/flowboard/__init__.py" = ([regex]::Match((Get-Content agent/flowboard/__init__.py -Raw), '__version__ = "([^"]+)"')).Groups[1].Value
           }
           $bad = $have.GetEnumerator() | Where-Object { $_.Value -ne $want }
           if ($bad) { throw "tag v$want does not match: " + (($bad | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ", ") }
 
       # ── 1. the agent → resources/agent/dflow-agent.exe ─────────────────────
       - uses: astral-sh/setup-uv@v6
-      - name: Agent (PyInstaller)
+      - name: Agent (Nuitka + PyInstaller)
         run: |
           uv venv --python 3.11 agent/.venv
-          uv pip install --python agent/.venv/Scripts/python.exe -e agent pyinstaller
+          uv pip install --python agent/.venv/Scripts/python.exe -e agent pyinstaller nuitka ordered-set zstandard
           Push-Location agent
+          # the agent's own code as machine code: the licence checks are not one decompile + edit away (packaging/dflow-agent.spec)
+          .venv/Scripts/python.exe -m nuitka --module flowboard --include-package=flowboard --output-dir=../build/nuitka `
+            --remove-output --assume-yes-for-downloads --msvc=latest --jobs=4 --lto=no
+          $pyd = Get-ChildItem ../build/nuitka -Filter "flowboard*.pyd" | Select-Object -First 1
+          if (-not $pyd) { throw "Nuitka built no flowboard*.pyd" }
+          $env:DFLOW_COMPILED = $pyd.FullName
           .venv/Scripts/python.exe -m PyInstaller packaging/dflow-agent.spec --noconfirm `
             --distpath ../desktop/src-tauri/resources --workpath ../build/pyinstaller
           Pop-Location
           if (-not (Test-Path desktop/src-tauri/resources/agent/dflow-agent.exe)) { throw "dflow-agent.exe missing" }
+          if (-not (Test-Path "desktop/src-tauri/resources/agent/_internal/$($pyd.Name)")) { throw "the compiled flowboard is not in the bundle" }
+
+      # the compiled build must start and ask for a login (a Nuitka build that breaks at runtime never reaches a release)
+      - name: Agent smoke test
+        run: |
+          $h = New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/dflow-smoke"
+          $env:FLOWBOARD_HOME = $h.FullName
+          $env:FLOWBOARD_HTTP_PORT = "8534"
+          $env:FLOWBOARD_EXT_WS_PORT = "8455"
+          $p = Start-Process desktop/src-tauri/resources/agent/dflow-agent.exe -PassThru -WindowStyle Hidden
+          $ok = $false
+          for ($i = 0; $i -lt 60 -and -not $ok; $i++) {
+            Start-Sleep -Seconds 2
+            try { $ok = (Invoke-WebRequest http://127.0.0.1:8534/api/health -UseBasicParsing -TimeoutSec 3).StatusCode -eq 200 } catch {}
+          }
+          $me = 0
+          try { Invoke-WebRequest http://127.0.0.1:8534/api/account/me -UseBasicParsing -TimeoutSec 5 | Out-Null } catch { $me = [int]$_.Exception.Response.StatusCode }
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          if (-not $ok -or $me -ne 401) {
+            Get-Content "$($h.FullName)/logs/agent.log" -ErrorAction SilentlyContinue | Select-Object -Last 80
+            throw "the packaged agent did not start properly (health ok: $ok, /api/account/me: $me — expected 401)"
+          }
+          Write-Host "packaged agent ok: health 200, login required"
 
       # ── 2. the web UI → resources/web ──────────────────────────────────────
       - uses: actions/setup-node@v4

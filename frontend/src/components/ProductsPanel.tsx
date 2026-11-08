@@ -26,6 +26,7 @@ import { useGenerationStore } from "../store/generation";
 import { toast, useToastOn } from "../store/toast";
 import { PageEmpty, PageLoading } from "../quicktool/PageState";
 import { BundleDialog } from "../quicktool/bundle/BundleDialog";
+import { useFeature } from "../lib/features";
 
 /** Products per page: five to a row, five rows in the grid; a list row is taller. */
 const GRID_PER_PAGE = 25;
@@ -154,6 +155,7 @@ export function ProductsPanel({
   const [linkOpen, setLinkOpen] = useState(false);
   // "🎁 Gói nội dung": clip + bài Facebook + caption TikTok cho một sản phẩm.
   const [bundleFor, setBundleFor] = useState<Product | null>(null);
+  const bundleOn = useFeature("posts"); // the bundle writes a Facebook post + TikTok caption
   const [linkUrl, setLinkUrl] = useState("");
   const [linkBusy, setLinkBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -618,8 +620,8 @@ export function ProductsPanel({
                       <button type="button" className="project-modal__btn project-modal__btn--primary product-card__clip" onClick={() => onMakeClip(p)}>
                         🎬 Tạo clip
                       </button>
-                      <button type="button" className="project-modal__btn product-card__bundle" onClick={() => setBundleFor(p)}
-                              title="Một lần ra trọn bộ: clip + bài Facebook + caption TikTok cho sản phẩm này">🎁 Gói</button>
+                      {bundleOn && <button type="button" className="project-modal__btn product-card__bundle" onClick={() => setBundleFor(p)}
+                              title="Một lần ra trọn bộ: clip + bài Facebook + caption TikTok cho sản phẩm này">🎁 Gói</button>}
                     </span>
                   </div>
                 ))}
@@ -647,7 +649,7 @@ export function ProductsPanel({
                     <span className="product-row__actions">
                       <button type="button" className="project-modal__btn" onClick={() => openForm(p)}>Sửa</button>
                       <button type="button" className="project-modal__btn project-modal__btn--primary" onClick={() => onMakeClip(p)}>🎬 Tạo clip</button>
-                      <button type="button" className="project-modal__btn" onClick={() => setBundleFor(p)} title="Clip + bài Facebook + caption TikTok một lần">🎁 Gói</button>
+                      {bundleOn && <button type="button" className="project-modal__btn" onClick={() => setBundleFor(p)} title="Clip + bài Facebook + caption TikTok một lần">🎁 Gói</button>}
                     </span>
                   </div>
                 ))}

@@ -108,6 +108,8 @@ function DialogueLine({ text, tags }: { text: string; tags: string[] }) {
 }
 
 /** Step 5 — voice options, the clip list, the final file. */
+import { useFeature } from "../../lib/features";
+
 export function StepExport({ roles, productName = "", price = "", channelId = null, dubJobId = null, dubPart = null, voiceless = false }: {
   roles: ClipRoles; productName?: string; price?: string; channelId?: number | null;
   /** "🔇 Không lời": joined with the clips' own sound — no voice, no subtitles. */
@@ -119,6 +121,9 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
 }) {
   const voiceGroups = useVoiceGroups();
   const navigate = useNavigate();
+  const fbOn = useFeature("facebook");
+  const postsOn = useFeature("posts");
+  const dubOn = useFeature("dub");
   const [scheduling, setScheduling] = useState(false);
   // "Ghép" clicked, the export not queued yet (the clips are being wired): the button greys out at once
   const [sending, setSending] = useState(false);
@@ -281,8 +286,8 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
             <li>🌫 Vùng làm mờ che chữ gốc</li>
             <li>🗣 Đổi giọng đọc, sửa từng câu dịch</li>
           </ul>
-          <a className="qt-btn qt-btn--accent qt-btn--big" href={`/tools/dub?job=${dubJobId}`}
-             onClick={(e) => { e.preventDefault(); navigate(`/tools/dub?job=${dubJobId}`); }}>✏️ Mở trang chỉnh phụ đề & giọng</a>
+          {dubOn && <a className="qt-btn qt-btn--accent qt-btn--big" href={`/tools/dub?job=${dubJobId}`}
+             onClick={(e) => { e.preventDefault(); navigate(`/tools/dub?job=${dubJobId}`); }}>✏️ Mở trang chỉnh phụ đề & giọng</a>}
         </section>
       ) : (
       <section className="qt-card">
@@ -470,12 +475,12 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
                onClick={() => { if (boardId !== null) patchBoardData(boardId, { quicktool: { downloaded_at: Date.now() } }).catch(() => {}); }}>
               ⬇ Tải về đăng TikTok
             </a>
-            <div className="qt-result__share">
-              <button type="button" className="qt-btn qt-btn--schedule" onClick={() => setScheduling(true)}
-                      title="Chọn giờ đăng lên kênh; kênh có Facebook Page kết nối thì tự đăng">📅 Lên lịch đăng</button>
-              <button type="button" className="qt-btn qt-btn--publish" disabled={boardId === null} onClick={() => navigate(`/posts?clip=${boardId}`)}
-                      title="Sang trang Bài viết Facebook với video clip gắn sẵn: chọn kiểu bài, AI viết theo lời thoại clip, rồi Đăng ngay (bài viết / Reel) hoặc Lên lịch">✍️ Viết bài &amp; đăng</button>
-            </div>
+            {(fbOn || postsOn) && <div className="qt-result__share">
+              {fbOn && <button type="button" className="qt-btn qt-btn--schedule" onClick={() => setScheduling(true)}
+                      title="Chọn giờ đăng lên kênh; kênh có Facebook Page kết nối thì tự đăng">📅 Lên lịch đăng</button>}
+              {postsOn && <button type="button" className="qt-btn qt-btn--publish" disabled={boardId === null} onClick={() => navigate(`/posts?clip=${boardId}`)}
+                      title="Sang trang Bài viết Facebook với video clip gắn sẵn: chọn kiểu bài, AI viết theo lời thoại clip, rồi Đăng ngay (bài viết / Reel) hoặc Lên lịch">{fbOn ? "✍️ Viết bài & đăng" : "✍️ Viết bài"}</button>}
+            </div>}
             {scheduling && boardId !== null && (
               <ScheduleDialog target={{ kind: "clip", boardId, channelId, title: boardName || `Clip #${boardId}` }}
                               onClose={() => setScheduling(false)} onSaved={() => setScheduling(false)} />

@@ -33,6 +33,7 @@ import { PromptsPage } from "./pages/PromptsPage";
 import { PostsPage } from "./pages/PostsPage";
 import { ChannelsPage } from "./pages/ChannelsPage";
 import { AccountsPage } from "./pages/AccountsPage";
+import { AccountPage } from "./pages/AccountPage";
 import { DubPage } from "./pages/DubPage";
 import { CapcutPage } from "./pages/CapcutPage";
 import { ClipChannel } from "./steps/ClipChannel";
@@ -43,6 +44,8 @@ import { useFlowCredits } from "../components/credits";
 import { AccountSwitchBanner } from "../components/AccountSwitchBanner";
 import { BackgroundTasks } from "../components/BackgroundTasks";
 import { AssistantWidget } from "../components/AssistantWidget";
+import { useFeature } from "../lib/features";
+import { FeatureGate } from "./FeatureGate";
 import { toast, useToastOn } from "../store/toast";
 import { PageEmpty, PageLoading } from "./PageState";
 import { askConfirm, askText } from "../components/Dialogs";
@@ -96,6 +99,7 @@ function useCloseOverlay() {
  */
 export function QuicktoolApp() {
   const setUiMode = useSettingsStore((s) => s.setUiMode);
+  const assistantOn = useFeature("assistant");
   const [templates, setTemplates] = useState<BoardTemplate[]>([]);
 
   useEffect(() => {
@@ -109,7 +113,7 @@ export function QuicktoolApp() {
       <div className="qt-content">
         <AccountSwitchBanner />
         <BackgroundTasks />
-        <AssistantWidget />
+        {assistantOn && <AssistantWidget />}
         <Routes>
           {/* Static paths first so "new" / "from-video" are never read as a clip id. */}
           <Route path="/clips" element={<Library templates={templates} />} />
@@ -120,14 +124,15 @@ export function QuicktoolApp() {
           <Route path="/today" element={<TodayPage />} />
           <Route path="/models" element={<ModelsPage />} />
           <Route path="/prompts" element={<PromptsPage />} />
-          <Route path="/tools/clean" element={<CleanToolPage />} />
-          <Route path="/posts" element={<PostsPage />} />
+          <Route path="/tools/clean" element={<FeatureGate feature="clean" title="Xoá chữ / logo"><CleanToolPage /></FeatureGate>} />
+          <Route path="/posts" element={<FeatureGate feature="posts" title="Bài viết Facebook"><PostsPage /></FeatureGate>} />
           <Route path="/channels" element={<ChannelsPage />} />
           <Route path="/accounts" element={<AccountsPage />} />
-          <Route path="/schedule" element={<SchedulePage />} />
-          <Route path="/swipes" element={<SwipesPage />} />
-          <Route path="/tools/dub" element={<DubPage />} />
-          <Route path="/tools/capcut" element={<CapcutPage />} />
+          <Route path="/account" element={<AccountPage />} />
+          <Route path="/schedule" element={<FeatureGate feature="facebook" title="Lịch đăng"><SchedulePage /></FeatureGate>} />
+          <Route path="/swipes" element={<FeatureGate feature="swipes" title="Mẫu đang hot"><SwipesPage /></FeatureGate>} />
+          <Route path="/tools/dub" element={<FeatureGate feature="dub" title="Lồng tiếng video"><DubPage /></FeatureGate>} />
+          <Route path="/tools/capcut" element={<FeatureGate feature="capcut" title="Edit auto CapCut"><CapcutPage /></FeatureGate>} />
           <Route path="/settings" element={<Library templates={templates} />} />
           <Route path="/clips/:id/:step" element={<Wizard templates={templates} />} />
           <Route path="/clips/:id" element={<Wizard templates={templates} />} />
@@ -187,6 +192,7 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
   const [picked, setPicked] = useState<Set<number>>(() => new Set());
   const queue = useQuicktoolStore((s) => s.queue);
   const runQueue = useQuicktoolStore((s) => s.runQueue);
+  const autoClip = useFeature("auto_clip");
   const stopQueue = useQuicktoolStore((s) => s.stopQueue);
   const autoMessage = useQuicktoolStore((s) => s.autoMessage);
   const videoModel = useSettingsStore((s) => s.videoModel);
@@ -313,7 +319,7 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
                     ⬇ Tải {pickedList.filter((b) => b.summary.exported).length} clip đã ghép
                   </a>
                 )}
-                {pickedRunnable.length > 0 && (
+                {autoClip && pickedRunnable.length > 0 && (
                   <button type="button" className="qt-btn qt-btn--accent" disabled={deleting} onClick={() => startQueue(pickedRunnable)}
                           title="Chỉ chạy các clip chưa ghép xong trong số đã chọn">
                     ⚡ Chạy {pickedRunnable.length} clip dở
@@ -328,7 +334,7 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
               </>
             ) : (
               <>
-                {unfinished.length > 1 && (
+                {autoClip && unfinished.length > 1 && (
                   <button type="button" className="qt-btn qt-btn--ghost" onClick={() => startQueue(unfinished)}
                           title="Chạy tự động mọi clip chưa ghép xong, lần lượt từng clip">
                     ⚡ Chạy tất cả {unfinished.length} clip dở
@@ -440,6 +446,7 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
 function Wizard({ templates }: { templates: BoardTemplate[] }) {
   const { id, step: stepSlug } = useParams();
   const navigate = useNavigate();
+  const autoClip = useFeature("auto_clip");
   const routeId = Number(id);
 
   const boardId = useBoardStore((s) => s.boardId);
@@ -635,12 +642,12 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
           </button>
           {running ? (
             <button type="button" className="qt-btn qt-btn--danger" onClick={stopAuto}>■ Dừng tiến trình</button>
-          ) : (
+          ) : autoClip ? (
             <button type="button" className="qt-btn qt-btn--accent" onClick={startAuto} disabled={roles.scenes.length === 0}
                     title="Chạy hết: người mẫu → ảnh cảnh → video → lời thoại → ghép">
               ⚡ Tạo video tự động
             </button>
-          )}
+          ) : null}
         </div>
       </div>
 

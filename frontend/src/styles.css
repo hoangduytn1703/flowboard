@@ -6397,19 +6397,84 @@ button.chat-dock__presence[aria-expanded="true"] {
   font-size: 13px;
   color: var(--muted);
 }
-.user-chip__name { color: var(--text); font-weight: 600; }
-.user-chip { flex-wrap: wrap; row-gap: 4px; }
-.user-chip__actions { display: flex; gap: 12px; margin-left: auto; }
-.user-chip__role { margin-left: 6px; padding: 1px 6px; border-radius: 999px; font-size: 11px; font-weight: 700;
-  color: #ffb489; background: rgba(255, 106, 43, 0.14); border: 1px solid rgba(255, 106, 43, 0.4); vertical-align: 1px; }
+/* the whole left part opens "Tài khoản của tôi"; one "Thoát" on the right */
+.user-chip__me { flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px; padding: 5px 7px; margin-left: -7px;
+  border: 1px solid transparent; border-radius: 10px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.user-chip__me:hover, .user-chip__me.is-here { background: rgba(255, 255, 255, 0.05); border-color: var(--border); }
+.user-chip__me.is-here { border-color: rgba(255, 106, 43, 0.5); }
+.user-chip__avatar { flex-shrink: 0; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%;
+  font-size: 15px; font-weight: 800; color: #fff; background: linear-gradient(135deg, #ff7a3d, #c2410c); }
+.user-chip__text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.user-chip__name { color: var(--text); font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.user-chip__plan { font-size: 12px; font-weight: 600; color: #93c5fd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.user-chip__plan--admin { color: #ffb489; }
+.user-chip__plan--soon { color: #fbbf24; }
+.user-chip__out { flex-shrink: 0; padding: 5px 10px; border-radius: 8px; border: 1px solid var(--border); background: transparent;
+  color: var(--muted); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.user-chip__out:hover:not(:disabled) { color: #fca5a5; border-color: rgba(248, 113, 113, 0.55); background: rgba(248, 113, 113, 0.08); }
 
-/* "Đổi mật khẩu" (components/ChangePasswordDialog) */
-.pw-backdrop { z-index: 1250; } /* the sidebar / page sit above the plain modal layer (240) */
-.project-modal.pw-dialog { width: min(92vw, 440px); display: flex; flex-direction: column; gap: 12px; }
-.pw-dialog__title { margin: 0; font-size: 17px; color: var(--text); }
-.pw-dialog__field { display: flex; flex-direction: column; gap: 5px; font-size: 14px; color: var(--muted); }
-.pw-dialog__show { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); }
-.pw-dialog__hint { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
+/* "⬆ Nâng cấp gói" (components/UpgradeDialog) */
+.up-backdrop { z-index: 1250; }
+.project-modal.up { width: min(94vw, 960px); max-height: calc(100vh - 48px); overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
+.up__head { display: flex; align-items: center; gap: 12px; }
+.up__head h3 { margin: 0; font-size: 19px; color: var(--text); }
+.up__current { font-size: 14px; color: var(--muted); }
+.up__close { margin-left: auto; width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--text); font-size: 20px; cursor: pointer; }
+.up__loading { padding: 30px; text-align: center; color: var(--muted); }
+.up__trial { padding: 10px 12px; border-radius: 10px; font-size: 14px; line-height: 1.5; color: var(--text);
+  border: 1px solid rgba(251, 191, 36, 0.5); background: rgba(251, 191, 36, 0.08); }
+.up__pending { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 10px 12px; border-radius: 10px; font-size: 14px; color: var(--text);
+  border: 1px solid rgba(251, 191, 36, 0.5); background: rgba(251, 191, 36, 0.08); }
+.up__plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.up__plan { display: flex; flex-direction: column; gap: 10px; padding: 16px; border-radius: 12px; border: 1px solid var(--border); background: rgba(255, 255, 255, 0.02); }
+.up__plan--current { border-color: rgba(96, 165, 250, 0.55); background: rgba(96, 165, 250, 0.06); }
+.up__planhead { display: flex; align-items: center; gap: 8px; font-size: 18px; color: var(--text); }
+.up__tag { padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 700; color: #93c5fd; border: 1px solid rgba(96, 165, 250, 0.5); }
+.up__price { font-size: 24px; font-weight: 800; color: #ffb489; font-variant-numeric: tabular-nums; }
+/* terms: price with the list price struck through + saving, end date, per month, the term picker */
+.up__plans { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+.up__bigprice { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.up__list { font-size: 14.5px; color: var(--muted); text-decoration: line-through; font-variant-numeric: tabular-nums; }
+.up__off { padding: 2px 8px; border-radius: 999px; font-size: 13px; font-weight: 800; color: #fff; background: #dc2626; }
+.up__ends { font-size: 13.5px; line-height: 1.5; color: var(--text); }
+.up__per { color: var(--muted); }
+.up__forever { padding: 8px 10px; border-radius: 9px; font-size: 14.5px; color: #4ade80; background: rgba(34, 197, 94, 0.1); }
+.up__terms { display: flex; flex-direction: column; gap: 6px; }
+.up__term { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-radius: 9px; cursor: pointer;
+  border: 1px solid var(--border); background: rgba(255, 255, 255, 0.02); color: var(--text); font: inherit; font-size: 14px; text-align: left; }
+.up__term:hover { border-color: rgba(255, 106, 43, 0.6); }
+.up__term.is-on { border-color: #ff8a52; background: rgba(255, 106, 43, 0.12); box-shadow: inset 0 0 0 1px #ff8a52; }
+.up__termname { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-weight: 700; }
+.up__termname em { font-style: normal; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 800; color: #1a1206; background: #fbbf24; }
+.up__termprice { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.up__termprice s { font-size: 12px; color: var(--muted); }
+.up__termprice b { color: #ffb489; }
+.up__termprice i { font-style: normal; font-size: 11.5px; font-weight: 800; color: #fca5a5; }
+.up__feats { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 5px; font-size: 14px; color: var(--muted); flex: 1; }
+.up__feats li.is-on { color: var(--text); }
+.up__feats li span { display: inline-block; width: 16px; font-weight: 800; }
+.up__feats li.is-on span { color: #4ade80; }
+.up__foot { margin: 0; font-size: 13px; color: var(--muted); }
+.up__pay { display: grid; grid-template-columns: 320px 1fr; gap: 20px; align-items: start; }
+.up__qr { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 10px; border-radius: 12px; background: #fff; }
+.up__qr img { display: block; width: 300px; height: 300px; }
+.up__qr small { color: #333; font-size: 12.5px; text-align: center; }
+.up__qrwait { width: 300px; height: 300px; display: grid; place-items: center; color: #555; }
+.up__info { margin: 0; display: flex; flex-direction: column; gap: 10px; font-size: 15px; color: var(--text); }
+.up__info > div { display: grid; grid-template-columns: 120px 1fr; gap: 10px; align-items: baseline; }
+.up__info dt { color: var(--muted); font-size: 13.5px; }
+.up__info dd { margin: 0; overflow-wrap: anywhere; }
+.up__amount { font-size: 20px; color: #ffb489; }
+.up__content { font-family: ui-monospace, Consolas, monospace; font-size: 15px; padding: 2px 6px; border-radius: 6px; background: rgba(255, 255, 255, 0.06); }
+.up__gets dd { font-size: 13.5px; color: var(--muted); }
+.up__note { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--muted); }
+.up__info > div.up__btns { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
+@media (max-width: 760px) {
+  .up__pay { grid-template-columns: 1fr; justify-items: center; }
+  .up__info { width: 100%; }
+  .up__info > div { grid-template-columns: 1fr; gap: 2px; }
+}
+
 
 /* Settings → Dữ liệu: the bucket form */
 .data-sync__box { display: flex; flex-direction: column; gap: 6px; padding: 10px; margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; }

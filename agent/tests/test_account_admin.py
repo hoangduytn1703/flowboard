@@ -130,7 +130,7 @@ def test_an_older_central_store_gets_the_new_columns_and_the_seed_becomes_admin(
     md.create_all(eng)
     with eng.begin() as c:
         for i, name in enumerate(["akiragosho", "ban"], 1):
-            c.execute(old.insert().values(id=i, username=name, password_hash=accounts.hash_password("secret123"),
+            c.execute(old.insert().values(id=i, username=name, password_hash=accounts.hash_password("secret123", name),
                                           created_at=datetime(2026, 10, 22), backend='{"type": "sqlite"}'))
     eng.dispose()
     accounts.reset_central()

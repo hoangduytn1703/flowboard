@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  createAccount, listAccounts, logoutAccountEverywhere, randomPassword, resetAccountPassword, updateAccount,
-  type AccountList, type ManagedAccount,
+  createAccount, dayText, extendPlan, getPlans, listAccounts, logoutAccountEverywhere, randomPassword, resetAccountPassword, termLabel, timeLeft, vnd,
+  updateAccount, type AccountList, type ManagedAccount, type PlansData,
 } from "../../api/account";
 import { askConfirm, askText } from "../../components/Dialogs";
 import { useAccountStore } from "../../store/account";
 import { toast } from "../../store/toast";
 import { PageEmpty, PageLoading } from "../PageState";
+import { PlansEditor } from "./PlansEditor";
+import { BillingEditor } from "./BillingEditor";
+import { PlanAssignDialog } from "./PlanAssignDialog";
 import "./accounts.css";
 
 /** Times from the agent are naive UTC ("2026-11-08T03:12:00"). */
@@ -28,7 +31,7 @@ async function copy(text: string, done: string) {
 }
 
 function loginNote(username: string, password: string) {
-  return `Tài khoản DFlow\nTên đăng nhập: ${username}\nMật khẩu: ${password}\n(Đăng nhập xong vào "Đổi mật khẩu" ở góc dưới trái để đặt mật khẩu của bạn.)`;
+  return `Tài khoản DFlow\nTên đăng nhập: ${username}\nMật khẩu: ${password}\n(Đăng nhập xong bấm vào tên của bạn ở góc dưới trái → "Đổi mật khẩu" để đặt mật khẩu của bạn.)`;
 }
 
 /**
@@ -46,10 +49,16 @@ export function AccountsPage() {
   const [note, setNote] = useState("");
   const [cloud, setCloud] = useState(true);
   const [made, setMade] = useState<{ username: string; password: string; cloud: boolean } | null>(null);
+  const [plansData, setPlansData] = useState<PlansData | null>(null);
+  const [planId, setPlanId] = useState("");
+  const [newMonths, setNewMonths] = useState(0);
+  const [assigning, setAssigning] = useState<ManagedAccount | null>(null);
 
   const load = useCallback(async () => {
     try {
-      setData(await listAccounts());
+      const [list, pl] = await Promise.all([listAccounts(), getPlans()]);
+      setData(list);
+      setPlansData(pl);
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -64,7 +73,7 @@ export function AccountsPage() {
       <>
         <header className="qt-header"><span className="qt-header__crumb">Quản lý tài khoản</span></header>
         <PageEmpty icon="🔒" title="Chỉ tài khoản quản trị mới vào được trang này">
-          Bạn đổi được mật khẩu của mình ở nút <b>Đổi mật khẩu</b> góc dưới trái.
+          Bạn đổi được mật khẩu, tên hiển thị và xem gói của mình ở trang <b>Tài khoản của tôi</b> (bấm vào tên ở góc dưới trái).
         </PageEmpty>
       </>
     );
@@ -87,7 +96,8 @@ export function AccountsPage() {
     if (createProblem) { toast.warning(createProblem); return; }
     setBusy("create");
     try {
-      const row = await createAccount({ username: username.trim(), password, note, cloud: data!.cloud && cloud });
+      const row = await createAccount({ username: username.trim(), password, note, cloud: data!.cloud && cloud, plan: newPlan || undefined,
+        ...(newPlan && newPlan !== plansData?.trial_id ? { months: newMonths } : {}) });
       setMade({ username: row.username, password, cloud: row.backend === "postgres" });
       setUsername("");
       setNote("");
@@ -142,6 +152,11 @@ export function AccountsPage() {
     await act(a, "note", () => updateAccount(a.username, { note: next }), "Đã lưu ghi chú.");
   }
 
+  async function extend(a: ManagedAccount) {
+    const days = plansData?.plans.find((p) => p.id === plansData.trial_id)?.days ?? 7;
+    await act(a, "extend", () => extendPlan(a.username), `Đã gia hạn dùng thử cho ${a.username}: thêm ${days} ngày tính từ hôm nay.`);
+  }
+
   async function logoutAll(a: ManagedAccount) {
     const self = a.username === data!.me;
     if (!(await askConfirm(self
@@ -154,10 +169,25 @@ export function AccountsPage() {
   }
 
   const users = data.accounts.filter((a) => a.role !== "admin").length;
+  const plansList = plansData?.plans ?? [];
+  const newPlan = planId && plansList.some((p) => p.id === planId) ? planId : plansData?.default ?? "";
+  const planOf = (a: ManagedAccount) => (a.plan && plansList.some((p) => p.id === a.plan) ? a.plan : plansData?.default ?? "");
+  const planLabel = (id: string) => plansList.find((p) => p.id === id)?.name ?? id;
   return (
     <>
       <header className="qt-header"><span className="qt-header__crumb">Quản lý tài khoản</span></header>
       <div className="qt-home acc">
+        {data.licensing?.active && (data.licensing.can_sign ? (
+          <div className="acc-lic acc-lic--key">
+            🔑 Máy này có <b>khoá ký</b> ({data.licensing.key_path}) — gói, hạn, khoá tài khoản, bảng gói và thông tin chuyển khoản được ký bằng khoá này,
+            ai sửa tay cơ sở dữ liệu cũng vô hiệu. <b>Sao lưu file khoá</b> (USB / trình quản lý mật khẩu): mất là không cấp gói mới được.
+          </div>
+        ) : (
+          <div className="acc-lic acc-lic--nokey">
+            🔒 Máy này <b>không có khoá ký</b> nên chỉ xem được: tạo tài khoản, đổi gói / hạn, khoá, lưu bảng gói / thanh toán và duyệt nâng cấp phải làm
+            trên máy có khoá. (Muốn quản lý ở máy này: chép file <code>dflow-license.key</code> từ máy có khoá vào <code>{data.licensing.key_path}</code>.)
+          </div>
+        ))}
         <section className="qt-card acc-new">
           <div className="qt-card__head"><h3 className="qt-card__title">＋ Tạo tài khoản cho người khác</h3></div>
           <p className="qt-card__hint">
@@ -181,6 +211,23 @@ export function AccountsPage() {
               <span>Ghi chú (không bắt buộc)</span>
               <input value={note} maxLength={200} placeholder="vd: bạn Nam, dùng thử tới 30/11" onChange={(e) => setNote(e.target.value)} />
             </label>
+            <label className="qt-field">
+              <span>Gói</span>
+              <select value={newPlan} onChange={(e) => { const id = e.target.value; setPlanId(id); setNewMonths(plansList.find((p) => p.id === id)?.terms?.[0]?.months ?? 0); }}>
+                {plansList.map((p) => <option key={p.id} value={p.id}>{p.name}{p.id === plansData?.trial_id ? ` (${p.days ?? 7} ngày)` : ""}</option>)}
+              </select>
+            </label>
+            {newPlan && newPlan !== plansData?.trial_id && (
+              <label className="qt-field">
+                <span>Thời hạn</span>
+                <select value={newMonths} onChange={(e) => setNewMonths(Number(e.target.value))}>
+                  {(plansData?.term_months ?? [0]).map((m) => {
+                    const sold = plansList.find((p) => p.id === newPlan)?.terms?.find((x) => x.months === m);
+                    return <option key={m} value={m}>{termLabel(m)}{sold ? ` · ${vnd(sold.price)}` : ""}</option>;
+                  })}
+                </select>
+              </label>
+            )}
             {data.cloud && (
               <label className="acc-new__cloud">
                 <input type="checkbox" checked={cloud} onChange={(e) => setCloud(e.target.checked)} />
@@ -219,7 +266,7 @@ export function AccountsPage() {
           {users === 0 && <p className="qt-card__hint">Chưa có tài khoản nào ngoài bạn. Tạo ở khung trên.</p>}
           <div className="acc-table" role="table">
             <div className="acc-row acc-row--head" role="row">
-              <span>Tài khoản</span><span>Ghi chú</span><span>Dữ liệu</span><span>Đăng nhập gần nhất</span><span>Thao tác</span>
+              <span>Tài khoản</span><span>Gói</span><span>Ghi chú</span><span>Dữ liệu</span><span>Đăng nhập gần nhất</span><span>Thao tác</span>
             </div>
             {data.accounts.map((a) => {
               const admin = a.role === "admin";
@@ -231,6 +278,45 @@ export function AccountsPage() {
                     {admin && <span className="acc-chip acc-chip--admin">quản trị</span>}
                     {a.username === data.me && <span className="acc-chip">bạn</span>}
                     {a.disabled && <span className="acc-chip acc-chip--off">đã khoá</span>}
+                    {a.expired && !a.disabled && <span className="acc-chip acc-chip--off" title="Hết hạn gói: không đăng nhập được">hết hạn</span>}
+                    {data.licensing?.active && a.license === "missing" && (
+                      <span className="acc-chip acc-chip--off" title="Chưa có chữ ký: không đăng nhập được. Mở “Gói & thời hạn”, chọn gói rồi lưu để ký.">⚠ chưa ký</span>
+                    )}
+                    {data.licensing?.active && a.license === "invalid" && (
+                      <span className="acc-chip acc-chip--off" title="Chữ ký không khớp (bị sửa tay): không đăng nhập được. Mở “Gói & thời hạn”, chọn gói rồi lưu để ký lại.">⚠ chữ ký sai</span>
+                    )}
+                    {a.tampered && (
+                      <span className="acc-chip acc-chip--warn" title="Dòng tài khoản trong cơ sở dữ liệu bị sửa tay (gói / hạn / quyền / khoá). App dùng giá trị đã ký, phần sửa không có tác dụng.">⚠ bị sửa tay</span>
+                    )}
+                    {a.display_name && <small className="acc-display">{a.display_name}</small>}
+                  </span>
+                  <span className="acc-plan">
+                    {admin ? <span className="acc-chip acc-chip--admin" title="Tài khoản quản trị luôn có mọi tính năng">Toàn quyền</span> : (
+                      (() => {
+                        const pid = planOf(a);
+                        const isTrial = pid === plansData?.trial_id;
+                        const left = timeLeft(a.plan_expires);
+                        return (
+                          <>
+                            <button type="button" className={`acc-planbtn${isTrial ? " acc-planbtn--trial" : ""}`} disabled={!plansData}
+                                    title="Đổi gói / thời hạn của tài khoản này" onClick={() => setAssigning(a)}>
+                              <b>{planLabel(pid)}</b><span aria-hidden="true">✎</span>
+                            </button>
+                            <span className={`acc-trial${left.over ? " acc-trial--over" : a.plan_expires && left.days <= 3 ? " acc-trial--soon" : ""}`}>
+                              {a.plan_expires
+                                ? <span title={`Hết hạn ngày ${dayText(a.plan_expires)}`}>{left.over ? `Hết hạn ${dayText(a.plan_expires)}` : `${left.text} · tới ${dayText(a.plan_expires)}`}</span>
+                                : <span>vĩnh viễn</span>}
+                              {isTrial ? (
+                                <button type="button" className="qt-link" disabled={b("extend")} onClick={() => void extend(a)}
+                                        title="Dùng thử lại từ hôm nay (số ngày đặt ở bảng Gói)">Gia hạn</button>
+                              ) : a.plan_expires && (
+                                <button type="button" className="qt-link" onClick={() => setAssigning(a)} title="Gia hạn / đổi thời hạn">Gia hạn</button>
+                              )}
+                            </span>
+                          </>
+                        );
+                      })()
+                    )}
                   </span>
                   <span className="acc-note">
                     {a.note || <i className="acc-muted">—</i>}
@@ -246,24 +332,30 @@ export function AccountsPage() {
                   <span className="acc-acts">
                     {!admin && (
                       <button type="button" className="qt-btn qt-btn--small" disabled={b("pw")} onClick={() => void resetPassword(a)}
-                              title="Đặt mật khẩu mới (khi họ quên)">🔑 Đặt lại mật khẩu</button>
+                              title="Đặt mật khẩu mới (khi họ quên)">🔑 Mật khẩu</button>
                     )}
                     {!admin && (
                       <button type="button" className={`qt-btn qt-btn--small${a.disabled ? "" : " qt-btn--danger"}`} disabled={b("lock")}
                               onClick={() => void toggleLock(a)}>{a.disabled ? "🔓 Mở khoá" : "🔒 Khoá"}</button>
                     )}
                     <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" disabled={b("out") || a.sessions === 0}
-                            onClick={() => void logoutAll(a)} title="Đăng xuất tài khoản này ở mọi máy / trình duyệt">⎋ Đăng xuất mọi máy</button>
+                            onClick={() => void logoutAll(a)} title="Đăng xuất tài khoản này ở mọi máy / trình duyệt">⎋ Đăng xuất</button>
                   </span>
                 </div>
               );
             })}
           </div>
           <p className="qt-card__hint">
-            Khoá = không đăng nhập được, dữ liệu vẫn giữ (mở khoá là dùng lại như cũ). Đổi mật khẩu / khoá có hiệu lực ngay trên máy này;
-            máy khác đang mở app nhận ra trong vòng 5 phút.
+            Khoá = không đăng nhập được, dữ liệu vẫn giữ (mở khoá là dùng lại như cũ). Hết hạn dùng thử cũng vậy — bấm <b>Gia hạn</b> hoặc
+            chuyển sang gói khác là đăng nhập lại được. Đổi mật khẩu / khoá có hiệu lực ngay trên máy này; máy khác đang mở app nhận ra trong vòng 5 phút.
           </p>
         </section>
+
+        {assigning && plansData && (
+          <PlanAssignDialog account={assigning} plans={plansData} onClose={() => setAssigning(null)} onSaved={() => void load()} />
+        )}
+        {plansData && <PlansEditor data={plansData} onSaved={(next) => { setPlansData(next); void load(); }} />}
+        {plansData && <BillingEditor plans={plansData.plans.filter((p) => p.id !== plansData.trial_id)} onDecided={() => void load()} />}
       </div>
     </>
   );

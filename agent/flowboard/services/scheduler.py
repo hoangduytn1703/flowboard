@@ -564,7 +564,9 @@ async def publish(slot_id: int, *, auto: bool = False) -> dict[str, Any]:
 
 async def tick() -> int:
     """Publish every due auto slot (once). Returns how many were attempted."""
-    if not has_engine():
+    from flowboard import plans
+
+    if not has_engine() or not plans.active_allows("facebook"):  # the account's plan lost Facebook posting
         return 0
     now = _now()
     with get_session() as s:

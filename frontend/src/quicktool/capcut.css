@@ -98,10 +98,10 @@
 .cc-radios { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 @media (max-width: 760px) { .cc-radios { grid-template-columns: 1fr; } }
 .cc-radio {
-  display: flex; flex-direction: column; gap: 2px; cursor: pointer;
+  position: relative; display: flex; flex-direction: column; gap: 2px; cursor: pointer;
   padding: 9px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel-high);
 }
-.cc-radio input { position: absolute; opacity: 0; pointer-events: none; }
+.cc-radio input { position: absolute; inset: 0; margin: 0; opacity: 0; pointer-events: none; }
 .cc-radio strong { color: var(--text); font-size: 14px; }
 .cc-radio small { font-size: 12px; }
 .cc-radio--on { border-color: var(--qt-accent); background: rgba(255, 106, 43, 0.1); }

@@ -23,6 +23,10 @@ os.environ["FLOWBOARD_PLANNER_BACKEND"] = "mock"
 # call run_llm (auto-prompt, script tailoring…) hit a real provider mid-test.
 # Tests that need a config write their own file (tmp_secrets_path fixtures).
 os.environ.setdefault("FLOWBOARD_SECRETS_PATH", str(Path(_TMPDIR) / "secrets.json"))
+# The admin's licence signing key on this machine (~/.flowboard/dflow-license.key) must not sign test stores:
+# tests that need a key make their own (test_licensing.py).
+os.environ["FLOWBOARD_LICENSE_KEY"] = str(Path(_TMPDIR) / "no-licence-key")
+os.environ.pop("FLOWBOARD_LICENSE_STRICT", None)
 
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlmodel import SQLModel  # noqa: E402

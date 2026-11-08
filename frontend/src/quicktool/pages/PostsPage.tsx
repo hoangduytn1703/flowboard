@@ -14,6 +14,7 @@ import { copyPost, PostEditor } from "../posts/PostEditor";
 import { ScheduleDialog, type ScheduleTarget } from "../schedule/ScheduleDialog";
 import { StatsLine } from "../schedule/FbStats";
 import { createSlot, publishSlot, slotLabel, suggestSlots, syncFacebook, type FbFormat } from "../../api/schedule";
+import { canUse, useFeature } from "../../lib/features";
 import { FormatPicker, StoryToggle } from "../schedule/FormatPicker";
 import { AutoPilot, type AutoSeed } from "../posts/AutoPilot";
 import "../posts.css";
@@ -91,6 +92,8 @@ export function PostsPage() {
   const [tab, setTab] = useState<"form" | "chat">("form");
   // "✍️ Viết & đăng" by hand ⇄ "🤖 Tự động đăng" (fixed schedules, services/autopilot); /posts?auto=1 opens the latter
   const [mode, setMode] = useState<"write" | "auto">(() => (params.get("auto") ? "auto" : "write"));
+  const fbOn = useFeature("facebook");
+  const autoOn = useFeature("autopilot");
   const [autoSeed, setAutoSeed] = useState<AutoSeed | null>(null);
   const [brief, setBrief] = useState<PostBrief>(DEFAULT_BRIEF);
   const [productId, setProductId] = useState<number | null>(null);
@@ -181,7 +184,7 @@ export function PostsPage() {
     void listPosts().then(setSaved).catch(() => setSaved([]));
     void listSeries().then(setAllSeries).catch(() => setAllSeries([]));
     // posts that went up by hand on a connected Page → their saved copy shows "🌐 Đã đăng tay trên FB"
-    void syncFacebook({ maxAge: 600 }).then((r) => {
+    if (canUse("facebook")) void syncFacebook({ maxAge: 600 }).then((r) => {
       if (r.channels.some((c) => !c.error)) void listPosts().then(setSaved).catch(() => undefined);
     }).catch(() => undefined);
   }, []);
@@ -663,7 +666,7 @@ export function PostsPage() {
       <div className="qt-posts__cardactions">
         <button type="button" className="qt-btn qt-btn--small qt-btn--accent" onClick={() => open(p)}>Mở</button>
         <button type="button" className="qt-btn qt-btn--small" onClick={() => void copyPost(draftOf(p))}>📋 Copy</button>
-        <button type="button" className="qt-btn qt-btn--small" title={scheduleTip(p)} onClick={() => setSchedule({ kind: "post", postId: p.id, channelId: p.channel_id, title: titleOf(p) })}>📅</button>
+        {fbOn && <button type="button" className="qt-btn qt-btn--small" title={scheduleTip(p)} onClick={() => setSchedule({ kind: "post", postId: p.id, channelId: p.channel_id, title: titleOf(p) })}>📅</button>}
         {delBtn(p, "qt-posts__del")}
       </div>
     </article>
@@ -679,7 +682,7 @@ export function PostsPage() {
       {p.fb_manual ? <HandPostedBadge at={p.fb_manual.at} link={p.fb_manual.link} />
         : p.schedule && <ScheduleBadge s={p.schedule} onClick={() => navigate("/schedule")} />}
       <button type="button" className="qt-btn qt-btn--small" onClick={() => void copyPost(draftOf(p))}>📋 Copy</button>
-      <button type="button" className="qt-btn qt-btn--small" title={scheduleTip(p)} onClick={() => setSchedule({ kind: "post", postId: p.id, channelId: p.channel_id, title: titleOf(p) })}>📅</button>
+      {fbOn && <button type="button" className="qt-btn qt-btn--small" title={scheduleTip(p)} onClick={() => setSchedule({ kind: "post", postId: p.id, channelId: p.channel_id, title: titleOf(p) })}>📅</button>}
       <button type="button" className="qt-btn qt-btn--small qt-btn--accent" onClick={() => open(p)}>Mở</button>
       {delBtn(p)}
     </li>
@@ -691,11 +694,11 @@ export function PostsPage() {
         <span className="qt-header__crumb">Bài viết Facebook</span>
       </header>
       <div className="qt-home qt-posts">
-        <div className="qt-posts__modes" role="tablist" aria-label="Cách đăng">
+        {autoOn && <div className="qt-posts__modes" role="tablist" aria-label="Cách đăng">
           <button type="button" role="tab" aria-selected={mode === "write"} className={mode === "write" ? "is-on" : ""} onClick={() => setMode("write")}>✍️ Viết & đăng</button>
           <button type="button" role="tab" aria-selected={mode === "auto"} className={mode === "auto" ? "is-on" : ""} onClick={() => setMode("auto")}>🤖 Tự động đăng theo lịch</button>
-        </div>
-        {mode === "auto" ? (
+        </div>}
+        {mode === "auto" && autoOn ? (
           <AutoPilot options={options} products={products} allSeries={allSeries} seed={autoSeed} onSeedUsed={() => setAutoSeed(null)} />
         ) : (<>
         <div className="qt-posts__grid">
@@ -920,11 +923,11 @@ export function PostsPage() {
                   </button>
                   {noChannel && <small className="qt-posts__need">Chọn <strong>Kênh / page</strong> ở bước 1 trước — AI viết theo giọng của page đó.</small>}
                   {!noChannel && noSeries && <small className="qt-posts__need">Đang chọn <strong>Câu chuyện nhiều kỳ</strong> — chọn loạt truyện hoặc đặt tên loạt mới.</small>}
-                  <button type="button" className="qt-btn qt-btn--small qt-btn--ghost qt-posts__autolink" disabled={noChannel || noSeries || boardId !== null}
+                  {autoOn && <button type="button" className="qt-btn qt-btn--small qt-btn--ghost qt-posts__autolink" disabled={noChannel || noSeries || boardId !== null}
                           title={boardId !== null ? "Bài gắn clip không chạy theo lịch được" : "Dùng đúng cài đặt này (kênh, kiểu bài, ý chính, ảnh, sản phẩm, loạt truyện) cho lịch tự động đăng"}
                           onClick={() => { setAutoSeed({ channel_id: channelId, brief: { ...brief }, product_id: productId, series: seriesWriting ? series.trim() : "" }); setMode("auto"); }}>
                     🤖 Tự động đăng theo lịch với cài đặt này
-                  </button>
+                  </button>}
                 </div>
               </div>
             ) : (
@@ -985,9 +988,9 @@ export function PostsPage() {
                 <div className="qt-batch__head">
                   <strong>📚 Loạt {batch.length} bài vừa viết</strong>
                   <span className="qt-card__hint">Bấm một bài để mở / sửa bên dưới.</span>
-                  <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={batchBusy || batch.every((id) => slots[id])} onClick={() => void scheduleBatch()}>
+                  {fbOn && <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={batchBusy || batch.every((id) => slots[id])} onClick={() => void scheduleBatch()}>
                     {batchBusy ? "Đang xếp lịch…" : "📅 Xếp lịch cả loạt (mỗi ngày 1 bài)"}
-                  </button>
+                  </button>}
                   <button type="button" className="qt-link" onClick={() => setBatch([])}>ẩn</button>
                 </div>
                 <ol className="qt-batch__list">
@@ -1004,7 +1007,7 @@ export function PostsPage() {
                         <div className="qt-batch__actions">
                           {slots[id]
                             ? <span className="qt-batch__slot">📅 {slots[id]}</span>
-                            : <button type="button" className="qt-btn qt-btn--small" onClick={() => setSchedule({ kind: "post", postId: id, channelId: p.channel_id, title: p.title || p.body.split("\n")[0] })}>📅 Lên lịch</button>}
+                            : fbOn && <button type="button" className="qt-btn qt-btn--small" onClick={() => setSchedule({ kind: "post", postId: id, channelId: p.channel_id, title: p.title || p.body.split("\n")[0] })}>📅 Lên lịch</button>}
                           <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={() => void copyPost(draftOf(p))}>📋</button>
                         </div>
                       </li>
@@ -1037,7 +1040,9 @@ export function PostsPage() {
                 ) : (
                 <div className="qt-posts__publish">
                   <div className="qt-posts__publishwhere">
-                    {published ? (
+                    {!fbOn ? (
+                      <>Gói của bạn chưa có <strong>đăng / lên lịch Facebook</strong> — bấm Copy rồi đăng tay.</>
+                    ) : published ? (
                       <>✓ Đã đăng {published.reel ? "Reel" : "bài"} lên <strong>{channel?.fb_page_name || channel?.name}</strong> lúc{" "}
                         {new Date(published.at).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}.</>
                     ) : channel ? (
@@ -1053,17 +1058,17 @@ export function PostsPage() {
                     {imagesBusy && <span className="qt-posts__wait"> · 🎨 đang tạo ảnh — đợi xong rồi đăng</span>}
                   </div>
                   <div className="qt-posts__publishbtns">
-                    {channel?.fb_connected && !published && (
+                    {fbOn && channel?.fb_connected && !published && (
                       <StoryToggle compact value={fbStory} onChange={setFbStory}
                                    enabled={!!video || clipVideo !== "" || images.length > 0 || !!draft.body.trim()}
                                    why="Bài chưa có nội dung." />
                     )}
                     {published?.link && <a className="qt-btn qt-btn--accent" href={published.link} target="_blank" rel="noreferrer">Xem {published.reel ? "Reel" : "bài"} trên Facebook ↗</a>}
                     <button type="button" className="qt-btn qt-btn--ghost" disabled={!draft.body.trim()} onClick={() => void copyPost(draft)}>📋 Copy</button>
-                    <button type="button" className="qt-btn" disabled={!channel || publishing || imagesBusy}
+                    {fbOn && <button type="button" className="qt-btn" disabled={!channel || publishing || imagesBusy}
                             title={imagesBusy ? "Đợi ảnh tạo xong rồi lên lịch" : undefined}
-                            onClick={async () => { const id = dirty || postId === null ? await save(true) : postId; if (id) setSchedule({ kind: "post", postId: id, channelId, title: draft.title || draft.body.split("\n")[0], fbFormat, fbStory }); }}>📅 Lên lịch</button>
-                    {channel?.fb_connected && (
+                            onClick={async () => { const id = dirty || postId === null ? await save(true) : postId; if (id) setSchedule({ kind: "post", postId: id, channelId, title: draft.title || draft.body.split("\n")[0], fbFormat, fbStory }); }}>📅 Lên lịch</button>}
+                    {fbOn && channel?.fb_connected && (
                       <button type="button" className={`qt-btn ${published ? "qt-btn--ghost" : "qt-btn--accent"}`}
                               disabled={publishing || imagesBusy || !draft.body.trim() || (boardId !== null && !video && !clipVideo)}
                               onClick={() => void publishNow()}
