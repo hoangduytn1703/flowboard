@@ -36,6 +36,7 @@ import { AccountsPage } from "./pages/AccountsPage";
 import { AccountPage } from "./pages/AccountPage";
 import { DubPage } from "./pages/DubPage";
 import { CapcutPage } from "./pages/CapcutPage";
+import { CutPage } from "./pages/CutPage";
 import { ClipChannel } from "./steps/ClipChannel";
 import { ClipPost } from "./steps/ClipPost";
 import { SchedulePage } from "./pages/SchedulePage";
@@ -49,6 +50,13 @@ import { FeatureGate } from "./FeatureGate";
 import { toast, useToastOn } from "../store/toast";
 import { PageEmpty, PageLoading } from "./PageState";
 import { askConfirm, askText } from "../components/Dialogs";
+
+/** A part of "✂️ Cắt video" (board template "cut_part"): its project, run and place among the parts. */
+function cutPartOf(qt: object, boardId: number | null): { job_id: string; run_id: string; index: number; total: number; board_id: number | null } | null {
+  const q = qt as { dub?: { job_id?: string }; cut?: { run_id?: string; index?: number; total?: number } };
+  if (!q.dub?.job_id) return null;
+  return { job_id: q.dub.job_id, run_id: q.cut?.run_id ?? "", index: q.cut?.index ?? 1, total: q.cut?.total ?? 1, board_id: boardId };
+}
 
 /** Wizard steps and their URL slugs: /clips/:id/<slug>. */
 const STEPS = [
@@ -133,6 +141,7 @@ export function QuicktoolApp() {
           <Route path="/swipes" element={<FeatureGate feature="swipes" title="Mẫu đang hot"><SwipesPage /></FeatureGate>} />
           <Route path="/tools/dub" element={<FeatureGate feature="dub" title="Lồng tiếng video"><DubPage /></FeatureGate>} />
           <Route path="/tools/capcut" element={<FeatureGate feature="capcut" title="Edit auto CapCut"><CapcutPage /></FeatureGate>} />
+          <Route path="/tools/cut" element={<FeatureGate feature="cut" title="Cắt video"><CutPage /></FeatureGate>} />
           <Route path="/settings" element={<Library templates={templates} />} />
           <Route path="/clips/:id/:step" element={<Wizard templates={templates} />} />
           <Route path="/clips/:id" element={<Wizard templates={templates} />} />
@@ -708,7 +717,8 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
                                      voiceless={!!qt.voiceless}
                                      dubJobId={qt.template_id === "dub" ? ((qt as { dub?: { job_id?: string } }).dub?.job_id ?? null)
                                        : qt.template_id === "dub_part" ? ((qt as { dub_part?: { job_id?: string } }).dub_part?.job_id ?? null) : null}
-                                     dubPart={qt.template_id === "dub_part" ? ((qt as { dub_part?: { index: number; total: number } }).dub_part ?? null) : null} />}
+                                     dubPart={qt.template_id === "dub_part" ? ((qt as { dub_part?: { index: number; total: number } }).dub_part ?? null) : null}
+                                     cutPart={qt.template_id === "cut_part" ? cutPartOf(qt, routeId) : null} />}
           {step === 1 && loaded && <ClipChannel boardId={routeId} channelId={qt.channel_id ?? null} />}
           {step === 5 && loaded && <ClipPost boardId={routeId} productId={qt.product_id ?? null} channelId={qt.channel_id ?? null} />}
           <div className="qt-footer">

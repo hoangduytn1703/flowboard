@@ -63,7 +63,7 @@ OWN_TRAITS = (
     "a few light freckles across the nose", "a slightly wider nose bridge", "a small dimple on one side when smiling",
     "naturally fuller cheeks", "a faint mole above the lip", "slightly hooded eyes", "a gently asymmetrical smile",
 )
-TOOLS = ("create_model", "add_product", "write_post", "schedule_post", "create_clip", "auto_post")
+TOOLS = ("create_model", "add_product", "write_post", "schedule_post", "create_clip", "auto_post", "cut_video")
 
 _SYSTEM = """You are "Trợ lý DFlow", the AI assistant inside DFlow — a tool that makes ad clips, Facebook posts and posting
 schedules for a Vietnamese TikTok Shop / Shopee affiliate seller. Answer in natural, short, friendly Vietnamese (xưng "mình",
@@ -104,6 +104,12 @@ match them to the closest catalog entry, e.g. "chú ta hay tò mò" = "Chúng ta
    Only for a channel the catalog says is connected (fb_connected) — else say it must be connected on the Kênh page first.
    "mỗi ngày" = all 7 days, "ngày thường" / "T2-T6" = [0,1,2,3,4], "cuối tuần" = [5,6]. series = a catalog series of that
    channel (each slot = its next episode) or a new name. images default 1. ai default "claude" (the seller's Claude CLI).
+7. cut_video {urls: [video links], prompt?, how?: "ai"|"prompt"|"even", min_s?, max_s?, max_parts?, channel_id?} — "✂️ Cắt
+   video": download long videos (TikTok / Douyin / YouTube / Facebook / Instagram / X, up to 10 links) and cut each into
+   short videos, NO dubbing. prompt = what to keep in Vietnamese ("mỗi đoạn một mẹo", "những đoạn hài nhất") → how "prompt";
+   no request → how "ai" (the AI picks the moments worth a short video); "chia đều" → how "even". min_s / max_s = seconds of
+   one short video (default 30 / 60; "khoảng 1 phút" = 45 / 75); max_parts = at most that many per video. Every part lands
+   in "Clip của tôi" and can be edited (subtitles, format, blur…) on the "✂️ Cắt video" page; dubbing is a separate step.
 
 Chain steps in order in "actions" (e.g. write_post then schedule_post with post "previous"; add_product then write_post
 with product_id "previous"). Ask back (actions []) only when something essential is missing or ambiguous (which channel,
@@ -195,12 +201,13 @@ def _add_message(role: str, text: str, *, data: Optional[dict] = None, task_id: 
 #: words of DFlow work, matched as whole words. Ambiguous once the accents go (tạo/tao, ảnh/anh, mẫu/màu,
 #: bài/bai…) → only with their accents; unambiguous ones also without ("nguoi mau", "clip", "long tieng").
 _WORK_ACCENTED = {"tạo", "làm", "vẽ", "lưu", "mẫu", "ảnh", "hình", "bài", "đăng", "lịch", "kênh", "giọng", "đổi", "sửa",
-                  "xoá", "xóa", "huỷ", "hủy", "giúp", "dựng", "ghép", "quay", "tập", "viết"}
+                  "xoá", "xóa", "huỷ", "hủy", "giúp", "dựng", "ghép", "quay", "tập", "viết", "cắt"}
 _WORK_PLAIN = ("model", "nguoi mau", "nhan vat", "kol", "clip", "video", "san pham", "sp", "link", "http", "https", "shopee",
                "tiktok", "lazada", "post", "fanpage", "facebook", "fb", "reel", "long tieng", "dub", "capcut", "phu de",
                "kich ban", "quang cao", "affiliate", "huong dan", "chuc nang", "tinh nang", "lam duoc", "lam gi", "credit",
                "flow", "dflow", "tro ly", "tao mau", "ve mau", "luu mau", "tao clip", "lam clip", "viet bai", "dang bai",
-               "series", "loat", "len lich", "hen gio", "kenh", "tu dong", "dang deu", "moi ngay", "hang ngay",
+               "series", "loat", "len lich", "hen gio", "kenh", "tu dong", "dang deu", "moi ngay", "hang ngay", "cat video", "cat clip",
+               "cat thanh", "youtube", "douyin",
                # how people ask for a model in everyday talk
                "co gai", "con gai", "con nho", "em gai", "chang trai", "anh chang", "co nang", "hot girl", "hotgirl", "hot boy",
                "gai xinh", "trai dep", "mau nu", "mau nam")
@@ -216,7 +223,8 @@ _YES = {"ok", "oke", "okay", "uh", "u", "um", "vang", "da", "yes", "co", "dong y
         "ok lam di", "ok lam luon", "duoc", "dc", "dung roi", "chuan", "go", "xac nhan"}
 _NO = {"khong", "ko", "k", "thoi", "huy", "dung", "stop", "no", "khong can", "thoi khoi", "huy di", "bo di"}
 SKILLS_VI = ("tạo người mẫu AI, thêm sản phẩm từ link, viết bài Facebook (cả tập tiếp của loạt truyện) kèm ảnh, lên lịch "
-             "đăng / tự đăng lên Page, đặt lịch tự động đăng đều (VD T2–T6 20h), tạo clip quảng cáo có kịch bản theo sản phẩm")
+             "đăng / tự đăng lên Page, đặt lịch tự động đăng đều (VD T2–T6 20h), tạo clip quảng cáo có kịch bản theo sản phẩm, "
+             "cắt video dài thành nhiều video ngắn")
 GREETING_REPLY = (f"Chào bạn 👋 Mình là trợ lý của DFlow. Mình làm được: **{SKILLS_VI}**. Cứ nói việc cần làm, ví dụ “viết tập tiếp "
                   "của loạt … cho kênh … rồi lên lịch 20h tối nay”.")
 THANKS_REPLY = "Dạ 👍 Cần gì trong DFlow cứ nhắn mình nha."
@@ -435,6 +443,20 @@ def _clean_args(tool: str, a: dict[str, Any], cat: dict[str, Any]) -> tuple[Opti
                "product_id": _product_id(a.get("product_id") or a.get("product"), cat),
                "ai": a.get("ai") if a.get("ai") in ("claude", "gemini") else "claude", "story": bool(a.get("story"))}
         return out, None
+    if tool == "cut_video":
+        raw = a.get("urls") if isinstance(a.get("urls"), list) else [a.get("url") or a.get("urls") or ""]
+        urls = [u for u in (str(x or "").strip() for x in raw) if re.match(r"https?://", u)][:10]
+        if not urls:
+            return None, "Bạn gửi mình link video cần cắt nhé (TikTok / Douyin / YouTube / Facebook…)."
+        prompt = re.sub(r"\s+", " ", str(a.get("prompt") or "")).strip()[:600]
+        how = str(a.get("how") or "").lower()
+        how = how if how in ("ai", "prompt", "even") else ("prompt" if prompt else "ai")
+        if how == "prompt" and not prompt:
+            how = "ai"
+        lo, hi = _int(a.get("min_s")) or 30, _int(a.get("max_s")) or 60
+        return {"urls": urls, "prompt": prompt, "how": how, "min_s": lo, "max_s": max(hi, lo + 5),
+                "max_parts": max(0, min(30, _int(a.get("max_parts")) or 0)),
+                "channel_id": _channel_id(a.get("channel_id") or a.get("channel"), cat)}, None
     if tool == "create_clip":
         pid = _product_id(a.get("product_id") or a.get("product"), cat)
         if pid is None:
@@ -518,6 +540,10 @@ def _plan_summary(actions: list[dict[str, Any]], cat: dict[str, Any]) -> list[st
                          f"mỗi khung AI ({'Claude CLI' if g['ai'] == 'claude' else 'Gemini'}) viết {what}"
                          + (f" kèm {g['images']} ảnh" if g.get("images") else "") + " rồi tự đăng"
                          + (" + 📲 thêm vào tin" if g.get("story") else ""))
+        elif a["tool"] == "cut_video":
+            how = {"prompt": f"theo yêu cầu “{g['prompt'][:80]}”", "even": "chia đều", "ai": "AI tự chọn đoạn hay"}[g["how"]]
+            lines.append(f"{i}. ✂️ Cắt {len(g['urls'])} video thành nhiều video ngắn {g['min_s']}–{g['max_s']} giây ({how})"
+                         + (f", tối đa {g['max_parts']} video mỗi link" if g.get("max_parts") else ""))
         elif a["tool"] == "create_clip":
             prod = products.get(g["product_id"]) if isinstance(g["product_id"], int) else "sản phẩm vừa thêm"
             lines.append(f"{i}. Tạo clip quảng cáo cho “{prod}” (kịch bản theo sản phẩm"
@@ -610,7 +636,8 @@ def cancel(task_id: int) -> bool:
 
 _RUNNING: set[int] = set()
 _TITLES = {"create_model": "Tạo người mẫu", "add_product": "Thêm sản phẩm", "write_post": "Viết bài",
-           "schedule_post": "Lên lịch đăng", "create_clip": "Tạo clip", "auto_post": "Đặt lịch tự động đăng"}
+           "schedule_post": "Lên lịch đăng", "create_clip": "Tạo clip", "auto_post": "Đặt lịch tự động đăng",
+           "cut_video": "Cắt video"}
 
 
 def start_task(actions: list[dict[str, Any]], *, plan: Optional[list[str]] = None, pending: bool = False) -> dict[str, Any]:
@@ -1044,5 +1071,27 @@ async def _do_auto_post(task_id: int, i: int, args: dict[str, Any], ctx: dict[st
             "ctx": {"plan_id": plan_id, "channel_id": plan["channel_id"]}}
 
 
+async def _do_cut_video(task_id: int, i: int, args: dict[str, Any], ctx: dict[str, Any], prefix: str) -> dict[str, Any]:
+    from flowboard.services import video_cut
+
+    st = _state(task_id)
+    run_id = st.get(f"s{i}_run")
+    if not run_id:
+        _save(task_id, step=f"{prefix}Đang đưa video vào hàng cắt…", link="/tools/cut")
+        try:
+            run_id, made = video_cut.start(links=args["urls"], media=[], how=args["how"], prompt=args.get("prompt") or "",
+                                           min_s=args["min_s"], max_s=args["max_s"], max_parts=args.get("max_parts") or 0,
+                                           channel_id=args.get("channel_id") or ctx.get("channel_id"))
+        except video_cut.CutError as exc:
+            raise AssistantError(f"Không cắt được: {exc}")
+        _save(task_id, **{f"s{i}_run": run_id})
+    n = len(args["urls"])
+    return {"line": f"✂️ Đã đưa {n} video vào **Cắt video** — tool tải về, nghe lời, AI chọn đoạn rồi cắt (vài phút mỗi video). "
+                    "Xong thì các video ngắn nằm trong Clip của tôi; chỉnh phụ đề / khung / vùng mờ cho từng video hoặc cả loạt ở trang Cắt video.",
+            "links": [{"label": "Mở Cắt video", "href": f"/tools/cut?run={run_id}"}], "link": f"/tools/cut?run={run_id}",
+            "ctx": {"cut_run": run_id}}
+
+
 _HANDLERS = {"create_model": _do_create_model, "add_product": _do_add_product, "write_post": _do_write_post,
-             "schedule_post": _do_schedule_post, "create_clip": _do_create_clip, "auto_post": _do_auto_post}
+             "schedule_post": _do_schedule_post, "create_clip": _do_create_clip, "auto_post": _do_auto_post,
+             "cut_video": _do_cut_video}

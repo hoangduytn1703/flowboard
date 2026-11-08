@@ -376,6 +376,10 @@ export interface DubJob {
   /** "✂️ Cắt thành nhiều video": the rows being edited and the parts cut so far */
   cuts?: DubCutRow[];
   parts?: DubPart[];
+  /** "cut" = one part of a video cut on the "✂️ Cắt video" page (no voice, its own sound, subtitles optional) */
+  kind?: string;
+  cut?: { session_id: string; run_id: string; index: number; total: number; start: number; end: number;
+          source_url?: string | null; source_title?: string };
   language: string;
   title: string;
   duration_s: number;
@@ -410,7 +414,7 @@ export type DubMode = "dub" | "sub";
 
 /** The subtitles' language — mirrors services/dub.SUB_LANGS: Vietnamese, the video's own words ("orig", not
  * translated: an English video gets English subtitles) or another language (Google Dịch). A voice-over reads Vietnamese. */
-export type SubLang = "vi" | "orig" | "en" | "zh" | "ja" | "ko" | "th" | "id" | "es" | "fr" | "de" | "pt" | "ru";
+export type SubLang = "vi" | "orig" | "none" | "en" | "zh" | "ja" | "ko" | "th" | "id" | "es" | "fr" | "de" | "pt" | "ru";
 export const SUB_LANGS: { key: SubLang; label: string }[] = [
   { key: "vi", label: "Tiếng Việt" },
   { key: "orig", label: "Ngôn ngữ gốc của video (không dịch)" },
@@ -428,6 +432,8 @@ export const SUB_LANGS: { key: SubLang; label: string }[] = [
 ];
 export function subLangLabel(key: string | undefined, sourceLang?: string): string {
   if (key === "orig") return `Ngôn ngữ gốc${sourceLang ? ` (${sourceLang})` : ""}`;
+  // "✂️ Cắt video": a part starts with no subtitles burned (its lines are kept, ready to be switched on)
+  if (key === "none") return "Không có phụ đề";
   return SUB_LANGS.find((l) => l.key === key)?.label ?? "Tiếng Việt";
 }
 /** The name inside a sentence: "tiếng Anh", "ngôn ngữ gốc (en)". */

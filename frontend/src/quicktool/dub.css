@@ -347,3 +347,21 @@
 .qt-dublinks__voicelabel { font-size: 13px; font-weight: 700; white-space: nowrap; }
 .qt-dublinks__voicelabel small { font-weight: 500; color: var(--muted); }
 .qt-dublinks__voice > :last-child { flex: 1 1 320px; min-width: 0; }
+
+/* "🎬 Chọn từ Clip của tôi" (ClipPickDialog.tsx) + the clips picked on the form */
+.qt-dub__clips { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.qt-dub__clips li { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 9px; font-size: 14px; }
+.qt-dub__clips li span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-modal.qt-clippick { width: min(96vw, 900px); }
+.qt-clippick__body { padding: 10px; }
+.qt-clippick__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+.qt-clippick__item { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 6px; text-align: left; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 10px; background: rgba(255, 255, 255, 0.02); color: var(--text); }
+.qt-clippick__item:hover:not(:disabled) { border-color: rgba(255, 106, 43, 0.6); }
+.qt-clippick__item.is-on { border-color: var(--qt-accent); background: rgba(255, 106, 43, 0.12); }
+.qt-clippick__item:disabled { opacity: 0.45; cursor: not-allowed; }
+.qt-clippick__thumb { display: grid; place-items: center; aspect-ratio: 9 / 12; border-radius: 7px; overflow: hidden; background: #0d0f14; font-size: 26px; }
+.qt-clippick__thumb img { width: 100%; height: 100%; object-fit: cover; }
+.qt-clippick__name { font-size: 13px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.qt-clippick__tick { position: absolute; top: 10px; right: 10px; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--qt-accent); color: #fff; font-weight: 800; font-size: 14px; }

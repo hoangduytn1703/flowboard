@@ -1814,6 +1814,48 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   - Test `test_app_mode.py` (5: `.env` giữ dòng tay + BOM, settings áp gói ngay + cờ restart + không lộ mật khẩu, restart chỉ ở app + 409 khi bận, phục vụ UI + SPA + không
     đọc ngoài thư mục, status chỉ thư mục extension). Thử thật bản PyInstaller trên cổng phụ 8534 / 8455 với HOME tạm: giao diện, F5 trang con, 8 mẫu clip, 43 prompt mẫu,
     đổi gói Pro có hiệu lực ngay, dán dòng cloud → cờ restart.
+- **✂️ Cắt video — menu riêng, không lồng tiếng** (8/11 khuya, người dùng: "dù chỉ cần cắt và edit thì vẫn phải qua lồng tiếng là không cần thiết… 1 menu riêng,
+  bỏ link vào, có prompt cắt hoặc AI tự prompt, bấm là ra nhiều video nhỏ, edit từng video hoặc nhiều video; muốn lồng tiếng thì lấy từ Clip của tôi"):
+  - **`services/video_cut.py`** + **`routes/cut.py`** (`/api/cut/*`): một link / file = một **session** (`Session`, lưu `<media>/cut/<id>/session.json` trên máy
+    này; nhiều link dán cùng lúc chung `run_id`). Luồng `_run` (một session nghe một lúc, `_pump`): `_prepare` = tải (`video_fetch.fetch_video`, ≤ 60 phút,
+    Asset) → probe → **Whisper một lần** (`dub._runner transcribe`, gợi ý tên bằng tiêu đề như lồng tiếng; máy không có pyvideotrans thì bỏ qua, `heard` false) →
+    `suggest`: `how` = **ai** (AI tự chọn đoạn đáng thành video ngắn, bỏ chào hỏi / quảng cáo / lan man) | **prompt** (yêu cầu của người bán thắng mọi luật) |
+    **even** (chia đều, cắt ở chỗ ngừng); AI = `run_llm("auto_prompt")` với `_SYSTEM` + `ai_prompt` (dòng có số + giờ, độ dài min–max, tối đa N video) → JSON
+    `{parts: [{from, to, title}], note}` → `dub_split.parts_from_ai` (dùng lại, qua `_as_job`); trả lời không phải JSON thì hỏi lại 1 lần (thấy thật 1 lần từ Claude
+    CLI), vẫn hỏng / không có lời / không có Whisper → chia đều + `note` → (`review` thì dừng ở `status: review`) → `_cut_all`: ffmpeg cắt chính xác
+    (`dub_split._cut`, dấu `flowboard-cut:<session>`) → mỗi phần `_part_job`: một **`dub.Job` kind "cut"** (mode "sub", **`sub_lang: "none"`** = không in phụ
+    đề, giữ tiếng gốc; `cut = {session_id, run_id, index, total, start, end, source_url, source_title}`, `batch_id = run_id`, câu = lời Whisper trong đoạn dời về 0
+    `part_lines`, `media_id` = file cắt nên "đã xuất" ngay) + clip (`dub._save_board` → board **`template_id: "cut_part"`**, `quicktool.cut`). Cắt lại (`cut()`, tab
+    "✂️ Sửa chỗ cắt" / review) dùng lại job + clip cùng số thứ tự, giữ kiểu đã chỉnh (layout, kiểu, nhấn chữ — chỗ nhấn bỏ), phụ đề đã dịch thì dịch lại câu mới.
+    `again` (↻ Làm lại, không nghe lại nếu đã nghe), `stop`, `delete` (chỉ session + thư mục; clip / dự án phần giữ), `part_jobs(run|session)` theo thứ tự cắt,
+    `clip_media(board_ids)` (video cuối của clip — trang Lồng tiếng). Routes: `GET /status`, `POST/GET /sessions`, `GET /sessions/{id}`, `POST …/suggest|cut|stop|again`,
+    `POST /sessions/delete`, `GET /parts?run=|session=`, `POST /clips`.
+  - **`dub.py` cho phần cắt**: `Job.kind`, `Job.cut` (public, job.json, snapshot, `_job_from_dict`, `restore_from_board` nhận cả phần không có câu);
+    `SUB_LANGS["none"]` ("không có phụ đề": `_render` không tạo cue nào, câu vẫn giữ; `subtitle_lines("none")` trả nguyên câu); `_run_job` / `_pump` / `render_job`
+    cho phần cắt xuất cả khi không có câu; `_save_board` kind cut → template `cut_part`, tên clip theo tên phần. `GET /api/dub/jobs` (danh sách lồng tiếng) **bỏ** job
+    kind cut; Edit auto CapCut cũng không liệt kê chúng ở tab lồng tiếng (vẫn có ở tab clip). Nút "việc đang chạy": `running._cut_items` (session, `/tools/cut?session=`)
+    + phần đang xuất (`kind: "cut"`, `/tools/cut?job=&run=`), outcome `cut:<id>`; `op_tracker` "AI đang chọn đoạn cắt".
+  - **Gói**: tính năng mới **`cut`** ("✂️ Cắt video"; icon Edit auto CapCut đổi sang 🎞) — `plans.FEATURES` + web `src/lib/catalog.ts` / `FeatureIcon.tsx`. Luật:
+    `/api/cut/*` → cut; `/api/cut/clips` → cut hoặc dub; route của trình chỉnh sửa `/api/dub/jobs/<id>[/render|subtitles|highlights/pick|names|stop|nosub|voice|bgm|filmstrip.jpg|wave.png]`
+    và `/api/dub/(mascot|background|decor)` → dub hoặc cut; OCR `/api/clean/*/detect` → clean / dub / cut. **Bảng gói đã ký chưa có `cut`** → chỉ quản trị thấy menu tới khi
+    quản trị tick "Cắt video" cho từng gói ở 📦 Gói & tính năng (máy có khoá ký) rồi Lưu.
+  - Frontend: **`quicktool/pages/CutPage.tsx`** (+ `cut.css`, tiền tố `ct-`; route `/tools/cut`, menu Công cụ "✂️ Cắt video", `FeatureGate` "cut"): trái = ô link (mỗi link một
+    ô, dán nhiều link tự tách, ≤ 10) + "📁 Chọn file video…" (`uploadDubVideo` = `/api/reference-video/upload`), "Cắt thế nào" (3 thẻ AI tự chọn / Theo yêu cầu + 5 gợi ý /
+    Chia đều; cảnh báo khi máy không có Whisper), độ dài (`LENGTHS` 15–30 s … 3–10 phút), số video tối đa, "xem lại trước khi cắt", kênh (form nhớ localStorage
+    `flowboard.cut.form`); phải = danh sách session (`SessionCard`: tiến độ / lỗi / ↻ / Dừng / 🗑, ghi chú AI, `RowsEditor` = video gốc + ✨ Gợi ý lại + bảng tên / từ / đến
+    (`TimeBox` export từ `CutPane`) / ▶ xem đoạn / 🗑 / ＋ Thêm đoạn / ✂️ Cắt N đoạn; lưới `PartCard` có ảnh (poster), ✓ đã chỉnh, ✏️ Chỉnh, ⬇, 🎙, Clip →; chọn nhiều →
+    "✏️ Chỉnh N video" / "🎙 Lồng tiếng N" (≤ 5) / "⬇ Tải N (.zip)"). Trình chỉnh sửa = **`DubEditor`** nhúng trong trang (`?job=&run=[&parts=]`, select "Video n/N",
+    "⇪ Áp cho cả loạt" = `applyToOthers`: layout / kiểu / nhấn chữ **+ ngôn ngữ phụ đề** (`BatchLook.lang`; mỗi phần lấy câu của chính nó qua `/subtitles`). `DubEditor`
+    với `job.kind === "cut"`: không có ô "Kiểu làm" / tab ✂️ Cắt (`Inspector cutPart`), tab 💬 Phụ đề có ô **Phụ đề: Không có / Đúng lời trong video / ngôn ngữ khác**
+    ở đầu, `EditorStage noSubs` khi tắt. Bước 5 của clip `cut_part`: thẻ "Video n/N cắt từ video dài" + ✏️ Mở trình chỉnh sửa + 🎙 Lồng tiếng (`StepExport cutPart`,
+    `QuicktoolApp cutPartOf`). **Trang Lồng tiếng** có "🎬 Chọn từ Clip của tôi" (`dub/ClipPickDialog.tsx`: clip có video, lọc "Chỉ video đã cắt", ≤ 5) và nhận
+    `?clips=<board ids>` — mỗi clip thành một job lồng tiếng với `source_media_id` = video cuối của clip (tên = tên clip). Trợ lý AI: kỹ năng **`cut_video`** {urls, prompt?,
+    how?, min_s?, max_s?, max_parts?, channel_id?} (từ "cắt" vào bộ lọc chủ đề).
+  - Test `test_video_cut.py` (9: tuỳ chọn, chia đều ở chỗ ngừng + số video, AI theo yêu cầu + note + tối đa, không lời / không Whisper / AI lỗi → chia đều, câu trong đoạn
+    dời về 0, cắt thật bằng ffmpeg → job + clip đúng → sửa phần 1 (1:1 nền lưới, không phụ đề) → cắt lại giữ job / clip / kiểu, routes, luật gói, trợ lý). Thử thật trên
+    agent phụ (cổng 8534, dữ liệu tạm, không Neon): video Enceladus 3:35 tiếng Trung → Whisper ~80 s → cắt 5 video ~16 s (lần đó AI trả không phải JSON → chia đều; gọi lại
+    AI 10,8 s ra 3 đoạn đúng chủ đề kèm tiêu đề); phần 1 dịch phụ đề Google 2,4 s + xuất 9:16 nền lưới 6,9 s; Playwright: trang, form, sửa chỗ cắt, chọn nhiều, trình
+    chỉnh sửa (tắt / bật phụ đề), "Chọn từ Clip của tôi", Bước 5, 760 px không tràn, không lỗi console.
 ## Lộ trình (chốt với người dùng 30/10) — làm theo thứ tự A → B, C chạy song song khi cần
 Mục tiêu cuối: **bán DFlow** cho người làm affiliate (2 gói **Pro** / **Premium**), dạng **app desktop Tauri 2** — mọi thao tác trong app,
 Chrome chỉ để cài extension và mở tab Flow đúng project. Người dùng nói rõ: không cần bàn chuyện đúng sai pháp lý, họ tự chịu trách nhiệm.
@@ -1868,6 +1910,7 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
   Chrome Web Store từ chối → giữ cách cài tay kèm video.
 
 ## Việc đang dở / chưa kiểm chứng
+- **✂️ Cắt video (8/11 khuya, từ bản 1.8.0)**: bảng gói đã ký chưa bật `cut` cho gói nào (quản trị tick ở 📦 Gói & tính năng). Chưa thử với link thật (mới thử file trên máy), video dài 30–60 phút, máy không có Whisper (bản cài của khách: chỉ chia đều — có thể thêm Gemini xem video để chọn đoạn). Phần đang xuất dùng chung hàng đợi với lồng tiếng (chờ sau một video lồng tiếng dài). Session chỉ nằm trên máy đã cắt (phần cắt = clip thì có ở mọi máy). Clip `cut_part` vẫn hiện Bước 1–4 vô nghĩa (như `dub_part`).
 - **BẢO MẬT — sau Phase C (8/11 khuya, bản 1.7.0)**: bạn bè cài app **không cần và không nhận dòng Neon** nữa — đăng ký / đăng nhập qua dflow.io.vn, app chỉ cầm
   role Postgres của chính tài khoản (đọc / ghi đúng schema của mình) + token API; key B2 nằm trên máy chủ web; key AI / token Page của mỗi người đi qua API (chỉ chủ
   tài khoản đọc được). Quyền dùng vẫn ký số (hướng B). **Còn mở**: (1) máy nào còn dòng Neon (máy nhà) vẫn toàn quyền — đừng đưa dòng đó cho ai; dòng đó từng nằm ở máy
@@ -1876,9 +1919,8 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
   dflow-web giữ khoá web + dòng owner — bị chiếm là mất hết (Vercel: bật 2FA tài khoản); (5) **B2 đã đầy 10 GB miễn phí** → đẩy file đang lỗi (xem Bẫy). Chưa có: nút
   nâng `min_app`.
 - **App desktop (7/11)**: vỏ Tauri **chưa build được trên máy** (không có Rust) — chỉ CI build; phần Rust chưa chạy thử thật (khay, đóng-ẩn, mở link ra trình duyệt,
-  khởi động lại mã 75, tự thoát theo tiến trình cha) tới khi người dùng cài bộ cài. **Tự cập nhật chưa chạy thật lần nào**: 0.1.1 không có updater nên người
-  dùng phải cài tay 0.1.2 một lần; lần cập nhật thật đầu tiên chỉ thử được khi phát hành 0.1.3 (xem lệnh có tới được trang 127.0.0.1:8434 qua capability không,
-  cài passive, mở lại app). Chưa có: ký số, Remotion, nút "Chọn thư mục" (đang gõ đường dẫn), chuyển dữ liệu cũ khi đổi thư mục, Phase C (bán cho khách).
+  khởi động lại mã 75, tự thoát theo tiến trình cha) tới khi người dùng cài bộ cài. **Tự cập nhật đã chạy thật** (8/11 khuya: 1.6.0 → 1.7.0 bằng nút trong app, người dùng
+  xác nhận) — capability + lệnh Rust + cài passive đều đúng. Chưa có: ký số, Remotion, nút "Chọn thư mục" (đang gõ đường dẫn), chuyển dữ liệu cũ khi đổi thư mục, Phase C (bán cho khách).
 - **Tên riêng khi lồng tiếng (7/11)**: chưa nghe giọng VieNeu / Edge đọc các cách đọc AI ghi ("Anh xtanh", "Prốc xi ma Xen tau ri") — có thể phải sửa tay ở khung
   "🔤 Tên riêng"; gợi ý `hotwords` cho Whisper chưa chạy thật trên video mới (job cũ đã nhận dạng rồi — dùng nút "✨ AI rà tên riêng" trong trình chỉnh sửa rồi Xuất lại);
   nút "▶ Nghe câu" của trình chỉnh sửa vẫn đọc chữ phụ đề (chưa theo bảng tên); Edit auto CapCut lồng tiếng trước dùng chung luồng dub nên có rà tên, còn phụ đề video
@@ -2201,3 +2243,5 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
   tài khoản thử `phasec-test` (đã xoá: role, schema, tài khoản) — cách ly đúng, tạo clip vào schema riêng, hồ sơ / nâng cấp qua web, khoá / mở khoá. Phát hiện B2 đầy 10 GB
   miễn phí (đẩy file lỗi từ trước — xem Bẫy). Vá kèm: `/api/cloud/s3` trước đây tài khoản thường nào cũng ghi đè được key kho file → giờ chỉ admin.
 - **8/11 khuya** — **Phát hành 1.7.0** (Phase C): CI chết 2 lần vì github.com release download trả 504 (xem Bẫy) → commit `a81b7bf` (ffmpeg nguồn 2 gyan.dev + thử lại, Tauri thử 3 lần) và `32a90d6` (tải NSIS qua API asset), dời tag v1.7.0 sang `32a90d6` (chưa phát hành nên không ảnh hưởng ai) → run 42471485411 xong, release v1.7.0 trên dflow-releases (bộ cài 191 MB + `latest.json`), tải về `D:\DFlow-Setup\`. Trang hướng dẫn (`docs/cai-dat-dflow.html` → `index.html` dflow-releases, commit `0ee01e2`) trỏ 1.7.0 + bước "Có tài khoản DFlow" (đăng ký trên dflow.io.vn) thay bước dán dòng kết nối. dflow-web `8054b3c`: trang Tài khoản + FAQ bỏ hướng dẫn dán dòng (tự deploy Vercel). Người dùng báo app đã lên 1.7.
+- **8/11 khuya** — Người dùng xác nhận đã lên 1.7.0 **bằng nút cập nhật trong app** (từ 1.6.0) → lần tự cập nhật thật đầu tiên chạy được. Sửa dòng "Tự cập nhật chưa chạy thật" ở Việc đang dở.
+- **8/11 khuya** — **✂️ Cắt video — menu riêng** (không lồng tiếng): link / file → Whisper → AI chọn đoạn theo yêu cầu (hoặc tự chọn / chia đều) → cắt thành nhiều video, mỗi video một clip + dự án chỉnh sửa (trình chỉnh sửa lồng tiếng ở chế độ phụ đề tuỳ chọn, chỉnh từng video hoặc áp cho cả loạt); trang Lồng tiếng lấy video từ "Clip của tôi"; trợ lý AI `cut_video`; tính năng gói `cut`. `services/video_cut.py`, `routes/cut.py`, `dub.py` (kind cut, `sub_lang none`), `plans.py`, `running.py`, `op_tracker.py`, `assistant.py`, `capcut_auto.py`, `routes/dub.py`, `api/cut.ts`, `pages/CutPage.tsx`, `cut.css`, `DubEditor` / `Inspector` / `EditorStage` / `CutPane`, `dub/ClipPickDialog.tsx`, `DubPage.tsx`, `StepExport.tsx`, `QuicktoolApp.tsx`, `QuicktoolSidebar.tsx`, `BackgroundTasks.tsx`, `lib/features.ts`; web `catalog.ts`, `FeatureIcon.tsx`. Test `test_video_cut.py` 9 + liên quan (dub / assistant / plans / running / capcut / licensing / billing…) 161 pass, `tsc` + web typecheck sạch; thử thật trên agent phụ 8534 (xem Chỗ cần biết). Phát hành trong 1.8.0 (người dùng: "ok phát hành 1.8.0 luôn đi").

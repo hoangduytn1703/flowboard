@@ -214,8 +214,8 @@ def sources(limit: int = 60) -> dict[str, list[dict[str, Any]]]:
     dub.load_jobs()
     dubs = []
     for j in sorted(dub.JOBS.values(), key=lambda j: j.started_at, reverse=True):
-        if j.status not in ("done", "review", "error") or not j.segments:
-            continue
+        if j.status not in ("done", "review", "error") or not j.segments or j.kind == "cut":
+            continue  # a cut part is listed with the clips (its own clip holds the video)
         voice = (j.work / "voice.wav") if j.work else None
         dubs.append({"id": j.id, "title": j.name or j.title or "Video lồng tiếng", "duration": j.duration_s,
                      "width": j.width, "height": j.height, "lines": len([s for s in j.segments if s.text.strip()]),

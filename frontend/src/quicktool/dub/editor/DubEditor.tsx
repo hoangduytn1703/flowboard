@@ -55,6 +55,8 @@ export interface BatchLook {
   engine: DubEngine;
   /** the key-moment settings (each clip picks its own points) */
   highlights: DubHighlights;
+  /** "✂️ Cắt video": the subtitles' language too (none / the words heard / translated), each part from its own lines */
+  lang?: SubLang;
 }
 
 export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch, onApplyAll }: {
@@ -111,6 +113,8 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
 
   const working = ["queued", "running", "rendering"].includes(job.status);
   const readOnly = working || exporting;
+  // a part of "✂️ Cắt video": no voice-over, its own sound, subtitles optional
+  const isCut = job.kind === "cut";
 
   // A render finished (or started over): the agent's copy is the truth again.
   const prevStatus = useRef(job.status);
@@ -346,7 +350,8 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
       if (lookEdits || customCount) body.looks = doc.cues.map((c) => cleanLook(c.look));
       onJob(await renderDub(job.job_id, body));
       announceRunning();
-      toast.info(subOnly ? "Đang xuất: chèn phụ đề, giữ tiếng gốc — nhanh thôi."
+      toast.info(isCut ? "Đang xuất video đã chỉnh — nhanh thôi."
+        : subOnly ? "Đang xuất: chèn phụ đề, giữ tiếng gốc — nhanh thôi."
         : needVoice ? "Đang xuất: đọc lại giọng rồi in hình…"
         : doc.highlights.on && !doc.highlights.points.length ? "Đang xuất: AI chọn chữ quan trọng rồi in hình (giữ giọng)."
         : "Đang xuất: chỉ in lại hình, giữ giọng — nhanh thôi.");
@@ -360,7 +365,11 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
   // ``auto``: switching the project to a voice-over — its lines must be Vietnamese, so they are translated at once
   async function setSubLang(lang: SubLang, auto = false) {
     if (lang === docRef.current.lang || readOnly || langBusy) return;
-    const handEdits = langDirty || auto ? 0 : textEdits;
+    if (lang === "none") {  // nothing to rewrite: the lines stay, just not burned
+      change((d) => ({ ...d, lang }));
+      return;
+    }
+    const handEdits = langDirty || auto || docRef.current.lang === "none" ? 0 : textEdits;
     if (handEdits && !await askConfirm(`Đổi ngôn ngữ sẽ viết lại chữ của mọi câu — ${handEdits} câu bạn đã sửa tay sẽ thay bằng bản mới (Ctrl+Z để lấy lại). Tiếp tục?`)) return;
     setLangBusy(true);
     try {
@@ -416,12 +425,16 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
     const nBlurs = layoutBlurs(doc.layout).length;
     const parts = ["vị trí / cỡ / độ rộng phụ đề", "kiểu chữ", nBlurs ? `${nBlurs} vùng mờ` : "",
                    doc.layout.canvas ? `khung xuất ${doc.layout.canvas.aspect}` : "", doc.layout.frame ? "khung" : "",
-                   doc.layout.mascot?.media_id ? "nhân vật" : "", doc.highlights.on ? "nhấn chữ quan trọng (AI chọn chỗ riêng cho từng clip)" : ""].filter(Boolean).join(", ");
-    if (!await askConfirm(`Áp ${parts} của clip này cho ${others.length} clip còn lại của loạt?\nCác clip đó sẽ được in lại (giữ giọng đã đọc). Chữ, giờ và câu chỉnh riêng của từng clip không đổi.`)) return;
+                   doc.layout.mascot?.media_id ? "nhân vật" : "", doc.highlights.on ? "nhấn chữ quan trọng (AI chọn chỗ riêng cho từng clip)" : "",
+                   isCut ? (doc.lang === "none" ? "tắt phụ đề" : `phụ đề ${subLangName(doc.lang, job.language)}`) : ""].filter(Boolean).join(", ");
+    if (!await askConfirm(isCut
+      ? `Áp ${parts} của video này cho ${others.length} video còn lại?\nCác video đó sẽ được xuất lại; phụ đề của mỗi video lấy từ lời của chính nó.`
+      : `Áp ${parts} của clip này cho ${others.length} clip còn lại của loạt?\nCác clip đó sẽ được in lại (giữ giọng đã đọc). Chữ, giờ và câu chỉnh riêng của từng clip không đổi.`)) return;
     setApplyingAll(true);
     try {
       if (dirty || neverRendered) await exportNow();
-      const n = await onApplyAll({ layout: doc.layout, style: doc.style, engine: out.engine, highlights: { ...doc.highlights, points: [], picked: "" } });
+      const n = await onApplyAll({ layout: doc.layout, style: doc.style, engine: out.engine, highlights: { ...doc.highlights, points: [], picked: "" },
+                                   ...(isCut ? { lang: doc.lang } : {}) });
       toast.success(`Đã gửi kiểu này cho ${n} clip — đang in lại.`);
     } catch (e) {
       toast.error(errMessage(e));
@@ -475,10 +488,10 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
   return (
     <div className={`dx${landscapeClass(frameW, frameH)}`}>
       <div className="dx__top">
-        <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={close} title="Về trang Lồng tiếng">← Danh sách</button>
+        <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={close} title={isCut ? "Về trang Cắt video" : "Về trang Lồng tiếng"}>← Danh sách</button>
         {siblings.length > 1 ? (
           <label className="dx__pick" title="Clip trong loạt — chọn clip cần chỉnh">
-            <span>Clip {Math.max(1, siblings.findIndex((s) => s.job_id === job.job_id) + 1)}/{siblings.length}</span>
+            <span>{isCut ? "Video" : "Clip"} {Math.max(1, siblings.findIndex((s) => s.job_id === job.job_id) + 1)}/{siblings.length}</span>
             <select value={job.job_id} onChange={(e) => switchTo(e.target.value)} disabled={applyingAll}>
               {siblings.map((s, i) => (
                 <option key={s.job_id} value={s.job_id}>
@@ -486,12 +499,12 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
                 </option>
               ))}
             </select>
-            <small>{job.language ? `tiếng gốc ${job.language} · ` : ""}{subOnly ? `phụ đề ${subLangName(doc.lang, job.language)} · ` : ""}{clock(total, false)} · {doc.cues.length} câu</small>
+            <small>{job.language ? `tiếng gốc ${job.language} · ` : ""}{subOnly ? (doc.lang === "none" ? "không phụ đề · " : `phụ đề ${subLangName(doc.lang, job.language)} · `) : ""}{clock(total, false)} · {doc.cues.length} câu</small>
           </label>
         ) : (
           <div className="dx__title">
             <strong>{out.name || job.name || job.title || "Video lồng tiếng"}</strong>
-            <small>{job.language ? `tiếng gốc ${job.language} · ` : ""}{subOnly ? `phụ đề ${subLangName(doc.lang, job.language)} · ` : ""}{clock(total, false)} · {doc.cues.length} câu</small>
+            <small>{job.language ? `tiếng gốc ${job.language} · ` : ""}{subOnly ? (doc.lang === "none" ? "không phụ đề · " : `phụ đề ${subLangName(doc.lang, job.language)} · `) : ""}{clock(total, false)} · {doc.cues.length} câu</small>
           </div>
         )}
         <div className="dx__state">
@@ -563,6 +576,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
             frameW={frameW}
             frameH={frameH}
             cues={doc.cues}
+            noSubs={doc.lang === "none"}
             layout={doc.layout}
             style={doc.style}
             highlights={doc.highlights}
@@ -646,10 +660,11 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
             value: doc.names, set: (names, key) => change((d) => ({ ...d, names }), key), check: () => void checkNames(),
             checking: namesBusy, note: job.names_note ?? "", voiced: !subOnly,
           }}
-          cutPane={
+          cutPart={isCut}
+          cutPane={isCut ? null : (
             <CutPane job={job} cues={doc.cues} duration={total} now={time} dirty={dirty} readOnly={readOnly}
                      onSeek={(t) => stage.current?.seek(t)} onPlayRange={(a, b) => stage.current?.playRange(a, b)} onJob={onJob} />
-          }
+          )}
         />
       </div>
 

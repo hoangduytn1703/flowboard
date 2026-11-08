@@ -59,6 +59,7 @@ TRACKED: list[Rule] = [
     _r("POST", r"/api/boards/(\d+)/tailor", "clip_setup", "AI viết lại kịch bản", "/clips/{0}/script"),
     _r("POST", r"/api/boards/(\d+)/cover", "clip_setup", "Đang làm ảnh bìa", "/clips/{0}/export"),
     _r("POST", r"/api/dub/jobs/([0-9a-f]+)/names", "ai", "AI đang rà tên riêng", "/tools/dub?job={0}"),
+    _r("POST", r"/api/cut/sessions/([0-9a-f]+)/suggest", "cut", "AI đang chọn đoạn cắt", "/tools/cut?session={0}"),
     _r("POST", r"/api/prompt/(auto|refine|revise|auto-batch)", "ai", "AI viết prompt", "/clips"),
     _r("POST", r"/api/prompt/narration", "ai", "AI viết lời thoại", "/clips"),
     _r("POST", r"/api/reference-video/(analyze|analyze-link)", "video", "AI đang xem video mẫu", "/clips/from-video"),

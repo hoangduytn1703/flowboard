@@ -83,9 +83,11 @@ export const EditorStage = forwardRef<StageHandle, {
   onNatural: (w: number, h: number) => void;
   /** "📱 Xem trên": show the frame inside that app's screen, with its buttons over it (view only) */
   platform?: PlatformKey | null;
+  /** "Không có phụ đề" (a part of "✂️ Cắt video"): no subtitle box on the picture */
+  noSubs?: boolean;
 }>(function EditorStage({
   src, srcW, srcH, voiceUrl, bgmUrl, player, frameW, frameH, cues, layout, style, highlights, selected, readOnly, audio,
-  onLayout, onSubGeom, onSelect, onEditText, onTime, onPlaying, onDuration, onNatural, platform = null,
+  onLayout, onSubGeom, onSelect, onEditText, onTime, onPlaying, onDuration, onNatural, platform = null, noSubs = false,
 }, ref) {
   const area = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
@@ -476,7 +478,7 @@ export const EditorStage = forwardRef<StageHandle, {
             {emph.words}
           </div>
         )}
-        {editing ? (
+        {noSubs ? null : editing ? (
           <div className="dx-stage__edit" style={{ left: pct(lay.x), top: pct(lay.y), width: pct(Math.max(0.5, lay.w ?? 0.86)) }} onPointerDown={(e) => e.stopPropagation()}>
             <textarea autoFocus value={editing.text} rows={2} style={{ fontSize: Math.max(14, fontPx * 0.9) }}
                       onChange={(e) => setEditing({ ...editing, text: e.target.value })}

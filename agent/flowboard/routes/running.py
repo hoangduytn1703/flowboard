@@ -70,6 +70,12 @@ def _dub_items() -> list[dict[str, Any]]:
     for j in list(dub.JOBS.values()):
         if j.status not in ("queued", "running", "rendering"):
             continue
+        if j.kind == "cut":  # a part of "✂️ Cắt video" being exported
+            out.append({"key": f"dub:{j.id}", "kind": "cut", "title": f"Xuất “{j.name or j.title or 'video đã cắt'}”",
+                        "detail": j.phase or "Đang xuất", "progress": int(j.progress) if j.status != "queued" else None,
+                        "started_at": _iso_from_ts(j.started_at),
+                        "link": f"/tools/cut?job={j.id}" + (f"&run={j.batch_id}" if j.batch_id else "")})
+            continue
         out.append({
             "key": f"dub:{j.id}", "kind": "dub",
             "title": j.name or j.title or "Video lồng tiếng",
@@ -93,6 +99,13 @@ def _dub_split_items() -> list[dict[str, Any]]:
                     "detail": st.get("phase") or "Đang cắt", "progress": int(st.get("progress") or 0),
                     "started_at": _iso_from_ts(st.get("started_at") or 0), "link": f"/tools/dub?job={job_id}"})
     return out
+
+
+def _cut_items() -> list[dict[str, Any]]:
+    """"✂️ Cắt video" sessions downloading / being heard / cut."""
+    from flowboard.services import video_cut
+
+    return [dict(it, started_at=_iso_from_ts(it["started_at"])) for it in video_cut.running_items()]
 
 
 def _dub_link_items() -> list[dict[str, Any]]:
@@ -207,7 +220,7 @@ def _flow_items() -> list[dict[str, Any]]:
 @router.get("")
 def running() -> dict[str, Any]:
     items: list[dict[str, Any]] = []
-    for source in (_dub_items, _dub_split_items, _dub_link_items, _clean_items, _capcut_items, _assistant_items, _autopilot_items, _flow_items, _op_items):
+    for source in (_dub_items, _dub_split_items, _cut_items, _dub_link_items, _clean_items, _capcut_items, _assistant_items, _autopilot_items, _flow_items, _op_items):
         try:
             items += source()
         except Exception:  # noqa: BLE001 — one broken source must not hide the others
@@ -230,6 +243,10 @@ def outcome(key: str = Query(..., max_length=80)) -> dict[str, Any]:
         from flowboard.services import op_tracker
 
         return op_tracker.outcome(ident) or {"ok": True, "message": "Đã xong"}
+    if kind == "cut":
+        from flowboard.services import video_cut
+
+        return video_cut.outcome(ident)
     if kind == "dub":
         from flowboard.services import dub
 

@@ -33,7 +33,9 @@ FEATURES: list[dict[str, str]] = [
      "desc": "Nút ⚡ Tạo video tự động trong clip, chạy hàng loạt nhiều clip một lần"},
     {"key": "dub", "icon": "🎙", "label": "Lồng tiếng video",
      "desc": "Lồng tiếng / chèn phụ đề video từ link, thư viện link, cắt thành nhiều clip"},
-    {"key": "capcut", "icon": "✂️", "label": "Edit auto CapCut",
+    {"key": "cut", "icon": "✂️", "label": "Cắt video",
+     "desc": "Dán link / file → AI cắt thành nhiều video ngắn theo yêu cầu, chỉnh từng video hoặc cả loạt"},
+    {"key": "capcut", "icon": "🎞", "label": "Edit auto CapCut",
      "desc": "Tạo dự án CapCut có phụ đề, chữ nhấn, hiệu ứng"},
     {"key": "clean", "icon": "🧽", "label": "Xoá chữ / logo",
      "desc": "Xoá logo, watermark, phụ đề cứng khỏi video có sẵn"},
@@ -78,9 +80,14 @@ def _rule(pattern: str, features: Any, methods: Optional[str] = None) -> None:
 
 
 _rule(r"^/api/dub/status$", None)                       # Bước 4 asks whether Remotion runs here
+# "✂️ Cắt video" edits its parts in the dubbing editor: the editor's own routes serve both tools
+_rule(r"^/api/dub/jobs/[0-9a-f]+(/(render|subtitles|highlights/pick|names|stop|nosub|voice|bgm|filmstrip\.jpg|wave\.png))?$", ("dub", "cut"))
+_rule(r"^/api/dub/(mascot|background|decor)(/|$)", ("dub", "cut"))
 _rule(r"^/api/dub(/|$)", "dub")
+_rule(r"^/api/cut/clips$", ("cut", "dub"))               # the dubbing page picks videos from "Clip của tôi"
+_rule(r"^/api/cut(/|$)", "cut")
 _rule(r"^/api/capcut(/|$)", "capcut")
-_rule(r"^/api/clean/[^/]+/detect$", ("clean", "dub"))   # the dub editor's "find the old captions" (OCR)
+_rule(r"^/api/clean/[^/]+/detect$", ("clean", "dub", "cut"))   # the editor's "find the old captions" (OCR)
 _rule(r"^/api/clean(/|$)", "clean")
 _rule(r"^/api/posts/clip-hooks$", None)                 # Bước 2 "5 câu mở đầu khác" of a clip
 _rule(r"^/api/posts(/|$)", ("posts", "facebook"), "GET")  # Lịch đăng lists the saved posts too

@@ -30,6 +30,7 @@ from flowboard.routes import bundles as bundles_route
 from flowboard.routes import swipes as swipes_route
 from flowboard.routes import dub as dub_route
 from flowboard.routes import capcut as capcut_route
+from flowboard.routes import cut as cut_route
 from flowboard.routes import running as running_route
 from flowboard.routes import assistant as assistant_route
 from flowboard.routes import autopilot as autopilot_route
@@ -316,6 +317,7 @@ app.include_router(bundles_route.router)
 app.include_router(swipes_route.router)
 app.include_router(dub_route.router)
 app.include_router(capcut_route.router)
+app.include_router(cut_route.router)
 app.include_router(prompt_library_route.router)
 app.include_router(video_clean_route.router)
 app.include_router(activity.router)

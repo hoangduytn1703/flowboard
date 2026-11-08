@@ -43,7 +43,7 @@ def _now() -> datetime:
 def test_routes_map_to_features():
     assert plans.feature_for("GET", "/api/dub/jobs") == ("dub",)
     assert plans.feature_for("GET", "/api/dub/status") is None  # Bước 4 asks it on every clip
-    assert plans.feature_for("POST", "/api/clean/abc/detect") == ("clean", "dub")
+    assert plans.feature_for("POST", "/api/clean/abc/detect") == ("clean", "dub", "cut")
     assert plans.feature_for("POST", "/api/clean/jobs") == ("clean",)
     assert plans.feature_for("GET", "/api/posts") == ("posts", "facebook")
     assert plans.feature_for("POST", "/api/posts/write") == ("posts",)

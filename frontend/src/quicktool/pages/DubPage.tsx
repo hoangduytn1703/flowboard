@@ -9,6 +9,8 @@ import {
 import { DubEditor, type BatchLook } from "../dub/editor/DubEditor";
 import { DubJobsDialog, jobTitle } from "../dub/DubJobsDialog";
 import { DubLinksDialog } from "../dub/DubLinksDialog";
+import { ClipPickDialog, type PickedClip } from "../dub/ClipPickDialog";
+import { clipVideos } from "../../api/cut";
 import { VOICES } from "../../api/client";
 import { SUB_LANGS, subLangName, type DubEngine, type DubMode, type DubTranslator, type SubLang } from "../../api/dub";
 import { toast } from "../../store/toast";
@@ -47,6 +49,9 @@ export function DubPage() {
   const [links, setLinks] = useState<string[]>([""]);
   const linkInputs = useRef<(HTMLInputElement | null)[]>([]);
   const [file, setFile] = useState<File | null>(null);
+  // "🎬 Chọn từ Clip của tôi": finished clips to dub (the videos cut on "✂️ Cắt video"); /tools/dub?clips=<ids> picks them
+  const [clips, setClips] = useState<PickedClip[]>([]);
+  const [pickOpen, setPickOpen] = useState(false);
   const [name, setName] = useState("");
   // the voice picked last is the default next time (account pref — both machines; also set from the link library)
   const voice = useSettingsStore((s) => s.dubVoice) || DEFAULT_VOICE;
@@ -225,9 +230,25 @@ export function DubPage() {
     if (e.key === "Backspace" && !links[i] && links.length > 1) { e.preventDefault(); removeRow(i); window.setTimeout(() => linkInputs.current[Math.max(0, i - 1)]?.focus(), 0); }
   }
   const linkList = links.map((l) => l.trim()).filter(Boolean);
+  const wantClips = searchParams.get("clips");
+  useEffect(() => {
+    if (!wantClips) return;
+    const ids = wantClips.split(",").map(Number).filter((n) => n > 0).slice(0, MAX_LINKS);
+    void clipVideos(ids).then((cs) => {
+      if (!cs.length) { toast.warning("Clip này chưa có video để lồng tiếng."); return; }
+      setClips(cs);
+      setLinks([""]);
+      setFile(null);
+      toast.info(`Đã chọn ${cs.length} video từ Clip của tôi — chọn giọng rồi bấm Lồng tiếng.`);
+    }).catch((e) => toast.error(errMessage(e)));
+    const next = new URLSearchParams(searchParams);
+    next.delete("clips");
+    setSearchParams(next, { replace: true });
+  }, [wantClips]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sourceCount = clips.length || (file ? 1 : linkList.length);
 
   async function start() {
-    if (!linkList.length && !file) { toast.warning("Dán link video hoặc chọn file."); return; }
+    if (!linkList.length && !file && !clips.length) { toast.warning("Dán link video, chọn file hoặc chọn từ Clip của tôi."); return; }
     if (linkList.length > MAX_LINKS) { toast.warning(`Tối đa ${MAX_LINKS} link một lần.`); return; }
     setStarting(true);
     try {
@@ -236,13 +257,15 @@ export function DubPage() {
         toast.info("Đang tải file lên…");
         sourceMediaId = (await uploadDubVideo(file)).media_id;
       }
-      const sources = file ? [{ url: null as string | null, source_media_id: sourceMediaId }] : linkList.map((l) => ({ url: l, source_media_id: null }));
+      const sources: { url: string | null; source_media_id: string | null; clipName?: string }[] = clips.length
+        ? clips.map((c) => ({ url: null, source_media_id: c.media_id, clipName: c.name }))
+        : file ? [{ url: null, source_media_id: sourceMediaId }] : linkList.map((l) => ({ url: l, source_media_id: null }));
       const batchId = sources.length > 1 ? `b${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}` : "";
       const started: DubJob[] = [];
       for (const src of sources) {
         started.push(await startDub({
-          ...src, voice, keep_bgm: keepBgm, style, engine, channel_id: channelId,
-          name: sources.length > 1 ? "" : name.trim(), auto_render: !review, batch_id: batchId, look_preset_id: lookId, translator, mode, sub_lang: lang,
+          url: src.url, source_media_id: src.source_media_id, voice, keep_bgm: keepBgm, style, engine, channel_id: channelId,
+          name: sources.length > 1 ? (src.clipName ?? "") : (name.trim() || src.clipName || ""), auto_render: !review, batch_id: batchId, look_preset_id: lookId, translator, mode, sub_lang: lang,
         }));
       }
       if (batchId) {
@@ -254,6 +277,7 @@ export function DubPage() {
         setJob(started[0]);
       }
       setLinks([""]);
+      setClips([]);
       announceRunning();
       refreshRecent();
     } catch (e) {
@@ -494,6 +518,22 @@ export function DubPage() {
                   <button type="button" className="qt-btn qt-btn--small" disabled={starting} onClick={() => fileInput.current?.click()}>⬆ Chọn file video</button>
                   {file && <small>{file.name} · {(file.size / 1048576).toFixed(1)} MB <button type="button" className="qt-link" onClick={() => pickNewFile(null)}>bỏ</button></small>}
                 </div>
+                <div className="qt-dub__or">
+                  <span>hoặc</span>
+                  <button type="button" className="qt-btn qt-btn--small" disabled={starting} onClick={() => setPickOpen(true)}
+                          title="Lồng tiếng video đã cắt ở ✂️ Cắt video, hoặc clip đã ghép">🎬 Chọn từ Clip của tôi</button>
+                  {clips.length > 0 && <small>{clips.length} video <button type="button" className="qt-link" onClick={() => setClips([])}>bỏ</button></small>}
+                </div>
+                {clips.length > 0 && (
+                  <ul className="qt-dub__clips">
+                    {clips.map((c) => (
+                      <li key={c.board_id}>
+                        <span>🎬 {c.name}</span>
+                        <button type="button" className="qt-dub__linkx" title="Bỏ video này" onClick={() => setClips((cs) => cs.filter((x) => x.board_id !== c.board_id))}>×</button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 {file && fileMatch && (
                   <div className="qt-dub__match">
                     <span>🎬 Video này bạn đã làm bằng tool{fileMatch.kind === "dub" ? `: “${fileMatch.job.name || fileMatch.job.title || "video lồng tiếng"}”` : ` (clip “${fileMatch.name}”)`}.</span>
@@ -578,7 +618,7 @@ export function DubPage() {
                 </label>
                 <ChannelPicker value={channelId} onChange={setChannelId} label="Lưu vào kênh" disabled={working} />
                 <button type="button" className="qt-btn qt-btn--accent qt-btn--big" disabled={starting} onClick={() => void start()}>
-                  {starting ? "Đang gửi…" : linkList.length > 1 ? `${subOnly ? "💬 Chèn phụ đề" : "🎙 Lồng tiếng"} ${linkList.length} video`
+                  {starting ? "Đang gửi…" : sourceCount > 1 ? `${subOnly ? "💬 Chèn phụ đề" : "🎙 Lồng tiếng"} ${sourceCount} video`
                     : working ? "➕ Thêm vào hàng đợi" : subOnly ? "💬 Chèn phụ đề" : "🎙 Lồng tiếng"}
                 </button>
               </section>
@@ -665,6 +705,10 @@ export function DubPage() {
         )}
       </div>
       {allOpen && <DubJobsDialog jobs={recent} onOpen={openJobById} onClose={() => setAllOpen(false)} onDelete={removeFromList} />}
+      {pickOpen && (
+        <ClipPickDialog max={MAX_LINKS} initial={clips} onClose={() => setPickOpen(false)}
+                        onPick={(cs) => { setClips(cs); setPickOpen(false); setLinks([""]); pickNewFile(null); }} />
+      )}
       {linksOpen && (
         <DubLinksDialog
           onVoice={setVoice}

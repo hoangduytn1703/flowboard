@@ -110,7 +110,7 @@ function DialogueLine({ text, tags }: { text: string; tags: string[] }) {
 /** Step 5 — voice options, the clip list, the final file. */
 import { useFeature } from "../../lib/features";
 
-export function StepExport({ roles, productName = "", price = "", channelId = null, dubJobId = null, dubPart = null, voiceless = false }: {
+export function StepExport({ roles, productName = "", price = "", channelId = null, dubJobId = null, dubPart = null, cutPart = null, voiceless = false }: {
   roles: ClipRoles; productName?: string; price?: string; channelId?: number | null;
   /** "🔇 Không lời": joined with the clips' own sound — no voice, no subtitles. */
   voiceless?: boolean;
@@ -118,12 +118,15 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
   dubJobId?: string | null;
   /** a part cut out of a dubbed video ("✂️ Cắt thành nhiều video") */
   dubPart?: { index: number; total: number } | null;
+  /** a part of a long video cut on the "✂️ Cắt video" page: edited there, dubbed on the dubbing page */
+  cutPart?: { job_id: string; run_id: string; index: number; total: number; board_id: number | null } | null;
 }) {
   const voiceGroups = useVoiceGroups();
   const navigate = useNavigate();
   const fbOn = useFeature("facebook");
   const postsOn = useFeature("posts");
   const dubOn = useFeature("dub");
+  const cutOn = useFeature("cut");
   const [scheduling, setScheduling] = useState(false);
   // "Ghép" clicked, the export not queued yet (the clips are being wired): the button greys out at once
   const [sending, setSending] = useState(false);
@@ -266,7 +269,22 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
 
   return (
     <div className="qt-step qt-step--two">
-      {dubJobId ? (
+      {cutPart ? (
+        <section className="qt-card qt-dubclip">
+          <div className="qt-card__eyebrow">Video {cutPart.index}/{cutPart.total} cắt từ video dài</div>
+          <h3 className="qt-card__title">Chỉnh ở trang Cắt video</h3>
+          <p className="qt-card__hint">
+            Video này được <strong>cắt</strong> ra từ một video dài, giữ nguyên tiếng gốc. Chỉnh phụ đề (đúng lời trong video hoặc dịch), khung
+            9:16 + nền, vùng mờ che chữ / logo, nhân vật, nhấn chữ — từng video hoặc cả loạt; xuất xong clip này tự dùng bản mới.
+          </p>
+          <div className="qt-dubclip__acts">
+            {cutOn && <button type="button" className="qt-btn qt-btn--accent qt-btn--big"
+                              onClick={() => navigate(`/tools/cut?job=${cutPart.job_id}${cutPart.run_id ? `&run=${cutPart.run_id}` : ""}`)}>✏️ Mở trình chỉnh sửa</button>}
+            {dubOn && cutPart.board_id && <button type="button" className="qt-btn qt-btn--big"
+                              onClick={() => navigate(`/tools/dub?clips=${cutPart.board_id}`)}>🎙 Lồng tiếng video này</button>}
+          </div>
+        </section>
+      ) : dubJobId ? (
         <section className="qt-card qt-dubclip">
           <div className="qt-card__eyebrow">{dubPart ? `Phần ${dubPart.index}/${dubPart.total} của video lồng tiếng` : "Video lồng tiếng"}</div>
           <h3 className="qt-card__title">{dubPart ? "Chỉnh hoặc cắt lại ở trang Lồng tiếng" : "Chỉnh phụ đề, giọng đọc, bản dịch"}</h3>

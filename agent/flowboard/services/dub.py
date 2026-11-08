@@ -795,6 +795,11 @@ class Job:
     #: cut so far [{index, start, end, title, media_id, board_id, at}]
     cuts: list[dict] = field(default_factory=list)
     parts: list[dict] = field(default_factory=list)
+    #: "✂️ Cắt video" (services/video_cut): "cut" = one part of a cut video, edited here like a subtitled clip (mode
+    #: "sub", the part keeps its own sound, subtitles off until asked for); ``cut`` = {session_id, run_id, index, total,
+    #: start, end, source_url, source_title}
+    kind: str = ""
+    cut: dict = field(default_factory=dict)
     #: every mp4 this job rendered: [{media_id, size, sha256, at}] — "📂 Mở lại video đã làm" finds the
     #: project from a downloaded file (the tag inside it first, these fingerprints second)
     outputs: list[dict] = field(default_factory=list)
@@ -823,6 +828,7 @@ class Job:
             "width": self.width, "height": self.height, "batch_id": self.batch_id,
             "translator": self.translator, "translated_by": self.translated_by, "mode": self.mode,
             "sub_lang": self.sub_lang, "cuts": [dict(c) for c in self.cuts], "parts": [dict(p) for p in self.parts],
+            "kind": self.kind, "cut": dict(self.cut),
             "names": [dict(n) for n in self.names], "names_note": self.names_note,
             "title": self.title, "duration_s": round(self.duration_s, 1),
             "segments": [s.public() for s in self.segments],
@@ -921,6 +927,8 @@ SUB_LANGS: dict[str, str] = {
     "vi": "tiếng Việt", "orig": "ngôn ngữ gốc", "en": "tiếng Anh", "zh": "tiếng Trung", "ja": "tiếng Nhật",
     "ko": "tiếng Hàn", "th": "tiếng Thái", "id": "tiếng Indonesia", "es": "tiếng Tây Ban Nha", "fr": "tiếng Pháp",
     "de": "tiếng Đức", "pt": "tiếng Bồ Đào Nha", "ru": "tiếng Nga",
+    # no subtitles burned (the parts of "✂️ Cắt video" start like this; the lines stay, ready to be switched on)
+    "none": "không có phụ đề",
 }
 
 
@@ -938,6 +946,8 @@ def subtitle_lines(job: "Job", lang: str) -> tuple[list[str], str]:
     from flowboard.services import free_translate
 
     lang = normalize_sub_lang(lang)
+    if lang == "none":  # nothing burned: the lines stay as they are
+        return [s.text for s in job.segments], "none"
     src = [s.src for s in job.segments]
     if lang == "orig" or (_base_lang(job.language) and _base_lang(job.language) == lang):
         return list(src), "none"
@@ -1501,7 +1511,7 @@ def _render(job: Job) -> None:
         _timeline_wav(ffmpeg, sfx_pieces, info.duration, sfx_track)
     _set(job, "Đang ghép video + phụ đề", 91)
     cues: list[tuple[float, float, str]] = []
-    for s in job.segments:
+    for s in ([] if job.sub_lang == "none" else job.segments):  # "không có phụ đề": the lines are kept, not burned
         own = effective_layout(job.layout, s.look)
         for a, b, t in split_cue(s.start, s.end, s.text, sub_max_chars(out_w, out_h, own)):
             cues.append((a, b, t, s.look) if s.look else (a, b, t))
@@ -1745,14 +1755,18 @@ def _save_board(job: Job) -> int:
     """The dubbed video as a clip: a board with one video node (the
     Vietnamese lines as its narration) and an export node holding the final
     mp4, so the library, "Hôm nay", channels and step-5 posts all work."""
-    name = (job.name or job.title or "Video lồng tiếng").strip()[:80]
+    name = (job.name or job.title or ("Video đã cắt" if job.kind == "cut" else "Video lồng tiếng")).strip()[:80]
     narration = " ".join(s.text for s in job.segments if s.text.strip())
-    qt = {"template_id": "dub", "step": 5, "source_url": job.url, "channel_id": job.channel_id,
+    cut = job.kind == "cut"
+    qt = {"template_id": "cut_part" if cut else "dub", "step": 5, "source_url": (job.cut.get("source_url") if cut else job.url),
+          "channel_id": job.channel_id,
           "dub": {"job_id": job.id, "voice": job.voice, "style": job.style, "layout": dict(job.layout), "mode": job.mode,
                   "keep_bgm": job.keep_bgm, "language": job.language, "source_media_id": job.source_media_id,
                   # the whole editable project, so it can be reopened even if <work>/job.json is gone
                   # (another machine, cleaned media folder) — see restore_from_board
                   "snapshot": snapshot(job)}}
+    if cut:
+        qt["cut"] = dict(job.cut)
     with get_session() as s:
         if job.board_id:
             board = s.get(Board, job.board_id)
@@ -1764,7 +1778,8 @@ def _save_board(job: Job) -> int:
             s.commit()
             s.refresh(board)
             video = Node(board_id=board.id, short_id=generate_unique_short_id(s, board.id), type="video", x=0, y=0,
-                         data={"title": "Video có phụ đề" if job.mode == "sub" else "Video lồng tiếng", "narration": narration, "mediaId": job.media_id,
+                         data={"title": "Video đã cắt" if cut else "Video có phụ đề" if job.mode == "sub" else "Video lồng tiếng",
+                               "narration": narration, "mediaId": job.media_id,
                                "dubbed": True}, status="done")
             export = Node(board_id=board.id, short_id=generate_unique_short_id(s, board.id), type="export", x=320, y=0,
                           data={"title": "Xuất", "mediaId": job.media_id, "voice": job.voice}, status="done")
@@ -1772,6 +1787,8 @@ def _save_board(job: Job) -> int:
             s.add(export)
         else:
             board.data = {**(board.data or {}), "quicktool": {**((board.data or {}).get("quicktool") or {}), **qt}}
+            if cut:
+                board.name = name
             s.add(board)
             for n in s.exec(select(Node).where(Node.board_id == board.id)).all():
                 if n.type in ("video", "export"):
@@ -1784,7 +1801,7 @@ def _save_board(job: Job) -> int:
 
 def _run_job(job: Job, render: bool) -> None:
     try:
-        if render and job.segments and job.src_path is not None:
+        if render and (job.segments or job.kind == "cut") and job.src_path is not None:
             _render(job)
             return
         _prepare(job)
@@ -1854,6 +1871,7 @@ def _job_from_dict(d: dict, work: Path, fallback_time: float) -> Job:
               names=dub_names.normalize_names(d.get("names")), names_note=str(d.get("names_note") or ""),
               cuts=[c for c in d.get("cuts") or [] if isinstance(c, dict)],
               parts=[p for p in d.get("parts") or [] if isinstance(p, dict)],
+              kind=str(d.get("kind") or ""), cut=dict(d.get("cut")) if isinstance(d.get("cut"), dict) else {},
               language=str(d.get("language") or ""),
               status=str(d.get("status") or "error"), phase=str(d.get("phase") or ""),
               progress=int(d.get("progress") or 0), title=str(d.get("title") or ""),
@@ -1867,7 +1885,8 @@ def _job_from_dict(d: dict, work: Path, fallback_time: float) -> Job:
         job.status = "error"
         job.error = ("Agent khởi động lại giữa chừng — bản dịch vẫn còn, bấm \"Xuất lại video\" để làm tiếp "
                      "(câu đã đọc lấy lại từ bộ nhớ đệm)" if job.segments else
-                     "Agent khởi động lại giữa chừng — làm lại từ link")
+                     "Agent khởi động lại giữa chừng — làm lại từ link") if job.kind != "cut" else \
+            "Agent khởi động lại giữa chừng — bấm \"Xuất lại video\" để xuất lại"
     src = media_service.cached_path(job.source_media_id or "") if job.source_media_id else None
     job.src_path = Path(src) if src else None
     if (work / "voice.wav").is_file():
@@ -1955,7 +1974,8 @@ def _pump() -> None:
     nxt, waiting = waiting[0], waiting[1:]
     for i, j in enumerate(waiting):
         j.phase = f"Chờ đến lượt ({i + 1} video trước)"
-    render = bool(nxt.segments) and nxt.src_path is not None and getattr(nxt, "_render_only", False)
+    # a part of "✂️ Cắt video" renders even with no lines (a video with no speech, or no Whisper on this machine)
+    render = (bool(nxt.segments) or nxt.kind == "cut") and nxt.src_path is not None and getattr(nxt, "_render_only", False)
     # Claimed before the thread starts, so a second pump skips it. A re-render
     # keeps the phase render_job set ("Đang in lại phụ đề" / "Đang render").
     nxt.status = "rendering" if render else "running"
@@ -1986,7 +2006,9 @@ def render_job(job: Job, *, lines: Optional[list[str]], voice: Optional[str], st
     the edited lines are in (the editor re-translates them, see :func:`subtitle_lines`)."""
     if job.status in ("queued", "running", "rendering"):
         raise DubError("Video này đang chạy")
-    if not job.segments or job.src_path is None or not Path(job.src_path).is_file():
+    if job.kind == "cut" and (job.src_path is None or not Path(job.src_path).is_file()):
+        raise DubError("Không thấy file video của phần này trên máy — cắt lại ở trang ✂️ Cắt video.")
+    if job.kind != "cut" and (not job.segments or job.src_path is None or not Path(job.src_path).is_file()):
         raise DubError("Chưa có bản dịch để render (agent đã khởi động lại?) — làm lại từ link.")
     new_lang = normalize_sub_lang(sub_lang) if sub_lang is not None else job.sub_lang
     if (normalize_mode(mode) if mode is not None else job.mode) == "dub" and new_lang != "vi" and _base_lang(job.language) != "vi":
@@ -2049,7 +2071,7 @@ def render_job(job: Job, *, lines: Optional[list[str]], voice: Optional[str], st
 TAG_PREFIX = "flowboard-dub:"
 SNAPSHOT_KEYS = ("url", "source_media_id", "voice", "keep_bgm", "style", "engine", "layout", "highlights", "width", "height",
                  "channel_id", "name", "language", "title", "duration_s", "segments", "media_id", "batch_id", "mode",
-                 "sub_lang", "cuts", "parts", "names")
+                 "sub_lang", "cuts", "parts", "names", "kind", "cut")
 
 
 def output_tag(job: Job) -> str:
@@ -2120,7 +2142,7 @@ def restore_from_board(job_id: str) -> Optional[Job]:
     for b in boards:
         dub = (((b.data or {}).get("quicktool") or {}).get("dub") or {})
         snap = dub.get("snapshot")
-        if dub.get("job_id") != job_id or not isinstance(snap, dict) or not snap.get("segments"):
+        if dub.get("job_id") != job_id or not isinstance(snap, dict) or not (snap.get("segments") or snap.get("kind") == "cut"):
             continue
         job = _job_from_dict({**snap, "job_id": job_id, "board_id": b.id, "status": "done", "error": None,
                               "phase": "Mở lại từ clip đã lưu", "progress": 100}, _jobs_root() / job_id, time.time())

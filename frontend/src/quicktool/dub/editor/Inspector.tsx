@@ -59,7 +59,7 @@ export function Inspector({
   tab, onTab, selected, onSelect, cues, origin, onCueText, onCueTiming, onPlayCue,
   layout, onLayout, style, onStyle, styles, status, out, onOut, orientation,
   readOnly, focusText, onDetect, detecting, activeCue, onPickCue,
-  scope, onScope, onGeom, onApplyAll, onClearLook, onClearAll, customCount, hl, cutPane, lang, names,
+  scope, onScope, onGeom, onApplyAll, onClearLook, onClearAll, customCount, hl, cutPane, lang, names, cutPart = false,
 }: {
   tab: InspectorTab;
   onTab: (t: InspectorTab) => void;
@@ -102,6 +102,8 @@ export function Inspector({
   lang: { value: SubLang; source: string; busy: boolean; set: (l: SubLang) => void };
   /** "🔤 Tên riêng" (top of "📜 Các câu") */
   names: NamesCtl;
+  /** a part of "✂️ Cắt video": no voice-over, subtitles optional ("Không có phụ đề"), no "✂️ Cắt" tab */
+  cutPart?: boolean;
 }) {
   const textRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -152,13 +154,32 @@ export function Inspector({
   return (
     <aside className="dx-insp">
       <div className="dx-insp__tabs" role="tablist">
-        {TABS.map((t) => (
+        {TABS.filter((t) => t.key !== "cut" || !cutPart).map((t) => (
           <button key={t.key} type="button" role="tab" aria-selected={tab === t.key}
                   className={`dx-insp__tab${tab === t.key ? " is-on" : ""}`} onClick={() => onTab(t.key)}>{t.label}</button>
         ))}
       </div>
       <div className="dx-insp__body">
-        {tab === "sub" && (
+        {tab === "sub" && cutPart && (
+          <section className="dx-insp__sec">
+            <label className="qt-field">
+              <span>Phụ đề{lang.busy ? " · đang lấy chữ…" : ""}</span>
+              <select value={lang.value} disabled={readOnly || lang.busy} onChange={(e) => lang.set(e.target.value as SubLang)}>
+                <option value="none">Không có phụ đề</option>
+                {SUB_LANGS.map((l) => (
+                  <option key={l.key} value={l.key}>{l.key === "orig" ? `Đúng lời trong video${lang.source ? ` (${lang.source})` : ""}` : l.label}</option>
+                ))}
+              </select>
+            </label>
+            {lang.value === "none" && (
+              <p className="dx-insp__tip">
+                {cues.length ? `Video đang tắt phụ đề — chọn ngôn ngữ để bật (${cues.length} câu lấy từ lời trong video).`
+                  : "Không nghe được lời nào trong video này nên không có phụ đề — vẫn chỉnh khung xuất, vùng mờ, trang trí, nhấn chữ được."}
+              </p>
+            )}
+          </section>
+        )}
+        {tab === "sub" && (!cutPart || lang.value !== "none") && (
           <>
             {cue && i !== null ? (
               <section className="dx-insp__sec">
@@ -355,7 +376,7 @@ export function Inspector({
           <section className="dx-insp__sec">
             <label className="qt-field"><span>Tên clip</span>
               <input value={out.name} disabled={readOnly} onChange={(e) => onOut({ name: e.target.value })} placeholder="VD: Mẹo giảm căng bụng cho mẹ bầu" /></label>
-            <div className="qt-field"><span>Kiểu làm</span>
+            {!cutPart && <div className="qt-field"><span>Kiểu làm</span>
               <div className="dx-insp__mode" role="radiogroup" aria-label="Kiểu làm">
                 <label className={`dx-insp__modeopt${out.mode === "dub" ? " is-on" : ""}`}>
                   <input type="radio" name="dx-mode" checked={out.mode === "dub"} disabled={readOnly} onChange={() => onOut({ mode: "dub" })} />
@@ -366,11 +387,12 @@ export function Inspector({
                   💬 Chỉ phụ đề (giữ tiếng gốc)
                 </label>
               </div>
-            </div>
+            </div>}
             {out.mode === "sub" && (
               <label className="qt-field">
                 <span>Ngôn ngữ phụ đề{lang.busy ? " · đang dịch…" : ""}</span>
                 <select value={lang.value} disabled={readOnly || lang.busy} onChange={(e) => lang.set(e.target.value as SubLang)}>
+                  {cutPart && <option value="none">Không có phụ đề</option>}
                   {SUB_LANGS.map((l) => (
                     <option key={l.key} value={l.key}>{l.key === "orig" ? `Ngôn ngữ gốc của video${lang.source ? ` (${lang.source})` : ""} — không dịch` : l.label}</option>
                   ))}

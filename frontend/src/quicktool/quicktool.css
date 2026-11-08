@@ -1809,3 +1809,6 @@
   border: 1px dashed #3a4050; border-radius: 10px; background: rgba(255, 255, 255, 0.02); font-size: 14px; }
 .qt-voiceless strong { font-size: 15px; }
 .qt-voiceless small { color: var(--muted); flex: 1 1 260px; }
+
+/* step 5 of a part of "✂️ Cắt video": edit / dub buttons */
+.qt-dubclip__acts { display: flex; flex-wrap: wrap; gap: 8px; }

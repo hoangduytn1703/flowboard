@@ -53,7 +53,7 @@ function problem(r: DubCutRow, dur: number): string {
 }
 
 /** A time box: typed as m:ss.s, committed on blur / Enter. */
-function TimeBox({ value, onChange, disabled, label }: { value: number; onChange: (v: number) => void; disabled: boolean; label: string }) {
+export function TimeBox({ value, onChange, disabled, label }: { value: number; onChange: (v: number) => void; disabled: boolean; label: string }) {
   const [text, setText] = useState(fmtClock(value));
   useEffect(() => setText(fmtClock(value)), [value]);
   const commit = () => {

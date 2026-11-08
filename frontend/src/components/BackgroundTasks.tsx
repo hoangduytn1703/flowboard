@@ -44,7 +44,7 @@ const POLL_IDLE_MS = 15000;
 const DONE_KEEP_MS = 3 * 60 * 1000;
 
 const KIND_ICON: Record<string, string> = {
-  dub: "🎙", clean: "🧽", clip: "🎬", flow: "🖼", capcut: "✂️",
+  dub: "🎙", clean: "🧽", clip: "🎬", flow: "🖼", capcut: "🎞", cut: "✂️",
   // in-page operations (services/op_tracker.TRACKED)
   post_write: "✍️", post_batch: "✍️", ai: "✨", bundle: "🎁", channel: "📣", product: "🛍", clip_setup: "🎬",
   video: "🎞", publish: "🚀", upload: "⬆", media: "🗂",

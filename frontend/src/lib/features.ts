@@ -7,7 +7,7 @@ import { useAccountStore } from "../store/account";
  * Core clip making (clips, products, models, prompts, history, settings) is never gated.
  */
 export type FeatureKey =
-  | "auto_clip" | "dub" | "capcut" | "clean" | "posts" | "facebook" | "autopilot" | "swipes" | "assistant";
+  | "auto_clip" | "dub" | "cut" | "capcut" | "clean" | "posts" | "facebook" | "autopilot" | "swipes" | "assistant";
 
 export function hasFeature(me: AccountMe | null, key: FeatureKey): boolean {
   if (!me || !me.auth || !me.features) return true; // no login / an older agent: nothing is gated

@@ -64,7 +64,7 @@ class RenderBody(BaseModel):
     # switch a project between voice-over and subtitles only
     mode: Optional[str] = Field(default=None, pattern="^(dub|sub)$")
     # the language the lines are in now (the editor re-translated them: POST /jobs/{id}/subtitles)
-    sub_lang: Optional[str] = Field(default=None, pattern="^(vi|orig|en|zh|ja|ko|th|id|es|fr|de|pt|ru)$")
+    sub_lang: Optional[str] = Field(default=None, pattern="^(vi|orig|none|en|zh|ja|ko|th|id|es|fr|de|pt|ru)$")
     # "🔤 Tên riêng": [{write, say}] — the subtitle shows `write`, the voice reads `say` (services/dub_names)
     names: Optional[list[dict[str, Any]]] = Field(default=None, max_length=200)
 
@@ -103,7 +103,8 @@ def list_jobs(batch: Optional[str] = Query(None, max_length=40), all: bool = Fal
     if batch:
         return [j.public() for j in sorted((j for j in dub.JOBS.values() if j.batch_id == batch), key=lambda j: j.started_at)]
     dub.backfill_snapshots()
-    jobs = sorted(dub.JOBS.values(), key=lambda j: j.started_at, reverse=True)
+    # the parts of "✂️ Cắt video" are edited from that page, not listed with the dubbed videos
+    jobs = sorted((j for j in dub.JOBS.values() if j.kind != "cut"), key=lambda j: j.started_at, reverse=True)
     picked = jobs if all else jobs[:limit]
     if brief:
         return [j.public() | {"segments": [], "lines": len(j.segments)} for j in picked]
@@ -179,7 +180,7 @@ async def render(job_id: str, body: RenderBody) -> dict[str, Any]:
 
 
 class SubLangBody(BaseModel):
-    lang: str = Field(pattern="^(vi|orig|en|zh|ja|ko|th|id|es|fr|de|pt|ru)$")
+    lang: str = Field(pattern="^(vi|orig|none|en|zh|ja|ko|th|id|es|fr|de|pt|ru)$")
 
 
 class NamesBody(BaseModel):
