@@ -137,13 +137,13 @@ footer { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line)
 
   <div class="get" id="tai">
     <div class="get__meta">
-      <span class="eyebrow" id="ver">Bản mới nhất · 1.5.2 · 186 MB</span>
+      <span class="eyebrow" id="ver">Bản mới nhất · 1.6.0 · 182 MB</span>
       <h2>Tải file cài đặt</h2>
-      <span class="get__name" id="file">DFlow_1.5.2_x64-setup.exe</span>
+      <span class="get__name" id="file">DFlow_1.6.0_x64-setup.exe</span>
       <div class="nope"><span class="chip chip--ok">Windows 10 / 11</span><span class="chip">RAM 8 GB trở lên</span><span class="chip">Ổ cứng trống ~10 GB</span></div>
     </div>
     <div class="get__btns">
-      <a class="btn btn--main" id="dl" href="https://github.com/hoangduytn1703/dflow-releases/releases/download/v1.5.2/DFlow_1.5.2_x64-setup.exe">⬇ Tải DFlow 1.5.2</a>
+      <a class="btn btn--main" id="dl" href="https://github.com/hoangduytn1703/dflow-releases/releases/download/v1.6.0/DFlow_1.6.0_x64-setup.exe">⬇ Tải DFlow 1.6.0</a>
       <a class="btn btn--ghost" href="https://github.com/hoangduytn1703/dflow-releases/releases/latest">Trang tải (luôn có bản mới nhất)</a>
     </div>
   </div>
@@ -254,6 +254,9 @@ footer { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line)
           <tr><td>“Windows protected your PC”</td><td>Bấm <b>More info</b> → <b>Run anyway</b>.</td></tr>
           <tr><td>“Sai tên đăng nhập hoặc mật khẩu” dù gõ đúng</td><td>Máy chưa nối dữ liệu: làm lại bước 3 (Dán dòng kết nối).</td></tr>
           <tr><td>“Tài khoản này đã bị khoá”</td><td>Hỏi người quản lý DFlow mở khoá.</td></tr>
+          <tr><td>“Gói … đã hết hạn”</td><td>Nhờ người quản lý gia hạn, hoặc nâng cấp gói (trang <b>Tài khoản của tôi</b> → ⬆ Nâng cấp gói).</td></tr>
+          <tr><td>“Chưa được người quản lý cấp quyền trên app”</td><td>Nhờ người quản lý mở <b>Gói &amp; thời hạn</b> của tài khoản bạn rồi bấm lưu (cấp lại quyền).</td></tr>
+          <tr><td>“Bản DFlow trên máy này … đã cũ”</td><td>Cập nhật app (thanh “Có bản DFlow mới” hoặc <b>⚙ Cài đặt → 🖥 Máy này</b>), rồi đăng nhập lại.</td></tr>
           <tr><td>Quên mật khẩu</td><td>Nhờ người quản lý đặt lại mật khẩu rồi đổi lại ở trang <b>Tài khoản của tôi</b> (bấm vào tên ở góc dưới trái).</td></tr>
           <tr><td>App báo mất kết nối extension</td><td>Vào <code>chrome://extensions</code> bấm ↻ ở ô DFlow Bridge, kiểm tra tab flow.google.com còn mở, rồi F5 tab đó.</td></tr>
           <tr><td>AI không viết được</td><td><b>⚙ Cài đặt → 🤖 AI viết</b> đã chọn Claude chưa; mở PowerShell gõ <code>claude</code> xem còn đăng nhập và gói Claude còn lượt không.</td></tr>
@@ -269,7 +272,7 @@ footer { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line)
 </div>
 
 <script>
-// The download button follows the newest release (the static 1.5.2 link stays if GitHub cannot be reached).
+// The download button follows the newest release (the static 1.6.0 link stays if GitHub cannot be reached).
 fetch("https://api.github.com/repos/hoangduytn1703/dflow-releases/releases/latest")
   .then(function (r) { return r.ok ? r.json() : null; })
   .then(function (rel) {
