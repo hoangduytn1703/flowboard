@@ -143,6 +143,43 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "desktop/src-tauri -> target"
+      # The bundler downloads NSIS + nsis_tauri_utils from github.com/<owner>/<repo>/releases/download, which answered 504 for
+      # hours on 8/11. The API asset endpoint kept working: fetch both there, check the SHA1s the bundler itself checks
+      # (tauri-bundler nsis/mod.rs, CLI 2.12.4) and lay them out where it looks (%LOCALAPPDATA%\tauri\NSIS) — it then skips
+      # its own download. Any failure here just leaves the bundler to try on its own.
+      - name: NSIS toolset (prefetch)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tools = Join-Path $env:LOCALAPPDATA "tauri"
+          $nsis = Join-Path $tools "NSIS"
+          if (Test-Path (Join-Path $nsis "Plugins/x86-unicode/additional/nsis_tauri_utils.dll")) { Write-Host "NSIS already there"; exit 0 }
+          function Get-Asset($repo, $tag, $name, $sha1, $out) {
+            $auth = @{ Authorization = "Bearer $env:GH_TOKEN" }
+            $id = ((Invoke-RestMethod "https://api.github.com/repos/$repo/releases/tags/$tag" -Headers $auth).assets | Where-Object name -eq $name).id
+            foreach ($try in 1..4) {
+              try {
+                Invoke-WebRequest "https://api.github.com/repos/$repo/releases/assets/$id" -OutFile $out `
+                  -Headers @{ Accept = "application/octet-stream"; Authorization = "Bearer $env:GH_TOKEN" }
+                if ((Get-FileHash $out -Algorithm SHA1).Hash -eq $sha1) { return }
+                Write-Host "${name}: wrong hash - retry $try"
+              } catch { Write-Host "${name}: $($_.Exception.Message) - retry $try" }
+              Start-Sleep -Seconds (10 * $try)
+            }
+            throw "$name could not be fetched"
+          }
+          New-Item -ItemType Directory -Force $tools | Out-Null
+          $zip = Join-Path $env:RUNNER_TEMP "nsis-3.13.zip"
+          Get-Asset "tauri-apps/binary-releases" "nsis-3.13" "nsis-3.13.zip" "DB14F8AF2EA346B786C6AE19343F61AAF5E09B8E" $zip
+          if (Test-Path $nsis) { Remove-Item -Recurse -Force $nsis }
+          Expand-Archive $zip $tools -Force
+          Rename-Item (Join-Path $tools "nsis-3.13") "NSIS"
+          $plugins = Join-Path $nsis "Plugins/x86-unicode/additional"
+          New-Item -ItemType Directory -Force $plugins | Out-Null
+          Get-Asset "tauri-apps/nsis-tauri-utils" "nsis_tauri_utils-v0.5.3" "nsis_tauri_utils.dll" "75197FEE3C6A814FE035788D1C34EAD39349B860" (Join-Path $plugins "nsis_tauri_utils.dll")
+          Get-ChildItem $nsis | Select-Object -First 8 | Format-Table Name
+
       - name: Installer (Tauri)
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
