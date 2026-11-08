@@ -92,16 +92,18 @@ export function DataFolderSection() {
         <>
           <div className="settings-panel__hint">
             {s.account.auth ? <>Tài khoản <strong>{s.account.username}</strong>. </> : <>Chưa bật đăng nhập (FLOWBOARD_AUTH=off). </>}
-            Database: {s.account.backend === "postgres"
+            Database: {s.via_api
+              ? <strong>trên cloud DFlow (qua {s.files.endpoint?.replace(/^https?:\/\//, "") || "dflow.io.vn"}) — đăng nhập ở máy nào cũng thấy; máy này chỉ giữ quyền vào đúng dữ liệu của tài khoản.</strong>
+              : s.account.backend === "postgres"
               ? <strong>trên cloud (Postgres) — đăng nhập ở máy nào cũng thấy.</strong>
               : <>trên máy này (<code>{s.account.storage_dir}</code>){s.central_cloud ? " — máy này đã nối cloud, bấm chuyển bên dưới." : " — máy này chưa có FLOWBOARD_CENTRAL_DB_URL trong .env."}</>}
             {" "}File media: {s.files.enabled
-              ? <>bucket <code>{s.files.bucket}</code> — đã đẩy {s.files.uploaded}, đã tải {s.files.downloaded}{s.files.pending_uploads ? `, đang chờ ${s.files.pending_uploads}` : ""}.</>
+              ? <>{s.via_api ? <>kho file DFlow</> : <>bucket <code>{s.files.bucket}</code></>} — đã đẩy {s.files.uploaded}, đã tải {s.files.downloaded}{s.files.pending_uploads ? `, đang chờ ${s.files.pending_uploads}` : ""}.</>
               : <>chỉ trên máy này.</>}
           </div>
           {s.files.last_error && <div className="settings-panel__project-error">Lỗi đồng bộ file gần nhất: {s.files.last_error}</div>}
           <div className="qt-row">
-            {s.account.auth && s.account.backend !== "postgres" && s.central_cloud && (
+            {s.account.auth && s.account.backend !== "postgres" && s.central_cloud && !s.via_api && (
               <button type="button" className="flow-accounts__btn" disabled={busy !== ""} onClick={() => void migrate()}>
                 {busy === "migrate" ? "Đang chuyển…" : "☁ Chuyển dữ liệu lên cloud"}
               </button>
@@ -112,7 +114,7 @@ export function DataFolderSection() {
               </button>
             )}
           </div>
-          <div className="data-sync__box">
+          {!s.via_api && <div className="data-sync__box">
             <strong>Kho file media (S3: Backblaze B2 / Cloudflare R2) — dùng chung cho mọi máy đăng nhập</strong>
             <input className="settings-panel__project-input" placeholder={s.files.endpoint ?? "Endpoint: s3.us-west-004.backblazeb2.com"}
                    value={s3.endpoint} onChange={(e) => setS3({ ...s3, endpoint: e.target.value })} />
@@ -128,7 +130,7 @@ export function DataFolderSection() {
                 {busy === "s3" ? "Đang kiểm tra…" : s.files.enabled ? "Đổi kho file" : "Kiểm tra & lưu"}
               </button>
             </div>
-          </div>
+          </div>}
         </>
       )}
     </div>

@@ -75,6 +75,11 @@ def _admin(request: Request) -> dict:
         raise HTTPException(401, "Chưa đăng nhập")
     if not accounts.is_admin(user):
         raise HTTPException(403, "Chỉ tài khoản quản trị mới quản lý được tài khoản. Bạn chỉ đổi được mật khẩu của mình.")
+    if accounts.via_api():
+        from flowboard import cloud_api
+
+        raise HTTPException(409, f"Máy này đăng nhập qua {cloud_api.host()}: quản lý tài khoản, gói và thanh toán ở trang quản trị "
+                                 f"{cloud_api.site()}/quan-tri.")
     return user
 
 

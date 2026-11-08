@@ -48,7 +48,7 @@ DFlow chạy trên máy của bạn (không phải trang web có sẵn), nên c�
 | Tài khoản Google có **Google Flow gói Pro hoặc Ultra** | Tạo ảnh và video | Đăng ký Google AI Pro / Ultra, vào flow.google.com |
 | Tài khoản **Claude** (gói Pro hoặc Max) | AI viết kịch bản, bài viết, trợ lý | claude.ai |
 | **Gemini API key** (miễn phí) | Đọc sản phẩm từ link, clip theo link, giọng Gemini, sửa tên riêng khi lồng tiếng | aistudio.google.com/apikey |
-| **Tên đăng nhập DFlow** (+ dòng kết nối dữ liệu) | Đăng nhập vào app, dữ liệu của bạn nằm trên cloud | Người quản lý DFlow tạo và gửi cho bạn ([Mục 6.6](#66-cấp-tài-khoản-cho-người-khác-chỉ-người-quản-lý)) |
+| **Tài khoản DFlow** | Đăng nhập vào app, dữ liệu của bạn nằm trên cloud | Tự đăng ký ở **[dflow.io.vn](https://dflow.io.vn/dang-ky)** (được dùng thử), hoặc người quản lý tạo và gửi cho bạn ([Mục 6.6](#66-cấp-tài-khoản-cho-người-khác-chỉ-người-quản-lý)) |
 | Tài khoản **GitHub** được mời vào kho code | **Chỉ khi chạy từ mã nguồn** (Cách 2) — người cài bằng file không cần | Tạo ở github.com, rồi nhờ chủ DFlow mời vào kho `hoangduytn1703/flowboard` |
 
 **Không phải ai cũng cần hết.** Bảng dưới cho biết tính năng nào cần cài thêm gì. Phần **Cơ bản** là bắt buộc, các dòng còn lại chỉ cài khi bạn dùng tới.
@@ -60,7 +60,7 @@ DFlow chạy trên máy của bạn (không phải trang web có sẵn), nên c�
 | **Lồng tiếng video**, xoá phụ đề có sẵn bằng AI, giọng VieNeu miễn phí | Bộ VieDub (pyvideotrans) — nặng, nên có card đồ hoạ NVIDIA | [Mục 6.2](#62-lồng-tiếng-video-xoá-phụ-đề-ai-giọng-vieneu) |
 | Edit auto CapCut | CapCut bản máy tính | [Mục 6.3](#63-edit-auto-capcut) |
 | Tự đăng lên Facebook Page, xem lượt xem | Mã truy cập (token) của Page | [Mục 6.4](#64-tự-đăng-facebook-page) |
-| Dùng chung dữ liệu trên nhiều máy | Dòng kết nối cơ sở dữ liệu (chủ DFlow đưa) | [Mục 6.5](#65-dùng-chung-dữ-liệu-trên-nhiều-máy) |
+| Dùng chung dữ liệu trên nhiều máy | Không cần gì thêm — đăng nhập cùng tài khoản là thấy | [Mục 6.5](#65-dùng-chung-dữ-liệu-trên-nhiều-máy) |
 
 > **Tự động đăng theo lịch** chỉ chạy khi máy đang bật và DFlow đang mở lúc tới giờ.
 
@@ -82,12 +82,13 @@ Có 2 cách. **Cách 1 (file cài đặt)** dễ nhất — **không phải cài
 3. **Mở DFlow** từ menu Start (hoặc biểu tượng trên màn hình). Lần đầu mất 20–40 giây để khởi động.
    Đóng cửa sổ thì DFlow **vẫn chạy ngầm** ở khay hệ thống (góc dưới phải, cạnh đồng hồ) để lịch đăng bài vẫn chạy —
    muốn tắt hẳn: chuột phải biểu tượng DFlow → **Thoát DFlow**.
-4. **Đăng nhập lần đầu** (theo đúng thứ tự):
-   - Được gửi **dòng kết nối dữ liệu** (bắt đầu bằng `postgresql://…`)? Ở trang đăng nhập bấm **🌐 Dán dòng kết nối trước** → dán nguyên dòng →
-     **Kết nối**. DFlow tự kiểm tra rồi khởi động lại (20–40 giây). Làm một lần trên mỗi máy. Chưa dán dòng này thì tài khoản được cấp sẽ báo
-     *"Sai tên đăng nhập hoặc mật khẩu"*.
-   - Đăng nhập bằng **tên + mật khẩu được cấp**.
-   - Bấm vào **tên của bạn** ở góc dưới trái → trang **Tài khoản của tôi** → **Đổi mật khẩu** để đặt mật khẩu riêng (trang này còn có tên hiển thị, gói đang dùng, nâng cấp gói, lịch sử giao dịch).
+4. **Đăng nhập lần đầu**:
+   - Chưa có tài khoản? Bấm **Đăng ký trên dflow.io.vn** ở trang đăng nhập (hoặc vào [dflow.io.vn/dang-ky](https://dflow.io.vn/dang-ky)) — tài khoản mới
+     được **dùng thử** ngay. Người quản lý tạo sẵn cho bạn thì dùng tên + mật khẩu được gửi.
+   - Đăng nhập trong app bằng tên + mật khẩu đó (máy cần có mạng — app kiểm tài khoản với dflow.io.vn; mất mạng vẫn vào được nếu máy này đã đăng nhập
+     trong 7 ngày gần nhất). **Không cần dán dòng kết nối nào** (từ bản 1.7.0).
+   - Bấm vào **tên của bạn** ở góc dưới trái → trang **Tài khoản của tôi** → **Đổi mật khẩu** nếu mật khẩu do người khác đặt (trang này còn có tên hiển thị, gói
+     đang dùng, nâng cấp gói, lịch sử giao dịch). Gia hạn / nâng gói cũng làm được trên dflow.io.vn.
 5. **Cài Claude Code** (AI viết kịch bản, bài viết) — mở PowerShell (bấm Start, gõ `powershell`) và dán:
 
    ```powershell
@@ -103,7 +104,7 @@ Có 2 cách. **Cách 1 (file cài đặt)** dễ nhất — **không phải cài
    - phần **Extension DFlow Bridge**: làm theo hướng dẫn hiện ở đó (mở `chrome://extensions` → bật Developer mode → Load unpacked → chọn
      thư mục DFlow chỉ cho, có nút 📂 mở sẵn thư mục), rồi F5 tab flow.google.com;
    - muốn để ảnh / video ở chỗ khác (ổ ngoài, ổ E…): đổi **Thư mục lưu ảnh, video** rồi bấm **↻ Khởi động lại DFlow**;
-   - đổi dòng kết nối dữ liệu sau này: ô **Dùng chung dữ liệu** → Lưu → Khởi động lại.
+   - ô **Dùng chung dữ liệu** để trống (chỉ máy của người quản lý mới dán dòng kết nối trực tiếp — Mục 6.6).
 9. **⚙ Cài đặt → 🔑 Gemini key**: dán Gemini key (lấy ở aistudio.google.com/apikey). **⚙ Cài đặt → ⚡ Google Flow**: chọn project Flow vừa tạo.
 
 **Cập nhật bản mới**: app **tự báo** khi có bản mới (thanh "🎉 Có bản DFlow …" ở dưới màn hình, hoặc **⚙ Cài đặt → 🖥 Máy này → ↻ Kiểm tra
@@ -325,22 +326,24 @@ Các bước này hơi rắc rối — nhờ người cài làm giúp. Chi tiế
 
 ### 6.5 Dùng chung dữ liệu trên nhiều máy
 
-Để mở DFlow ở máy nào cũng thấy cùng sản phẩm, clip, bài viết… (và để đăng nhập được bằng tài khoản người quản lý tạo): người quản lý gửi riêng
-cho bạn một dòng bắt đầu bằng `postgresql://` hoặc `FLOWBOARD_CENTRAL_DB_URL=` (**giữ bí mật**, đừng đăng lên đâu).
+**Bản app (Cách 1), từ 1.7.0**: không cần làm gì — đăng nhập cùng một tài khoản ở máy nào cũng thấy cùng sản phẩm, clip, bài viết, key AI, token Page.
+App đăng nhập qua **dflow.io.vn**; máy của bạn chỉ được quyền vào **đúng dữ liệu của tài khoản mình** (không thấy của ai khác), ảnh / video lên kho file qua
+máy chủ DFlow.
 
-- **Bản app (Cách 1)**: ở trang đăng nhập bấm **🌐 Dán dòng kết nối trước** → dán → **Kết nối** (app tự khởi động lại). Đã đăng nhập rồi thì đổi ở
-  **⚙ Cài đặt → 🖥 Máy này → Dùng chung dữ liệu**.
-- **Chạy từ mã nguồn (Cách 2)**: cũng dán ở trang đăng nhập được (xong tắt DFlow, chạy lại `start.ps1`), hoặc mở `notepad D:\DFlow\.env`, dán dòng
-  đó xuống cuối, lưu, tắt DFlow mở lại rồi đăng nhập.
+**Chạy từ mã nguồn (Cách 2)** / **máy của người quản lý**: dùng **dòng kết nối trực tiếp** (dòng `FLOWBOARD_CENTRAL_DB_URL=postgresql://…` trong `.env`) — dòng
+này có **toàn quyền** cơ sở dữ liệu (mọi tài khoản), **không gửi cho ai**. Máy có dòng này thì không đăng nhập qua web. Muốn chạy từ mã nguồn như bản app
+(đăng nhập qua web) thì bỏ dòng đó và thêm `FLOWBOARD_CLOUD_API=https://dflow.io.vn` vào `.env`.
 
 ### 6.6 Cấp tài khoản cho người khác (chỉ người quản lý)
 
 Chỉ tài khoản **quản trị** (`akiragosho`) thấy menu **👥 Quản lý tài khoản** (nhóm Nâng cao). Mỗi tài khoản có dữ liệu riêng — không ai thấy của ai.
+Trang quản trị trên web **dflow.io.vn/quan-tri** làm được hết các việc dưới đây (tạo tài khoản, gói, thời hạn, khoá, duyệt nâng cấp) từ máy nào cũng được;
+trong app, menu này chỉ chạy trên máy có dòng kết nối trực tiếp — máy đăng nhập qua web thì menu mở trang quản trị trên web.
 
 1. **👥 Quản lý tài khoản → Tạo tài khoản cho người khác**: gõ tên đăng nhập (chữ không dấu, số, `.` `_` `-`), mật khẩu (🎲 tạo ngẫu nhiên),
    ghi chú (ai dùng, hết hạn khi nào) → **Tạo tài khoản** → **📋 Copy để gửi** (mật khẩu chỉ hiện lúc này).
-2. Gửi cho họ: thông tin đăng nhập vừa copy + **dòng kết nối dữ liệu** (dòng `FLOWBOARD_CENTRAL_DB_URL=…` trong file `.env` của bạn) + link file cài
-   **github.com/hoangduytn1703/dflow-releases/releases**.
+2. Gửi cho họ: thông tin đăng nhập vừa copy + link trang cài đặt **hoangduytn1703.github.io/dflow-releases**. **Không gửi dòng kết nối dữ liệu** (từ bản
+   1.7.0 app không cần; dòng đó có toàn quyền cơ sở dữ liệu). Hoặc để họ tự đăng ký ở dflow.io.vn rồi đổi gói cho họ.
 3. Họ quên mật khẩu → **🔑 Đặt lại mật khẩu** (copy luôn thông tin mới để gửi). Ngừng cho dùng → **🔒 Khoá** (họ bị đăng xuất, không đăng nhập được;
    dữ liệu giữ nguyên, **🔓 Mở khoá** là dùng lại). **⎋ Đăng xuất mọi máy** khi nghi lộ mật khẩu.
 4. **Gói của từng người**: bấm ô **Gói** của tài khoản → **Gói & thời hạn** (chọn gói + thời hạn đã bán, cộng thêm vào hạn còn lại; hoặc 📅 chọn ngày hết
@@ -355,8 +358,9 @@ Chỉ tài khoản **quản trị** (`akiragosho`) thấy menu **👥 Quản lý
 
 Người khác chỉ đổi được mật khẩu / thông tin của chính họ (bấm vào tên ở góc dưới trái → **Tài khoản của tôi**).
 
-> **Lưu ý bảo mật**: nhờ chữ ký số, người có dòng kết nối dữ liệu không tự nâng gói / gia hạn / mở khoá được — nhưng người rành kỹ thuật vẫn **đọc được
-> dữ liệu của mọi tài khoản** (sản phẩm, clip, key AI, token Page). Chỉ gửi dòng đó cho người bạn tin. Chạy từ mã nguồn trên kho trống sẽ tạo sẵn tài khoản
+> **Lưu ý bảo mật**: từ bản 1.7.0 người dùng app chỉ có quyền vào dữ liệu của chính họ (đăng nhập qua dflow.io.vn); gói / hạn / khoá được ký số nên không tự
+> nâng được. **Dòng kết nối trực tiếp** thì vẫn đọc / sửa được dữ liệu của mọi tài khoản — chỉ để trên máy của bạn; lỡ đưa cho ai thì đổi mật khẩu Neon (Neon
+> Console → Roles → Reset password) rồi cập nhật `.env` máy bạn và `DATABASE_URL` của web trên Vercel. Chạy từ mã nguồn trên kho trống sẽ tạo sẵn tài khoản
 > `akiragosho / Password@123` (ghi công khai trong mã nguồn) — **đổi mật khẩu quản trị ngay**. Người được mời vào kho mã nguồn (Cách 2) sửa được code trên máy
 > họ để bỏ mọi giới hạn gói — khách chỉ nên dùng file cài (Cách 1).
 
@@ -373,9 +377,12 @@ Người khác chỉ đổi được mật khẩu / thông tin của chính họ
 | Trang `localhost:5174` không mở được | Cửa sổ DFlow còn mở không? Lần đầu chờ cài xong (5–10 phút) rồi F5 |
 | `Could not create agent\.venv` | uv chưa cài được — làm lại Bước 2, đóng mở lại PowerShell |
 | `ffmpeg is not on PATH` | `winget install -e --id Gyan.FFmpeg`, rồi đóng mở lại PowerShell |
-| Tài khoản được cấp báo *"Sai tên đăng nhập hoặc mật khẩu"* | Máy này chưa nối dữ liệu cloud: ở trang đăng nhập bấm **🌐 Dán dòng kết nối trước** (Mục 6.5) |
+| *"Sai tên đăng nhập hoặc mật khẩu"* | Kiểm tra lại (tên không dấu, chữ thường); thử đăng nhập trên dflow.io.vn — được ở đó mà app không được thì cập nhật app |
+| *"Không kết nối được dflow.io.vn để đăng nhập"* | Máy chưa có mạng / mạng chặn trang đó. Máy đã đăng nhập trong 7 ngày gần nhất thì vẫn vào được khi mất mạng |
+| *"Nhập sai mật khẩu quá nhiều lần"* | Đợi 15 phút rồi thử lại |
+| Ảnh / video không lên kho file (*"storage cap exceeded"* trong Cài đặt → Dữ liệu) | Kho Backblaze B2 của người quản lý đầy mức miễn phí — người quản lý nâng mức trần (Caps & Alerts) hoặc dọn file |
 | *"Tài khoản này đã bị khoá"* | Hỏi người quản lý DFlow mở khoá |
-| Quên mật khẩu | Nhờ người quản lý **🔑 Đặt lại mật khẩu** (Mục 6.6) |
+| Quên mật khẩu, gói hết hạn | Vào **dflow.io.vn** (gia hạn / nâng gói ở trang Tài khoản), hoặc nhờ người quản lý **🔑 Đặt lại mật khẩu** (Mục 6.6) |
 | *"Tài khoản này chưa được người quản lý cấp quyền trên app"* | Người quản lý mở **👥 Quản lý tài khoản** trên máy có khoá ký → **Gói & thời hạn** của tài khoản đó → chọn gói → Lưu (máy ký lại) |
 | *"Mật khẩu của tài khoản này cần được người quản lý đặt lại"* | Mật khẩu từng được đổi bằng app bản cũ (≤ 1.5.2) — nhờ người quản lý **🔑 Đặt lại mật khẩu** |
 | *"Bản DFlow trên máy này (…) đã cũ"* | Cập nhật app (Mục 5) rồi đăng nhập lại |

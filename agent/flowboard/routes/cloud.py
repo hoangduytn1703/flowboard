@@ -38,11 +38,16 @@ def cloud_status(request: Request) -> dict:
     acc = accounts.status()
     fs = file_store.status()
     fs.pop("prefix", None)
-    return {"account": acc, "files": fs, "central_cloud": accounts.central_url() is not None}
+    return {"account": acc, "files": fs, "central_cloud": accounts.central_url() is not None, "via_api": accounts.via_api()}
 
 
 @router.put("/s3")
-def set_s3(body: S3Body) -> dict:
+def set_s3(body: S3Body, request: Request) -> dict:
+    user = _me(request)
+    if accounts.via_api():
+        raise HTTPException(409, "Kho file do máy chủ DFlow giữ — máy này không cần (và không được) cài key.")
+    if accounts.auth_enabled() and not accounts.is_admin(user):
+        raise HTTPException(403, "Chỉ tài khoản quản trị mới đổi được kho file.")
     if not any([body.endpoint, body.bucket, body.keyId, body.secret]):
         accounts.set_setting("s3", None)
         file_store.reset()
@@ -81,6 +86,8 @@ def migrate(request: Request) -> dict:
     user = _me(request)
     if user is None:
         raise HTTPException(401, "Chưa đăng nhập")
+    if accounts.via_api():
+        raise HTTPException(409, "Dữ liệu của tài khoản đã nằm trên cloud DFlow.")
     try:
         from flowboard.worker.processor import get_worker
         if get_worker().active_count > 0:

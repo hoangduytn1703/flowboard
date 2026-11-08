@@ -100,7 +100,13 @@ export function QuicktoolSidebar() {
             <span className="qt-nav__icon">🧩</span> Canvas (kéo thả node)
           </button>
         )}
-        {isAdmin && (
+        {isAdmin && me?.site?.admin && (
+          <a className="qt-nav__item" href={me.site.admin} target="_blank" rel="noreferrer"
+             title={`Tài khoản, gói, giá và yêu cầu nâng cấp: quản lý trên ${me.site.host}`}>
+            <span className="qt-nav__icon">👥</span> Quản lý tài khoản ↗
+          </a>
+        )}
+        {isAdmin && !me?.site && (
           <button type="button" className={`qt-nav__item${is("/accounts") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/accounts")}
                   title="Chỉ tài khoản quản trị: tạo tài khoản cho người khác, đặt lại mật khẩu, khoá / mở khoá">
             <span className="qt-nav__icon">👥</span> Quản lý tài khoản

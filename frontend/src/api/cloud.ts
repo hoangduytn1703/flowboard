@@ -21,6 +21,8 @@ export interface CloudStatus {
     last_error: string | null;
   };
   central_cloud: boolean;
+  /** Phase C: logs in through the DFlow website — the bucket and the move to cloud are the server's business */
+  via_api?: boolean;
 }
 
 function send<T>(path: string, method: string, body?: unknown): Promise<T> {

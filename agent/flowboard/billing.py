@@ -12,6 +12,10 @@ verified automatically.
 The QR is a NAPAS VietQR payload (EMVCo merchant-presented, "QRIBFTTA" = transfer to an account) built here and
 drawn by the browser — no third-party QR service sees the account number. Settings live in the central store
 (``account_setting`` key ``billing``), requests in the central table ``account_upgrade``.
+
+Phase C (8/11): an app that logs in through the DFlow website (cloud_api.py) still works out the prices and the QR from
+its local copy of the signed documents, but the requests live on the website (``/api/app/upgrade*``), which works the
+price out again from its own signed plans before filing one.
 """
 from __future__ import annotations
 
@@ -248,7 +252,22 @@ def _row(r: Any) -> dict[str, Any]:
             "decided_at": r.decided_at.isoformat() if r.decided_at else None}
 
 
+def _via_api() -> bool:
+    return accounts.via_api()
+
+
+def _api(username: str, method: str, path: str, body: Optional[dict] = None) -> dict:
+    from flowboard import cloud_api
+
+    try:
+        return cloud_api.account_call(username, method, path, body=body)
+    except cloud_api.ApiError as exc:
+        raise BillingError(exc.detail) from exc
+
+
 def pending_for(username: str) -> Optional[dict[str, Any]]:
+    if _via_api():
+        return _api(username, "GET", "/api/app/upgrade").get("pending")
     with _engine().connect() as c:
         r = c.execute(select(upgrades).where(upgrades.c.username == username, upgrades.c.status == "pending")
                       .order_by(upgrades.c.id.desc())).first()
@@ -258,6 +277,8 @@ def pending_for(username: str) -> Optional[dict[str, Any]]:
 def file_request(user: dict, plan_id: str, months: int = 0) -> dict[str, Any]:
     """"Tôi đã chuyển khoản": one pending request per account (a newer one replaces it)."""
     q = quote(user, plan_id, months)
+    if _via_api():
+        return _api(user["username"], "POST", "/api/app/upgrade/request", {"plan_id": q["plan_id"], "months": q["months"]}).get("request") or {}
     with _engine().begin() as c:
         c.execute(upgrades.update().where(upgrades.c.username == user["username"], upgrades.c.status == "pending")
                   .values(status="cancelled", decided_at=_now()))
@@ -268,12 +289,17 @@ def file_request(user: dict, plan_id: str, months: int = 0) -> dict[str, Any]:
 
 
 def cancel_request(username: str) -> None:
+    if _via_api():
+        _api(username, "POST", "/api/app/upgrade/cancel")
+        return
     with _engine().begin() as c:
         c.execute(upgrades.update().where(upgrades.c.username == username, upgrades.c.status == "pending")
                   .values(status="cancelled", decided_at=_now()))
 
 
 def list_requests(limit: int = 100, username: Optional[str] = None) -> list[dict[str, Any]]:
+    if _via_api():
+        return (_api(username, "GET", "/api/app/upgrade").get("requests") or [])[:limit] if username else []
     q = select(upgrades).order_by(upgrades.c.id.desc()).limit(limit)
     if username:
         q = q.where(upgrades.c.username == username)

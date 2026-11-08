@@ -166,9 +166,13 @@ def connect_status() -> dict[str, Any]:
     """Open: does this machine use the cloud database yet (the login page shows the paste box when not)."""
     from flowboard import accounts
 
+    from flowboard import cloud_api
+
     saved = bool(app_env.read_values().get("FLOWBOARD_CENTRAL_DB_URL"))
     cloud = accounts.central_url() is not None
-    return {"app": config.APP_MODE, "cloud": cloud, "restart_pending": saved and not cloud}
+    site = cloud_api.site() if cloud_api.enabled() else None
+    return {"app": config.APP_MODE, "cloud": cloud or site is not None, "restart_pending": saved and not cloud,
+            "site": {"url": site, "host": cloud_api.host(), "signup": f"{site}/dang-ky", "forgot": f"{site}/dang-nhap"} if site else None}
 
 
 @router.post("/connect")

@@ -15,6 +15,17 @@ export interface AccountMe {
   features?: string[];
   /** what the account filled in on "Tài khoản của tôi" */
   profile?: AccountProfile;
+  /** Phase C: the DFlow website this machine logs in through (account admin, sign-up, renewals) — null on the direct line */
+  site?: SiteLinks | null;
+}
+
+export interface SiteLinks {
+  url: string;
+  host: string;
+  account?: string;
+  admin?: string;
+  signup?: string;
+  forgot?: string;
 }
 
 export interface AccountProfile {
@@ -387,6 +398,8 @@ export interface ConnectStatus {
   cloud: boolean;
   /** a line is saved but the agent has not restarted with it */
   restart_pending: boolean;
+  /** Phase C: logs in through the DFlow website — no line to paste; sign-up happens there */
+  site?: SiteLinks | null;
 }
 
 export function getConnectStatus() {

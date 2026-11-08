@@ -124,6 +124,11 @@ export function LoginPage({ onLoggedIn }: { onLoggedIn: (me: AccountMe) => void 
         {cloud && !cloud.cloud && !connected && (
           <CloudConnect status={cloud} onConnected={() => { setConnected(true); setCloud({ ...cloud, cloud: true }); }} />
         )}
+        {cloud?.site && (
+          <p className="login__site">
+            Đăng nhập bằng tài khoản DFlow (tài khoản trên <b>{cloud.site.host}</b>).
+          </p>
+        )}
         <label className="login__field">
           <span>Tên đăng nhập</span>
           <input type="text" autoComplete="username" autoFocus value={username} onChange={(e) => setUsername(e.target.value)} />
@@ -136,6 +141,12 @@ export function LoginPage({ onLoggedIn }: { onLoggedIn: (me: AccountMe) => void 
         <button type="submit" className="qt-btn qt-btn--accent qt-btn--big" disabled={busy || !username.trim() || !password}>
           {busy ? "Đang đăng nhập…" : "Đăng nhập"}
         </button>
+        {cloud?.site && (
+          <div className="login__links">
+            <span>Chưa có tài khoản? <a href={cloud.site.signup} target="_blank" rel="noreferrer">Đăng ký trên {cloud.site.host}</a></span>
+            <span>Quên mật khẩu, hết hạn gói? <a href={cloud.site.forgot} target="_blank" rel="noreferrer">Vào {cloud.site.host}</a></span>
+          </div>
+        )}
       </form>
     </div>
   );

@@ -368,6 +368,13 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   `window.confirm` / `window.prompt` nữa**: `components/Dialogs.tsx` `askConfirm(msg, {ok, cancel, danger})` / `askText(msg, value)` (Promise, hộp riêng của app,
   `DialogHost` gắn ở `App.tsx`, z-index 1300, Enter = đồng ý, Esc = huỷ) — đã thay cả 41 chỗ. Code mới: `if (!(await askConfirm("…"))) return;` trong hàm async.
   Dò lỗi kiểu này: `agent.log` của app (`<DFlowData>\logs`) — bấm nút mà không có request nào là lỗi phía giao diện.
+- **Postgres 16+ (Neon): role vừa tạo bằng CREATEROLE chỉ cho người tạo quyền ADMIN, không SET / INHERIT** (8/11 khuya, Phase C: `CREATE SCHEMA … AUTHORIZATION` báo
+  "must be able to SET ROLE"; `pg_has_role(…, 'MEMBER')` vẫn trả true nên kiểm kiểu đó là sai): phải `GRANT role TO current_user WITH INHERIT TRUE, SET TRUE` (kiểm bằng
+  `pg_has_role(current_user, role, 'SET')` + `'USAGE'`). Cũng vậy: **`CREATE SCHEMA IF NOT EXISTS` kiểm quyền CREATE trên database TRƯỚC khi xem schema có chưa** → role
+  của tài khoản (không có quyền đó) chạy `init_db` cũ là lỗi dù schema đã có — `init_db` giờ hỏi `pg_namespace` trước.
+- **Backblaze B2 đầy gói miễn phí → mọi lượt đẩy file lỗi "Cannot upload files, storage cap exceeded"** (thấy 8/11 khuya khi thử Phase C: bucket 410 file / **10,40 GB**,
+  toàn bộ của akiragosho; B2 cho 10 GB miễn phí rồi dừng ở mức "cap" đặt trong tài khoản). Không phải lỗi chữ ký. Sửa: Backblaze → Caps & Alerts nâng mức trần (giá ~$6 /
+  TB / tháng) hoặc dọn file lớn (video lồng tiếng / ghép cũ); `GET /api/cloud/status` → `upload_errors`, `last_error` cho thấy.
 - **Ảnh / video cũ 404 trong app (hoặc máy mới)**: chỉ là file chưa từng lên B2 (B2 trả 403 cho key không có → `download_errors` ở `GET /api/cloud/status`), không
   phải lỗi app; trên máy nhà chúng nằm ở `storage/accounts/akiragosho/media` của repo. Muốn app thấy: đặt Thư mục dữ liệu (Cài đặt → 🖥 Máy này) = thư mục
   `storage` của repo (app và start.ps1 không chạy cùng lúc nên dùng chung được) hoặc chép thư mục media sang.
@@ -1625,6 +1632,39 @@ của người dùng (console.neon.tech, secure.backblaze.com).
     giấy phép / tài liệu ký / băm mật khẩu / luật gói ở đây thì sửa bên đó luôn** (người dùng 8/11: "việc code sẽ làm song song nếu bên web cần update"). 8/11
     khuya đã sửa bên web: tin cả khoá web + khoá quản trị, giấy phép web ký **mang theo `lh`** (trước đó thiếu → tài khoản còn băm cũ bị app khoá đăng nhập khi
     web ký lại), không lưu mật khẩu khi thiếu `DFLOW_PEPPER` trên kho đã ký. Bên này: `doc_state(key)` kiểm **bản đã lưu**, `sign_doc` lưu luôn tài liệu vừa ký.
+- **🌐 Phase C — app đăng nhập qua dflow.io.vn, không cầm dòng Neon** (8/11 khuya, người dùng: "bạn toàn quyền, triển hướng C đi, làm hết"; miễn phí — Vercel
+  Hobby + Neon free; máy nhà không cần bật 24/7):
+  - **Bật khi nào**: bản cài (`config.PACKAGED`) mà `.env` **không có** `FLOWBOARD_CENTRAL_DB_URL` → `cloud_api.enabled()` (mặc định `https://dflow.io.vn`;
+    `FLOWBOARD_CLOUD_API` đổi địa chỉ, để trống = tắt — `conftest.py` đặt trống; chạy từ repo muốn thử thì đặt `FLOWBOARD_CLOUD_API=http://127.0.0.1:3030`).
+    Máy có dòng Neon (máy nhà / start.ps1) vẫn **chế độ trực tiếp** như cũ (owner: ký số, quản trị trong app).
+  - **Web (`dflow-web`)**: API cho app `src/app/api/app/*` — `POST login` (kiểm mật khẩu + khoá + hết hạn + giấy phép + băm cũ có ghim `lh`, 10 lần sai / 15 phút → 429,
+    băm cũ → băm lại có pepper), `GET me` (app hỏi lại mỗi 10 phút), `GET/PUT settings` (chỉ khoá `secrets:<user>` và `fb_token:<user>:<số>`), `POST media`
+    (`op` put / get → link ký sẵn 15 phút, list thư mục `<user>/`, delete; key ngoài thư mục mình → 403), `upgrade` (GET pending + lịch sử, `request`, `cancel` — giá tính
+    lại trên web), `account/profile|password|logout-others` (đổi mật khẩu / đăng xuất máy khác trả token mới cho máy đang dùng). Thư viện: `lib/appapi.ts` (token
+    `dfa1.` HMAC với SESSION_SECRET + nhãn riêng, gắn dấu vân tay băm mật khẩu + mốc `app_after:<user>`; `appPayload` = dòng tài khoản thô + **chữ JSON nguyên văn**
+    của `plans` / `billing` / `min_app` + chữ ký + `license_epoch` + dòng DB riêng), `lib/dbrole.ts`, `lib/media.ts` (aws-sdk v3, `requestChecksumCalculation:
+    "WHEN_REQUIRED"` — B2 không nhận header checksum CRC). Khoá tài khoản trên web (`setDisabled`) → `lockRole` (NOLOGIN + ngắt kết nối).
+  - **Role Postgres riêng từng tài khoản** (`dbrole.provision`, mỗi lần app đăng nhập, khoá `pg_advisory_xact_lock`): `CREATE ROLE "u_<username>" LOGIN` (mật khẩu 192
+    bit, lưu **mã hoá AES-256-GCM** khoá từ DFLOW_PEPPER ở bảng `account_dbrole` — mọi máy của tài khoản nhận cùng một dòng), `GRANT role TO current_user WITH INHERIT
+    TRUE, SET TRUE`, schema `acct_<user>` (tạo với AUTHORIZATION role, hoặc giao chủ), **giao chủ mọi bảng / view / sequence lẻ / kiểu** do người khác tạo trong schema,
+    `ALTER DEFAULT PRIVILEGES` (bảng owner tạo sau vẫn dùng được), `search_path`; tài khoản backend sqlite / thiếu schema → ghi `{"type":"postgres","schema":…}`.
+    Dòng DB trả về = dòng owner đổi user / mật khẩu, bỏ `-pooler.`. **Đã thử thật trên Neon** (tài khoản thử `phasec-test`, đã xoá sạch): role ghi được schema của nó,
+    bị từ chối `account_user`, `account_setting`, `account_dbrole`, `acct_akiragosho`, CREATE SCHEMA; khoá → `rolcanlogin` false + web 403; mở khoá + đăng nhập → bật lại.
+  - **Agent** `flowboard/cloud_api.py`: `login` / `store` (chép dòng tài khoản vào **kho cục bộ** `storage/accounts.db` — **giữ đúng id của web** vì giấy phép gắn id —,
+    `backend = {"type":"postgres","schema","url","via":"api"}`, băm mật khẩu cục bộ để đăng nhập offline, tài liệu ký vào `account_setting` cục bộ, token `api_token:<user>`,
+    `api_seen:<user>`), `maybe_refresh` (gọi từ `accounts.resolve_session`, nền, mỗi `REFRESH_S` 600 s; 401/403 → `drop` = đăng xuất máy này; offline quá `OFFLINE_OK_S`
+    7 ngày → đăng xuất), `get_remote` / `set_remote` (cache 60 s), `account_call` (401 → drop). `accounts.py`: `via_api()`, `get_setting` / `set_setting` chuyển khoá
+    `secrets:` / `fb_token:` qua API (`_remote`), `_authenticate_via_api` (web lỗi mạng / 5xx → dùng bản sao nếu mật khẩu khớp + web xác nhận trong 7 ngày; 403 → xoá
+    băm cục bộ để không vào offline được), `startup` không seed / không ký trong chế độ này, `status().via_api`, `lock_db_role` (máy trực tiếp khoá tài khoản cũng NOLOGIN
+    role). `file_store._ApiBucket` thay boto3 (put_object / upload_file / download_file / list_objects_v2 / delete_object qua link ký sẵn; 404 → `_NotInBucket`).
+    `billing`: `pending_for` / `file_request` / `cancel_request` / `list_requests` gọi web (bảng giá + QR vẫn tính từ bản ký cục bộ). `routes/account.py`: password / profile /
+    logout-others qua web, `_me_payload.site` (link web, admin, tài khoản); `account_admin._admin` → 409 "quản lý ở …/quan-tri"; `cloud.py` `/s3` (giờ chỉ admin, kể cả chế
+    độ trực tiếp — trước đó tài khoản thường nào cũng ghi đè được key kho file) + `/migrate` → 409; `app.py` `GET /api/app/connect` có `site` (signup / forgot) và
+    `cloud: true`. `db/session.init_db`: chỉ `CREATE SCHEMA` khi chưa có (xem Bẫy). Frontend: trang đăng nhập bỏ ô dán dòng, thêm "Đăng ký trên dflow.io.vn" + "Quên mật
+    khẩu, hết hạn gói?" (`.login__site`, `.login__links`), menu "👥 Quản lý tài khoản ↗" + nút ở Tài khoản của tôi mở `…/quan-tri`, Cài đặt → Dữ liệu ẩn ô kho file + nút
+    chuyển lên cloud khi `via_api`. Test `test_cloud_api.py` (10, web giả MockTransport) + `test_app_mode` sửa kỳ vọng.
+  - **Vẫn còn**: máy trực tiếp (máy nhà, có dòng Neon) vẫn là owner — giữ dòng đó cho riêng mình; role đọc được tên các schema khác (catalog — lộ tên đăng nhập); một
+    tài khoản có thể ghi đầy dung lượng Neon free (0,5 GB) của chính nó; agent bản cài vẫn là mã máy dịch từ Python (Nuitka) — giấy phép ký số lo phần gói.
 - **Đăng xuất Flow phải bấm 2 lần** (21/10, `SettingsPanel.tsx`): lần đầu nút đổi thành "Bấm lần nữa để đăng xuất…" + "Huỷ",
   tự quay lại sau 5 s / khi đóng hộp; xong có toast (`AccountPanel.handleLogout`). Nút chỉ có ở hộp Cài đặt mở từ ⚙ cạnh tài khoản.
 
@@ -1811,9 +1851,9 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
   Remotion: gói kèm Node hoặc để sau.
 
 ### Phase C — Chuẩn bị bán (song song, phần lớn trước khi phát hành B)
-- **Bắt buộc sửa trước khi giao app cho người khác**: kho trung tâm (Neon) + khoá B2 **không được nằm trong bản cài** → đưa ra sau một **API của mình**
-  (đăng nhập, gói, đồng bộ); bỏ tài khoản tạo sẵn `akiragosho / Password@123`; bỏ phụ thuộc Claude CLI (gói Max của người dùng) → khách dùng Gemini key
-  của họ; đường dẫn cứng `D:\codes\pyvideotrans` → gói tải thêm.
+- **Xong 8/11 khuya (bản 1.7.0)**: app đăng nhập qua API của dflow.io.vn, mỗi tài khoản một role Postgres chỉ thấy schema của nó, kho file qua link ký sẵn, đăng ký
+  trên web (xem "Chỗ cần biết" → "Phase C"). Tài khoản tạo sẵn đã bỏ ở bản cài (8/11 tối). **Còn**: bỏ phụ thuộc Claude CLI (gói Max của người dùng) → khách dùng Gemini
+  key của họ; đường dẫn cứng `D:\codes\pyvideotrans` → gói tải thêm.
 - **Gói Pro / Premium** (đề xuất 30/10, chưa chốt): Pro = làm tay một shop / một page (wizard clip đầy đủ, giọng Edge, bài viết 1 bài, lịch nhắc, sản phẩm /
   người mẫu / prompt, xoá chữ khoanh vùng; giới hạn 1 kênh, 1 Page, 1 tài khoản Flow, 1 máy). Premium = tự động + số lượng + tăng trưởng + đồ nặng:
   **Trợ lý AI (Phase A)**, tạo video tự động / hàng đợi / N clip, giọng Gemini, viết nhiều bài / loạt / A/B, **tự đăng Page + đồng bộ & số liệu**, định
@@ -1827,15 +1867,13 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
   Chrome Web Store từ chối → giữ cách cài tay kèm video.
 
 ## Việc đang dở / chưa kiểm chứng
-- **BẢO MẬT — sau hướng B (8/11 khuya)**: quyền dùng (vai trò / gói / hạn / khoá / bảng gói / STK) giờ **ký số** + agent bản cài dịch Nuitka (xem "Chỗ cần biết" →
-  "Chữ ký số quyền dùng") → sửa tay Neon (hay trỏ sang kho Postgres tự dựng) không tự lên admin / Premium / bỏ hạn được nữa. **Còn mở**: (1) dòng Neon vẫn đọc / sửa được **dữ liệu** mọi tài khoản, **key
-  Gemini / OpenAI / xAI** (`secrets:<user>`), **token Facebook Page** (`fb_token:…`), **key Backblaze B2** (`s3`, dùng chung → tải / xoá media của tất cả), băm mật khẩu
-  (có pepper — không dò được nếu không có mã app) → chỉ **C** (máy chủ API riêng, máy khách không cầm chuỗi Neon / key B2) mới chặn; (2) phát lại giấy phép cũ của chính
-  mình; (3) **app ≤ 1.5.2 không chặn gói nào**, bộ cài 1.5.0–1.5.2 đang công khai trên dflow-releases — đã đề xuất người dùng xoá các release cũ sau khi phát hành bản
-  có giấy phép (việc công khai — chờ người dùng quyết); (4) người có mã nguồn (Cách 2) bỏ được mọi kiểm tra trên máy họ; (5) máy chủ chạy dflow-web giữ khoá web — bị chiếm là cấp được mọi gói (thay khoá + phát hành app mới). Tạm thời: **chỉ đưa dòng Neon cho người thật
-  sự tin**; ai đã có dòng mà không còn tin → đổi mật khẩu Neon (Neon Console → Roles → Reset password) rồi dán dòng mới cho máy mình. Chưa có: nút nâng `min_app`.
-  Bản cài đầu tiên có giấy phép = **1.6.0** (8/11 khuya, đã phát hành); kho Neon đã được máy có khoá ký trước đó (agent web). Kho mới (Neon khác) phải được máy có khoá
-  mở một lần (agent chạy từ repo hoặc bản cài trên máy nhà) trước khi bạn bè đăng nhập bằng bản cài — không thì mọi tài khoản "chưa được cấp quyền".
+- **BẢO MẬT — sau Phase C (8/11 khuya, bản 1.7.0)**: bạn bè cài app **không cần và không nhận dòng Neon** nữa — đăng ký / đăng nhập qua dflow.io.vn, app chỉ cầm
+  role Postgres của chính tài khoản (đọc / ghi đúng schema của mình) + token API; key B2 nằm trên máy chủ web; key AI / token Page của mỗi người đi qua API (chỉ chủ
+  tài khoản đọc được). Quyền dùng vẫn ký số (hướng B). **Còn mở**: (1) máy nào còn dòng Neon (máy nhà) vẫn toàn quyền — đừng đưa dòng đó cho ai; dòng đó từng nằm ở máy
+  nào khác thì đổi mật khẩu Neon (Neon Console → Roles → Reset password) rồi cập nhật cả `.env` máy nhà lẫn `DATABASE_URL` trên Vercel; (2) phát lại giấy phép cũ của chính
+  mình (chỉ có tác dụng trên máy đó, máy chủ web kiểm khoá / hạn khi đăng nhập và mỗi 10 phút); (3) người có mã nguồn (Cách 2) bỏ được kiểm tra trên máy họ; (4) máy chủ
+  dflow-web giữ khoá web + dòng owner — bị chiếm là mất hết (Vercel: bật 2FA tài khoản); (5) **B2 đã đầy 10 GB miễn phí** → đẩy file đang lỗi (xem Bẫy). Chưa có: nút
+  nâng `min_app`.
 - **App desktop (7/11)**: vỏ Tauri **chưa build được trên máy** (không có Rust) — chỉ CI build; phần Rust chưa chạy thử thật (khay, đóng-ẩn, mở link ra trình duyệt,
   khởi động lại mã 75, tự thoát theo tiến trình cha) tới khi người dùng cài bộ cài. **Tự cập nhật chưa chạy thật lần nào**: 0.1.1 không có updater nên người
   dùng phải cài tay 0.1.2 một lần; lần cập nhật thật đầu tiên chỉ thử được khi phát hành 0.1.3 (xem lệnh có tới được trang 127.0.0.1:8434 qua capability không,
@@ -2154,4 +2192,10 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
 - **8/11 khuya** — **Hướng B: chữ ký số quyền dùng + agent dịch Nuitka** (người dùng: "làm B luôn đi", sau khi rà bảo mật; miễn phí): `licensing.py` (Ed25519; khoá riêng chỉ ở máy nhà `%USERPROFILE%\.flowboard\dflow-license.key` — **người dùng cần sao lưu**), giấy phép từng tài khoản (`account_user.license`) + bảng gói / thanh toán / `min_app` ký số và kiểm đúng bản đã lưu, kho ký lần đầu khi agent có khoá khởi động (quản trị trước), chỉ máy có khoá đổi quyền (403 ở máy khác), băm mật khẩu có pepper (`dflow2`, gắn tên), phiên HMAC gắn id, chặn duyệt nâng cấp sai giá, khách chỉ thấy QR khi STK + bảng giá đã ký, `__version__`; CI dịch `flowboard` bằng Nuitka thành `.pyd` + chạy thử agent; trang quản trị có banner 🔑 / 🔒 + chip "chưa ký / chữ ký sai / bị sửa tay". `licensing.py` (mới), `accounts.py`, `plans.py`, `billing.py`, `routes/account.py`, `routes/account_admin.py`, `main.py`, `config.py`, `__init__.py`, `pyproject.toml` (cryptography), `dflow-agent.spec`, `desktop.yml`, `api/account.ts`, `AccountsPage.tsx`, `PlansEditor.tsx`, `BillingEditor.tsx`, CSS, README (Mục 6.6 khoá ký + bảng lỗi). Test `test_licensing.py` 11 + licence / thanh toán / gói / tài khoản / app / lịch / tự động 97 pass / 2 skip; cả bộ 1161 pass / 2 skip (trước lần đổi cách kiểm tài liệu ký; bỏ các file lỗi môi trường Windows đã biết); `tsc` sạch. Bản dịch Nuitka + PyInstaller chạy thật trên cổng phụ 8534 (sửa tay dòng không lên quyền, trang lạ 403). Khởi động lại agent web (`start140.log`) → **kho Neon ký lần đầu: 2 tài khoản** (akiragosho quản trị, tranngan VIP tới 08/12/2026; cả hai giữ băm cũ đã ghim nên mật khẩu không đổi, app 1.5.2 vẫn đăng nhập được), bảng gói / thanh toán / `min_app` 1.5.2 đã ký. Mọi người phải đăng nhập lại (đổi kiểu phiên). Push + phát hành 1.6.0 ngay sau (dòng dưới).
 - **8/11 khuya** — **Khoá ký riêng cho website** (người dùng làm web chạy quảng cáo, quản lý tài khoản / gói song song, hỏi cho web là ngoại lệ chữ ký số): web không bỏ được chữ ký (ai có dòng Neon cũng giả được) nên có khoá Ed25519 riêng mà app tin như khoá quản trị — `licensing.WEB_PUBLIC_KEY_B64`, `_trusted()`, `status().web_fingerprint`; khoá riêng `%USERPROFILE%\.flowboard\dflow-web-license.key`. Sửa bên `dflow-web` (repo chưa có remote, không commit): `licensing.ts` tin cả hai khoá + ký được bằng khoá web + mang `lh`, `accounts.ts` / `password.ts` không lưu mật khẩu thiếu pepper trên kho đã ký, `.env.example`, `CLAUDE.md`; `.env.local` thêm `DFLOW_LICENSE_KEY_FILE` → khoá web (web ký ngay, không chờ job). Test licence 12 + account / billing / plans / app 53 pass, `npm run typecheck` web sạch, thử chéo node → Python đạt. Khởi động lại agent web DFlow (`start141.log`) để tin khoá web.
 - **8/11 khuya** — **Phát hành 1.6.0** (người dùng: "push hết code lên thành 1 bản update app mới"): gộp mọi việc 8/11 tối–khuya ở trên — gói & tính năng, nâng cấp bằng chuyển khoản, thời hạn + giá gốc, gói Dùng thử, trang Tài khoản của tôi, dàn hết bề rộng + container query, vá bảo mật, chữ ký số quyền dùng + agent dịch Nuitka + khoá ký của website (dòng trên). Số phiên bản 1.6.0 ở 8 file (`__init__.py`, `pyproject.toml`, `tauri.conf.json`, `Cargo.toml`, `frontend` + `desktop` package.json + lock). Commit `b600917` + push `main`, tag `v1.6.0` → run 42455598766 xong (~24 phút; bước Nuitka + chạy thử agent đóng gói đạt), release v1.6.0 trên dflow-releases (bộ cài 182 MB + `latest.json`), tải về `D:\DFlow-Setup\`; trang hướng dẫn (`docs/cai-dat-dflow.html` → `index.html` của dflow-releases) trỏ 1.6.0 + 3 dòng lỗi mới (gói hết hạn / chưa được cấp quyền / bản app cũ). Cả bộ test trên commit phát hành 1163 pass / 2 skip. **App 1.5.2 trên máy nhà không đăng nhập được akiragosho** (mật khẩu đã đổi trên bản mới → băm `dflow2`) và màn đăng nhập của 1.5.2 không có thanh cập nhật → cài tay bộ cài 1.6.0 (bạn bè chưa đổi mật khẩu thì vào 1.5.2 rồi cập nhật bằng nút).
-- **8/11 khuya** — **dflow-web lên GitHub riêng tư** `hoangduytn1703/dflow-web` (commit đầu 72 file; đã rà khoá ký, pepper, chuỗi Neon, `.env.local` — không lọt). Bản web DFlow (start.ps1) đã tắt để người dùng chạy app. **Hosting web bán gói**: người dùng muốn miễn phí như các web trước → **Vercel Hobby** (CLI máy nhà đã đăng nhập hoangduytn1703): project `dflow-web` (vùng `sin1` cạnh Neon — `vercel.json`; `.vercelignore` chặn `.env*`; Git chưa nối được vì Vercel chưa có quyền repo riêng tư). Lệnh đẩy bí mật lên Vercel bị chặn quyền ("Data Exfiltration") → người dùng tự chạy script đặt env production (DATABASE_URL, DFLOW_PEPPER, WEB_SYNC_SECRET, CRON_SECRET, SESSION_SECRET mới, DFLOW_LICENSE_KEY = khoá web). Đã thử Cloudflare Workers (OpenNext 1.20.16): build chết trên Windows (`EPERM symlink` — cần Developer Mode hoặc WSL, máy chưa có) + cần Workers Paid (băm pbkdf2 vượt 10 ms CPU gói free, giới hạn 3 MiB) + R2 / Durable Objects cho cache giá → bỏ. Tên miền: `toptoplive.io.vn` đã chuyển nameserver sang Cloudflare (đã kiểm DNS); người dùng muốn **`dflow.io.vn`** (chưa ai đăng ký, sẽ mua ở tenten.vn rồi thêm vào Cloudflare như trên).
+- **8/11 khuya** — **dflow-web lên GitHub riêng tư** `hoangduytn1703/dflow-web` (commit đầu 72 file; đã rà khoá ký, pepper, chuỗi Neon, `.env.local` — không lọt). Bản web DFlow (start.ps1) đã tắt để người dùng chạy app. **Hosting web bán gói**: người dùng muốn miễn phí như các web trước → **Vercel Hobby** (CLI máy nhà đã đăng nhập hoangduytn1703): project `dflow-web` (vùng `sin1` cạnh Neon — `vercel.json`; `.vercelignore` chặn `.env*`; **đã nối GitHub: mỗi lần push `main` của dflow-web là deploy production** — người dùng cấp quyền repo cho Vercel GitHub App, rồi `vercel git connect`). Lệnh đẩy bí mật lên Vercel bị chặn quyền ("Data Exfiltration") → người dùng tự chạy script đặt env production (DATABASE_URL, DFLOW_PEPPER, WEB_SYNC_SECRET, CRON_SECRET, SESSION_SECRET mới, DFLOW_LICENSE_KEY = khoá web). Đã thử Cloudflare Workers (OpenNext 1.20.16): build chết trên Windows (`EPERM symlink` — cần Developer Mode hoặc WSL, máy chưa có) + cần Workers Paid (băm pbkdf2 vượt 10 ms CPU gói free, giới hạn 3 MiB) + R2 / Durable Objects cho cache giá → bỏ. Tên miền: `toptoplive.io.vn` đã chuyển nameserver sang Cloudflare (đã kiểm DNS); người dùng muốn **`dflow.io.vn`** (chưa ai đăng ký, sẽ mua ở tenten.vn rồi thêm vào Cloudflare như trên).
+- **8/11 khuya** — **Phase C: app đăng nhập qua dflow.io.vn, không cầm dòng Neon** (người dùng: "bạn toàn quyền, triển hướng C đi, làm hết"): web thêm API cho app
+  (`dflow-web/src/app/api/app/*`, `lib/appapi.ts`, `lib/dbrole.ts`, `lib/media.ts`, `accounts.setDisabled` khoá role), agent thêm `cloud_api.py` + chế độ đăng nhập qua web
+  (`accounts.py`, `file_store._ApiBucket`, `billing.py`, `routes/account.py`, `account_admin.py`, `cloud.py`, `app.py`, `db/session.py`), giao diện (trang đăng nhập có link đăng
+  ký, menu quản trị mở web, Cài đặt → Dữ liệu). Test `test_cloud_api.py` 10 + cả bộ (xem dòng phát hành); **thử thật trên Neon + web dev 3030 + agent phụ cổng 8534**:
+  tài khoản thử `phasec-test` (đã xoá: role, schema, tài khoản) — cách ly đúng, tạo clip vào schema riêng, hồ sơ / nâng cấp qua web, khoá / mở khoá. Phát hiện B2 đầy 10 GB
+  miễn phí (đẩy file lỗi từ trước — xem Bẫy). Vá kèm: `/api/cloud/s3` trước đây tài khoản thường nào cũng ghi đè được key kho file → giờ chỉ admin.

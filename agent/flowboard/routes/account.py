@@ -15,7 +15,10 @@
   POST /api/account/logout-others        → logged out on every other machine / browser
 
 New accounts are made by the admin only (routes/account_admin.py) — there is
-no open sign-up.
+no open sign-up in the app (people sign up on the DFlow website).
+
+Phase C (8/11): on a machine that logs in through the website (cloud_api.py) the password, profile and "log out other
+machines" go to the website's app API; this machine's own login sessions are handled here as before.
 """
 from __future__ import annotations
 
@@ -52,7 +55,26 @@ def _set_cookie(resp: Response, token: str) -> None:
 def _me_payload(user: dict) -> dict:
     return {"auth": True, "username": user["username"], "created_at": user["created_at"].isoformat() if user.get("created_at") else None,
             "backend": (user.get("backend") or {}).get("type", "sqlite"), "is_admin": accounts.is_admin(user),
-            "profile": user.get("profile") or {k: "" for k in accounts.PROFILE_KEYS}, **_plan_payload(user)}
+            "profile": user.get("profile") or {k: "" for k in accounts.PROFILE_KEYS}, **_plan_payload(user), "site": _site()}
+
+
+def _site() -> Optional[dict]:
+    """Phase C: the DFlow website this machine logs in through (account admin, sign-up and renewals live there)."""
+    from flowboard import cloud_api
+
+    if not cloud_api.enabled():
+        return None
+    base = cloud_api.site()
+    return {"url": base, "host": cloud_api.host(), "account": f"{base}/tai-khoan", "admin": f"{base}/quan-tri"}
+
+
+def _api(username: str, method: str, path: str, body: Optional[dict] = None) -> dict:
+    from flowboard import cloud_api
+
+    try:
+        return cloud_api.account_call(username, method, path, body=body)
+    except cloud_api.ApiError as exc:
+        raise HTTPException(401 if exc.status == 401 else 502 if exc.offline else 400, exc.detail)
 
 
 def _plan_payload(user: dict) -> dict:
@@ -111,8 +133,13 @@ def change_password(body: PasswordBody, request: Request) -> dict:
         raise HTTPException(400, "Mật khẩu hiện tại không đúng.")
     if body.new == body.current:
         raise HTTPException(400, "Mật khẩu mới phải khác mật khẩu hiện tại.")
+    if accounts.via_api():
+        from flowboard import cloud_api
+
+        out = _api(user["username"], "POST", "/api/app/account/password", {"current": body.current, "new": body.new})
+        cloud_api._save_token(user["username"], out.get("token"))
     try:
-        accounts.set_password(user["username"], body.new)
+        accounts.set_password(user["username"], body.new)  # (via the website: this machine's copy, for logging in offline)
     except accounts.AuthError as exc:
         raise HTTPException(400, str(exc))
     # Whoever else knew the old password is logged out; this browser stays in.
@@ -176,7 +203,12 @@ def save_profile(body: ProfileBody, request: Request) -> dict:
     email = body.email.strip()
     if email and ("@" not in email or " " in email or len(email) > 120):
         raise HTTPException(400, "Email chưa đúng dạng.")
-    accounts.set_profile(user["username"], body.model_dump())
+    if accounts.via_api():
+        from flowboard import cloud_api
+
+        cloud_api.store(_api(user["username"], "PUT", "/api/app/account/profile", body.model_dump()))
+    else:
+        accounts.set_profile(user["username"], body.model_dump())
     return _me_payload(accounts.get_user(user["username"]) or user)
 
 
@@ -193,6 +225,11 @@ def logout_others(request: Request) -> dict:
     user = accounts.user_from_request(request)
     if user is None:
         raise HTTPException(401, "Chưa đăng nhập")
+    if accounts.via_api():  # every other machine's token stops counting on the website; they notice within minutes
+        from flowboard import cloud_api
+
+        out = _api(user["username"], "POST", "/api/app/account/logout-others")
+        cloud_api._save_token(user["username"], out.get("token"))
     n = accounts.revoke_sessions(user["username"], keep=request.cookies.get(accounts.SESSION_COOKIE))
     return {"ok": True, "logged_out": n}
 

@@ -73,7 +73,7 @@ def test_a_fresh_install_takes_the_cloud_line_from_the_login_page(client, env_fi
     assert r.json() == {"ok": True, "restarting": True} and exits and "secret" not in r.text
     assert probed == ["postgresql://u:secret@ep-a.neon.tech/db"]
     assert app_env.read_values()["FLOWBOARD_CENTRAL_DB_URL"] == "postgresql://u:secret@ep-a.neon.tech/db"
-    assert client.get("/api/app/connect").json() == {"app": True, "cloud": False, "restart_pending": True}
+    assert client.get("/api/app/connect").json() == {"app": True, "cloud": False, "restart_pending": True, "site": None}
     # Once this machine is on the cloud, the open door is shut (changes go through Settings after login).
     monkeypatch.setenv("FLOWBOARD_CENTRAL_DB_URL", "postgresql://u:secret@ep-a.neon.tech/db")
     assert client.post("/api/app/connect", json={"central_db_url": "postgresql://x@evil/db"}).status_code == 409

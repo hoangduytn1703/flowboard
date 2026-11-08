@@ -19,6 +19,11 @@ Configuration (first match wins): env ``FLOWBOARD_S3_ENDPOINT`` /
 (/ ``FLOWBOARD_S3_REGION``), else the central account store's ``s3``
 setting (set once from Settings → Dữ liệu; every machine that logs in gets
 it). Not configured → every function is a no-op.
+
+Phase C (8/11): an app that logs in through the DFlow website (cloud_api.py)
+never holds the bucket key — :class:`_ApiBucket` stands in for the boto3
+client: the website signs a short-lived link per upload / download and lists
+the account's own folder.
 """
 from __future__ import annotations
 
@@ -49,6 +54,10 @@ READ_WHOLE_MAX = 64 * 1024 * 1024
 
 
 def config() -> Optional[dict[str, str]]:
+    from flowboard import cloud_api
+
+    if cloud_api.enabled():
+        return {"endpoint": cloud_api.site() or "", "bucket": "DFlow", "keyId": "", "secret": "", "region": "", "via": "api"}
     env = {
         "endpoint": os.getenv("FLOWBOARD_S3_ENDPOINT"), "bucket": os.getenv("FLOWBOARD_S3_BUCKET"),
         "keyId": os.getenv("FLOWBOARD_S3_KEY_ID"), "secret": os.getenv("FLOWBOARD_S3_SECRET"),
@@ -116,11 +125,70 @@ def make_client(cfg: dict):
     )
 
 
+class _NotInBucket(RuntimeError):
+    """download_file of a missing key, shaped like botocore's error (file_store.download reads ``response``)."""
+
+    def __init__(self, key: str) -> None:
+        super().__init__(f"{key}: not found")
+        self.response = {"Error": {"Code": "404"}}
+
+
+class _ApiBucket:
+    """The calls file_store makes on a boto3 client, done through the DFlow website (Phase C): signed links, never the key."""
+
+    def _owner(self) -> str:
+        return prefix().rstrip("/")
+
+    def _api(self, body: dict) -> dict:
+        from flowboard import cloud_api
+
+        return cloud_api.account_call(self._owner(), "POST", "/api/app/media", body=body)
+
+    def _link(self, op: str, key: str) -> str:
+        url = (self._api({"op": op, "keys": [key]}).get("urls") or {}).get(key)
+        if not url:
+            raise RuntimeError("máy chủ DFlow chưa có kho file")
+        return url
+
+    def put_object(self, Bucket: str, Key: str, Body: bytes) -> None:  # noqa: N803 — boto3's names
+        import httpx
+
+        httpx.put(self._link("put", Key), content=Body, timeout=httpx.Timeout(300.0, connect=15.0)).raise_for_status()
+
+    def upload_file(self, Filename: str, Bucket: str, Key: str) -> None:  # noqa: N803
+        import httpx
+
+        with open(Filename, "rb") as fh:  # a file object: httpx sends its length (signed links refuse chunked uploads)
+            httpx.put(self._link("put", Key), content=fh, timeout=httpx.Timeout(3600.0, connect=15.0)).raise_for_status()
+
+    def download_file(self, Bucket: str, Key: str, Filename: str) -> None:  # noqa: N803
+        import httpx
+
+        with httpx.stream("GET", self._link("get", Key), timeout=httpx.Timeout(600.0, connect=15.0)) as resp:
+            if resp.status_code == 404:
+                raise _NotInBucket(Key)
+            resp.raise_for_status()
+            with open(Filename, "wb") as out:
+                for chunk in resp.iter_bytes(1 << 20):
+                    out.write(chunk)
+
+    def list_objects_v2(self, Bucket: str, Prefix: str, MaxKeys: int = 1000, ContinuationToken: Optional[str] = None) -> dict:  # noqa: N803
+        data = self._api({"op": "list", "prefix": Prefix, "token": ContinuationToken})
+        nxt = data.get("next")
+        return {"Contents": [{"Key": i["key"], "Size": i.get("size") or 0} for i in data.get("items") or []],
+                "IsTruncated": bool(nxt), "NextContinuationToken": nxt}
+
+    def delete_object(self, Bucket: str, Key: str) -> None:  # noqa: N803
+        self._api({"op": "delete", "key": Key})
+
+
 def client():
     global _client, _client_cfg
     cfg = config()
     if cfg is None:
         return None
+    if cfg.get("via") == "api":
+        return _ApiBucket()
     with _client_lock:
         if _client is None or _client_cfg != cfg:
             _client = make_client(cfg)

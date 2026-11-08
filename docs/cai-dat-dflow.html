@@ -155,7 +155,7 @@ footer { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line)
       <li><span class="box" aria-hidden="true"></span><div><b>Google Flow gói Pro hoặc Ultra</b><span>Tạo ảnh, video. Vào <a href="https://flow.google.com">flow.google.com</a> bằng tài khoản Google có gói Google AI Pro / Ultra</span></div></li>
       <li><span class="box" aria-hidden="true"></span><div><b><a href="https://claude.ai">Claude gói Pro hoặc Max</a></b><span>AI viết kịch bản, bài viết, trợ lý (gói miễn phí không dùng được)</span></div></li>
       <li><span class="box" aria-hidden="true"></span><div><b><a href="https://aistudio.google.com/apikey">Gemini API key</a></b><span>Miễn phí. Bấm “Create API key”, chép chuỗi bắt đầu bằng AIza…</span></div></li>
-      <li class="from"><span class="box" aria-hidden="true"></span><div><b>Từ người quản lý DFlow</b><span><strong>Tên đăng nhập + mật khẩu</strong> và <strong>dòng kết nối dữ liệu</strong> (bắt đầu bằng <code>postgresql://</code>). Dòng này giữ bí mật, không gửi cho ai khác.</span></div></li>
+      <li class="from"><span class="box" aria-hidden="true"></span><div><b>Tài khoản DFlow</b><span>Tự đăng ký ở <a href="https://dflow.io.vn/dang-ky">dflow.io.vn</a> (được dùng thử ngay), hoặc dùng <strong>tên đăng nhập + mật khẩu</strong> người quản lý DFlow gửi.</span></div></li>
     </ul>
   </section>
 
@@ -173,14 +173,14 @@ footer { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line)
         <p>Đóng cửa sổ thì DFlow vẫn chạy ngầm ở khay (góc dưới phải, cạnh đồng hồ) để lịch đăng bài vẫn chạy. Tắt hẳn: chuột phải biểu tượng DFlow → <b>Thoát DFlow</b>.</p>
       </div></li>
       <li><div class="step">
-        <h3>Dán dòng kết nối dữ liệu</h3>
-        <p>Ở trang đăng nhập, bấm <span class="where">🌐 Dán dòng kết nối trước</span> → dán nguyên dòng người quản lý gửi → <b>Kết nối</b>.</p>
-        <p>DFlow tự kiểm tra rồi khởi động lại (20–40 giây). Chỉ làm một lần trên mỗi máy.</p>
-        <p class="note">Bỏ qua bước này thì đăng nhập sẽ báo <em>“Sai tên đăng nhập hoặc mật khẩu”</em> dù gõ đúng.</p>
+        <h3>Có tài khoản DFlow</h3>
+        <p>Chưa có thì bấm <span class="where">Đăng ký trên dflow.io.vn</span> ở trang đăng nhập của app (hoặc vào <a href="https://dflow.io.vn/dang-ky">dflow.io.vn/dang-ky</a>): chọn tên đăng nhập, mật khẩu là xong, được dùng thử ngay.</p>
+        <p>Người quản lý đã tạo sẵn cho bạn thì bỏ qua bước này.</p>
+        <p class="note">Từ bản 1.7.0 không cần dán dòng kết nối nào nữa — app tự đăng nhập qua dflow.io.vn và chỉ vào được đúng dữ liệu của tài khoản bạn.</p>
       </div></li>
       <li><div class="step">
         <h3>Đăng nhập và đổi mật khẩu</h3>
-        <p>Đăng nhập bằng tên + mật khẩu được cấp. Sau đó bấm vào <span class="where">tên của bạn</span> ở góc dưới trái → trang <b>Tài khoản của tôi</b> → <b>Đổi mật khẩu</b> để đặt mật khẩu riêng.</p>
+        <p>Đăng nhập trong app bằng tên + mật khẩu (máy cần có mạng). Mật khẩu do người khác đặt thì bấm vào <span class="where">tên của bạn</span> ở góc dưới trái → trang <b>Tài khoản của tôi</b> → <b>Đổi mật khẩu</b>.</p>
       </div></li>
       <li><div class="step">
         <h3>Cài Claude Code</h3>
@@ -252,12 +252,15 @@ footer { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line)
         <thead><tr><th>Bạn thấy</th><th>Cách sửa</th></tr></thead>
         <tbody>
           <tr><td>“Windows protected your PC”</td><td>Bấm <b>More info</b> → <b>Run anyway</b>.</td></tr>
-          <tr><td>“Sai tên đăng nhập hoặc mật khẩu” dù gõ đúng</td><td>Máy chưa nối dữ liệu: làm lại bước 3 (Dán dòng kết nối).</td></tr>
+          <tr><td>“Sai tên đăng nhập hoặc mật khẩu”</td><td>Gõ lại (tên chữ thường, không dấu). Thử đăng nhập trên <a href="https://dflow.io.vn/dang-nhap">dflow.io.vn</a>: được ở đó mà app không được thì cập nhật app.</td></tr>
+          <tr><td>“Không kết nối được dflow.io.vn để đăng nhập”</td><td>Kiểm tra mạng. Máy đã đăng nhập trong 7 ngày gần nhất thì mất mạng vẫn vào được.</td></tr>
+          <tr><td>“Nhập sai mật khẩu quá nhiều lần”</td><td>Đợi 15 phút rồi thử lại.</td></tr>
           <tr><td>“Tài khoản này đã bị khoá”</td><td>Hỏi người quản lý DFlow mở khoá.</td></tr>
-          <tr><td>“Gói … đã hết hạn”</td><td>Nhờ người quản lý gia hạn, hoặc nâng cấp gói (trang <b>Tài khoản của tôi</b> → ⬆ Nâng cấp gói).</td></tr>
+          <tr><td>“Gói … đã hết hạn”</td><td>Gia hạn / nâng gói trên <a href="https://dflow.io.vn/tai-khoan">dflow.io.vn</a> (trang Tài khoản), hoặc nhờ người quản lý gia hạn.</td></tr>
           <tr><td>“Chưa được người quản lý cấp quyền trên app”</td><td>Nhờ người quản lý mở <b>Gói &amp; thời hạn</b> của tài khoản bạn rồi bấm lưu (cấp lại quyền).</td></tr>
           <tr><td>“Bản DFlow trên máy này … đã cũ”</td><td>Cập nhật app (thanh “Có bản DFlow mới” hoặc <b>⚙ Cài đặt → 🖥 Máy này</b>), rồi đăng nhập lại.</td></tr>
           <tr><td>Quên mật khẩu</td><td>Nhờ người quản lý đặt lại mật khẩu rồi đổi lại ở trang <b>Tài khoản của tôi</b> (bấm vào tên ở góc dưới trái).</td></tr>
+          <tr><td>Ảnh / video không lên cloud (Cài đặt → Dữ liệu báo lỗi đồng bộ file)</td><td>Báo người quản lý DFlow (kho file trên máy chủ có thể đã đầy).</td></tr>
           <tr><td>App báo mất kết nối extension</td><td>Vào <code>chrome://extensions</code> bấm ↻ ở ô DFlow Bridge, kiểm tra tab flow.google.com còn mở, rồi F5 tab đó.</td></tr>
           <tr><td>AI không viết được</td><td><b>⚙ Cài đặt → 🤖 AI viết</b> đã chọn Claude chưa; mở PowerShell gõ <code>claude</code> xem còn đăng nhập và gói Claude còn lượt không.</td></tr>
           <tr><td>Tạo ảnh / video lỗi, “Flow bỏ lượt”</td><td>Tab Flow đúng tài khoản có gói Pro / Ultra; <b>⚙ Cài đặt → ⚡ Google Flow</b> đúng project.</td></tr>

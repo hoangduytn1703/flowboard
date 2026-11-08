@@ -342,6 +342,9 @@ def active_allows(feature: str) -> bool:
     if user is None:
         return False
     full = accounts.get_user(user["username"]) or user  # the cached copy may predate a plan change
+    from flowboard import cloud_api
+
+    cloud_api.maybe_refresh(full)  # an app left in the tray: the loops keep asking the website too (lock, plan change)
     return allows(full, feature)
 
 

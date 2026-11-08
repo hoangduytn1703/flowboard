@@ -176,8 +176,13 @@ def init_db(target: Optional[Engine] = None) -> None:
     if eng.dialect.name == "postgresql":
         schema = _schema_of(eng)
         if schema:
+            from sqlalchemy import text
+
             with eng.begin() as conn:
-                conn.exec_driver_sql(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
+                # Only when missing: an account's own database login (Phase C, dflow-web dbrole.ts) owns its schema but
+                # may not create one — and Postgres checks that right before looking at IF NOT EXISTS.
+                if conn.execute(text("SELECT 1 FROM pg_namespace WHERE nspname = :s"), {"s": schema}).first() is None:
+                    conn.exec_driver_sql(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
     SQLModel.metadata.create_all(eng)
     # Absolute file paths written before 22/10 → relative to the data folder.
     from flowboard.db.paths import normalize_asset_paths

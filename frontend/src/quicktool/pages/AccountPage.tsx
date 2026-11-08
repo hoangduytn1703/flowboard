@@ -177,7 +177,11 @@ export function AccountPage() {
               </div>
             ) : plan && !trial && <div className="me-plan__ends">Dùng <b>vĩnh viễn</b> — không cần gia hạn</div>)}
             {me.is_admin ? (
-              <button type="button" className="qt-btn qt-btn--small" onClick={() => navigate("/accounts")}>👥 Quản lý tài khoản & gói</button>
+              me.site?.admin ? (
+                <a className="qt-btn qt-btn--small" href={me.site.admin} target="_blank" rel="noreferrer">👥 Quản lý tài khoản & gói trên {me.site.host} ↗</a>
+              ) : (
+                <button type="button" className="qt-btn qt-btn--small" onClick={() => navigate("/accounts")}>👥 Quản lý tài khoản & gói</button>
+              )
             ) : (
               <button type="button" className="qt-btn qt-btn--accent" onClick={() => setUpgrading(true)}>
                 {plan?.expires_at && !trial ? "↻ Gia hạn / nâng cấp gói" : "⬆ Nâng cấp gói"}

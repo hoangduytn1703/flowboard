@@ -6375,6 +6375,11 @@ button.chat-dock__presence[aria-expanded="true"] {
   border-radius: 8px;
 }
 .login__error { padding: 8px 10px; font-size: 14px; color: #fecaca; background: rgba(248, 113, 113, 0.12); border-radius: 8px; }
+.login__site { margin: 0; font-size: 13.5px; color: var(--muted); line-height: 1.5; }
+.login__site b { color: var(--text, #e8e8ef); font-weight: 600; }
+.login__links { display: flex; flex-direction: column; gap: 6px; margin-top: 2px; font-size: 13.5px; color: var(--muted); line-height: 1.45; }
+.login__links a { color: #ff8a4c; font-weight: 600; text-decoration: none; }
+.login__links a:hover { text-decoration: underline; }
 /* Fresh install: paste the cloud line before logging in (LoginPage → CloudConnect) */
 .login__card { width: min(92vw, 420px); }
 .login__cloud { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 10px 12px; border-radius: 10px;

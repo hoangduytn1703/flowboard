@@ -195,6 +195,9 @@ def central_url() -> Optional[str]:
 
 
 def get_setting(key: str) -> Any:
+    if _remote(key):  # an account's own entry (AI keys, Page tokens): behind the website's API (cloud_api.py)
+        from flowboard import cloud_api
+        return cloud_api.get_remote(key)
     with central_engine().connect() as c:
         row = c.execute(select(settings_t).where(settings_t.c.key == key)).first()
     if row is None:
@@ -206,12 +209,29 @@ def get_setting(key: str) -> Any:
 
 
 def set_setting(key: str, value: Any) -> None:
+    if _remote(key):
+        from flowboard import cloud_api
+        cloud_api.set_remote(key, value)
+        return
     raw = json.dumps(value, ensure_ascii=False)
     with central_engine().begin() as c:
         if c.execute(select(settings_t.c.key).where(settings_t.c.key == key)).first():
             c.execute(settings_t.update().where(settings_t.c.key == key).values(value=raw))
         else:
             c.execute(settings_t.insert().values(key=key, value=raw))
+
+
+def _remote(key: str) -> bool:
+    from flowboard import cloud_api
+
+    return cloud_api.remote_key(key)
+
+
+def via_api() -> bool:
+    """Phase C: this machine logs in through the DFlow website (cloud_api.py) — the local store is only a copy."""
+    from flowboard import cloud_api
+
+    return cloud_api.enabled()
 
 
 def set_backend(username: str, backend: dict) -> None:
@@ -336,6 +356,25 @@ def set_disabled(username: str, disabled: bool) -> None:
         _refresh_cached(username)
     if disabled:
         revoke_sessions(username)
+        lock_db_role(username)
+
+
+def lock_db_role(username: str) -> None:
+    """Phase C: an account the website gave a database login (dflow-web dbrole.ts) loses it at once when locked; its
+    next good app login turns it back on. Best effort — only the owner line (the admin's machine) can do it."""
+    if central_url() is None:
+        return
+    from sqlalchemy import text
+
+    try:
+        with central_engine().begin() as c:
+            row = c.execute(text("SELECT role FROM account_dbrole WHERE username = :u"), {"u": username}).first()
+            if row is None or not c.execute(text("SELECT 1 FROM pg_roles WHERE rolname = :r"), {"r": row.role}).first():
+                return
+            c.exec_driver_sql('ALTER ROLE "%s" WITH NOLOGIN' % row.role.replace('"', '""'))
+            c.execute(text("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = :r"), {"r": row.role})
+    except Exception as exc:  # noqa: BLE001 — no table yet (nobody logged in through the website), SQLite store…
+        logger.info("accounts: database login of %s not locked (%s)", username, str(exc).splitlines()[0][:120])
 
 
 def _refresh_cached(username: str) -> None:
@@ -438,10 +477,39 @@ def seed_default() -> bool:
     return True
 
 
-def authenticate(username: str, password: str) -> dict:
-    user = get_user(username or "")
-    if user is None or not verify_password(password or "", user["password_hash"], user["username"]):
+def _authenticate_via_api(username: str, password: str) -> dict:
+    """The website checks the password, lock, end date and licence, and hands out the account's database login
+    (cloud_api.py). Offline (or the site is down): the copy kept on this machine lets a recent account in."""
+    from flowboard import cloud_api
+
+    name = (username or "").strip().lower()
+    try:
+        cloud_api.login(name, password or "")
+    except cloud_api.ApiError as exc:
+        if not exc.offline:
+            if exc.status == 403 and get_user(name):
+                cloud_api.drop(name)  # locked / expired / unlicensed: no offline way in either
+                with central_engine().begin() as c:
+                    c.execute(users.update().where(users.c.username == name).values(password_hash="!"))
+            raise AuthError(exc.detail) from exc
+        user = get_user(name)
+        if user is None or not verify_password(password or "", user["password_hash"], user["username"]) \
+                or not cloud_api.recently_seen(user["username"]):
+            raise AuthError(f"Không kết nối được {cloud_api.host()} để đăng nhập — kiểm tra mạng rồi thử lại.") from exc
+        logger.warning("accounts: %s logged in offline (%s)", name, exc.detail)
+    user = get_user(name)
+    if user is None:
         raise AuthError("Sai tên đăng nhập hoặc mật khẩu.")
+    return user
+
+
+def authenticate(username: str, password: str) -> dict:
+    if via_api():
+        user = _authenticate_via_api(username, password)
+    else:
+        user = get_user(username or "")
+        if user is None or not verify_password(password or "", user["password_hash"], user["username"]):
+            raise AuthError("Sai tên đăng nhập hoặc mật khẩu.")
     if user.get("license") == "ok" and needs_rehash(user["password_hash"]) \
             and licensing.legacy_fp(user["password_hash"]) != user.get("license_lh"):
         # an old-format hash the licence was not signed with: written by hand (anyone can make one) — no entry
@@ -457,7 +525,7 @@ def authenticate(username: str, password: str) -> dict:
         end = user["plan_expires"].strftime("%d/%m/%Y")
         which = "Gói dùng thử" if user.get("plan") == "trial" else "Gói đang dùng"
         raise AuthError(f"{which} của tài khoản này đã hết hạn ({end}). Liên hệ người quản lý DFlow để gia hạn hoặc nâng gói.")
-    if licensing.strict() and needs_rehash(user["password_hash"]):
+    if licensing.strict() and needs_rehash(user["password_hash"]) and not via_api():
         # the installed app: the hash gets the pepper — app builds from before the licences can no longer log in with it
         with central_engine().begin() as c:
             c.execute(users.update().where(users.c.id == user["id"]).values(password_hash=hash_password(password, user["username"])))
@@ -490,7 +558,10 @@ def resolve_session(token: Optional[str]) -> Optional[dict]:
         return None
     hit = _session_cache.get(token)
     if hit and time.time() - hit[1] < 300:
-        return None if expired(hit[0]) else hit[0]
+        if expired(hit[0]):
+            return None
+        _check_with_site(hit[0])
+        return hit[0]
     with central_engine().connect() as c:
         row = c.execute(select(sessions).where(sessions.c.token == _token_key(token))).first()
         if row is None or str(row.user_id) != token.split(".", 1)[0]:
@@ -507,7 +578,15 @@ def resolve_session(token: Optional[str]) -> Optional[dict]:
     with central_engine().begin() as c:
         c.execute(sessions.update().where(sessions.c.token == _token_key(token)).values(last_seen=_now()))
     _session_cache[token] = (user, time.time())
+    _check_with_site(user)
     return user
+
+
+def _check_with_site(user: dict) -> None:
+    """Phase C: every few minutes the website is asked again (lock, password change, plan change → seen here)."""
+    from flowboard import cloud_api
+
+    cloud_api.maybe_refresh(user)
 
 
 def delete_session(token: Optional[str]) -> None:
@@ -732,6 +811,11 @@ def startup() -> None:
             fn()
         return
     central_engine()
+    if via_api():
+        # the local store is a copy of what the website says: nothing to seed, nothing to sign here
+        from flowboard import cloud_api
+        logger.info("accounts: logging in through %s (no direct database line)", cloud_api.host())
+        return
     seed_default()
     try:  # the admin's machine signs a store nobody signed yet (once — licensing.ensure_epoch)
         signed = licensing.ensure_epoch()
@@ -750,4 +834,5 @@ def status() -> dict:
     u = active_user()
     return {"auth": auth_enabled(), "username": u["username"] if u else None,
             "since": _active["since"], "storage_dir": str(config.STORAGE_DIR),
-            "backend": ((u or {}).get("backend") or {}).get("type", "sqlite"), "central_cloud": central_url() is not None}
+            "backend": ((u or {}).get("backend") or {}).get("type", "sqlite"), "central_cloud": central_url() is not None,
+            "via_api": via_api()}
