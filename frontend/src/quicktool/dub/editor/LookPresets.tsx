@@ -43,7 +43,8 @@ export function LookPresets({ current, readOnly, onApply }: {
       const row = await saveLookPreset(name.trim() || `Mẫu ${n}`, current);
       setPresets((list) => [row, ...(list ?? [])]);
       if (!(presets ?? []).length) { await setDefaultLook(row.id); setDefaultId(row.id); }
-      toast.success(`Đã lưu mẫu "${row.name}"${!(presets ?? []).length ? " — và đặt làm mặc định cho video mới" : ""}.`);
+      toast.success(`Đã lưu mẫu "${row.name}"${!(presets ?? []).length ? " và đặt làm mặc định cho video mới" : ""}. `
+        + "Với clip khác: mở ★ Mẫu → ✓ Áp dụng → Xuất lại video.");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
@@ -59,7 +60,8 @@ export function LookPresets({ current, readOnly, onApply }: {
     try {
       await setDefaultLook(p?.id ?? null);
       setDefaultId(p?.id ?? null);
-      toast.success(p ? `"${p.name}" là mẫu mặc định — video lồng tiếng mới sẽ dùng kiểu này.` : "Đã bỏ mẫu mặc định.");
+      toast.success(p ? `"${p.name}" là mẫu mặc định — video mới (lồng tiếng, cắt video) tự dùng kiểu này. Clip đang mở: bấm ✓ Áp dụng.`
+                      : "Đã bỏ mẫu mặc định.");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     }
@@ -87,23 +89,28 @@ export function LookPresets({ current, readOnly, onApply }: {
             <strong>Mẫu chỉnh sửa</strong>
             <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={busy || readOnly} onClick={() => void save()}>★ Lưu kiểu hiện tại</button>
           </div>
-          <p className="dx-presets__tip">Một mẫu = vị trí / cỡ / độ rộng / kiểu phụ đề, các vùng mờ, khung xuất, khung trang trí, nhân vật, cài đặt nhấn chữ.
-            Chữ và mốc giờ của từng clip không nằm trong mẫu.</p>
+          <p className="dx-presets__tip">Một mẫu = vị trí / cỡ / độ rộng / kiểu phụ đề, các vùng mờ, khung xuất + nền, khung trang trí, nhân vật / logo,
+            cài đặt nhấn chữ (chữ và mốc giờ của từng clip thì không). <b>✓ Áp dụng</b> đưa mẫu vào clip đang mở — rồi bấm Xuất lại video.
+            <b> Mặc định</b> = video mới (lồng tiếng, cắt video) tự ra theo mẫu đó.</p>
           {presets === null ? <small className="qt-card__hint">Đang tải…</small>
             : presets.length === 0 ? <small className="qt-card__hint">Chưa có mẫu nào — chỉnh clip này ưng ý rồi bấm "★ Lưu kiểu hiện tại".</small>
             : (
               <ul className="dx-presets__list">
                 {presets.map((p) => {
                   const d = p.data as LookPresetData;
-                  const bits = [d.style, d.layout?.canvas ? `khung ${d.layout.canvas.aspect}` : "", (d.layout?.blurs?.length ?? (d.layout?.blur ? 1 : 0)) ? `${d.layout.blurs?.length ?? 1} vùng mờ` : "",
-                                d.layout?.frame ? "khung" : "", d.layout?.mascot?.media_id ? "nhân vật" : "", d.highlights?.on ? "nhấn chữ" : "", d.engine === "remotion" ? "Remotion" : ""].filter(Boolean);
+                  const c = d.layout?.canvas;
+                  const bg = c && c.fit !== "crop" && c.fit !== "blur" && c.fit !== "black" ? `nền ${c.fit === "grid" ? "lưới" : c.fit === "color" ? "màu" : c.fit === "video" ? "video" : "ảnh"}` : "";
+                  const bits = [d.style, c ? `khung ${c.aspect}` : "", bg, (d.layout?.blurs?.length ?? (d.layout?.blur ? 1 : 0)) ? `${d.layout.blurs?.length ?? 1} vùng mờ` : "",
+                                d.layout?.frame ? "khung trang trí" : "", d.layout?.mascot?.media_id ? "nhân vật" : "", d.highlights?.on ? "nhấn chữ" : "", d.engine === "remotion" ? "Remotion" : ""].filter(Boolean);
                   return (
                     <li key={p.id} className={p.id === defaultId ? "is-default" : ""}>
                       <button type="button" className="dx-presets__use" disabled={readOnly} onClick={() => apply(p)} title="Áp mẫu này cho clip đang mở">
                         <strong>{p.id === defaultId ? "★ " : ""}{p.name}</strong>
                         <small>{bits.join(" · ")}{p.uses ? ` · dùng ${p.uses} lần` : ""}</small>
                       </button>
-                      <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" title={p.id === defaultId ? "Đang là mặc định cho video mới — bấm để bỏ" : "Đặt làm mặc định cho video lồng tiếng mới"}
+                      <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={readOnly} onClick={() => apply(p)}
+                              title="Đưa mẫu này vào clip đang mở (khung, nền, nhân vật, vùng mờ, kiểu phụ đề…) — xem trước rồi bấm Xuất lại video">✓ Áp dụng</button>
+                      <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" title={p.id === defaultId ? "Video mới (lồng tiếng, cắt video) đang tự dùng mẫu này — bấm để bỏ" : "Video mới (lồng tiếng, cắt video) tự dùng mẫu này — không đổi clip đang mở"}
                               onClick={() => void makeDefault(p.id === defaultId ? null : p)}>{p.id === defaultId ? "Mặc định ✓" : "Mặc định"}</button>
                       <button type="button" className="qt-btn qt-btn--small qt-btn--danger" title="Xoá mẫu" onClick={() => void remove(p)}>🗑</button>
                     </li>

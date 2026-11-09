@@ -382,19 +382,10 @@ async def decor_cutout(body: CutoutBody) -> dict[str, Any]:
 
 def _look_preset(preset_id: Optional[int]) -> Optional[dict[str, Any]]:
     """The saved look to start a job with (None = the defaults). A missing id is an error, not a silent default."""
-    if not preset_id:
-        return None
-    from flowboard.db import get_session
-    from flowboard.db.models import DecorPreset
-
-    with get_session() as s:
-        p = s.get(DecorPreset, preset_id)
-        if p is None or p.kind != "look":
-            raise HTTPException(404, "Không thấy mẫu chỉnh sửa này (đã xoá?) — chọn mẫu khác hoặc để trống.")
-        p.uses = (p.uses or 0) + 1
-        s.add(p)
-        s.commit()
-        return dub.normalize_look_preset(p.data)
+    try:
+        return dub.look_preset(preset_id)
+    except dub.DubError as exc:
+        raise HTTPException(404, str(exc))
 
 
 class PresetBody(BaseModel):
@@ -430,15 +421,8 @@ class DefaultLookBody(BaseModel):
 
 @router.get("/decor/presets/default")
 def get_default_look() -> dict[str, Any]:
-    """The look preset new dubbing jobs start with (``{id}``, None = plain defaults)."""
-    from flowboard.db import get_session
-    from flowboard.db.models import AppSetting, DecorPreset
-
-    with get_session() as s:
-        row = s.get(AppSetting, dub.LOOK_PRESET_KEY)
-        pid = int(row.value) if row and row.value.isdigit() else None
-        p = s.get(DecorPreset, pid) if pid else None
-        return {"id": pid if p is not None and p.kind == "look" else None}
+    """The look preset new videos (dubbing, link library, cut parts) start with (``{id}``, None = plain defaults)."""
+    return {"id": dub.default_look_id()}
 
 
 @router.put("/decor/presets/default")

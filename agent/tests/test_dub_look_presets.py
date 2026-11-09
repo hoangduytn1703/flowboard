@@ -2,6 +2,8 @@
 from frames / stickers, one of them the default, and a new job starting with it."""
 from __future__ import annotations
 
+import pytest
+
 from flowboard.services import dub
 
 
@@ -28,6 +30,11 @@ def test_look_presets_are_saved_listed_defaulted_and_start_a_job(client, monkeyp
     assert client.put("/api/dub/decor/presets/default", json={"id": pid}).status_code == 200
     assert client.get("/api/dub/decor/presets/default").json() == {"id": pid}
     assert client.put("/api/dub/decor/presets/default", json={"id": 9999}).status_code == 404
+    # the services (the cut page's parts start from these too)
+    assert dub.default_look_id() == pid
+    assert dub.look_preset(pid, count=False)["style"] == "outline" and dub.look_preset(None) is None
+    with pytest.raises(dub.DubError):
+        dub.look_preset(9999)
 
     monkeypatch.setattr(dub, "status", lambda: {"available": True, "separate": False, "remotion": False})
     monkeypatch.setattr(dub, "_pump", lambda: None)

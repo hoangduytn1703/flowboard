@@ -1,7 +1,8 @@
 """✂️ Cắt video (services/video_cut): links / files → many short videos, each editable in the dubbing editor.
 
   GET  /api/cut/status
-  POST /api/cut/sessions                 {links, media: [{media_id, name}], how, prompt, min_s, max_s, max_parts, review, channel_id}
+  POST /api/cut/sessions                 {links, media: [{media_id, name}], how, prompt, min_s, max_s, max_parts, review, channel_id,
+                                          look_preset_id} — the parts come out rendered in that ★ Mẫu chỉnh sửa
   GET  /api/cut/sessions                 newest first (brief: no lines)
   GET  /api/cut/sessions/{id}
   POST /api/cut/sessions/{id}/suggest    {how, prompt, min_s, max_s, max_parts} → {rows, by, note} (nothing cut)
@@ -19,7 +20,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from flowboard.services import video_cut
+from flowboard.services import dub, video_cut
 
 router = APIRouter(prefix="/api/cut", tags=["cut"])
 
@@ -39,6 +40,8 @@ class StartBody(BaseModel):
     max_parts: int = Field(default=0, ge=0, le=100)
     review: bool = False
     channel_id: Optional[int] = None
+    #: a saved "★ Mẫu chỉnh sửa" (frame, background, sticker, blur boxes…) every part is rendered in
+    look_preset_id: Optional[int] = None
 
 
 class SuggestBody(BaseModel):
@@ -82,9 +85,13 @@ def get_status() -> dict[str, Any]:
 @router.post("/sessions", status_code=201)
 def start(body: StartBody) -> dict[str, Any]:
     try:
+        look = dub.look_preset(body.look_preset_id)
+    except dub.DubError as exc:
+        raise HTTPException(404, str(exc))
+    try:
         run_id, made = video_cut.start(links=body.links, media=[m.model_dump() for m in body.media], how=body.how,
                                        prompt=body.prompt, min_s=body.min_s, max_s=body.max_s, max_parts=body.max_parts,
-                                       review=body.review, channel_id=body.channel_id)
+                                       review=body.review, channel_id=body.channel_id, look=look)
     except video_cut.CutError as exc:
         raise HTTPException(400, str(exc))
     return {"run_id": run_id, "sessions": [video_cut.public(s, brief=True) for s in made]}

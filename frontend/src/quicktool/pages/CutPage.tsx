@@ -4,8 +4,8 @@ import { announceRunning } from "../../components/BackgroundTasks";
 import { askConfirm } from "../../components/Dialogs";
 import { exportsZipUrl } from "../../api/client";
 import {
-  dubSubtitleLines, getDubJob, getDubStatus, linksIn, renderDub, subLangName, uploadDubVideo,
-  type DubCutRow, type DubJob, type DubRender, type DubStatus,
+  dubSubtitleLines, getDefaultLook, getDubJob, getDubStatus, linksIn, listLookPresets, renderDub, subLangName, uploadDubVideo,
+  type DecorPreset, type DubCutRow, type DubJob, type DubRender, type DubStatus,
 } from "../../api/dub";
 import {
   cutAgain, cutNow, deleteCutSessions, getCutStatus, isBusy, LENGTHS, listCutParts, listCutSessions,
@@ -81,6 +81,10 @@ export function CutPage() {
   const [maxParts, setMaxParts] = useState(prefs.maxParts);
   const [review, setReview] = useState(prefs.review);
   const [channelId, setChannelId] = useState<number | null>(null);
+  // "★ Mẫu chỉnh sửa": the saved look (9:16 frame, background, sticker, blur boxes…) every part is rendered in;
+  // the default one is pre-picked, like the dubbing form
+  const [looks, setLooks] = useState<DecorPreset[]>([]);
+  const [lookId, setLookId] = useState<number | null>(null);
   const [starting, setStarting] = useState(false);
   const [job, setJob] = useState<DubJob | null>(null);
   const [siblings, setSiblings] = useState<DubJob[]>([]);
@@ -94,6 +98,8 @@ export function CutPage() {
     void getCutStatus().then(setStatus).catch(() => setStatus({ whisper: false, whisper_reason: "", remotion: false, max_minutes: 60,
       max_links: MAX_LINKS, max_parts: 30, prompt_max: 600, default_min: 30, default_max: 60 }));
     void getDubStatus().then(setDubStatus).catch(() => undefined);
+    void listLookPresets().then(setLooks).catch(() => setLooks([]));
+    void getDefaultLook().then((d) => setLookId(d.id)).catch(() => undefined);
   }, []);
   useEffect(() => {
     try { window.localStorage.setItem(FORM_KEY, JSON.stringify({ how, lenKey, maxParts, review })); } catch { /* private mode */ }
@@ -247,8 +253,10 @@ export function CutPage() {
     setStarting(true);
     try {
       const r = await startCut({ links: cleanLinks, media: readyFiles.map((f) => ({ media_id: f.media_id!, name: f.name })), how, prompt,
-                                 min_s: len.min, max_s: len.max, max_parts: maxParts, review, channel_id: channelId });
-      toast.success(`Đã đưa ${r.sessions.length} video vào hàng cắt — tải về, nghe lời, chọn đoạn rồi cắt.`);
+                                 min_s: len.min, max_s: len.max, max_parts: maxParts, review, channel_id: channelId,
+                                 look_preset_id: lookId });
+      const lookName = looks.find((p) => p.id === lookId)?.name;
+      toast.success(`Đã đưa ${r.sessions.length} video vào hàng cắt — tải về, nghe lời, chọn đoạn rồi cắt${lookName ? `; mỗi video cắt ra được áp mẫu "${lookName}"` : ""}.`);
       setLinks([""]);
       setFiles([]);
       announceRunning();
@@ -376,6 +384,16 @@ export function CutPage() {
               <label className="qt-check">
                 <input type="checkbox" checked={review} onChange={(e) => setReview(e.target.checked)} /> Cho mình xem lại các đoạn trước khi cắt
               </label>
+              {looks.length > 0 && (
+                <label className="qt-field">
+                  <span>Mẫu chỉnh sửa cho các video cắt ra <small className="qt-card__hint">(khung 9:16, nền, logo / nhân vật, vùng mờ… đã lưu bằng nút ★ Mẫu trong trình chỉnh sửa)</small></span>
+                  <select className="qt-input" value={lookId ?? ""} onChange={(e) => setLookId(e.target.value ? Number(e.target.value) : null)}>
+                    <option value="">— Không dùng mẫu, để video thô —</option>
+                    {looks.map((p) => <option key={p.id} value={p.id}>★ {p.name}{p.uses ? ` · dùng ${p.uses} lần` : ""}</option>)}
+                  </select>
+                  {lookId !== null && <small className="qt-card__hint">Cắt xong mỗi video được áp mẫu và xuất luôn — mở ✏️ Chỉnh nếu muốn sửa thêm.</small>}
+                </label>
+              )}
               <ChannelPicker value={channelId} onChange={setChannelId} label="Lưu clip vào kênh (không bắt buộc)" />
               <button type="button" className="qt-btn qt-btn--accent qt-btn--big ct__go" disabled={!count || starting || files.some((f) => f.busy)} onClick={() => void start()}>
                 {starting ? "Đang gửi…" : count ? `✂️ Cắt ${count} video` : "✂️ Cắt video"}

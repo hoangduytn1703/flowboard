@@ -1915,6 +1915,46 @@ def normalize_look_preset(raw: Any) -> dict[str, Any]:
             "engine": engine, "highlights": hl}
 
 
+def look_preset(preset_id: Optional[int], *, count: bool = True) -> Optional[dict[str, Any]]:
+    """A saved "★ Mẫu chỉnh sửa" by id, normalised (and counted as used); None for no id. A missing id is an
+    error, never a silent plain look — the seller picked that preset on purpose."""
+    if not preset_id:
+        return None
+    from flowboard.db import get_session
+    from flowboard.db.models import DecorPreset
+
+    with get_session() as s:
+        p = s.get(DecorPreset, int(preset_id))
+        if p is None or p.kind != "look":
+            raise DubError("Không thấy mẫu chỉnh sửa này (đã xoá?) — chọn mẫu khác hoặc để trống.")
+        if count:
+            p.uses = (p.uses or 0) + 1
+            s.add(p)
+            s.commit()
+        return normalize_look_preset(p.data)
+
+
+def default_look_id() -> Optional[int]:
+    """The preset marked "Mặc định" (new videos start with it); None when there is none or it was deleted."""
+    from flowboard.db import get_session
+    from flowboard.db.models import AppSetting, DecorPreset
+
+    with get_session() as s:
+        row = s.get(AppSetting, LOOK_PRESET_KEY)
+        pid = int(row.value) if row is not None and (row.value or "").isdigit() else None
+        p = s.get(DecorPreset, pid) if pid else None
+        return pid if p is not None and p.kind == "look" else None
+
+
+def apply_look(job: Job, look: dict[str, Any]) -> None:
+    """Put a saved look on ``job``: layout (subtitle place, blur boxes, output format, frame, sticker), style,
+    engine and the key-moment settings — the points stay this clip's own (picked at render when on)."""
+    job.engine = _check_engine(str(look.get("engine") or job.engine))
+    job.style = _style_for(job.engine, str(look.get("style") or job.style))
+    job.layout = normalize_layout(look.get("layout"))
+    job.highlights = {**normalize_highlights(look.get("highlights")), "points": [], "picked": ""}
+
+
 def start_job(*, url: Optional[str], source_media_id: Optional[str], voice: str, keep_bgm: bool, style: str,
               channel_id: Optional[int], name: str, auto_render: bool, engine: str = "ass", batch_id: str = "",
               translator: str = DEFAULT_TRANSLATOR, mode: str = "dub", sub_lang: str = "vi",

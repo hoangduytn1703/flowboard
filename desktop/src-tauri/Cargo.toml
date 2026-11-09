@@ -1,6 +1,6 @@
 [package]
 name = "dflow"
-version = "1.8.1"
+version = "1.8.2"
 description = "DFlow desktop: the agent (Python, bundled with PyInstaller) in the background + its web UI in a window"
 authors = ["DuyNH"]
 edition = "2021"

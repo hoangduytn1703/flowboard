@@ -84,6 +84,8 @@ export interface CutStart {
   max_parts: number;
   review: boolean;
   channel_id: number | null;
+  /** a saved "★ Mẫu chỉnh sửa" (frame, background, sticker, blur boxes…) every part is rendered in; null = raw pieces */
+  look_preset_id?: number | null;
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {

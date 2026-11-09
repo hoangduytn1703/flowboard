@@ -116,6 +116,8 @@ def test_a_video_is_cut_into_clips_and_projects_then_edited(client, tmp_path, mo
         db.commit()
     s = _session(10.0, 4)
     s.source_media_id, s.work = "srcvid", tmp_path / "cut" / s.id
+    # the cut's "★ Mẫu chỉnh sửa": every part comes out square on a grid, rendered right after it is cut
+    s.look = dub.normalize_look_preset({"layout": {"canvas": {"aspect": "1:1", "fit": "grid"}}, "style": "box_white"})
     video_cut.SESSIONS[s.id] = s
     jobs: list[str] = []
     try:
@@ -127,34 +129,42 @@ def test_a_video_is_cut_into_clips_and_projects_then_edited(client, tmp_path, mo
         for p in parts:
             job = dub.JOBS[p["job_id"]]
             jobs.append(job.id)
+            _wait(lambda: job.status in ("done", "error"))
+            assert job.status == "done", job.error
             assert job.kind == "cut" and job.mode == "sub" and job.sub_lang == "none" and job.batch_id == s.run_id
-            assert job.url is None and job.cut["index"] == p["index"] and job.media_id == p["media_id"]
+            assert job.url is None and job.cut["index"] == p["index"]
+            # the raw piece, and the part's video rendered in the look (square), the clip pointing at the latter
             info = probe_clip(Path(media_service.cached_path(p["media_id"])))
             assert abs(info.duration - 5.0) < 0.4 and info.has_audio
+            assert job.layout["canvas"]["aspect"] == "1:1" and job.style == "box_white"
+            assert job.media_id != p["media_id"] and job.outputs
+            out = probe_clip(Path(media_service.cached_path(job.media_id)))
+            assert out.width == out.height and out.has_audio and abs(out.duration - 5.0) < 0.4
             assert all(0 <= g.start < g.end <= 5.05 for g in job.segments) and job.segments
             with get_session() as db:
                 b = db.get(Board, p["board_id"])
                 qt = b.data["quicktool"]
                 assert qt["template_id"] == "cut_part" and qt["cut"]["session_id"] == s.id and qt["dub"]["job_id"] == job.id
                 nodes = {n.type: n for n in db.exec(dub.select(Node).where(Node.board_id == b.id)).all()}
-                assert nodes["export"].data["mediaId"] == p["media_id"]
+                assert nodes["export"].data["mediaId"] == job.media_id
         assert [j.id for j in video_cut.part_jobs(run_id=s.run_id)] == jobs
+        assert [p["edited"] for p in video_cut.public(s)["parts"]] == [True, True]
         # the dubbing list does not show the parts; the cut page's list does
         listed = [j["job_id"] for j in client.get("/api/dub/jobs?all=true&brief=true").json()]
         assert not set(jobs) & set(listed)
         assert [j["job_id"] for j in client.get(f"/api/cut/parts?run={s.run_id}").json()] == jobs
 
-        # edit part 1: a 9:16 frame on a grid, no subtitles burned → a new video, the clip follows it
+        # edit part 1: a 16:9 frame on a grid instead, no subtitles burned → a new video, the clip follows it
         first = dub.JOBS[jobs[0]]
         old_media = first.media_id
         r = client.post(f"/api/dub/jobs/{first.id}/render", json={
-            "layout": {**first.layout, "canvas": {"aspect": "1:1", "fit": "grid"}}, "sub_lang": "none"})
+            "layout": {**first.layout, "canvas": {"aspect": "16:9", "fit": "grid"}}, "sub_lang": "none"})
         assert r.status_code == 200, r.text
         _wait(lambda: first.status in ("done", "error"))
         assert first.status == "done", first.error
         assert first.media_id != old_media and first.outputs
         info = probe_clip(Path(media_service.cached_path(first.media_id)))
-        assert info.width == info.height and info.has_audio
+        assert info.width > info.height and info.has_audio
         with get_session() as db:
             b = db.get(Board, first.board_id)
             assert b.data["quicktool"]["template_id"] == "cut_part"
@@ -162,13 +172,19 @@ def test_a_video_is_cut_into_clips_and_projects_then_edited(client, tmp_path, mo
         # no subtitles burned when "none": the subtitle file is empty of dialogue
         assert "Dialogue" not in (first.work / "subs.ass").read_text(encoding="utf-8")
 
-        # cut again: same projects and clips, new pieces; the look of part 1 is kept
+        # cut again: same projects and clips, new pieces rendered again in each part's own look (part 1 wide, part 2 square)
         boards = [p["board_id"] for p in parts]
         video_cut.cut(s, [{"start": 0, "end": 4.0, "title": "Đầu mới"}, {"start": 4.0, "end": 10.0, "title": "Sau"}])
         _wait(lambda: s.status != "cutting")
         assert s.status == "done", s.error
         assert [p["job_id"] for p in s.parts] == jobs and [p["board_id"] for p in s.parts] == boards
-        assert dub.JOBS[jobs[0]].layout.get("canvas", {}).get("aspect") == "1:1" and not dub.JOBS[jobs[0]].outputs
+        for jid, wide in zip(jobs, (True, False)):
+            j = dub.JOBS[jid]
+            _wait(lambda: j.status in ("done", "error"))
+            assert j.status == "done", j.error
+            assert j.layout["canvas"]["aspect"] == ("16:9" if wide else "1:1") and j.outputs
+            out = probe_clip(Path(media_service.cached_path(j.media_id)))
+            assert (out.width > out.height) is wide and abs(out.duration - (4.0 if wide else 6.0)) < 0.4
         with get_session() as db:
             assert db.get(Board, boards[0]).name == "Đầu mới"
     finally:
@@ -183,13 +199,20 @@ def test_routes_check_what_they_get(client, monkeypatch):
     assert r.status_code == 400 and "link" in r.json()["detail"]
     r = client.post("/api/cut/sessions", json={"links": ["https://youtu.be/abc"], "how": "prompt", "prompt": "  "})
     assert r.status_code == 400 and "yêu cầu" in r.json()["detail"]
+    # a look preset that is gone is an error, not a silent raw cut
+    r = client.post("/api/cut/sessions", json={"links": ["https://youtu.be/abc"], "look_preset_id": 9999})
+    assert r.status_code == 404 and "mẫu" in r.json()["detail"].lower()
+    look = client.post("/api/dub/decor/presets", json={"kind": "look", "name": "Dọc 9:16", "data": {
+        "layout": {"canvas": {"aspect": "9:16", "fit": "grid"}}, "style": "box_yellow"}}).json()
     r = client.post("/api/cut/sessions", json={"links": ["xem nè https://youtu.be/abc nha", "https://youtu.be/def"],
-                                              "how": "even", "min_s": 15, "max_s": 30})
+                                              "how": "even", "min_s": 15, "max_s": 30, "look_preset_id": look["id"]})
     assert r.status_code == 201, r.text
     body = r.json()
     try:
         assert len(body["sessions"]) == 2 and {x["run_id"] for x in body["sessions"]} == {body["run_id"]}
         assert body["sessions"][0]["url"] == "https://youtu.be/abc" and body["sessions"][0]["status"] == "queued"
+        assert all(x["look"]["layout"]["canvas"]["aspect"] == "9:16" for x in body["sessions"])
+        assert client.get("/api/dub/decor/presets?kind=look").json()[0]["uses"] == 1
         listed = client.get("/api/cut/sessions").json()
         assert {x["id"] for x in body["sessions"]} <= {x["id"] for x in listed}
         sid = body["sessions"][0]["id"]
@@ -204,6 +227,7 @@ def test_routes_check_what_they_get(client, monkeypatch):
     finally:
         for x in body["sessions"]:
             video_cut.SESSIONS.pop(x["id"], None)
+        client.delete(f"/api/dub/decor/presets/{look['id']}")
 
 
 def test_the_cut_feature_unlocks_the_editor_routes_it_needs():

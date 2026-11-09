@@ -91,6 +91,9 @@ class Session:
     note: str = ""
     #: the parts cut so far [{index, start, end, title, job_id, board_id, media_id}]
     parts: list[dict] = field(default_factory=list)
+    #: "★ Mẫu chỉnh sửa" picked for this cut (dub.normalize_look_preset): every new part comes out in that look
+    #: (9:16 frame, background, sticker, blur boxes…) — rendered right after it is cut; None = the raw pieces
+    look: Optional[dict] = None
     error: Optional[str] = None
     stop: bool = False
     started_at: float = field(default_factory=time.time)
@@ -99,7 +102,7 @@ class Session:
 
     SAVED = ("id", "run_id", "url", "source_media_id", "how", "prompt", "min_s", "max_s", "max_parts", "review", "channel_id",
              "status", "phase", "progress", "title", "duration_s", "width", "height", "language", "segments", "heard", "prepared",
-             "rows", "by", "note", "parts", "error", "started_at", "position")
+             "rows", "by", "note", "parts", "look", "error", "started_at", "position")
 
     def to_dict(self) -> dict[str, Any]:
         return {k: getattr(self, k) for k in self.SAVED}
@@ -260,8 +263,10 @@ def status() -> dict[str, Any]:
 # ── start / queue ──────────────────────────────────────────────────────────
 
 def start(*, links: list[str], media: list[dict[str, Any]], how: str = "ai", prompt: str = "", min_s: Any = None,
-          max_s: Any = None, max_parts: Any = 0, review: bool = False, channel_id: Optional[int] = None) -> tuple[str, list[Session]]:
-    """One session per link / file, all in one run (their parts are one batch in the editor). Returns ``(run_id, sessions)``."""
+          max_s: Any = None, max_parts: Any = 0, review: bool = False, channel_id: Optional[int] = None,
+          look: Optional[dict] = None) -> tuple[str, list[Session]]:
+    """One session per link / file, all in one run (their parts are one batch in the editor). ``look`` = a saved
+    "★ Mẫu chỉnh sửa" (:func:`dub.look_preset`) every part is rendered in. Returns ``(run_id, sessions)``."""
     from flowboard.services.video_fetch import extract_url
 
     items: list[tuple[str, Any]] = []
@@ -290,7 +295,7 @@ def start(*, links: list[str], media: list[dict[str, Any]], how: str = "ai", pro
     for i, (kind, value) in enumerate(items):
         s = Session(id=_uid(), run_id=run_id, how=how, prompt=prompt, min_s=lo, max_s=hi,
                     max_parts=normalize_max_parts(max_parts), review=bool(review), channel_id=channel_id,
-                    started_at=now, position=i)
+                    look=dub.normalize_look_preset(look) if look else None, started_at=now, position=i)
         if kind == "url":
             s.url = str(value)[:2000]
         else:
@@ -571,12 +576,27 @@ def _cut_all(s: Session, rows: list[dict[str, Any]], *, base: int) -> None:
             db.commit()
         title = row.get("title") or (f"{name} — Phần {i}/{total}" if total > 1 else name)
         job = _part_job(s, i, total, row, title, media_id, dst, old.get(i))
+        if needs_render(job):
+            # the piece is raw: render it in its look now (the dubbing queue, one at a time) so it comes out finished
+            try:
+                dub.render_job(job, lines=None, voice=None, style=None, keep_bgm=None, name=None)
+            except dub.DubError as exc:
+                job.error = f"Chưa áp được kiểu đã chỉnh — mở trình chỉnh sửa, bấm Xuất lại video ({exc})"
+                dub.persist(job)
         parts.append({"index": i, "start": row["start"], "end": row["end"], "title": title, "job_id": job.id,
                       "board_id": job.board_id, "media_id": media_id, "at": time.time()})
         s.parts = parts + [p for k, p in sorted(old.items()) if k > i]
         persist(s)
     s.parts = parts  # parts past the new count keep their clips (the seller may have edited them), not listed here
     s.status, s.phase, s.progress, s.error = "done", f"Đã cắt {total} video", 100, None
+
+
+def needs_render(job: dub.Job) -> bool:
+    """A part just cut is the raw piece. It is rendered at once when its project has something to put on it: a
+    look (the cut's preset, or what the seller set before cutting again — 9:16 frame, background, blur boxes,
+    sticker), subtitles to burn, or key-moment emphasis."""
+    return (dub.normalize_layout(job.layout) != dub.normalize_layout(None) or job.sub_lang != "none"
+            or bool((job.highlights or {}).get("on")))
 
 
 def part_lines(s: Session, start: float, end: float) -> list[dub.Segment]:
@@ -603,6 +623,8 @@ def _part_job(s: Session, index: int, total: int, row: dict[str, Any], title: st
     job.name = job.title = title[:80]
     if prev is None:
         job.channel_id = s.channel_id
+        if s.look:  # the cut's "★ Mẫu chỉnh sửa": the part starts (and is rendered) in that look
+            dub.apply_look(job, s.look)
     job.language = s.language
     job.duration_s = float(info.duration) if info else float(row["end"] - row["start"])
     job.width, job.height = (int(info.width), int(info.height)) if info else (s.width, s.height)
