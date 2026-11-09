@@ -35,10 +35,9 @@ from sqlmodel import select
 from flowboard.db import get_session
 from flowboard.db.models import Asset, Board, Node
 from flowboard.services import media as media_service
-from flowboard.services import dub_decor, dub_names, dub_remotion, key_moments, sfx, tts
+from flowboard.services import dub_addon, dub_decor, dub_names, dub_remotion, key_moments, sfx, tts
 from flowboard.services.llm import run_llm
 from flowboard.services.llm.base import LLMError
-from flowboard.services.video_clean import erase_python, erase_root
 from flowboard.services.video_export import _encode_args, _run, probe_clip
 from flowboard.short_id import generate_unique_short_id
 
@@ -92,25 +91,32 @@ class DubError(RuntimeError):
 
 # ── availability ───────────────────────────────────────────────────────────
 
+#: what a machine without the speech AI is told (the dubbing page shows the add-on card under it)
+NO_RUNTIME = ("Máy này chưa có gói lồng tiếng (AI nghe tiếng Whisper, tách nhạc nền, giọng VieNeu). "
+              "Bấm “Cài gói lồng tiếng” — tải một lần, sau đó dùng mãi.")
+
+
 def status() -> dict[str, Any]:
-    python = erase_python()
-    root = erase_root()
+    rt = dub_addon.runtime()
+    root = rt[0] if rt else dub_addon.addon_dir()
     out: dict[str, Any] = {"available": False, "root": str(root), "ytdlp": shutil.which("yt-dlp") is not None,
-                           "whisper": False, "separate": False}
+                           "whisper": False, "separate": False, "runtime": "none"}
     rm_ok, rm_why = dub_remotion.available()
     out["remotion"] = rm_ok
     if not rm_ok:
         out["remotion_reason"] = rm_why
-    if python is None:
-        out["reason"] = f"Không thấy Python của pyvideotrans ({root / '.venv'}). Đặt FLOWBOARD_ERASE_PYTHON trong .env."
+    if rt is None:
+        out["reason"] = NO_RUNTIME
+        out["addon"] = dub_addon.status()
         return out
+    out["runtime"] = "addon" if root == dub_addon.addon_dir() else "viedub"
     from flowboard.services.dub_runner import WHISPER_DIR
 
     out["whisper"] = (root / "models" / WHISPER_DIR / "model.bin").is_file()
     out["separate"] = (root / "models" / "onnx" / "vocals.fp16.onnx").is_file()
     out["sfx_sets"] = sfx.sets()
     if not out["whisper"]:
-        out["reason"] = f"Chưa có mô hình Whisper large-v3-turbo trong {root / 'models'} — mở VieDub chạy một video để nó tải về."
+        out["reason"] = f"Thiếu mô hình Whisper large-v3-turbo trong {root / 'models'} — mở VieDub chạy một video để nó tải về."
         return out
     out["available"] = True
     return out
@@ -118,12 +124,13 @@ def status() -> dict[str, Any]:
 
 def _runner(*args: str, progress: Optional[Callable[[int], None]] = None,
             stop: Optional[Callable[[], bool]] = None, timeout: int = STEP_TIMEOUT_S) -> dict[str, Any]:
-    python = erase_python()
-    if python is None:
-        raise DubError(status().get("reason", "pyvideotrans không có trên máy"))
-    env = dict(os.environ, FLOWBOARD_ERASE_ROOT=str(erase_root()), PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
+    rt = dub_addon.runtime()
+    if rt is None:
+        raise DubError(NO_RUNTIME)
+    root, python, extra = rt
+    env = dub_addon.clean_env(FLOWBOARD_ERASE_ROOT=str(root), PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1", **extra)
     cmd = [str(python), str(RUNNER_PATH), *args]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=str(erase_root()))
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=str(root))
     tail: list[str] = []
     deadline = time.time() + timeout
 

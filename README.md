@@ -57,7 +57,8 @@ DFlow chạy trên máy của bạn (không phải trang web có sẵn), nên c�
 |---|---|---|
 | **Cơ bản**: mở app, làm clip quảng cáo, sản phẩm, bài viết, lịch đăng | File cài **DFlow-Setup.exe** + Chrome + Claude Code + extension DFlow Bridge (chạy từ mã nguồn thì thêm uv, Node.js, Git, ffmpeg) | [Mục 3](#3-cài-đặt-lần-đầu-windows) |
 | Tải video từ link TikTok / YouTube / Instagram / Facebook | yt-dlp (Douyin không cần) | [Mục 6.1](#61-tải-video-từ-link) |
-| **Lồng tiếng video**, xoá phụ đề có sẵn bằng AI, giọng VieNeu miễn phí | Bộ VieDub (pyvideotrans) — nặng, nên có card đồ hoạ NVIDIA | [Mục 6.2](#62-lồng-tiếng-video-xoá-phụ-đề-ai-giọng-vieneu) |
+| **Lồng tiếng video**, chèn phụ đề, cắt video theo lời, giọng VieNeu miễn phí | **Gói lồng tiếng** — bấm cài một lần trong app (~3,9 GB, nên có card NVIDIA) | [Mục 6.2](#62-lồng-tiếng-video-xoá-phụ-đề-ai-giọng-vieneu) |
+| Xoá phụ đề có sẵn bằng AI | Bộ VieDub (pyvideotrans) đầy đủ — nặng | [Mục 6.2](#62-lồng-tiếng-video-xoá-phụ-đề-ai-giọng-vieneu) |
 | Edit auto CapCut | CapCut bản máy tính | [Mục 6.3](#63-edit-auto-capcut) |
 | Tự đăng lên Facebook Page, xem lượt xem | Mã truy cập (token) của Page | [Mục 6.4](#64-tự-đăng-facebook-page) |
 | Dùng chung dữ liệu trên nhiều máy | Không cần gì thêm — đăng nhập cùng tài khoản là thấy | [Mục 6.5](#65-dùng-chung-dữ-liệu-trên-nhiều-máy) |
@@ -112,8 +113,8 @@ cập nhật**) → bấm **⬇ Cập nhật ngay**: app tự tải, đóng, cà
 `chrome://extensions` bấm nút tải lại (↻) ở ô DFlow Bridge. File cài mới nhất luôn có ở **github.com/hoangduytn1703/dflow-releases/releases**
 (bản **trước 1.5.1** chưa tự cập nhật được: tải file cài mới nhất về cài đè một lần, dữ liệu giữ nguyên).
 
-> Bản app đã kèm sẵn ffmpeg. Lồng tiếng video vẫn cần bộ VieDub cài riêng ([Mục 6.2](#62-lồng-tiếng-video-xoá-phụ-đề-ai-giọng-vieneu)) —
-> khai báo đường dẫn ở Cài đặt → 🖥 Máy này. Phụ đề kiểu Remotion chưa có trong bản app (dùng kiểu ffmpeg).
+> Bản app đã kèm sẵn ffmpeg. Lồng tiếng video cần **gói lồng tiếng**: lần đầu mở trang 🎙 Lồng tiếng video, bấm **⬇ Cài gói lồng tiếng** (từ bản 1.8.1;
+> [Mục 6.2](#62-lồng-tiếng-video-xoá-phụ-đề-ai-giọng-vieneu)). Phụ đề kiểu Remotion chưa có trong bản app (dùng kiểu ffmpeg).
 
 ### Cách 2 — Chạy từ mã nguồn
 
@@ -291,8 +292,13 @@ Rồi tắt DFlow và mở lại.
 
 ### 6.2 Lồng tiếng video, xoá phụ đề AI, giọng VieNeu
 
-Phần này nặng (nhận dạng giọng nói, tách nhạc, xoá chữ bằng AI), chạy bằng bộ **VieDub (pyvideotrans)** cài riêng. **Nên có card đồ hoạ NVIDIA**
-(không có vẫn chạy, nhưng chậm hơn nhiều) và thêm khoảng 15 GB ổ cứng. Nếu không rành, nhờ người cài DFlow làm giúp phần này.
+**Cách dễ (bản app từ 1.8.1): gói lồng tiếng.** Mở trang **🎙 Lồng tiếng video** → bấm **⬇ Cài gói lồng tiếng** (hoặc Cài đặt → 🖥 Máy này). DFlow tự
+tải bộ nhận dạng giọng nói Whisper, tách nhạc nền, giọng VieNeu và — nếu máy có card NVIDIA — thư viện để chạy bằng card: khoảng **3,9 GB** (không có card
+NVIDIA thì ~2,6 GB, chạy bằng CPU, chậm hơn nhiều), cần trống ~9 GB, nằm trong thư mục dữ liệu (`<DFlowData>\addons\dub`). Tải từ PyPI / HuggingFace, miễn phí;
+rời trang vẫn tải tiếp (nút "việc đang chạy"), mất mạng giữa chừng thì bấm **Cài lại** để tải tiếp chỗ dở. Card NVIDIA cần driver mới (bản 528 trở lên).
+Gói này **không** có xoá chữ bằng AI (LaMa cần thêm ~8 GB) — muốn có thì cài VieDub đầy đủ như dưới; máy có VieDub thì DFlow dùng VieDub.
+
+**Cách cũ: bộ VieDub (pyvideotrans) đầy đủ** — có cả xoá chữ bằng AI. Thêm khoảng 15 GB ổ cứng. Nếu không rành, nhờ người cài DFlow làm giúp.
 
 1. Tải và cài VieDub (pyvideotrans) theo hướng dẫn trong kho VieDub, để ở `D:\codes\pyvideotrans`.
 2. Mở VieDub, lồng tiếng thử **một** video để nó tự tải các mô hình về thư mục `models\`:
@@ -391,7 +397,8 @@ Người khác chỉ đổi được mật khẩu / thông tin của chính họ
 | AI không viết được / báo lỗi AI | **⚙ Cài đặt → 🤖 AI viết** đã chọn Claude chưa; chạy `claude` trong PowerShell xem còn đăng nhập không, gói Claude còn lượt không |
 | Tạo ảnh / video báo lỗi, "Flow bỏ lượt" | Tab Flow đúng tài khoản có gói Pro / Ultra; Cài đặt → Google Flow đúng project; ở Bước 1 của clip bấm "🎬 Kiểm tra với Flow" xem người mẫu có bị chặn không |
 | Báo hết lượt Gemini | Thêm Gemini key từ tài khoản Google khác (Cài đặt → Gemini key) |
-| Lồng tiếng báo "chưa dùng được" | Chưa cài bộ VieDub — xem Mục 6.2 |
+| Lồng tiếng báo "chưa có gói lồng tiếng" | Bấm **⬇ Cài gói lồng tiếng** ngay trên trang đó (Mục 6.2) |
+| Cài gói lồng tiếng báo lỗi giữa chừng | Mạng chập chờn: bấm **Cài lại** (tải tiếp chỗ dở). Ổ đĩa đầy: dọn bớt hoặc đổi Thư mục dữ liệu |
 
 Vẫn không được: chụp màn hình cửa sổ DFlow (PowerShell) và trang báo lỗi, gửi cho người hỗ trợ.
 

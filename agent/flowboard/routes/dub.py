@@ -17,7 +17,7 @@ from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from flowboard.services import dub, dub_links, dub_remotion, dub_split, tts
+from flowboard.services import dub, dub_addon, dub_links, dub_remotion, dub_split, tts
 
 router = APIRouter(prefix="/api/dub", tags=["dub"])
 
@@ -67,6 +67,36 @@ class RenderBody(BaseModel):
     sub_lang: Optional[str] = Field(default=None, pattern="^(vi|orig|none|en|zh|ja|ko|th|id|es|fr|de|pt|ru)$")
     # "🔤 Tên riêng": [{write, say}] — the subtitle shows `write`, the voice reads `say` (services/dub_names)
     names: Optional[list[dict[str, Any]]] = Field(default=None, max_length=200)
+
+
+@router.get("/addon")
+def get_addon() -> dict[str, Any]:
+    """The "gói lồng tiếng" of this machine: installed or not, the NVIDIA card, space, install progress."""
+    return dub_addon.status()
+
+
+@router.post("/addon/install")
+def install_addon() -> dict[str, Any]:
+    """Start (or resume) installing it in the background; poll ``GET /addon``."""
+    try:
+        return dub_addon.install()
+    except dub_addon.AddonError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/addon/cancel")
+def cancel_addon() -> dict[str, Any]:
+    dub_addon.cancel()
+    return dub_addon.status()
+
+
+@router.post("/addon/remove")
+def remove_addon() -> dict[str, Any]:
+    try:
+        dub_addon.remove()
+    except dub_addon.AddonError as exc:
+        raise HTTPException(409, str(exc))
+    return dub_addon.status()
 
 
 @router.get("/status")

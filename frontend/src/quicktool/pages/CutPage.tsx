@@ -356,8 +356,8 @@ export function CutPage() {
                 </div>
               )}
               {how !== "even" && !status.whisper && (
-                <p className="ct__warn">⚠ Máy này chưa nghe được lời trong video ({status.whisper_reason || "thiếu Whisper của pyvideotrans"}) — AI không chọn theo
-                  nội dung được, tool sẽ chia đều theo độ dài.</p>
+                <p className="ct__warn">⚠ Máy này chưa nghe được lời trong video (chưa có gói lồng tiếng) — AI không chọn theo nội dung được, tool sẽ chia
+                  đều theo độ dài. <button type="button" className="qt-link" onClick={() => navigate("/tools/dub")}>Cài gói lồng tiếng →</button></p>
               )}
               <div className="qt-field">
                 <span>Mỗi video ngắn dài</span>

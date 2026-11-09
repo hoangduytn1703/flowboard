@@ -56,6 +56,10 @@ class CleanError(Exception):
     """A user-facing failure (bad geometry, ffmpeg refused, runner missing)."""
 
 
+class UnavailableError(CleanError):
+    """The AI runner is not on this machine (the routes answer 503)."""
+
+
 # ── geometry ───────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
@@ -277,7 +281,7 @@ def ai_status() -> dict[str, Any]:
     root = erase_root()
     if python is None:
         return {"available": False,
-                "reason": f"Không thấy Python của pyvideotrans ({root / '.venv'}). Đặt FLOWBOARD_ERASE_PYTHON trong .env.",
+                "reason": "Xoá chữ bằng AI cần bộ VieDub đầy đủ (torch + LaMa) — máy này chưa có. Dùng chế độ khoanh vùng (làm mờ / xoá logo).",
                 "root": str(root)}
     if not (root / "vi_dub_erase.py").is_file():
         return {"available": False, "reason": f"Không thấy vi_dub_erase.py trong {root}.", "root": str(root)}
@@ -289,14 +293,25 @@ def ai_status() -> dict[str, Any]:
 def _runner_cmd(*args: str) -> tuple[list[str], dict[str, str], str]:
     python = erase_python()
     if python is None:
-        raise CleanError(ai_status()["reason"])
+        raise UnavailableError(ai_status()["reason"])
     root = erase_root()
     env = dict(os.environ, FLOWBOARD_ERASE_ROOT=str(root), PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
     return [str(python), str(RUNNER_PATH), *args], env, str(root)
 
 
 def detect_bands(src: Path) -> dict[str, Any]:
-    """``{bands: [{y0, y1, hits}], info}`` from the runner's ``detect``."""
+    """``{bands: [{y0, y1, hits}], info}`` from the runner's ``detect`` — VieDub's, or on a machine with the
+    "gói lồng tiếng" add-on instead, dub_runner's own RapidOCR version."""
+    if erase_python() is None:
+        from flowboard.services import dub, dub_addon
+
+        if not dub_addon.ready():
+            raise UnavailableError("Tự tìm chữ gốc cần gói lồng tiếng — cài ở trang 🎙 Lồng tiếng video (một lần).")
+        try:
+            data = dub._runner("detect", str(src), timeout=DETECT_TIMEOUT_S)
+        except dub.DubError as exc:
+            raise CleanError(f"Tìm phụ đề lỗi: {exc}")
+        return {"bands": data.get("bands") or [], "info": data.get("info") or ""}
     cmd, env, cwd = _runner_cmd("detect", str(src))
     try:
         proc = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, timeout=DETECT_TIMEOUT_S, check=False)

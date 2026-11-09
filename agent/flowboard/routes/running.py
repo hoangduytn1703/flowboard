@@ -119,6 +119,14 @@ def _dub_link_items() -> list[dict[str, Any]]:
              "detail": f"{n} link chờ đến lượt", "progress": None, "started_at": None, "link": "/tools/dub?links=1"}]
 
 
+def _addon_items() -> list[dict[str, Any]]:
+    """The "gói lồng tiếng" download (several GB — minutes to an hour)."""
+    from flowboard.services import dub_addon
+
+    it = dub_addon.running_item()
+    return [it] if it else []
+
+
 def _clean_items() -> list[dict[str, Any]]:
     from flowboard.services import video_clean
 
@@ -220,7 +228,7 @@ def _flow_items() -> list[dict[str, Any]]:
 @router.get("")
 def running() -> dict[str, Any]:
     items: list[dict[str, Any]] = []
-    for source in (_dub_items, _dub_split_items, _cut_items, _dub_link_items, _clean_items, _capcut_items, _assistant_items, _autopilot_items, _flow_items, _op_items):
+    for source in (_addon_items, _dub_items, _dub_split_items, _cut_items, _dub_link_items, _clean_items, _capcut_items, _assistant_items, _autopilot_items, _flow_items, _op_items):
         try:
             items += source()
         except Exception:  # noqa: BLE001 — one broken source must not hide the others
@@ -243,6 +251,10 @@ def outcome(key: str = Query(..., max_length=80)) -> dict[str, Any]:
         from flowboard.services import op_tracker
 
         return op_tracker.outcome(ident) or {"ok": True, "message": "Đã xong"}
+    if kind == "dubaddon":
+        from flowboard.services import dub_addon
+
+        return dub_addon.outcome()
     if kind == "cut":
         from flowboard.services import video_cut
 

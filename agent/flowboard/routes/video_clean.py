@@ -85,7 +85,7 @@ async def detect(media_id: str) -> dict[str, Any]:
     try:
         found = await asyncio.to_thread(video_clean.detect_bands, path)
     except video_clean.CleanError as exc:
-        raise HTTPException(503 if "Không thấy Python" in str(exc) else 502, str(exc))
+        raise HTTPException(503 if isinstance(exc, video_clean.UnavailableError) else 502, str(exc))
     return {"media_id": media_id, "bands": found["bands"], "info": found["info"],
             "preview_t": round(min(max(0.0, info.duration * 0.3), max(0.0, info.duration - 0.1)), 2)}
 
@@ -125,7 +125,7 @@ async def erase(media_id: str, body: EraseBody) -> dict[str, Any]:
         msg = str(exc)
         if video_clean.active_job() is not None and "Đang có" in msg:
             raise HTTPException(409, msg)
-        if "Không thấy Python" in msg:
+        if isinstance(exc, video_clean.UnavailableError):
             raise HTTPException(503, msg)
         raise HTTPException(422, msg)
     return {"job_id": job.id, "status": job.status}

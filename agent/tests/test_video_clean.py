@@ -137,7 +137,7 @@ def test_ai_status_when_python_missing(monkeypatch, tmp_path):
     r = client.get("/api/clean/ai-status")
     assert r.status_code == 200
     body = r.json()
-    assert body["available"] is False and "pyvideotrans" in body["reason"]
+    assert body["available"] is False and "VieDub" in body["reason"]
 
 
 def test_detect_without_python_is_503(monkeypatch, clip):

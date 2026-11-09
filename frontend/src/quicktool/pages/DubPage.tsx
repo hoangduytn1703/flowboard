@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { announceRunning } from "../../components/BackgroundTasks";
 import {
@@ -21,6 +21,7 @@ import { ClipPost } from "../steps/ClipPost";
 import { VoiceField } from "../VoiceField";
 import "../dub.css";
 import { ProgressRing } from "../dub/ProgressRing";
+import { DubAddonCard } from "../dub/DubAddonCard";
 
 const POLL_MS = 2000;
 const DEFAULT_VOICE = "vi-VN-HoaiMyNeural";
@@ -113,11 +114,14 @@ export function DubPage() {
   const [fileMatch, setFileMatch] = useState<IdentifyResult | null>(null);
   const refreshRecent = () => void listDubJobsBrief().then(setRecent).catch(() => undefined);
 
-  useEffect(() => {
-    document.title = "Lồng tiếng video · DFlow";
+  const loadStatus = useCallback(() => {
     void getDubStatus().then((s) => { setStatus(s); if (!s.separate) setKeepBgm(false); })
       .catch((e) => { toast.error(errMessage(e)); setStatus({ available: false, reason: errMessage(e), root: "", ytdlp: false, whisper: false, separate: false, styles: [], max_minutes: 30, remotion: false }); });
   }, []);
+  useEffect(() => {
+    document.title = "Lồng tiếng video · DFlow";
+    loadStatus();
+  }, [loadStatus]);
   useEffect(() => { refreshRecent(); refreshLinkCount(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // /tools/dub?links=1 (the "đang chạy" badge for links waiting in the library) opens the library
   useEffect(() => { if (searchParams.get("links")) setLinksOpen(true); }, [searchParams]);
@@ -459,10 +463,11 @@ export function DubPage() {
               <ClipPost boardId={job.board_id} productId={null} channelId={job.channel_id} />
             )}
           </>
+        ) : !status.available && status.addon ? (
+          <div className="qt-dub__addon"><DubAddonCard initial={status.addon} onReady={loadStatus} /></div>
         ) : !status.available ? (
           <PageEmpty icon="🎙" title="Chưa dùng được trên máy này">
-            {status.reason ?? "Thiếu pyvideotrans / mô hình Whisper."} Lồng tiếng cần máy có repo <code>pyvideotrans</code> (VieDub) với mô hình
-            Whisper large-v3-turbo — như máy nhà.
+            {status.reason ?? "Thiếu mô hình Whisper."}
           </PageEmpty>
         ) : (
           <div className="qt-dub__grid">

@@ -21,6 +21,39 @@ export interface DubStatus {
   sfx_sets?: { key: "builtin" | "capcut"; label: string; count: number }[];
   /** who translates: free Google / Microsoft (like VieDub) or the AI set in Settings */
   translators?: { key: DubTranslator; label: string }[];
+  /** where the speech AI comes from: VieDub's venv, the "gói lồng tiếng" add-on, or nothing yet */
+  runtime?: "viedub" | "addon" | "none";
+  /** present when nothing is installed: the add-on card shows it */
+  addon?: DubAddon;
+}
+
+/** The "gói lồng tiếng" (services/dub_addon.py): Whisper + spleeter + VieNeu installed next to the user's data. */
+export interface DubAddon {
+  supported: boolean;
+  installed: boolean;
+  info: { version?: number; installed_at?: string; device?: string; cuda?: boolean; cuda_error?: string; note?: string;
+    gpu?: DubGpu | null };
+  dir: string;
+  gpu: DubGpu | null;
+  download_mb: number;
+  need_mb: number;
+  free_mb: number;
+  size_mb?: number;
+  running: boolean;
+  phase: string;
+  progress: number;
+  done_mb: number;
+  total_mb: number;
+  error: string;
+  started_at: string | null;
+  last: string;
+}
+
+export interface DubGpu {
+  name: string;
+  driver: string;
+  vram_mb: number;
+  old_driver: boolean;
 }
 
 /** "google" = free machine translation, no key / AI quota (the default, like VieDub); "ai" = the AI provider
@@ -562,6 +595,22 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 
 export function getDubStatus(): Promise<DubStatus> {
   return api<DubStatus>("/api/dub/status");
+}
+
+export function getDubAddon(): Promise<DubAddon> {
+  return api<DubAddon>("/api/dub/addon");
+}
+
+export function installDubAddon(): Promise<DubAddon> {
+  return post("/api/dub/addon/install", {});
+}
+
+export function cancelDubAddon(): Promise<DubAddon> {
+  return post("/api/dub/addon/cancel", {});
+}
+
+export function removeDubAddon(): Promise<DubAddon> {
+  return post("/api/dub/addon/remove", {});
 }
 
 export function startDub(body: DubStart): Promise<DubJob> {

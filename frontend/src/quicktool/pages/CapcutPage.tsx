@@ -113,11 +113,11 @@ function Requirements({ st, onRefresh, refreshing }: { st: CapcutStatus; onRefre
             ? <>{st.ai.provider} — giống AI viết bài, viết kịch bản.</>
             : <>{st.ai.reason} Không có AI thì tool tự chọn theo số / câu cảm thán.</>}
         </Check>
-        <Check ok={st.whisper} warn title="Whisper nghe lời (pyvideotrans)">
+        <Check ok={st.whisper} warn title="Whisper nghe lời (gói lồng tiếng)">
           {st.whisper
             ? "Dùng cho clip đã ghép và video của bạn (để biết lúc nào nói chữ gì)."
             : <>Chưa có — video lồng tiếng vẫn làm được (đã có lời); clip đã ghép / video của bạn chỉ vào CapCut, không có phụ đề.
-              {st.whisper_reason ? <> ({st.whisper_reason})</> : null}</>}
+              {" "}<a className="qt-link" href="/tools/dub">Cài gói lồng tiếng →</a></>}
         </Check>
         <Check ok={st.ffmpeg} title="ffmpeg">{st.ffmpeg ? "Có." : "Thiếu ffmpeg trên PATH."}</Check>
       </ul>

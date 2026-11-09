@@ -3,6 +3,7 @@ import { api } from "../../api/client";
 import { toast } from "../../store/toast";
 import { AppVersionSection } from "../AppUpdate";
 import { askConfirm } from "../Dialogs";
+import { DubAddonCard } from "../../quicktool/dub/DubAddonCard";
 
 interface AppStatus {
   /** the desktop app (DFlow.exe) — not start.ps1 */
@@ -213,9 +214,15 @@ export function MachineSection() {
       </div>
 
       <div className="settings-panel__section">
-        <div className="settings-panel__label">Bộ lồng tiếng VieDub (pyvideotrans) — chỉ khi dùng lồng tiếng</div>
+        <div className="settings-panel__label">🎙 Gói lồng tiếng (AI nghe tiếng, tách nhạc, giọng VieNeu)</div>
+        <DubAddonCard compact />
+      </div>
+
+      <div className="settings-panel__section">
+        <div className="settings-panel__label">Bộ VieDub đầy đủ (không bắt buộc)</div>
         <div className="settings-panel__hint">
-          Để trống nếu VieDub nằm ở <code>D:\codes\pyvideotrans</code>. Trang Lồng tiếng video tự báo còn thiếu gì.
+          Chỉ cần khi muốn xoá chữ bằng AI (LaMa). Máy đã có VieDub thì DFlow dùng nó thay cho gói lồng tiếng. Để trống nếu VieDub nằm ở
+          {" "}<code>D:\codes\pyvideotrans</code>.
         </div>
         <label className="settings-field">
           <span className="settings-panel__hint">Thư mục VieDub</span>

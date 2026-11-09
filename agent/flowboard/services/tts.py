@@ -115,11 +115,11 @@ def voice_kind(voice: str) -> str:
 
 
 def vieneu_available() -> tuple[bool, str]:
-    """VieNeu needs pyvideotrans' venv (the ``vieneu`` package lives there)."""
-    from flowboard.services.video_clean import erase_python
+    """VieNeu runs in the dubbing runtime (VieDub's venv or the "gói lồng tiếng" add-on — both have ``vieneu``)."""
+    from flowboard.services import dub_addon
 
-    if erase_python() is None:
-        return False, "cần repo pyvideotrans (VieDub) với venv có gói vieneu — như máy nhà"
+    if dub_addon.runtime() is None:
+        return False, "cần gói lồng tiếng — bấm “Cài gói lồng tiếng” ở trang 🎙 Lồng tiếng video"
     return True, ""
 
 

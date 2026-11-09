@@ -28,6 +28,8 @@ os.environ.setdefault("FLOWBOARD_SECRETS_PATH", str(Path(_TMPDIR) / "secrets.jso
 # The admin's licence signing key on this machine (~/.flowboard/dflow-license.key) must not sign test stores:
 # tests that need a key make their own (test_licensing.py).
 os.environ["FLOWBOARD_LICENSE_KEY"] = str(Path(_TMPDIR) / "no-licence-key")
+# the "gói lồng tiếng" never comes from the machine running the tests (services/dub_addon.py)
+os.environ["FLOWBOARD_DUB_ADDON_DIR"] = str(Path(_TMPDIR) / "addons" / "dub")
 os.environ.pop("FLOWBOARD_LICENSE_STRICT", None)
 
 from fastapi.testclient import TestClient  # noqa: E402
