@@ -296,7 +296,8 @@ Rồi tắt DFlow và mở lại.
 tải bộ nhận dạng giọng nói Whisper, tách nhạc nền, giọng VieNeu và — nếu máy có card NVIDIA — thư viện để chạy bằng card: khoảng **3,9 GB** (không có card
 NVIDIA thì ~2,6 GB, chạy bằng CPU, chậm hơn nhiều), cần trống ~9 GB, nằm trong thư mục dữ liệu (`<DFlowData>\addons\dub`). Tải từ PyPI / HuggingFace, miễn phí;
 rời trang vẫn tải tiếp (nút "việc đang chạy"), mất mạng giữa chừng thì bấm **Cài lại** để tải tiếp chỗ dở. Card NVIDIA cần driver mới (bản 528 trở lên).
-Gói này **không** có xoá chữ bằng AI (LaMa cần thêm ~8 GB) — muốn có thì cài VieDub đầy đủ như dưới; máy có VieDub thì DFlow dùng VieDub.
+Máy chưa có **Microsoft Visual C++ Runtime** (bộ thư viện Windows mà Whisper / VieNeu cần) thì từ bản 1.8.3 gói tự tải bản chính thức của Microsoft
+và cài — Windows hiện hộp hỏi quyền, bấm **Yes / Có**. Gói này **không** có xoá chữ bằng AI (LaMa cần thêm ~8 GB) — muốn có thì cài VieDub đầy đủ như dưới; máy có VieDub thì DFlow dùng VieDub.
 
 **Cách cũ: bộ VieDub (pyvideotrans) đầy đủ** — có cả xoá chữ bằng AI. Thêm khoảng 15 GB ổ cứng. Nếu không rành, nhờ người cài DFlow làm giúp.
 
@@ -399,6 +400,7 @@ Người khác chỉ đổi được mật khẩu / thông tin của chính họ
 | Báo hết lượt Gemini | Thêm Gemini key từ tài khoản Google khác (Cài đặt → Gemini key) |
 | Lồng tiếng báo "chưa có gói lồng tiếng" | Bấm **⬇ Cài gói lồng tiếng** ngay trên trang đó (Mục 6.2) |
 | Cài gói lồng tiếng báo lỗi giữa chừng | Mạng chập chờn: bấm **Cài lại** (tải tiếp chỗ dở). Ổ đĩa đầy: dọn bớt hoặc đổi Thư mục dữ liệu |
+| Cài gói lồng tiếng báo "Could not find module …ctranslate2.dll" | Máy thiếu Microsoft Visual C++ Runtime: cập nhật app lên 1.8.3 rồi bấm **Cài lại** (bấm **Yes** khi Windows hỏi quyền), hoặc tự cài [vc_redist.x64.exe](https://aka.ms/vs/17/release/vc_redist.x64.exe) rồi bấm **Cài lại** |
 
 Vẫn không được: chụp màn hình cửa sổ DFlow (PowerShell) và trang báo lỗi, gửi cho người hỗ trợ.
 
