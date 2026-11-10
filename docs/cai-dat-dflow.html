@@ -137,13 +137,13 @@ footer { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line)
 
   <div class="get" id="tai">
     <div class="get__meta">
-      <span class="eyebrow" id="ver">Bản mới nhất · 1.8.4 · 191 MB</span>
+      <span class="eyebrow" id="ver">Bản mới nhất · 1.8.5 · 182 MB</span>
       <h2>Tải file cài đặt</h2>
-      <span class="get__name" id="file">DFlow_1.8.4_x64-setup.exe</span>
+      <span class="get__name" id="file">DFlow_1.8.5_x64-setup.exe</span>
       <div class="nope"><span class="chip chip--ok">Windows 10 / 11</span><span class="chip">RAM 8 GB trở lên</span><span class="chip">Ổ cứng trống ~10 GB</span></div>
     </div>
     <div class="get__btns">
-      <a class="btn btn--main" id="dl" href="https://github.com/hoangduytn1703/dflow-releases/releases/download/v1.8.4/DFlow_1.8.4_x64-setup.exe">⬇ Tải DFlow 1.8.4</a>
+      <a class="btn btn--main" id="dl" href="https://github.com/hoangduytn1703/dflow-releases/releases/download/v1.8.5/DFlow_1.8.5_x64-setup.exe">⬇ Tải DFlow 1.8.5</a>
       <a class="btn btn--ghost" href="https://github.com/hoangduytn1703/dflow-releases/releases/latest">Trang tải (luôn có bản mới nhất)</a>
     </div>
   </div>
@@ -277,7 +277,7 @@ footer { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line)
 </div>
 
 <script>
-// The download button follows the newest release (the static 1.8.4 link stays if GitHub cannot be reached).
+// The download button follows the newest release (the static 1.8.5 link stays if GitHub cannot be reached).
 fetch("https://api.github.com/repos/hoangduytn1703/dflow-releases/releases/latest")
   .then(function (r) { return r.ok ? r.json() : null; })
   .then(function (rel) {
