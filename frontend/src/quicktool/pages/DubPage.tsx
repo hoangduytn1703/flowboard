@@ -492,6 +492,7 @@ export function DubPage() {
                   Dán link TikTok / Douyin / YouTube / Instagram / Facebook / X (tối đa {status.max_minutes} phút). AI nghe tiếng gốc
                   (Whisper), dịch sang tiếng Việt nói, đọc lại bằng giọng Việt, bỏ tiếng gốc{status.separate ? " (giữ được nhạc nền)" : ""} và in phụ đề.
                 </p>
+                {status.slow_reason && <p className="qt-nogpu">🐢 {status.slow_reason}</p>}
                 <div className="qt-field">
                   <span>Link video <small>(mỗi ô một link, tối đa {MAX_LINKS} — dán một lúc nhiều link cũng tự tách; dán cả đoạn share Douyin cũng được)</small></span>
                   <div className="qt-dub__links">

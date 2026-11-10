@@ -3,7 +3,9 @@
 import { api, extractErrorMessage } from "./client";
 import type { DubCutRow, DubJob } from "./dub";
 
-export type CutHow = "ai" | "prompt" | "even";
+/** ai = the AI picks; prompt = the seller's request; manual = "Tự cắt" (start / end / name typed, one video);
+ * even = spread evenly (still offered by "✨ Gợi ý lại" and the assistant) */
+export type CutHow = "ai" | "prompt" | "manual" | "even";
 export type CutStatus = "queued" | "running" | "review" | "cutting" | "done" | "error";
 
 export interface CutToolStatus {
@@ -17,6 +19,8 @@ export interface CutToolStatus {
   prompt_max: number;
   /** languages offered for the titles the AI writes */
   title_langs?: string[];
+  /** no NVIDIA card: Whisper hears on the CPU — works, slower (said before a long video) */
+  slow_reason?: string;
   default_min: number;
   default_max: number;
 }
@@ -26,6 +30,8 @@ export interface CutPartView {
   start: number;
   end: number;
   title: string;
+  /** "Tự cắt": the second line typed under the name */
+  subtitle?: string;
   job_id: string;
   board_id: number | null;
   /** the part's current video: the raw cut until it is exported from the editor */
@@ -70,6 +76,8 @@ export interface CutSession {
   rows: DubCutRow[];
   by: string;
   note: string;
+  /** analysed first: waits for its parts (status review with no rows) */
+  ask?: boolean;
   /** one title for the whole video, when the request asked for one ("Name") */
   name?: string;
   /** the language the AI writes the titles in ("" = what the request says, else Vietnamese) */
@@ -91,6 +99,10 @@ export interface CutStart {
   review: boolean;
   channel_id: number | null;
   title_lang?: string;
+  /** "🔍 Phân tích": only download + hear; each video then waits for its parts (typed, or the AI's) */
+  analyze?: boolean;
+  /** "Tự cắt" (how manual): the parts typed by the seller, seconds */
+  rows?: { start: number; end: number; title: string; subtitle?: string }[];
   /** a saved "★ Mẫu chỉnh sửa" (frame, background, sticker, blur boxes…) every part is rendered in; null = raw pieces */
   look_preset_id?: number | null;
 }
@@ -107,7 +119,9 @@ export const getCutSession = (id: string) => api<CutSession>(`/api/cut/sessions/
 export const startCut = (body: CutStart) => post<{ run_id: string; sessions: CutSession[] }>("/api/cut/sessions", body);
 export const suggestCut = (id: string, body: { how: CutHow; prompt: string; min_s: number; max_s: number; max_parts: number; title_lang?: string }) =>
   post<{ rows: DubCutRow[]; by: string; note: string; name?: string }>(`/api/cut/sessions/${id}/suggest`, body);
-export const cutNow = (id: string, rows: DubCutRow[]) => post<CutSession>(`/api/cut/sessions/${id}/cut`, { rows });
+/** ``how: "manual"`` = the seller typed these rows (the card then says "tự cắt") */
+export const cutNow = (id: string, rows: DubCutRow[], how?: "manual") =>
+  post<CutSession>(`/api/cut/sessions/${id}/cut`, how ? { rows, how } : { rows });
 export const stopCut = (id: string) => post<CutSession>(`/api/cut/sessions/${id}/stop`, {});
 export const cutAgain = (id: string) => post<CutSession>(`/api/cut/sessions/${id}/again`, {});
 export const deleteCutSessions = (ids: string[]) =>
@@ -146,12 +160,5 @@ export const LENGTHS: { key: string; label: string; min: number; max: number }[]
   { key: "180-600", label: "3–10 phút", min: 180, max: 600 },
 ];
 
-export const PROMPT_IDEAS = [
-  "Mỗi đoạn là một mẹo / một ý chính",
-  "Chỉ giữ những đoạn hài, bất ngờ nhất",
-  "Chỉ giữ phần review sản phẩm, bỏ phần chào hỏi",
-  "Mỗi đoạn một câu hỏi và câu trả lời",
-  "Cắt theo từng bước hướng dẫn",
-];
 
 export const isBusy = (s: CutSession) => s.status === "queued" || s.status === "running" || s.status === "cutting";

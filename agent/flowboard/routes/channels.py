@@ -87,7 +87,7 @@ def _row(c: Channel, posts: int = 0, clips: int = 0) -> dict[str, Any]:
         "description": c.description, "audience": c.audience, "goal": c.goal,
         "link": c.link or "", "page_review": dict(c.page_review) if c.page_review else None,
         "fb_page_id": c.fb_page_id or "", "fb_page_name": c.fb_page_name or "",
-        "fb_connected": bool(c.fb_page_id and facebook_publish.get_token(c.id)),
+        "fb_connected": bool(c.fb_page_id and facebook_publish.has_token(c.id)),
         "brainstorm": dict(c.brainstorm) if c.brainstorm else None,
         "posts": posts, "clips": clips,
         "created_at": c.created_at.isoformat() if c.created_at else None,

@@ -10,12 +10,12 @@ import {
 import { FormatBar, sourceBoxToFrame } from "./FormatBar";
 import { platformOf, type PlatformKey } from "./platforms";
 import { LookPresets } from "./LookPresets";
-import { cleanLook, effectiveLayout, type GeomPatch } from "./cues";
+import { cleanLook, effectiveLayout, splitText, type GeomPatch } from "./cues";
 import { toast } from "../../../store/toast";
 import { clock, cueIndexAt, sameJson, type EditCue, type EditDoc } from "./cues";
 import { EditorStage, type AudioMode, type Sel, type StageHandle } from "./EditorStage";
 import { EditorTimeline, type TimelineHandle } from "./EditorTimeline";
-import { Inspector, type InspectorTab, type OutSettings } from "./Inspector";
+import { Inspector, type OutSettings } from "./Inspector";
 import { CutPane } from "./CutPane";
 import "./editor.css";
 import { askConfirm } from "../../../components/Dialogs";
@@ -23,6 +23,22 @@ import { askConfirm } from "../../../components/Dialogs";
 const MIN_SLOT = 0.3;
 const COALESCE_MS = 900;
 const errMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** The tools on the left (what can be put on the video) and the details on the right (what is selected + export). */
+type LeftTab = "format" | "list" | "decor" | "blur" | "hl";
+type RightTab = "sub" | "cut" | "out";
+const LEFT_TABS: { key: LeftTab; icon: string; label: string }[] = [
+  { key: "format", icon: "🎞", label: "Khung & nền" },
+  { key: "list", icon: "📜", label: "Các câu" },
+  { key: "decor", icon: "🎨", label: "Trang trí" },
+  { key: "blur", icon: "🌫", label: "Làm mờ" },
+  { key: "hl", icon: "✨", label: "Nhấn chữ" },
+];
+const RIGHT_TABS: { key: RightTab; icon: string; label: string }[] = [
+  { key: "sub", icon: "💬", label: "Phụ đề" },
+  { key: "cut", icon: "✂️", label: "Cắt" },
+  { key: "out", icon: "⚙", label: "Xuất" },
+];
 
 function docFrom(job: DubJob): EditDoc {
   return {
@@ -84,7 +100,8 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
     try { return window.localStorage.getItem("flowboard.dub.scope") === "all" ? "all" : "cue"; } catch { return "cue"; }
   });
   const setScope = (v: "all" | "cue") => { setScopeState(v); try { window.localStorage.setItem("flowboard.dub.scope", v); } catch { /* private mode */ } };
-  const [tab, setTab] = useState<InspectorTab>("sub");
+  const [leftTab, setLeftTab] = useState<LeftTab>("format");
+  const [rightTab, setRightTab] = useState<RightTab>("sub");
   // "📱 Xem trên": view the frame inside an app's screen (remembered on this browser; never exported)
   const [platform, setPlatformState] = useState<PlatformKey | null>(() => {
     try { return platformOf(window.localStorage.getItem("flowboard.dub.platform"))?.key ?? null; } catch { return null; }
@@ -244,15 +261,78 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
     });
   }
 
+  // ── split / merge / add / remove lines (the number of lines changes: exported as the whole list) ──────────
+  /** key moments remember the line they sit in: looked up again after the lines moved */
+  const relinked = (d: EditDoc, cues: EditCue[]): EditDoc => ({
+    ...d, cues, highlights: normHighlights({ ...d.highlights, points: d.highlights.points.map((p) => ({ ...p, line: cueIndexAt(cues, p.at) })) }),
+  });
+  const splitAt = (): number | null => {
+    const t = timeRef.current;
+    const i = cueIndexAt(docRef.current.cues, t);
+    if (i === null) return null;
+    const c = docRef.current.cues[i];
+    return t - c.start >= MIN_SLOT && c.end - t >= MIN_SLOT ? i : null;
+  };
+  function splitAtNow() {
+    const i = splitAt();
+    if (i === null) { toast.warning("Đưa vạch thời gian vào giữa một câu (cách hai đầu ít nhất 0,3 giây) rồi bấm Tách."); return; }
+    const t = Math.round(timeRef.current * 1000) / 1000;
+    change((d) => {
+      const c = d.cues[i];
+      const frac = (t - c.start) / (c.end - c.start);
+      const [a, b] = splitText(c.text, frac);
+      const [sa, sb] = splitText(c.src, frac);
+      const cues = [...d.cues.slice(0, i), { ...c, end: t, text: a, src: sa }, { ...c, start: t, text: b, src: sb }, ...d.cues.slice(i + 1)];
+      return relinked(d, cues);
+    });
+    setSel({ kind: "cue", i: i + 1 });
+  }
+  function mergeWithNext(i: number) {
+    if (!docRef.current.cues[i + 1]) return;
+    change((d) => {
+      const a = d.cues[i], b = d.cues[i + 1];
+      const join = (x: string, y: string) => [x.trim(), y.trim()].filter(Boolean).join(" ");
+      const cues = [...d.cues.slice(0, i), { ...a, end: b.end, text: join(a.text, b.text), src: join(a.src, b.src) }, ...d.cues.slice(i + 2)];
+      return relinked(d, cues);
+    });
+    setSel({ kind: "cue", i });
+  }
+  /** where a new line fits at the playhead: the free time between two lines (null = inside a line / no room) */
+  const gapAt = (): { at: number; start: number; end: number } | null => {
+    const cues = docRef.current.cues;
+    const t = timeRef.current;
+    const end = duration || job.duration_s || 0;
+    if (cueIndexAt(cues, t) !== null) return null;
+    const at = cues.findIndex((c) => c.start > t);
+    const pos = at < 0 ? cues.length : at;
+    const lo = pos > 0 ? cues[pos - 1].end : 0;
+    const hi = pos < cues.length ? cues[pos].start : end;
+    const start = Math.max(lo, t);
+    return hi - start >= MIN_SLOT ? { at: pos, start, end: Math.min(hi, start + 2.5) } : null;
+  };
+  function addAtNow() {
+    const g = gapAt();
+    if (!g) { toast.warning("Chỗ này đang có câu — đưa vạch thời gian vào khoảng trống giữa hai câu rồi bấm Thêm câu (hoặc bấm Tách để chia câu)."); return; }
+    change((d) => relinked(d, [...d.cues.slice(0, g.at),
+      { start: Math.round(g.start * 1000) / 1000, end: Math.round(g.end * 1000) / 1000, src: "", text: "Câu mới", look: null }, ...d.cues.slice(g.at)]));
+    setSel({ kind: "cue", i: g.at });
+    setRightTab("sub");
+    setFocusText((n) => n + 1);
+  }
+  function removeCue(i: number) {
+    if (!docRef.current.cues[i]) return;
+    change((d) => relinked(d, d.cues.filter((_, k) => k !== i)));
+    setSel(null);
+  }
+
   // ── selection ↔ panel tab ────────────────────────────────────────────────
   function select(s: Sel) {
     setSel(s);
     if (!s) return;
-    if (s.kind === "cue") setTab((t) => (t === "list" ? "list" : "sub"));
-    else if (s.kind === "style") setTab("sub");
-    else if (s.kind === "blur") setTab("blur");
-    else if (s.kind === "hl") setTab("hl");
-    else setTab("decor");
+    if (s.kind === "cue" || s.kind === "style") setRightTab("sub");
+    else if (s.kind === "blur") setLeftTab("blur");
+    else if (s.kind === "hl") setLeftTab("hl");
+    else setLeftTab("decor");
   }
   function selectCue(i: number, seekTo = true) {
     const c = doc.cues[i];
@@ -277,6 +357,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
       const mod = e.ctrlKey || e.metaKey;
       if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
       if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
+      if (mod && e.key.toLowerCase() === "b") { e.preventDefault(); splitAtNow(); return; }
       if (mod || e.altKey) return;
       const cur = sel?.kind === "cue" ? sel.i : activeCue;
       switch (e.key) {
@@ -286,8 +367,8 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
         case "ArrowUp": e.preventDefault(); selectCue(Math.max(0, (cur ?? 1) - 1)); break;
         case "ArrowDown": e.preventDefault(); selectCue(Math.min(doc.cues.length - 1, (cur ?? -1) + 1)); break;
         case "Home": e.preventDefault(); stage.current?.seek(0); break;
-        case "Enter": if (sel?.kind === "cue") { e.preventDefault(); setTab("sub"); setFocusText((n) => n + 1); } break;
-        case "Delete": case "Backspace": if (sel?.kind === "cue") { e.preventDefault(); setCueText(sel.i, ""); } break;
+        case "Enter": if (sel?.kind === "cue") { e.preventDefault(); setRightTab("sub"); setFocusText((n) => n + 1); } break;
+        case "Delete": case "Backspace": if (sel?.kind === "cue") { e.preventDefault(); removeCue(sel.i); } break;
         case "Escape": select(null); break;
         default: break;
       }
@@ -301,6 +382,10 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
   const textEdits = doc.cues.filter((c, i) => c.text !== origin[i]?.text).length;
   const timeEdits = doc.cues.filter((c, i) => origin[i] && (Math.abs(c.start - origin[i].start) > 0.005 || Math.abs(c.end - origin[i].end) > 0.005)).length;
   const lookEdits = doc.cues.filter((c, i) => !sameJson(c.look ?? null, origin[i]?.look ?? null)).length;
+  // lines were split / merged / added / removed: the project's list is replaced as a whole
+  const structDirty = doc.cues.length !== job.segments.length;
+  // after a split / merge the old lines no longer line up by number: no "edited" marks, no "back to the old line"
+  const originShown = structDirty ? [] : origin;
   const layoutDirty = !sameJson(doc.layout, normLayout(job.layout));
   const styleDirty = doc.style !== job.style;
   const hlDirty = !sameJson(doc.highlights, normHighlights(job.highlights));
@@ -313,9 +398,10 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
   const voiceDirty = !subOnly && out.voice !== job.voice;
   const otherDirty = out.engine !== (job.engine ?? "ass") || (!subOnly && out.keepBgm !== job.keep_bgm) || out.name.trim() !== job.name || out.channelId !== job.channel_id;
   const changes = [
-    textEdits ? `${textEdits} câu sửa chữ` : "",
-    timeEdits ? `${timeEdits} câu dời giờ` : "",
-    lookEdits ? `${lookEdits} câu chỉnh riêng vị trí / cỡ` : "",
+    structDirty ? `tách / gộp / thêm / xoá câu (${job.segments.length} → ${doc.cues.length} câu)` : "",
+    !structDirty && textEdits ? `${textEdits} câu sửa chữ` : "",
+    !structDirty && timeEdits ? `${timeEdits} câu dời giờ` : "",
+    !structDirty && lookEdits ? `${lookEdits} câu chỉnh riêng vị trí / cỡ` : "",
     modeDirty ? (subOnly ? "chuyển sang chỉ phụ đề" : "chuyển sang lồng tiếng") : "",
     langDirty ? `phụ đề ${subLangName(doc.lang, job.language)}` : "",
     namesDirty ? "tên riêng" : "",
@@ -327,7 +413,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
   ].filter(Boolean);
   const dirty = changes.length > 0;
   // subtitles only never reads a voice; a voice-over reads it again when lines / timings / the voice changed
-  const needVoice = !subOnly && (textEdits > 0 || timeEdits > 0 || voiceDirty || namesDirty || !job.voice_url);
+  const needVoice = !subOnly && (structDirty || textEdits > 0 || timeEdits > 0 || voiceDirty || namesDirty || !job.voice_url);
   const neverRendered = job.status === "review" || !job.media_url;
 
   useEffect(() => {
@@ -346,8 +432,13 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
         voice: out.voice, engine: out.engine, keep_bgm: out.keepBgm, name: out.name.trim(), channel_id: out.channelId,
         mode: out.mode, sub_lang: doc.lang, names: normNames(doc.names),
       };
-      if (timeEdits) body.timings = doc.cues.map((c) => [c.start, c.end]);
-      if (lookEdits || customCount) body.looks = doc.cues.map((c) => cleanLook(c.look));
+      if (structDirty) {
+        delete body.lines;
+        body.cues = doc.cues.map((c) => ({ start: c.start, end: c.end, text: c.text, src: c.src, look: cleanLook(c.look) }));
+      } else {
+        if (timeEdits) body.timings = doc.cues.map((c) => [c.start, c.end]);
+        if (lookEdits || customCount) body.looks = doc.cues.map((c) => cleanLook(c.look));
+      }
       onJob(await renderDub(job.job_id, body));
       announceRunning();
       toast.info(isCut ? "Đang xuất video đã chỉnh — nhanh thôi."
@@ -365,6 +456,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
   // ``auto``: switching the project to a voice-over — its lines must be Vietnamese, so they are translated at once
   async function setSubLang(lang: SubLang, auto = false) {
     if (lang === docRef.current.lang || readOnly || langBusy) return;
+    if (structDirty && lang !== "none") { toast.warning("Vừa tách / gộp / thêm / xoá câu — bấm Xuất lại video trước rồi mới đổi ngôn ngữ phụ đề."); return; }
     if (lang === "none") {  // nothing to rewrite: the lines stay, just not burned
       change((d) => ({ ...d, lang }));
       return;
@@ -390,6 +482,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
   /** "✨ AI rà tên riêng": the names Google got wrong fixed in the lines + their Vietnamese reading — one undo step. */
   async function checkNames() {
     if (readOnly || namesBusy) return;
+    if (structDirty) { toast.warning("Vừa tách / gộp / thêm / xoá câu — bấm Xuất lại video trước rồi mới nhờ AI rà tên riêng."); return; }
     setNamesBusy(true);
     try {
       const r = await checkDubNames(job.job_id, docRef.current.cues.map((c) => c.text));
@@ -483,6 +576,8 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
   const styles = out.engine === "remotion" ? status.remotion_styles ?? [] : status.styles;
   const orientation = frameW && frameH ? (frameW > frameH ? "landscape" : frameW === frameH ? "square" : "portrait") : "portrait";
   const total = duration || job.duration_s;
+  const selCue = sel?.kind === "cue" && doc.cues[sel.i] ? sel.i : null;
+  const canSplit = activeCue !== null && time - doc.cues[activeCue].start >= MIN_SLOT && doc.cues[activeCue].end - time >= MIN_SLOT;
   const exportLabel = exporting ? "Đang gửi…" : neverRendered ? "🎬 Render video" : dirty ? `✓ Xuất lại video${needVoice ? " (đọc lại giọng)" : " (nhanh)"}` : "✓ Đã xuất";
 
   return (
@@ -526,8 +621,6 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
           )}
         </div>
         <div className="dx__actions">
-          <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" disabled={!past.current.length || readOnly} onClick={undo} title="Hoàn tác (Ctrl+Z)">↶</button>
-          <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" disabled={!future.current.length || readOnly} onClick={redo} title="Làm lại (Ctrl+Shift+Z)">↷</button>
           {job.media_url && <button type="button" className="qt-btn qt-btn--small" onClick={() => { stage.current?.pause(); setShowResult(true); }} title="Xem video đã xuất">▶ Bản đã xuất</button>}
           {job.media_url && (
             <a className="qt-btn qt-btn--small" href={job.media_url}
@@ -562,66 +655,26 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
       </div>
 
       <div className="dx__main">
-        <div className="dx__center">
-          <FormatBar layout={doc.layout} srcW={srcW} srcH={srcH} readOnly={readOnly} onLayout={setLayout}
-                     platform={platform} onPlatform={setPlatform} />
-          <EditorStage
-            ref={stage}
-            src={src}
-            srcW={srcW}
-            srcH={srcH}
-            voiceUrl={job.voice_url ? `${job.voice_url}?v=${version}` : undefined}
-            bgmUrl={job.bgm_url ? `${job.bgm_url}?v=${version}` : undefined}
-            player={live}
-            frameW={frameW}
-            frameH={frameH}
-            cues={doc.cues}
-            noSubs={doc.lang === "none"}
-            layout={doc.layout}
-            style={doc.style}
-            highlights={doc.highlights}
-            selected={sel}
-            readOnly={readOnly}
-            audio={audio}
-            onLayout={setLayout}
-            onSubGeom={subGeom}
-            onSelect={select}
-            onEditText={setCueText}
-            onTime={onTime}
-            onPlaying={setPlaying}
-            onDuration={(d) => { if (d) setDuration(d); }}
-            onNatural={(w, h) => setNatural({ w, h })}
-            platform={platform}
-          />
-          <div className="dx__transport">
-            <button type="button" className="dx__tbtn" title="Về đầu (Home)" onClick={() => stage.current?.seek(0)}>⏮</button>
-            <button type="button" className="dx__tbtn" title="Câu trước (↑)" onClick={() => selectCue(Math.max(0, (activeCue ?? (sel?.kind === "cue" ? sel.i : 1)) - 1))}>⏪</button>
-            <button type="button" className="dx__tbtn dx__tbtn--play" title="Phát / dừng (Space)" onClick={() => stage.current?.toggle()}>{playing ? "⏸" : "▶"}</button>
-            <button type="button" className="dx__tbtn" title="Câu sau (↓)" onClick={() => selectCue(Math.min(doc.cues.length - 1, (activeCue ?? (sel?.kind === "cue" ? sel.i : -1)) + 1))}>⏩</button>
-            <span className="dx__clock">{clock(time)} <small>/ {clock(total)}</small></span>
-            <span className="dx__cue">{activeCue !== null ? `Câu ${activeCue + 1}/${doc.cues.length}` : "—"}</span>
-            <label className="dx__audio" title="Nghe gì khi xem thử">
-              🔊
-              <select value={audio} onChange={(e) => setAudio(e.target.value as AudioMode)}>
-                {(job.mode ?? "dub") === "sub"
-                  ? <option value={live ? "dub" : "orig"}>Tiếng gốc (giữ khi xuất)</option>
-                  : <option value="dub" disabled={!job.voice_url && !live}>Giọng Việt{job.voice_url || live ? "" : " (chưa có)"}</option>}
-                {!live && (job.mode ?? "dub") !== "sub" && <option value="orig">Tiếng gốc</option>}
-                <option value="off">Tắt tiếng</option>
-              </select>
-            </label>
+        {/* tools: what goes on the video */}
+        <aside className="dx-side dx-side--left">
+          <div className="dx-side__tabs" role="tablist" aria-label="Công cụ">
+            {LEFT_TABS.map((x) => (
+              <button key={x.key} type="button" role="tab" aria-selected={leftTab === x.key}
+                      className={`dx-side__tab${leftTab === x.key ? " is-on" : ""}`} onClick={() => setLeftTab(x.key)}>
+                <span aria-hidden="true">{x.icon}</span>{x.label}
+              </button>
+            ))}
           </div>
-          {(textEdits > 0 || timeEdits > 0 || voiceDirty) && audio === "dub" && (
-            <p className="dx__stale">Giọng đang nghe là bản đã xuất — câu vừa sửa / dời sẽ được đọc lại khi bấm “Xuất lại video”.</p>
-          )}
-        </div>
-        <Inspector
-          tab={tab}
-          onTab={setTab}
+          <div className="dx-side__body">
+            {leftTab === "format" ? (
+              <FormatBar layout={doc.layout} srcW={srcW} srcH={srcH} readOnly={readOnly} onLayout={setLayout}
+                         platform={platform} onPlatform={setPlatform} />
+            ) : (
+              <Inspector bare tab={leftTab} onTab={() => undefined}
           selected={sel}
           onSelect={(s) => (s?.kind === "cue" ? selectCue(s.i) : select(s))}
           cues={doc.cues}
-          origin={origin}
+          origin={originShown}
           onCueText={setCueText}
           onCueTiming={setCueTiming}
           onPlayCue={(i) => { const c = doc.cues[i]; if (c) stage.current?.playRange(c.start, c.end); }}
@@ -665,14 +718,138 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
             <CutPane job={job} cues={doc.cues} duration={total} now={time} dirty={dirty} readOnly={readOnly}
                      onSeek={(t) => stage.current?.seek(t)} onPlayRange={(a, b) => stage.current?.playRange(a, b)} onJob={onJob} />
           )}
-        />
+              />
+            )}
+          </div>
+        </aside>
+
+        <div className="dx__center">
+          <EditorStage
+            ref={stage}
+            src={src}
+            srcW={srcW}
+            srcH={srcH}
+            voiceUrl={job.voice_url ? `${job.voice_url}?v=${version}` : undefined}
+            bgmUrl={job.bgm_url ? `${job.bgm_url}?v=${version}` : undefined}
+            player={live}
+            frameW={frameW}
+            frameH={frameH}
+            cues={doc.cues}
+            noSubs={doc.lang === "none"}
+            layout={doc.layout}
+            style={doc.style}
+            highlights={doc.highlights}
+            selected={sel}
+            readOnly={readOnly}
+            audio={audio}
+            onLayout={setLayout}
+            onSubGeom={subGeom}
+            onSelect={select}
+            onEditText={setCueText}
+            onTime={onTime}
+            onPlaying={setPlaying}
+            onDuration={(d) => { if (d) setDuration(d); }}
+            onNatural={(w, h) => setNatural({ w, h })}
+            platform={platform}
+          />
+          <div className="dx__transport">
+            <div className="dx__tgroup">
+              <span className="dx__clock">{clock(time)} <small>/ {clock(total)}</small></span>
+              <span className="dx__cue">{activeCue !== null ? `Câu ${activeCue + 1}/${doc.cues.length}` : "—"}</span>
+            </div>
+            <div className="dx__tgroup dx__tgroup--mid">
+              <button type="button" className="dx__tbtn" title="Về đầu (Home)" onClick={() => stage.current?.seek(0)}>⏮</button>
+              <button type="button" className="dx__tbtn" title="Câu trước (↑)" onClick={() => selectCue(Math.max(0, (activeCue ?? (sel?.kind === "cue" ? sel.i : 1)) - 1))}>⏪</button>
+              <button type="button" className="dx__tbtn dx__tbtn--play" title="Phát / dừng (Space)" onClick={() => stage.current?.toggle()}>{playing ? "⏸" : "▶"}</button>
+              <button type="button" className="dx__tbtn" title="Câu sau (↓)" onClick={() => selectCue(Math.min(doc.cues.length - 1, (activeCue ?? (sel?.kind === "cue" ? sel.i : -1)) + 1))}>⏩</button>
+            </div>
+            <div className="dx__tgroup dx__tgroup--end">
+              <label className="dx__audio" title="Nghe gì khi xem thử">
+                🔊
+                <select value={audio} onChange={(e) => setAudio(e.target.value as AudioMode)}>
+                  {(job.mode ?? "dub") === "sub"
+                    ? <option value={live ? "dub" : "orig"}>Tiếng gốc (giữ khi xuất)</option>
+                    : <option value="dub" disabled={!job.voice_url && !live}>Giọng Việt{job.voice_url || live ? "" : " (chưa có)"}</option>}
+                  {!live && (job.mode ?? "dub") !== "sub" && <option value="orig">Tiếng gốc</option>}
+                  <option value="off">Tắt tiếng</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          {(textEdits > 0 || timeEdits > 0 || voiceDirty) && audio === "dub" && (
+            <p className="dx__stale">Giọng đang nghe là bản đã xuất — câu vừa sửa / dời sẽ được đọc lại khi bấm “Xuất lại video”.</p>
+          )}
+        </div>
+
+        {/* details: what is selected, and the export */}
+        <aside className="dx-side dx-side--right">
+          <div className="dx-side__tabs" role="tablist" aria-label="Chi tiết">
+            {RIGHT_TABS.filter((x) => x.key !== "cut" || !isCut).map((x) => (
+              <button key={x.key} type="button" role="tab" aria-selected={rightTab === x.key}
+                      className={`dx-side__tab${rightTab === x.key ? " is-on" : ""}`} onClick={() => setRightTab(x.key)}>
+                <span aria-hidden="true">{x.icon}</span>{x.label}
+              </button>
+            ))}
+          </div>
+          <div className="dx-side__body">
+            <Inspector bare tab={rightTab} onTab={() => undefined}
+          selected={sel}
+          onSelect={(s) => (s?.kind === "cue" ? selectCue(s.i) : select(s))}
+          cues={doc.cues}
+          origin={originShown}
+          onCueText={setCueText}
+          onCueTiming={setCueTiming}
+          onPlayCue={(i) => { const c = doc.cues[i]; if (c) stage.current?.playRange(c.start, c.end); }}
+          layout={doc.layout}
+          onLayout={setLayout}
+          style={doc.style}
+          onStyle={setStyle}
+          styles={styles}
+          status={status}
+          out={out}
+          onOut={(p) => {
+            setOut((o) => ({ ...o, ...p }));
+            // to a voice-over: lines in another language are translated to Vietnamese right away (one undo step)
+            if (p.mode === "dub" && !linesAreVietnamese(docRef.current.lang, job.language)) void setSubLang("vi", true);
+          }}
+          orientation={orientation}
+          readOnly={readOnly}
+          focusText={focusText}
+          onDetect={job.source_media_id ? () => void detectOriginalSubs() : null}
+          detecting={detecting}
+          activeCue={activeCue}
+          scope={scope}
+          onScope={setScope}
+          onGeom={(patch, key) => subGeom(patch, scope === "cue" && sel?.kind === "cue" ? sel.i : null, key)}
+          onApplyAll={applyLookToAll}
+          onClearLook={clearLook}
+          onClearAll={clearAllLooks}
+          customCount={customCount}
+          onPickCue={(i) => { setSel({ kind: "cue", i }); const c = doc.cues[i]; if (c && (timeRef.current < c.start || timeRef.current >= c.end)) stage.current?.seek(c.start + 0.01); }}
+          hl={{
+            value: doc.highlights, set: setHl, pick: () => void pickHl(), picking, addAtNow: addPointAtNow, setPoint, removePoint, now: time,
+            onPickPoint: (i) => { setSel({ kind: "hl", i }); const p = doc.highlights.points[i]; if (p) stage.current?.seek(p.at + 0.01); },
+          }}
+          lang={{ value: doc.lang, source: job.language, busy: langBusy, set: (l) => void setSubLang(l) }}
+          names={{
+            value: doc.names, set: (names, key) => change((d) => ({ ...d, names }), key), check: () => void checkNames(),
+            checking: namesBusy, note: job.names_note ?? "", voiced: !subOnly,
+          }}
+          cutPart={isCut}
+          cutPane={isCut ? null : (
+            <CutPane job={job} cues={doc.cues} duration={total} now={time} dirty={dirty} readOnly={readOnly}
+                     onSeek={(t) => stage.current?.seek(t)} onPlayRange={(a, b) => stage.current?.playRange(a, b)} onJob={onJob} />
+          )}
+            />
+          </div>
+        </aside>
       </div>
 
       <EditorTimeline
         ref={timeline}
         duration={total}
         cues={doc.cues}
-        origin={origin}
+        origin={originShown}
         selected={sel}
         activeCue={activeCue}
         readOnly={readOnly}
@@ -687,10 +864,26 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
         onTiming={setCueTiming}
         onEditCue={(i) => { selectCue(i, false); setFocusText((n) => n + 1); }}
         onMovePoint={(i, at) => setPoint(i, { at: Math.round(at * 100) / 100 })}
+        toolbar={(
+          <div className="dx-tools" role="toolbar" aria-label="Công cụ timeline">
+            <button type="button" className="dx-tools__btn" disabled={!past.current.length || readOnly} onClick={undo} title="Hoàn tác (Ctrl+Z)">↶</button>
+            <button type="button" className="dx-tools__btn" disabled={!future.current.length || readOnly} onClick={redo} title="Làm lại (Ctrl+Shift+Z)">↷</button>
+            <span className="dx-tools__sep" aria-hidden="true" />
+            <button type="button" className="dx-tools__btn" disabled={readOnly || !canSplit} onClick={splitAtNow}
+                    title="Tách câu ở vạch thời gian thành hai câu (Ctrl+B)">✂ Tách</button>
+            <button type="button" className="dx-tools__btn" disabled={readOnly || selCue === null || selCue >= doc.cues.length - 1}
+                    onClick={() => { if (selCue !== null) mergeWithNext(selCue); }} title="Gộp câu đang chọn với câu ngay sau nó">⤝ Gộp</button>
+            <button type="button" className="dx-tools__btn" disabled={readOnly || activeCue !== null} onClick={addAtNow}
+                    title="Thêm một câu mới ở vạch thời gian (chỗ đang trống giữa hai câu)">＋ Thêm câu</button>
+            <button type="button" className="dx-tools__btn dx-tools__btn--danger" disabled={readOnly || selCue === null}
+                    onClick={() => { if (selCue !== null) removeCue(selCue); }} title="Xoá câu đang chọn (Delete)">🗑 Xoá</button>
+            <span className="dx-tl__hint">Kéo khối để dời · kéo mép để kéo dài / rút ngắn · bấm đúp để sửa chữ</span>
+          </div>
+        )}
       />
       <div className="dx__keys">
-        Phím tắt: <kbd>Space</kbd> phát/dừng · <kbd>←</kbd><kbd>→</kbd> từng khung (Shift = 1 s) · <kbd>↑</kbd><kbd>↓</kbd> câu trước/sau ·
-        <kbd>Enter</kbd> sửa chữ · <kbd>Delete</kbd> bỏ câu · <kbd>Ctrl</kbd>+<kbd>Z</kbd> hoàn tác
+        <kbd>Space</kbd> phát/dừng · <kbd>←</kbd><kbd>→</kbd> từng khung (Shift = 1 s) · <kbd>↑</kbd><kbd>↓</kbd> câu trước/sau ·
+        <kbd>Enter</kbd> sửa chữ · <kbd>Ctrl</kbd>+<kbd>B</kbd> tách câu · <kbd>Delete</kbd> xoá câu · <kbd>Ctrl</kbd>+<kbd>Z</kbd> hoàn tác
       </div>
 
       {showResult && job.media_url && (

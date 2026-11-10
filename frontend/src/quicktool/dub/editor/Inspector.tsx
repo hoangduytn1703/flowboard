@@ -60,8 +60,10 @@ export function Inspector({
   tab, onTab, selected, onSelect, cues, origin, onCueText, onCueTiming, onPlayCue,
   layout, onLayout, style, onStyle, styles, status, out, onOut, orientation,
   readOnly, focusText, onDetect, detecting, activeCue, onPickCue,
-  scope, onScope, onGeom, onApplyAll, onClearLook, onClearAll, customCount, hl, cutPane, lang, names, cutPart = false,
+  scope, onScope, onGeom, onApplyAll, onClearLook, onClearAll, customCount, hl, cutPane, lang, names, cutPart = false, bare = false,
 }: {
+  /** only the open tab's content — the editor draws the tab rails itself (tools on the left, details on the right) */
+  bare?: boolean;
   tab: InspectorTab;
   onTab: (t: InspectorTab) => void;
   selected: Sel;
@@ -153,13 +155,15 @@ export function Inspector({
   const engineStyles = out.engine === "remotion" ? status.remotion_styles ?? [] : status.styles;
 
   return (
-    <aside className="dx-insp">
-      <div className="dx-insp__tabs" role="tablist">
-        {TABS.filter((t) => t.key !== "cut" || !cutPart).map((t) => (
-          <button key={t.key} type="button" role="tab" aria-selected={tab === t.key}
-                  className={`dx-insp__tab${tab === t.key ? " is-on" : ""}`} onClick={() => onTab(t.key)}>{t.label}</button>
-        ))}
-      </div>
+    <aside className={`dx-insp${bare ? " dx-insp--bare" : ""}`}>
+      {!bare && (
+        <div className="dx-insp__tabs" role="tablist">
+          {TABS.filter((t) => t.key !== "cut" || !cutPart).map((t) => (
+            <button key={t.key} type="button" role="tab" aria-selected={tab === t.key}
+                    className={`dx-insp__tab${tab === t.key ? " is-on" : ""}`} onClick={() => onTab(t.key)}>{t.label}</button>
+          ))}
+        </div>
+      )}
       <div className="dx-insp__body">
         {tab === "sub" && cutPart && (
           <section className="dx-insp__sec">

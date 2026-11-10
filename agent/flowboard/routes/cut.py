@@ -1,7 +1,7 @@
 """✂️ Cắt video (services/video_cut): links / files → many short videos, each editable in the dubbing editor.
 
   GET  /api/cut/status
-  POST /api/cut/sessions                 {links, media: [{media_id, name}], how, prompt, min_s, max_s, max_parts, review, channel_id,
+  POST /api/cut/sessions                 {links, media: [{media_id, name}], how (ai | prompt | manual | even), rows (manual), prompt, min_s, max_s, max_parts, review, channel_id,
                                           look_preset_id} — the parts come out rendered in that ★ Mẫu chỉnh sửa
   GET  /api/cut/sessions                 newest first (brief: no lines)
   GET  /api/cut/sessions/{id}
@@ -31,10 +31,22 @@ class MediaItem(BaseModel):
     name: str = Field(default="", max_length=200)
 
 
+class Row(BaseModel):
+    start: float
+    end: float
+    title: str = Field(default="", max_length=200)
+    #: a second line under the name (optional)
+    subtitle: str = Field(default="", max_length=300)
+
+
 class StartBody(BaseModel):
     links: list[str] = Field(default_factory=list, max_length=video_cut.MAX_LINKS)
     media: list[MediaItem] = Field(default_factory=list, max_length=video_cut.MAX_LINKS)
-    how: str = Field(default="ai", pattern="^(ai|prompt|even)$")
+    how: str = Field(default="ai", pattern="^(ai|prompt|manual|even)$")
+    #: "Tự cắt" (how manual): the parts typed by the seller, [{start, end, title, subtitle?}] in seconds
+    rows: list[Row] = Field(default_factory=list, max_length=100)
+    #: "🔍 Phân tích": download + hear only; each video then waits for its parts (typed, or the AI's via /suggest)
+    analyze: bool = False
     prompt: str = Field(default="", max_length=8000)
     #: the language of the titles the AI writes ("" = what the request says, else Vietnamese)
     title_lang: str = Field(default="", max_length=40)
@@ -57,14 +69,10 @@ class SuggestBody(BaseModel):
     max_parts: int = Field(default=0, ge=0, le=100)
 
 
-class Row(BaseModel):
-    start: float
-    end: float
-    title: str = Field(default="", max_length=200)
-
-
 class CutBody(BaseModel):
     rows: list[Row] = Field(max_length=100)
+    #: "manual" = the seller typed these rows
+    how: Optional[str] = Field(default=None, pattern="^(manual)$")
 
 
 class IdsBody(BaseModel):
@@ -117,7 +125,7 @@ def start(body: StartBody) -> dict[str, Any]:
         run_id, made = video_cut.start(links=body.links, media=[m.model_dump() for m in body.media], how=body.how,
                                        prompt=body.prompt, min_s=body.min_s, max_s=body.max_s, max_parts=body.max_parts,
                                        review=body.review, channel_id=body.channel_id, look=look,
-                                       title_lang=body.title_lang)
+                                       title_lang=body.title_lang, rows=[r.model_dump() for r in body.rows], analyze=body.analyze)
     except video_cut.CutError as exc:
         raise HTTPException(400, str(exc))
     return {"run_id": run_id, "sessions": [video_cut.public(s, brief=True) for s in made]}
@@ -153,7 +161,7 @@ async def suggest(session_id: str, body: SuggestBody) -> dict[str, Any]:
 def cut(session_id: str, body: CutBody) -> dict[str, Any]:
     s = _session(session_id)
     try:
-        video_cut.cut(s, [r.model_dump() for r in body.rows])
+        video_cut.cut(s, [r.model_dump() for r in body.rows], how=body.how)
     except video_cut.CutError as exc:
         raise HTTPException(400, str(exc))
     return video_cut.public(s, brief=True)

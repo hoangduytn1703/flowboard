@@ -285,6 +285,11 @@ def ai_status() -> dict[str, Any]:
                 "root": str(root)}
     if not (root / "vi_dub_erase.py").is_file():
         return {"available": False, "reason": f"Không thấy vi_dub_erase.py trong {root}.", "root": str(root)}
+    from flowboard.services import machine
+
+    off = machine.limit("ai_erase")
+    if off is not None:  # no NVIDIA card: LaMa on the CPU takes hours — off, not a job that never ends
+        return {"available": False, "reason": off["reason"], "root": str(root), "no_gpu": True}
     model = root / "models" / "lama" / "big-lama.pt"
     return {"available": True, "python": str(python), "root": str(root),
             "model_cached": model.is_file() and model.stat().st_size > (100 << 20)}
@@ -427,6 +432,9 @@ def start_ai_job(source_media_id: str, src: Path, bands: list[dict[str, Any]]) -
     if active_job() is not None:
         raise CleanError("Đang có một tiến trình xoá AI chạy — đợi xong rồi thử lại.")
     _runner_cmd("erase")  # raises when pyvideotrans is missing
+    st = ai_status()
+    if not st["available"]:  # no NVIDIA card: refused here too, not only by the greyed-out button
+        raise UnavailableError(st["reason"])
     if not bands:
         raise CleanError("Chưa có dải phụ đề nào.")
     for band in bands:

@@ -5,6 +5,12 @@ import { AppVersionSection } from "../AppUpdate";
 import { askConfirm } from "../Dialogs";
 import { DubAddonCard } from "../../quicktool/dub/DubAddonCard";
 
+interface MachineInfo {
+  gpu: { name: string; driver: string; vram_mb: number; old_driver: boolean } | null;
+  checked_at: number | null;
+  limits: { key: string; state: "off" | "slow"; label: string; reason: string }[];
+}
+
 interface AppStatus {
   /** the desktop app (DFlow.exe) — not start.ps1 */
   app: boolean;
@@ -23,6 +29,8 @@ interface AppStatus {
   capcut_drafts: string;
   /** keys saved that only take effect after a restart */
   restart_pending: string[];
+  /** the card check (services/machine): asked once, remembered */
+  machine?: MachineInfo;
 }
 
 type Settings = Partial<{
@@ -44,6 +52,7 @@ export function MachineSection() {
   const [eraseRoot, setEraseRoot] = useState("");
   const [erasePython, setErasePython] = useState("");
   const [restarting, setRestarting] = useState(false);
+  const [checking, setChecking] = useState(false);
 
   async function load() {
     try {
@@ -57,6 +66,19 @@ export function MachineSection() {
     }
   }
   useEffect(() => { void load(); }, []);
+
+  async function recheck() {
+    setChecking(true);
+    try {
+      const m = await api<MachineInfo>("/api/app/machine/recheck", { method: "POST" });
+      setSt((s) => (s ? { ...s, machine: m } : s));
+      toast.success(m.gpu ? `Thấy card ${m.gpu.name}.` : "Vẫn chưa thấy card màn hình NVIDIA.");
+    } catch (e) {
+      toast.error(errMessage(e));
+    } finally {
+      setChecking(false);
+    }
+  }
 
   async function save(body: Settings, done: string) {
     setBusy(true);
@@ -133,6 +155,37 @@ export function MachineSection() {
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {st.machine && (
+        <div className="settings-panel__section">
+          <div className="settings-panel__label">Card màn hình của máy này</div>
+          <div className="settings-machine__row">
+            <span className={`settings-machine__gpu${st.machine.gpu ? " is-ok" : ""}`}>
+              {st.machine.gpu
+                ? `✓ ${st.machine.gpu.name}${st.machine.gpu.vram_mb ? ` · ${Math.round(st.machine.gpu.vram_mb / 1024)} GB` : ""} · driver ${st.machine.gpu.driver}`
+                : "Không có card NVIDIA"}
+            </span>
+            <button type="button" className="qt-btn qt-btn--small" disabled={checking} onClick={() => void recheck()}
+                    title="Tool chỉ kiểm một lần rồi nhớ (và tự kiểm lại khi driver thay đổi). Bấm khi vừa lắp card / cài driver.">
+              {checking ? "Đang kiểm…" : "↻ Kiểm tra lại"}
+            </button>
+          </div>
+          {st.machine.gpu?.old_driver && (
+            <div className="settings-panel__hint">⚠ Driver NVIDIA cũ (cần từ 528) — cập nhật driver để AI nghe lời chạy được trên card.</div>
+          )}
+          {st.machine.limits.length > 0 && (
+            <ul className="settings-machine__limits">
+              {st.machine.limits.map((l) => (
+                <li key={l.key}><b>{l.state === "off" ? "⛔ Đã tắt" : "🐢 Chạy chậm"} · {l.label}</b><span>{l.reason}</span></li>
+              ))}
+            </ul>
+          )}
+          <div className="settings-panel__hint">
+            Kiểm một lần lúc mở tool lần đầu rồi nhớ lại{st.machine.checked_at ? ` (lần kiểm: ${new Date(st.machine.checked_at * 1000).toLocaleString("vi-VN")})` : ""} —
+            lần sau mở không kiểm nữa, trừ khi driver card thay đổi.
+          </div>
         </div>
       )}
 

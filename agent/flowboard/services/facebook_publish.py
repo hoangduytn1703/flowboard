@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import mimetypes
 import re
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -84,8 +85,26 @@ def get_token(channel_id: int) -> Optional[str]:
     return str(tok) if tok else None
 
 
+#: "is this channel connected?" remembered for a short while: the token lives in the central store (a cloud round trip,
+#: ~0.15 s) and every channel list asks it for every channel. Publishing always reads the token itself.
+HAS_TOKEN_TTL_S = 120.0
+_has_token: dict[str, tuple[float, bool]] = {}
+
+
+def has_token(channel_id: int) -> bool:
+    key = token_key(channel_id)
+    hit = _has_token.get(key)
+    now = time.monotonic()
+    if hit is not None and now - hit[0] < HAS_TOKEN_TTL_S:
+        return hit[1]
+    value = bool(get_token(channel_id))
+    _has_token[key] = (now, value)
+    return value
+
+
 def set_token(channel_id: int, token: Optional[str]) -> None:
     accounts.set_setting(token_key(channel_id), token or "")
+    _has_token.pop(token_key(channel_id), None)
 
 
 def _error_message(resp: httpx.Response) -> str:

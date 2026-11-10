@@ -12,6 +12,30 @@ export interface EditCue {
 
 export const W_MIN = 0.2, W_MAX = 0.96;
 
+/** A line's words cut in two at ``frac`` of its time ("✂ Tách"): at a space when it has spaces, else at a character
+ * (Chinese / Japanese). Neither half is left empty when the text has two units or more. */
+export function splitText(text: string, frac: number): [string, string] {
+  const t = text.trim();
+  if (!t) return ["", ""];
+  const f = Math.min(0.95, Math.max(0.05, frac));
+  const words = t.split(/\s+/);
+  if (words.length > 1) {
+    // cut where the running length is closest to the share of the whole
+    const total = t.length;
+    let best = 1, bestGap = Infinity, run = 0;
+    for (let i = 1; i < words.length; i++) {
+      run += words[i - 1].length + 1;
+      const gap = Math.abs(run / total - f);
+      if (gap < bestGap) { bestGap = gap; best = i; }
+    }
+    return [words.slice(0, best).join(" "), words.slice(best).join(" ")];
+  }
+  const chars = Array.from(t);
+  if (chars.length < 2) return [t, ""];
+  const at = Math.min(chars.length - 1, Math.max(1, Math.round(chars.length * f)));
+  return [chars.slice(0, at).join(""), chars.slice(at).join("")];
+}
+
 /** A change of the subtitle box: ``w: null`` = back to the automatic width. */
 export interface GeomPatch { x?: number; y?: number; scale?: number; w?: number | null }
 export const LOOK_KEYS = ["x", "y", "scale", "w"] as const;

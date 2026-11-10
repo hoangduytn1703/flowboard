@@ -197,6 +197,90 @@ def test_a_video_is_cut_into_clips_and_projects_then_edited(client, tmp_path, mo
             dub.JOBS.pop(j, None)
 
 
+def test_typed_parts_are_checked_one_by_one():
+    """"Tự cắt": start, end and a name are required, the second line is not."""
+    rows = video_cut.manual_rows([{"start": 0, "end": 75.5, "title": "  Mở  đầu ", "subtitle": " cô gái  và chiếc xe "},
+                                  {"start": "80", "end": "150", "title": "Đoạn hai"}])
+    assert rows == [{"start": 0.0, "end": 75.5, "title": "Mở đầu", "subtitle": "cô gái và chiếc xe"},
+                    {"start": 80.0, "end": 150.0, "title": "Đoạn hai"}]
+    with pytest.raises(video_cut.CutError, match="ít nhất một đoạn"):
+        video_cut.manual_rows([])
+    with pytest.raises(video_cut.CutError) as e:
+        video_cut.manual_rows([{"start": None, "end": 5, "title": "a"}, {"start": 9, "end": 4, "title": "b"},
+                               {"start": 1, "end": 2.5, "title": "c"}, {"start": 1, "end": 9, "title": "  "},
+                               {"start": -2, "end": 9, "title": "e"}])
+    msg = str(e.value)
+    for want in ("Đoạn 1: thiếu giờ", "Đoạn 2: giờ kết thúc phải sau", "Đoạn 3: ngắn hơn 3 giây", "Đoạn 4: thiếu tên", "Đoạn 5: giờ bắt đầu không được âm"):
+        assert want in msg
+    with pytest.raises(video_cut.CutError, match="Tối đa"):
+        video_cut.manual_rows([{"start": i * 10, "end": i * 10 + 5, "title": "x"} for i in range(31)])
+
+
+def test_typed_parts_skip_the_ai_and_are_cut_back_to_the_video(monkeypatch):
+    monkeypatch.setattr(video_cut, "_pump", lambda: None)
+    with pytest.raises(video_cut.CutError, match="mỗi lần một link"):
+        video_cut.start(links=["https://youtu.be/a", "https://youtu.be/b"], media=[], how="manual",
+                        rows=[{"start": 0, "end": 10, "title": "a"}])
+    with pytest.raises(video_cut.CutError, match="thiếu tên"):
+        video_cut.start(links=["https://youtu.be/a"], media=[], how="manual", rows=[{"start": 0, "end": 10, "title": ""}])
+    _, (s,) = video_cut.start(links=["https://youtu.be/a"], media=[], how="manual",
+                              rows=[{"start": 5, "end": 60, "title": "Một", "subtitle": "phụ"}, {"start": 100, "end": 200, "title": "Hai"}])
+    try:
+        assert s.how == "manual" and s.by == "manual" and [r["title"] for r in s.rows] == ["Một", "Hai"]
+        # downloaded: the video is 120 s; the AI is never asked
+        cut_with: list = []
+
+        def prepared(x):
+            x.duration_s, x.prepared, x.heard = 120.0, True, True
+
+        async def no_ai(x):
+            raise AssertionError("Tự cắt must not ask the AI")
+
+        monkeypatch.setattr(video_cut, "_prepare", prepared)
+        monkeypatch.setattr(video_cut, "suggest", no_ai)
+        monkeypatch.setattr(video_cut, "_cut_all", lambda x, rows, base: cut_with.append(rows))
+        video_cut._run(s)
+        assert s.error is None and s.by == "manual"
+        assert cut_with == [[{"start": 5.0, "end": 60.0, "title": "Một", "subtitle": "phụ"}, {"start": 100.0, "end": 120.0, "title": "Hai"}]]
+        assert "Đoạn 2 kết thúc sau cuối video" in s.note
+        # a part that starts after the video ends is an error, said plainly
+        s.rows, s.status = [{"start": 130, "end": 140, "title": "Ba"}], "running"
+        video_cut._run(s)
+        assert s.status == "error" and "quá cuối video" in s.error
+    finally:
+        video_cut.SESSIONS.pop(s.id, None)
+
+
+def test_analyse_first_then_each_video_waits_for_its_parts(monkeypatch):
+    """"🔍 Phân tích": several videos are downloaded + heard, each then waits (review, no rows) with its length known."""
+    monkeypatch.setattr(video_cut, "_pump", lambda: None)
+    _, made = video_cut.start(links=["https://youtu.be/a", "https://youtu.be/b"], media=[], analyze=True, how="prompt", prompt="")
+    try:
+        assert len(made) == 2 and all(s.ask and s.rows == [] for s in made)
+        s = made[0]
+
+        def prepared(x):
+            x.duration_s, x.prepared, x.heard = 95.0, True, True
+            x.segments = [{"start": 1.0, "end": 4.0, "text": "xin chào"}]
+
+        async def no_ai(x):
+            raise AssertionError("nothing is suggested until the seller asks")
+
+        monkeypatch.setattr(video_cut, "_prepare", prepared)
+        monkeypatch.setattr(video_cut, "suggest", no_ai)
+        video_cut._run(s)
+        assert s.status == "review" and s.rows == [] and s.error is None and "Đã phân tích" in s.phase
+        assert video_cut.public(s, brief=True)["ask"] is True and made[1].status == "queued"
+        # the seller types the parts: the card then says "tự cắt"
+        monkeypatch.setattr(video_cut, "_source", lambda x: None)
+        monkeypatch.setattr(video_cut, "_cut_all", lambda x, rows, base: None)
+        video_cut.cut(s, [{"start": 0, "end": 30, "title": "A", "subtitle": "a"}, {"start": 40, "end": 200, "title": "B"}], how="manual")
+        assert s.how == "manual" and s.by == "manual" and s.rows[1]["end"] == 95.0 and s.rows[0]["subtitle"] == "a"
+    finally:
+        for x in made:
+            video_cut.SESSIONS.pop(x.id, None)
+
+
 def test_a_saved_prompt_writes_the_titles_and_a_name_for_the_whole_video(monkeypatch):
     s = _session()
     s.how, s.prompt, s.title_lang = "prompt", video_cut.DEFAULT_PROMPT, "Tây Ban Nha"

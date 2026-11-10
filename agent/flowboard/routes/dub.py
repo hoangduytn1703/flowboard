@@ -67,6 +67,9 @@ class RenderBody(BaseModel):
     sub_lang: Optional[str] = Field(default=None, pattern="^(vi|orig|none|en|zh|ja|ko|th|id|es|fr|de|pt|ru)$")
     # "🔤 Tên riêng": [{write, say}] — the subtitle shows `write`, the voice reads `say` (services/dub_names)
     names: Optional[list[dict[str, Any]]] = Field(default=None, max_length=200)
+    # the editor split / merged / added / removed lines: the whole list [{start, end, text, src?, look?}] (replaces
+    # lines / timings / looks)
+    cues: Optional[list[dict[str, Any]]] = Field(default=None, max_length=2000)
 
 
 @router.get("/addon")
@@ -202,7 +205,7 @@ async def render(job_id: str, body: RenderBody) -> dict[str, Any]:
         sent = body.model_dump(exclude_unset=True)
         dub.render_job(job, lines=body.lines, voice=body.voice, style=body.style, keep_bgm=body.keep_bgm,
                        name=body.name, layout=body.layout, engine=body.engine, timings=body.timings, looks=body.looks,
-                       highlights=body.highlights, mode=body.mode, sub_lang=body.sub_lang, names=body.names,
+                       highlights=body.highlights, mode=body.mode, sub_lang=body.sub_lang, names=body.names, cues=body.cues,
                        **({"channel_id": body.channel_id} if "channel_id" in sent else {}))
     except dub.DubError as exc:
         raise HTTPException(400, str(exc))

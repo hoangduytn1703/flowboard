@@ -361,3 +361,57 @@ async def test_real_claude_provider_lists_alias_models():
 
     models = await ClaudeProvider().list_models()
     assert {m["id"] for m in models} == {"fable", "opus", "sonnet", "haiku"}
+
+
+# ── The account's Gemini keys as the backup ("install and it works") ───
+
+@pytest.fixture
+def gemini_keys(monkeypatch: pytest.MonkeyPatch):
+    """The account has Gemini API keys; what they are asked is recorded."""
+    asked: list[dict] = []
+
+    async def by_keys(user_prompt, *, system_prompt=None, attachments=None, timeout=90.0):
+        asked.append({"prompt": user_prompt, "system": system_prompt})
+        return "from-the-keys"
+
+    monkeypatch.setattr(registry, "_gemini_keys_ready", lambda: True)
+    monkeypatch.setattr(registry, "_run_gemini_keys", by_keys)
+    return asked
+
+
+@pytest.mark.asyncio
+async def test_a_new_account_with_gemini_keys_just_works(tmp_secrets_path, fake_providers, gemini_keys):
+    """No AI picked yet (a new account on a freshly installed app): the keys answer instead of an error."""
+    assert await registry.run_llm("auto_prompt", "hi", system_prompt="s") == "from-the-keys"
+    assert gemini_keys == [{"prompt": "hi", "system": "s"}]
+    assert all(f.run_calls == [] for f in fake_providers.values())
+
+
+@pytest.mark.asyncio
+async def test_a_picked_ai_that_is_missing_or_fails_falls_back_to_the_keys(tmp_secrets_path, fake_providers, gemini_keys):
+    secrets.set_feature_provider("auto_prompt", "claude")
+    # the picked AI works: the keys are not touched
+    await registry.run_llm("auto_prompt", "a")
+    assert gemini_keys == [] and len(fake_providers["claude"].run_calls) == 1
+    # the CLI is not on this machine
+    fake_providers["claude"]._available = False
+    assert await registry.run_llm("auto_prompt", "b") == "from-the-keys"
+    # it is there but fails (out of quota)
+    fake_providers["claude"]._available = True
+
+    async def boom(*a, **k):
+        raise LLMError("claude CLI exited 1: hết lượt")
+
+    fake_providers["claude"].run = boom
+    assert await registry.run_llm("auto_prompt", "c") == "from-the-keys"
+    assert [x["prompt"] for x in gemini_keys] == ["b", "c"]
+    # a caller that asked for Claude by name keeps Claude's own error
+    with registry.use_ai("claude"):
+        with pytest.raises(LLMError, match="hết lượt"):
+            await registry.run_llm("auto_prompt", "d")
+
+
+@pytest.mark.asyncio
+async def test_no_ai_at_all_says_where_to_add_one(tmp_secrets_path, fake_providers):
+    with pytest.raises(LLMError, match="Gemini API key"):
+        await registry.run_llm("auto_prompt", "hi")

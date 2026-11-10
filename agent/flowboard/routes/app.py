@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from flowboard import config
 from flowboard.services import app_env
+from flowboard.services import machine
 
 router = APIRouter(prefix="/api/app", tags=["app"])
 
@@ -57,7 +58,14 @@ def status() -> dict[str, Any]:
         "erase_python": values.get("FLOWBOARD_ERASE_PYTHON", ""),
         "capcut_drafts": values.get("FLOWBOARD_CAPCUT_DRAFTS", ""),
         "restart_pending": pending,
+        "machine": machine.public(),
     }
+
+
+@router.post("/machine/recheck")
+def recheck_machine() -> dict[str, Any]:
+    """"Kiểm tra lại" — ask the NVIDIA driver again (a card or driver installed after the first start)."""
+    return machine.public(refresh=True)
 
 
 class SettingsBody(BaseModel):

@@ -441,3 +441,87 @@
 .dx-names__list input { min-width: 0; padding: 5px 8px; border-radius: 7px; border: 1px solid #3a4050;
   background: rgba(255, 255, 255, 0.03); color: inherit; font-size: 14px; }
 .dx-names__list span { color: var(--muted, #9aa3b2); }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   CapCut-style layout (10/11): tools on the left, the player in the middle, the details of what is selected on the
+   right, the timeline with its own toolbar underneath. Neutral dark greys, one accent. Later rules win over the
+   older ones above.
+   ─────────────────────────────────────────────────────────────────────────── */
+.dx { --dx-bg: #101012; --dx-panel: #1b1b1f; --dx-panel-2: #232328; --dx-line: #2c2c33; --dx-text: #e6e6ea; --dx-mute: #8e8e98; gap: 6px; }
+.dx__top { gap: 10px; padding: 6px 10px; background: var(--dx-panel); border: 1px solid var(--dx-line); border-radius: 8px; }
+.dx__main { grid-template-columns: 318px minmax(0, 1fr) 336px; gap: 6px; }
+.dx__center { padding: 8px; gap: 6px; background: var(--dx-bg); border: 1px solid var(--dx-line); border-radius: 8px; }
+
+.dx-side { min-height: 0; min-width: 0; display: flex; flex-direction: column; background: var(--dx-panel); border: 1px solid var(--dx-line); border-radius: 8px; overflow: hidden; }
+.dx-side__tabs { flex: none; display: flex; align-items: stretch; gap: 0; padding: 0 4px; border-bottom: 1px solid var(--dx-line); background: var(--dx-panel-2); overflow-x: auto; scrollbar-width: none; }
+.dx-side__tabs::-webkit-scrollbar { display: none; }
+.dx-side__tab {
+  flex: 1 1 0; min-width: 54px; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 7px 4px 6px;
+  font: inherit; font-size: 11.5px; font-weight: 600; line-height: 1.2; color: var(--dx-mute); white-space: nowrap;
+  background: none; border: 0; border-bottom: 2px solid transparent; cursor: pointer;
+}
+.dx-side__tab > span { font-size: 17px; line-height: 1; filter: grayscale(0.55); opacity: 0.8; }
+.dx-side__tab:hover { color: var(--dx-text); }
+.dx-side__tab.is-on { color: #fff; border-bottom-color: var(--qt-accent, #ff6a2b); }
+.dx-side__tab.is-on > span { filter: none; opacity: 1; }
+.dx-side__body { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+.dx-side--right .dx-side__tab { flex-direction: row; justify-content: center; gap: 6px; font-size: 13px; padding: 9px 6px; }
+.dx-side--right .dx-side__tab > span { font-size: 14px; }
+
+.dx-insp--bare { background: none; border: 0; border-radius: 0; overflow: visible; flex: 1 1 auto; }
+.dx-insp--bare .dx-insp__body { overflow: visible; flex: none; }
+
+/* "Khung & nền" in the left panel: each group's label on its own line, sliders the panel's width */
+.dx-side .dx-format { padding: 12px; gap: 14px; }
+.dx-side .dx-format__row { gap: 6px; }
+.dx-side .dx-format__label { flex: 0 0 100%; font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--dx-mute); }
+.dx-side .dx-format__fit { padding: 0; border: 0; background: none; }
+.dx-side .dx-format__pos { flex: 1 1 100%; justify-content: space-between; }
+.dx-side .dx-format__pos .tick-range { width: 170px; }
+.dx-side .dx-format__size { margin-left: 0; flex: 0 0 100%; }
+.dx-side .dx-format__hint { flex: 1 1 100%; }
+
+/* the player bar: time on the left, play in the middle, sound on the right */
+.dx__transport { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; padding: 2px 4px; }
+.dx__transport .dx__tgroup { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.dx__transport .dx__tgroup--mid { justify-content: center; }
+.dx__transport .dx__tgroup--end { justify-content: flex-end; }
+.dx__tbtn { width: 32px; height: 30px; border-radius: 6px; border: 0; background: none; color: var(--dx-text); }
+.dx__tbtn:hover { background: var(--dx-panel-2); }
+.dx__tbtn--play { width: 40px; height: 34px; background: var(--qt-accent, #ff6a2b); color: #fff; border-radius: 8px; }
+.dx__tbtn--play:hover { background: #ff7d45; }
+.dx__clock { margin-left: 0; color: var(--qt-accent, #ff6a2b); font-weight: 700; }
+.dx__clock small { font-weight: 400; }
+
+/* timeline + its toolbar */
+.dx-tl { border-color: var(--dx-line); border-radius: 8px; background: var(--dx-panel); }
+.dx-tl__bar { padding: 3px 8px; border-bottom-color: var(--dx-line); background: var(--dx-panel-2); }
+.dx-tl__heads { background: var(--dx-panel); border-right-color: var(--dx-line); }
+.dx-tl .timeline-editor { background: var(--dx-panel); }
+.dx-tools { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 2px; }
+.dx-tools__btn {
+  flex: none; padding: 5px 9px; font: inherit; font-size: 13px; font-weight: 600; color: var(--dx-text); white-space: nowrap;
+  background: none; border: 0; border-radius: 6px; cursor: pointer;
+}
+.dx-tools__btn:hover:not(:disabled) { background: #33333b; }
+.dx-tools__btn:disabled { opacity: 0.32; cursor: default; }
+.dx-tools__btn--danger:hover:not(:disabled) { background: rgba(248, 113, 113, 0.18); color: #fca5a5; }
+.dx-tools__sep { flex: none; width: 1px; height: 18px; margin: 0 5px; background: #3a3a43; }
+.dx-tools .dx-tl__hint { margin-left: 10px; }
+
+@media (max-width: 1500px) {
+  .dx__main { grid-template-columns: 280px minmax(0, 1fr) 310px; }
+}
+@media (max-width: 1280px) {
+  .dx__main { grid-template-columns: 250px minmax(0, 1fr) 290px; }
+  .dx-tools .dx-tl__hint { display: none; }
+}
+@media (max-width: 1040px) {
+  .dx { height: auto; }
+  .dx__main { grid-template-columns: 1fr; }
+  .dx-side { max-height: 60vh; }
+  .dx-stage { height: 56vh; }
+}
+.dx-stage__bgmiss { position: absolute; left: 4px; top: 4px; z-index: 6; max-width: calc(100% - 8px); padding: 2px 6px; border-radius: 5px;
+  font-size: 10.5px; line-height: 1.3; color: #fde68a; background: rgba(0, 0, 0, 0.72); pointer-events: auto; }
+.dx-side .dx-format__row > label:has(select) { flex: 1 1 100%; }

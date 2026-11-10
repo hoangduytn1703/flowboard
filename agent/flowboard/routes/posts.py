@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -26,6 +27,7 @@ from flowboard.services.products import get_product
 from flowboard.timestamps import utc_iso
 
 router = APIRouter(prefix="/api/posts", tags=["posts"])
+_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="posts")
 
 
 class ChatTurn(BaseModel):
@@ -381,10 +383,12 @@ def list_posts(board_id: Optional[int] = Query(None), channel_id: Optional[int] 
         if channel_id is not None:
             q = q.where(Post.channel_id == channel_id)
         rows = s.exec(q).all()
-    videos = _clip_videos({p.board_id for p in rows if p.board_id})  # one query, not one per post
-    slots = _post_schedules(list(rows))
     ids = {p.id for p in rows if p.id}
-    by_hand, numbers = fb_sync.manual_for_posts(ids), fb_sync.stats_for_posts(ids)
+    # four look-ups for the whole list (clip videos, schedule, posted by hand, numbers) — side by side: one after the
+    # other was four more round trips to a cloud database (~500 ms measured for a short list)
+    jobs = [_POOL.submit(_clip_videos, {p.board_id for p in rows if p.board_id}), _POOL.submit(_post_schedules, list(rows)),
+            _POOL.submit(fb_sync.manual_for_posts, ids), _POOL.submit(fb_sync.stats_for_posts, ids)]
+    videos, slots, by_hand, numbers = (j.result() for j in jobs)
     return [_row(p, videos.get(p.board_id) or "", slots.get(p.id or 0), by_hand.get(p.id or 0), numbers.get(p.id or 0)) for p in rows]
 
 

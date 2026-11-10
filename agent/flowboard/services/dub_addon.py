@@ -143,36 +143,11 @@ def runtime() -> Optional[tuple[Path, Path, dict[str, str]]]:
 
 # ── the machine ────────────────────────────────────────────────────────────
 
-_gpu_cache: dict[str, Any] = {"at": 0.0, "value": None}
-
-
 def nvidia_gpu(refresh: bool = False) -> Optional[dict[str, Any]]:
-    """``{name, driver, vram_mb, old_driver}`` from nvidia-smi (comes with the NVIDIA driver), None without a card."""
-    if not refresh and time.time() - _gpu_cache["at"] < 600:
-        return _gpu_cache["value"]
-    value: Optional[dict[str, Any]] = None
-    exe = shutil.which("nvidia-smi")
-    if exe is None and sys.platform == "win32":
-        guess = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "nvidia-smi.exe"
-        exe = str(guess) if guess.is_file() else None
-    if exe:
-        try:
-            out = subprocess.run([exe, "--query-gpu=name,driver_version,memory.total", "--format=csv,noheader,nounits"],
-                                 capture_output=True, text=True, timeout=10)
-            line = (out.stdout or "").strip().splitlines()[0] if out.returncode == 0 and out.stdout.strip() else ""
-            parts = [p.strip() for p in line.split(",")]
-            if len(parts) >= 2 and parts[0]:
-                try:
-                    major = int(parts[1].split(".")[0])
-                except ValueError:
-                    major = 0
-                vram = int(float(parts[2])) if len(parts) > 2 and parts[2].replace(".", "", 1).isdigit() else 0
-                value = {"name": parts[0], "driver": parts[1], "vram_mb": vram,
-                         "old_driver": sys.platform == "win32" and 0 < major < MIN_DRIVER}
-        except (OSError, subprocess.SubprocessError, IndexError):
-            value = None
-    _gpu_cache.update(at=time.time(), value=value)
-    return value
+    """``{name, driver, vram_mb, old_driver}``, None without a card — checked once and remembered (services/machine)."""
+    from flowboard.services import machine
+
+    return machine.gpu(refresh)
 
 
 def _free_mb(path: Path) -> int:

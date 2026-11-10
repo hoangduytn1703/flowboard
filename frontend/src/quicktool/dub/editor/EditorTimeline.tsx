@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from "react";
 import { Timeline, type TimelineState } from "@xzdarcy/react-timeline-editor";
 import type { TimelineAction, TimelineRow } from "@xzdarcy/timeline-engine";
 import "@xzdarcy/react-timeline-editor/dist/react-timeline-editor.css";
@@ -46,9 +46,11 @@ export const EditorTimeline = forwardRef<TimelineHandle, {
   onTiming: (i: number, start: number, end: number) => void;
   onEditCue: (i: number) => void;
   onMovePoint: (i: number, at: number) => void;
+  /** the editing tools on the left of the bar (undo, split, merge, add, delete) */
+  toolbar?: ReactNode;
 }>(function EditorTimeline({
   duration, cues, origin, selected, activeCue, readOnly, filmstrip, wave, blurCount, hasFrame, hasMascot, highlights,
-  onSeek, onSelect, onTiming, onEditCue, onMovePoint,
+  onSeek, onSelect, onTiming, onEditCue, onMovePoint, toolbar,
 }, ref) {
   const tl = useRef<TimelineState>(null);
   const host = useRef<HTMLDivElement>(null);
@@ -179,7 +181,7 @@ export const EditorTimeline = forwardRef<TimelineHandle, {
   return (
     <div className="dx-tl">
       <div className="dx-tl__bar">
-        <span className="dx-tl__hint">Kéo khối phụ đề để dời · kéo mép để kéo dài / rút ngắn · bấm đúp để sửa chữ</span>
+        {toolbar ?? <span className="dx-tl__hint">Kéo khối phụ đề để dời · kéo mép để kéo dài / rút ngắn · bấm đúp để sửa chữ</span>}
         <div className="dx-tl__zoom">
           <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={() => zoom(1 / 1.6)} title="Thu nhỏ">−</button>
           <input type="range" min={0} max={100} step={1} aria-label="Phóng to timeline"

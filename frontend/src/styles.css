@@ -6653,3 +6653,13 @@ button.chat-dock__presence[aria-expanded="true"] {
   gap: 10px; padding: 10px 14px; border-radius: 12px; border: 1px solid rgba(255, 106, 43, 0.6); background: #1f232c;
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5); font-size: 14.5px; color: var(--text); max-width: calc(100vw - 32px); flex-wrap: wrap; }
 
+
+/* the card check (Cài đặt → 🖥 Máy này) + the "no card: slower" note on the pages that hear the video */
+.settings-machine__gpu { flex: 1 1 260px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 9px; font-size: 14px; color: #fbbf24; }
+.settings-machine__gpu.is-ok { color: #4ade80; }
+.settings-machine__limits { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.settings-machine__limits li { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border: 1px solid rgba(251, 191, 36, 0.4);
+  border-radius: 9px; background: rgba(251, 191, 36, 0.06); font-size: 13px; line-height: 1.45; }
+.settings-machine__limits li span { color: var(--muted); }
+.qt-nogpu { margin: 0 0 10px; padding: 8px 10px; border: 1px solid rgba(251, 191, 36, 0.4); border-radius: 9px; background: rgba(251, 191, 36, 0.06);
+  font-size: 13px; line-height: 1.45; color: #fde68a; }

@@ -29,6 +29,7 @@ badge up forever.
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -225,13 +226,27 @@ def _flow_items() -> list[dict[str, Any]]:
     return out
 
 
+_MEMORY_SOURCES = (_addon_items, _dub_items, _dub_split_items, _cut_items, _clean_items, _capcut_items, _op_items)
+_DB_SOURCES = (_dub_link_items, _assistant_items, _autopilot_items, _flow_items)
+_POOL = ThreadPoolExecutor(max_workers=len(_DB_SOURCES), thread_name_prefix="running")
+
+
 @router.get("")
 def running() -> dict[str, Any]:
     items: list[dict[str, Any]] = []
-    for source in (_addon_items, _dub_items, _dub_split_items, _cut_items, _dub_link_items, _clean_items, _capcut_items, _assistant_items, _autopilot_items, _flow_items, _op_items):
+    # Every page asks this every few seconds. Four of the sources read the account's database (the dubbing link
+    # library, the assistant, the auto-poster, Flow requests) — one after the other that was ~4 round trips to a
+    # cloud database (~370 ms measured); side by side it is one.
+    futures = [_POOL.submit(source) for source in _DB_SOURCES]
+    for source in _MEMORY_SOURCES:
         try:
             items += source()
         except Exception:  # noqa: BLE001 — one broken source must not hide the others
+            continue
+    for f in futures:
+        try:
+            items += f.result(timeout=20)
+        except Exception:  # noqa: BLE001
             continue
     items.sort(key=lambda x: x.get("started_at") or "")
     return {"items": items}

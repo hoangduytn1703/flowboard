@@ -44,7 +44,9 @@ MAX_DURATION_S = 60 * 60
 MAX_LINKS = 10
 #: sessions waiting + running at once
 MAX_QUEUE = 20
-HOWS = ("ai", "prompt", "even")
+#: ai = the AI picks; prompt = the seller's request; manual = "Tự cắt", the seller types each part's start / end / name
+#: (one video at a time); even = spread evenly (the assistant and "✨ Gợi ý lại" still offer it)
+HOWS = ("ai", "prompt", "manual", "even")
 PROMPT_MAX = 4000
 #: saved cut prompts ("Prompt đã lưu"): AppSetting in the account's database, [{id, name, text}]
 PROMPTS_KEY = "cut_prompts"
@@ -117,6 +119,9 @@ class Session:
     name: str = ""
     #: the language the AI writes the titles in ("" = what the request says, else Vietnamese)
     title_lang: str = ""
+    #: "🔍 Phân tích" first: the video is downloaded and heard, then waits (status review, no rows) for the seller to
+    #: type the parts or ask the AI — with the real length known
+    ask: bool = False
     #: the parts cut so far [{index, start, end, title, job_id, board_id, media_id}]
     parts: list[dict] = field(default_factory=list)
     #: "★ Mẫu chỉnh sửa" picked for this cut (dub.normalize_look_preset): every new part comes out in that look
@@ -130,7 +135,7 @@ class Session:
 
     SAVED = ("id", "run_id", "url", "source_media_id", "how", "prompt", "min_s", "max_s", "max_parts", "review", "channel_id",
              "status", "phase", "progress", "title", "duration_s", "width", "height", "language", "segments", "heard", "prepared",
-             "rows", "by", "note", "name", "title_lang", "parts", "look", "error", "started_at", "position")
+             "rows", "by", "note", "name", "title_lang", "ask", "parts", "look", "error", "started_at", "position")
 
     def to_dict(self) -> dict[str, Any]:
         return {k: getattr(self, k) for k in self.SAVED}
@@ -167,6 +172,44 @@ def normalize_lengths(min_s: Any, max_s: Any) -> tuple[float, float]:
 
 def normalize_how(how: Any) -> str:
     return how if how in HOWS else "ai"
+
+
+def manual_rows(raw: Any) -> list[dict[str, Any]]:
+    """"Tự cắt": the parts the seller typed, checked one by one — start and end (seconds), a name (required), a second
+    line (optional). The video's length is not known yet: ends past it are cut back once it is downloaded."""
+    if not isinstance(raw, list) or not raw:
+        raise CutError("Nhập ít nhất một đoạn: giờ bắt đầu, giờ kết thúc và tên đoạn")
+    if len(raw) > dub_split.MAX_PARTS:
+        raise CutError(f"Tối đa {dub_split.MAX_PARTS} đoạn một video")
+    rows: list[dict[str, Any]] = []
+    bad: list[str] = []
+    for i, r in enumerate(raw, 1):
+        r = r if isinstance(r, dict) else {}
+        try:
+            a, b = float(r.get("start")), float(r.get("end"))
+            if not (a == a and b == b):  # NaN
+                raise ValueError
+        except (TypeError, ValueError):
+            bad.append(f"Đoạn {i}: thiếu giờ bắt đầu hoặc kết thúc")
+            continue
+        title = dub_split._clean_title(r.get("title"))
+        if a < 0:
+            bad.append(f"Đoạn {i}: giờ bắt đầu không được âm")
+        elif b <= a:
+            bad.append(f"Đoạn {i}: giờ kết thúc phải sau giờ bắt đầu")
+        elif b - a < dub_split.CUT_MIN:
+            bad.append(f"Đoạn {i}: ngắn hơn {dub_split.CUT_MIN:g} giây")
+        elif a >= MAX_DURATION_S:
+            bad.append(f"Đoạn {i}: bắt đầu quá {MAX_DURATION_S // 60} phút (video dài tối đa {MAX_DURATION_S // 60} phút)")
+        elif not title:
+            bad.append(f"Đoạn {i}: thiếu tên đoạn")
+        row = {"start": round(a, 2), "end": round(b, 2), "title": title}
+        if dub_split._clean_subtitle(r.get("subtitle")):
+            row["subtitle"] = dub_split._clean_subtitle(r.get("subtitle"))
+        rows.append(row)
+    if bad:
+        raise CutError("; ".join(bad[:5]) + (f" (và {len(bad) - 5} lỗi khác)" if len(bad) > 5 else ""))
+    return rows
 
 
 def normalize_max_parts(n: Any) -> int:
@@ -339,6 +382,7 @@ def status() -> dict[str, Any]:
     return {"whisper": bool(st.get("available")), "whisper_reason": "" if st.get("available") else st.get("reason", ""),
             "remotion": bool(st.get("remotion")), "max_minutes": MAX_DURATION_S // 60, "max_links": MAX_LINKS,
             "max_parts": dub_split.MAX_PARTS, "prompt_max": PROMPT_MAX, "title_langs": list(TITLE_LANGS),
+            "slow_reason": st.get("slow_reason", ""),
             "default_min": DEFAULT_MIN_S, "default_max": DEFAULT_MAX_S}
 
 
@@ -346,9 +390,11 @@ def status() -> dict[str, Any]:
 
 def start(*, links: list[str], media: list[dict[str, Any]], how: str = "ai", prompt: str = "", min_s: Any = None,
           max_s: Any = None, max_parts: Any = 0, review: bool = False, channel_id: Optional[int] = None,
-          look: Optional[dict] = None, title_lang: Any = "") -> tuple[str, list[Session]]:
+          look: Optional[dict] = None, title_lang: Any = "", rows: Any = None,
+          analyze: bool = False) -> tuple[str, list[Session]]:
     """One session per link / file, all in one run (their parts are one batch in the editor). ``look`` = a saved
-    "★ Mẫu chỉnh sửa" (:func:`dub.look_preset`) every part is rendered in. Returns ``(run_id, sessions)``."""
+    "★ Mẫu chỉnh sửa" (:func:`dub.look_preset`) every part is rendered in. ``how == "manual"`` ("Tự cắt") takes the
+    parts from ``rows`` and one video only. Returns ``(run_id, sessions)``."""
     from flowboard.services.video_fetch import extract_url
 
     items: list[tuple[str, Any]] = []
@@ -368,8 +414,15 @@ def start(*, links: list[str], media: list[dict[str, Any]], how: str = "ai", pro
         raise CutError(f"Đang có {len(busy)} video chờ cắt — đợi bớt rồi thêm tiếp")
     how = normalize_how(how)
     prompt = clean_prompt(prompt)
+    if analyze:  # only download + hear now; how to cut is chosen per video afterwards
+        how, prompt = "manual", ""
     if how == "prompt" and not prompt:
         raise CutError("Gõ yêu cầu cắt (VD: “mỗi đoạn một mẹo”) hoặc chọn “AI tự chọn đoạn hay”")
+    typed: list[dict[str, Any]] = []
+    if how == "manual" and not analyze:
+        if len(items) != 1:
+            raise CutError("Tự cắt nhập giờ cho từng video — mỗi lần một link hoặc một file")
+        typed = manual_rows(rows)
     lo, hi = normalize_lengths(DEFAULT_MIN_S if min_s is None else min_s, DEFAULT_MAX_S if max_s is None else max_s)
     run_id = _uid()
     now = time.time()
@@ -377,13 +430,15 @@ def start(*, links: list[str], media: list[dict[str, Any]], how: str = "ai", pro
     for i, (kind, value) in enumerate(items):
         s = Session(id=_uid(), run_id=run_id, how=how, prompt=prompt, min_s=lo, max_s=hi,
                     max_parts=normalize_max_parts(max_parts), review=bool(review), channel_id=channel_id,
-                    title_lang=normalize_title_lang(title_lang),
+                    title_lang=normalize_title_lang(title_lang), ask=bool(analyze),
                     look=dub.normalize_look_preset(look) if look else None, started_at=now, position=i)
         if kind == "url":
             s.url = str(value)[:2000]
         else:
             s.source_media_id = str(value["media_id"])[:64]
             s.title = re.sub(r"\.[A-Za-z0-9]{2,4}$", "", str(value.get("name") or "")).strip()[:80]
+        if typed:
+            s.rows, s.by = [dict(r) for r in typed], "manual"
         s.work = _root() / s.id
         SESSIONS[s.id] = s
         persist(s)
@@ -418,9 +473,22 @@ def _run(s: Session) -> None:
     try:
         if not s.prepared:
             _prepare(s)
-        _set(s, "AI đang chọn đoạn cắt" if s.how != "even" and s.segments else "Đang chia đoạn", 62)
-        res = asyncio.run(suggest(s))
-        s.rows, s.by, s.note, s.name = res["rows"], res["by"], res["note"], res.get("name", "")
+        if s.ask and not s.rows:
+            # "🔍 Phân tích": ready — the seller now types the parts or asks the AI (the card shows the editor)
+            s.status, s.phase, s.progress = "review", "Đã phân tích — chọn các đoạn rồi bấm ✂️ Cắt", 100
+            return
+        if s.how == "manual":
+            # "Tự cắt": the seller's parts, now checked against the video's real length
+            _set(s, "Đang kiểm các đoạn đã nhập", 62)
+            typed = list(s.rows)
+            s.rows, s.by = check_rows(s, typed), "manual"
+            cut_back = [i for i, (a, b) in enumerate(zip(typed, s.rows), 1) if b["end"] < float(a.get("end") or 0) - 0.01]
+            s.note = (f"Đoạn {', '.join(map(str, cut_back))} kết thúc sau cuối video ({s.duration_s:.0f} giây) — đã lấy tới hết video."
+                      if cut_back else "")
+        else:
+            _set(s, "AI đang chọn đoạn cắt" if s.how != "even" and s.segments else "Đang chia đoạn", 62)
+            res = asyncio.run(suggest(s))
+            s.rows, s.by, s.note, s.name = res["rows"], res["by"], res["note"], res.get("name", "")
         if not s.rows:
             raise CutError("Không chia được đoạn nào")
         if s.review:
@@ -627,8 +695,9 @@ def check_rows(s: Session, rows: Any) -> list[dict[str, Any]]:
     return rows
 
 
-def cut(s: Session, rows: Any) -> Session:
-    """Cut (or cut again) with these rows, in a thread. Part n reuses the project + clip of the old part n."""
+def cut(s: Session, rows: Any, how: Optional[str] = None) -> Session:
+    """Cut (or cut again) with these rows, in a thread. Part n reuses the project + clip of the old part n.
+    ``how == "manual"``: the seller typed the rows (the card says "tự cắt")."""
     if s.status in BUSY:
         raise CutError("Video này đang chạy — chờ xong")
     if not s.prepared:
@@ -640,6 +709,8 @@ def cut(s: Session, rows: Any) -> Session:
         if job is not None and job.status in ("queued", "running", "rendering"):
             raise CutError(f"Video {p.get('index')} đang xuất — chờ xong rồi cắt lại")
     s.rows, s.by = rows, s.by or "manual"
+    if how == "manual":
+        s.how = s.by = "manual"
     s.status, s.phase, s.progress, s.error, s.stop = "cutting", "Chuẩn bị cắt", 0, None, False
     persist(s)
 
@@ -683,7 +754,7 @@ def _cut_all(s: Session, rows: list[dict[str, Any]], *, base: int) -> None:
             except dub.DubError as exc:
                 job.error = f"Chưa áp được kiểu đã chỉnh — mở trình chỉnh sửa, bấm Xuất lại video ({exc})"
                 dub.persist(job)
-        parts.append({"index": i, "start": row["start"], "end": row["end"], "title": title, "job_id": job.id,
+        parts.append({"index": i, "start": row["start"], "end": row["end"], "title": title, "subtitle": row.get("subtitle", ""), "job_id": job.id,
                       "board_id": job.board_id, "media_id": media_id, "at": time.time()})
         s.parts = parts + [p for k, p in sorted(old.items()) if k > i]
         persist(s)
@@ -718,7 +789,7 @@ def _part_job(s: Session, index: int, total: int, row: dict[str, Any], title: st
     job.kind, job.mode = "cut", "sub"
     job.source_media_id = job.media_id = media_id
     job.cut = {"session_id": s.id, "run_id": s.run_id, "index": index, "total": total, "start": row["start"],
-               "end": row["end"], "source_url": s.url, "source_title": s.title}
+               "end": row["end"], "source_url": s.url, "source_title": s.title, "subtitle": row.get("subtitle", "")}
     job.batch_id = s.run_id
     job.name = job.title = title[:80]
     if prev is None:

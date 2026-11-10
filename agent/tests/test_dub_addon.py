@@ -324,16 +324,18 @@ def test_download_resumes_a_part_and_falls_back_to_a_mirror(tmp_path, monkeypatc
 
 
 def test_nvidia_smi_is_read(monkeypatch):
-    monkeypatch.setattr(dub_addon.shutil, "which", lambda name: "nvidia-smi")
-    monkeypatch.setattr(dub_addon.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(
+    from flowboard.services import machine
+
+    monkeypatch.setattr(machine, "_mem", None)
+    monkeypatch.setattr(machine.shutil, "which", lambda name: "nvidia-smi")
+    monkeypatch.setattr(machine.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(
         a, 0, stdout="NVIDIA GeForce RTX 3060, 512.15, 12288\n", stderr=""))
     gpu = dub_addon.nvidia_gpu(refresh=True)
     assert gpu["name"] == "NVIDIA GeForce RTX 3060" and gpu["vram_mb"] == 12288
-    assert gpu["old_driver"] is (dub_addon.sys.platform == "win32")  # 512 < 528: CUDA 12 wants a newer driver
-    monkeypatch.setattr(dub_addon.shutil, "which", lambda name: None)
-    monkeypatch.setattr(dub_addon.sys, "platform", "linux")
+    assert gpu["old_driver"] is (machine.sys.platform == "win32")  # 512 < 528: CUDA 12 wants a newer driver
+    monkeypatch.setattr(machine.shutil, "which", lambda name: None)
+    monkeypatch.setattr(machine.sys, "platform", "linux")
     assert dub_addon.nvidia_gpu(refresh=True) is None
-    dub_addon._gpu_cache.update(at=0.0, value=None)
 
 
 def test_routes_and_plans(addon, monkeypatch):

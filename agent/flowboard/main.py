@@ -154,6 +154,10 @@ async def lifespan(app: FastAPI):
     if dub_links.after_login not in accounts.after_activate:
         accounts.after_activate.append(dub_links.after_login)
     accounts.startup()
+    # what this machine can do (NVIDIA card): the first start checks, later starts read machine.json
+    import threading
+    from flowboard.services import machine
+    threading.Thread(target=machine.warm, name="machine-check", daemon=True).start()
     from flowboard.services import file_store
     file_store.install_hooks()
     if not accounts.auth_enabled():

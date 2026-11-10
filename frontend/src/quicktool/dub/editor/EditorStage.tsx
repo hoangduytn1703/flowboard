@@ -103,6 +103,8 @@ export const EditorStage = forwardRef<StageHandle, {
   const fps = DUB_FPS;
   const [t, setT] = useState(0);
   const [playing, setPlaying] = useState(false);
+  // the background picture / video that failed to load (not on this machine): its colour is shown instead of a broken image
+  const [bgBroken, setBgBroken] = useState<string | null>(null);
   const stopAt = useRef<number | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   const [editing, setEditing] = useState<{ i: number; text: string } | null>(null);
@@ -259,8 +261,10 @@ export const EditorStage = forwardRef<StageHandle, {
   const fgPxW = (box.w || 0) * (frameSpec ? frameSpec.scale : 1);
   const canvasBgLayer = !canvas || !wholeFit || wholeFit === "blur" || wholeFit === "black" ? null
     : wholeFit === "grid" ? <div className="dx-stage__cbg" style={gridCss(canvas.color, canvas.line, canvas.cell, frameW || 1, frameH || 1, fgPxW)} />
-    : wholeFit === "image" && canvasBgUrl ? <img className="dx-stage__cbg" src={canvasBgUrl} alt="" />
-    : wholeFit === "video" && canvasBgUrl ? <video className="dx-stage__cbg" src={canvasBgUrl} muted loop autoPlay playsInline />
+    : wholeFit === "image" && canvasBgUrl && bgBroken !== canvasBgUrl
+      ? <img className="dx-stage__cbg" src={canvasBgUrl} alt="" onError={() => setBgBroken(canvasBgUrl)} />
+    : wholeFit === "video" && canvasBgUrl && bgBroken !== canvasBgUrl
+      ? <video className="dx-stage__cbg" src={canvasBgUrl} muted loop autoPlay playsInline onError={() => setBgBroken(canvasBgUrl)} />
     : <div className="dx-stage__cbg" style={{ background: canvas.color }} />;
   const mascot = layout.mascot ?? null;
   const fontPx = stageH ? stageH * 0.036 * lay.scale : 16;
@@ -416,6 +420,9 @@ export const EditorStage = forwardRef<StageHandle, {
             <div className="dx-stage__fg" style={{ ...frameStyle, overflow: "hidden", ...(canvas?.fit === "black" ? { background: "#000" } : {}) }}>
               {canvas?.fit === "blur" && <video ref={canvasBg} className="dx-stage__bgvid" src={src} muted playsInline preload="auto" />}
               {canvasBgLayer}
+              {canvasBgUrl && bgBroken === canvasBgUrl && (
+                <span className="dx-stage__bgmiss" title="File nền không có trên máy này (chưa đồng bộ về) — chọn lại ở Khung & nền → Nền, không thì video xuất ra dùng màu nền">⚠ Không thấy file nền trên máy này</span>
+              )}
               <video ref={video} src={src} muted playsInline preload="auto"
                      style={{
                        position: "relative",

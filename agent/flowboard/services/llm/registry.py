@@ -76,6 +76,20 @@ async def _run_gemini_keys(user_prompt: str, *, system_prompt: Optional[str], at
         raise LLMError(f"Gemini: {exc}") from exc
 
 
+#: said when nothing can answer — the seller's words, with where to fix it (the English tail is matched by chat_agent)
+NO_AI = ("Chưa có AI nào dùng được trên tài khoản này: thêm Gemini API key (miễn phí) ở Cài đặt → 🔑 Gemini key, "
+         "hoặc chọn AI ở Cài đặt → 🤖 AI viết.")
+
+
+def _gemini_keys_ready() -> bool:
+    from . import gemini_api
+
+    try:
+        return bool(gemini_api.configured())
+    except Exception:  # noqa: BLE001 — a broken secrets store is "no keys"
+        return False
+
+
 def get_provider(name: str) -> Optional[LLMProvider]:
     """Lookup by name. None if the name is unknown."""
     return _PROVIDERS.get(name)
@@ -124,11 +138,19 @@ async def run_llm(
         config = {**config, feature: {"provider": "claude", "model": entry.get("model") if same else None,
                                       "effort": entry.get("effort") if same else None}}
     entry = config.get(feature)
+    # A new account has picked no AI yet, and a picked CLI can be missing on this machine (the installed app on a
+    # friend's PC has no Claude CLI): the account's Gemini keys answer instead of an error — "install and it works".
+    # Not when a caller asked for one AI by name (use_ai): that choice is kept.
+    backup = pick is None and _gemini_keys_ready()
+
+    async def by_keys(why: str) -> str:
+        logger.info("llm: feature=%s answered by the Gemini keys (%s)", feature, why)
+        return await _run_gemini_keys(user_prompt, system_prompt=system_prompt, attachments=attachments, timeout=timeout)
+
     if entry is None:
-        raise LLMError(
-            f"No AI provider configured for {feature}; "
-            f"open the AI Provider settings to set one up."
-        )
+        if backup:
+            return await by_keys("no provider picked")
+        raise LLMError(f"{NO_AI} (No AI provider configured for {feature})")
     provider_name = entry["provider"]
     model = entry.get("model")
     effort = entry.get("effort")
@@ -146,7 +168,10 @@ async def run_llm(
         )
 
     if not await provider.is_available():
+        if backup:
+            return await by_keys(f"{provider_name} is not on this machine")
         raise LLMError(
+            f"AI đã chọn ({provider_name}) không chạy được trên máy này — {NO_AI} "
             f"{provider_name} is not configured "
             f"(CLI missing or API key not set); "
             f"reconfigure in Settings → AI Providers."
@@ -177,11 +202,21 @@ async def run_llm(
         provider_name, feature, model or "-", effort or "-",
         len(attachments) if attachments else 0,
     )
-    return await provider.run(
-        user_prompt,
-        system_prompt=system_prompt,
-        attachments=attachments,
-        timeout=timeout,
-        model=model,
-        effort=effort,
-    )
+    try:
+        return await provider.run(
+            user_prompt,
+            system_prompt=system_prompt,
+            attachments=attachments,
+            timeout=timeout,
+            model=model,
+            effort=effort,
+        )
+    except LLMError as exc:
+        # the picked AI failed (out of quota, the CLI logged out…): the Gemini keys get one try before the error
+        if not backup:
+            raise
+        logger.warning("llm: provider=%s failed for %s (%s) — trying the Gemini keys", provider_name, feature, str(exc)[:200])
+        try:
+            return await by_keys(f"{provider_name} failed")
+        except LLMError:
+            raise exc from None

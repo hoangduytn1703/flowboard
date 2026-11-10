@@ -12,6 +12,9 @@ export interface DubStatus {
   separate: boolean;
   styles: { key: string; label: string }[];
   max_minutes: number;
+  /** an NVIDIA card on this machine (false: Whisper hears on the CPU — ``slow_reason`` says so) */
+  gpu?: boolean;
+  slow_reason?: string;
   default_layout?: DubLayout;
   /** second subtitle engine (Remotion: HTML/CSS subtitles, live preview) usable on this machine */
   remotion?: boolean;
@@ -514,6 +517,8 @@ export interface DubCutRow {
   start: number;
   end: number;
   title: string;
+  /** "✂️ Cắt video" → Tự cắt: a second line under the name (optional) */
+  subtitle?: string;
 }
 /** A part cut out: its own video and clip. */
 export interface DubPart extends DubCutRow {
@@ -570,6 +575,8 @@ export interface DubRender {
   sub_lang?: SubLang;
   /** "🔤 Tên riêng" glossary: how the voice reads the foreign names */
   names?: DubName[];
+  /** the editor split / merged / added / removed lines: the whole list (replaces lines / timings / looks) */
+  cues?: { start: number; end: number; text: string; src: string; look: SubLook | null }[];
 }
 
 /** "✨ AI chọn chữ quan trọng": the key moments for the lines as the editor holds them, without rendering. */

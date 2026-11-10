@@ -252,3 +252,23 @@ def test_a_long_video_lays_out_its_voice_in_parts_with_the_same_timing(tmp_path,
     assert not list(tmp_path.glob("parted.part*.wav"))  # part files cleaned up
     from flowboard.services import tts
     assert abs(tts._probe_duration(tmp_path / "parted.wav") - tts._probe_duration(tmp_path / "whole.wav")) < 0.05
+
+
+def test_the_editor_can_split_merge_add_and_remove_lines(tmp_path):
+    """``cues`` = the whole list when the number of lines changed: it replaces the project's lines."""
+    job = _job(tmp_path)  # 3 lines: 0–1.5, 2–3.5, 4–5.5
+    job.highlights = {"on": True, "points": [{"at": 2.9, "words": "câu", "line": 1}]}
+    before = dub.voice_key(job)
+    dub.apply_cues(job, [
+        {"start": 0.0, "end": 1.5, "text": "câu 0", "src": "src 0"},
+        {"start": 2.0, "end": 2.7, "text": "câu", "src": "src 1"},            # line 2 split in two
+        {"start": 2.7, "end": 3.5, "text": "một", "look": {"y": 0.3}},
+        {"start": 5.0, "end": 9.0, "text": "  câu   mới  "},                    # an added line, past the 6 s video
+    ])
+    assert [(s.start, s.end, s.text) for s in job.segments] == [
+        (0.0, 1.5, "câu 0"), (2.0, 2.7, "câu"), (2.7, 3.5, "một"), (5.0, 6.0, "câu mới")]
+    assert job.segments[2].look == {"y": 0.3} and job.segments[2].src == "" and job.segments[0].src == "src 0"
+    assert job.highlights["points"][0]["line"] == 2  # 2.9 s now sits in the second half
+    assert dub.voice_key(job) != before  # the voice is read again
+    with pytest.raises(dub.DubError):
+        dub.apply_cues(job, [{"start": "x", "end": 1}])

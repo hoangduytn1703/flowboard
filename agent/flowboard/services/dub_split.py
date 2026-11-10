@@ -52,6 +52,14 @@ def _clean_title(t: Any) -> str:
     return re.sub(r"\s+", " ", str(t or "")).strip()[:80]
 
 
+SUBTITLE_MAX = 120
+
+
+def _clean_subtitle(t: Any) -> str:
+    """A part's second line under its name ("✂️ Cắt video" → Tự cắt): optional."""
+    return re.sub(r"\s+", " ", str(t or "")).strip()[:SUBTITLE_MAX]
+
+
 def base_name(job: dub.Job) -> str:
     return (job.name or job.title or "Video").strip()[:60]
 
@@ -69,7 +77,10 @@ def normalize_rows(raw: Any, duration: float = 0.0) -> list[dict[str, Any]]:
             continue
         a = round(max(0.0, a), 2)
         b = round(min(b, duration) if duration > 0 else b, 2)
-        rows.append({"start": a, "end": b, "title": _clean_title(r.get("title"))})
+        row = {"start": a, "end": b, "title": _clean_title(r.get("title"))}
+        if _clean_subtitle(r.get("subtitle")):
+            row["subtitle"] = _clean_subtitle(r.get("subtitle"))
+        rows.append(row)
     return rows[:MAX_PARTS]
 
 

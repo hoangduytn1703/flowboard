@@ -119,6 +119,12 @@ def status() -> dict[str, Any]:
         out["reason"] = f"Thiếu mô hình Whisper large-v3-turbo trong {root / 'models'} — mở VieDub chạy một video để nó tải về."
         return out
     out["available"] = True
+    from flowboard.services import machine
+
+    slow = machine.limit("whisper")
+    out["gpu"] = slow is None
+    if slow is not None:  # no NVIDIA card: Whisper runs on the CPU — works, slower; the pages say so before a long video
+        out["slow_reason"] = slow["reason"]
     return out
 
 
@@ -2040,14 +2046,50 @@ def _pump() -> None:
 _UNSET: Any = object()
 
 
+#: lines of one project (the editor can split / add lines)
+MAX_CUES = 2000
+
+
+def apply_cues(job: Job, cues: list[dict]) -> None:
+    """The editor's whole list of lines replaces the project's — it split a line in two, merged two, added or removed
+    one, so the count differs. Each ``{start, end, text, src?, look?}``; kept in order, never overlapping, inside the
+    video (the same rules as :func:`apply_timings`)."""
+    if not isinstance(cues, list) or len(cues) > MAX_CUES:
+        raise DubError("Danh sách câu không hợp lệ")
+    made: list[Segment] = []
+    timings: list[list[float]] = []
+    for i, c in enumerate(cues):
+        if not isinstance(c, dict):
+            raise DubError(f"Câu {i + 1} không hợp lệ")
+        try:
+            start, end = float(c.get("start")), float(c.get("end"))
+        except (TypeError, ValueError):
+            raise DubError(f"Mốc thời gian câu {i + 1} không hợp lệ") from None
+        made.append(Segment(start=start, end=end, src=re.sub(r"\s+", " ", str(c.get("src") or "")).strip()[:2000],
+                            text=re.sub(r"\s+", " ", str(c.get("text") or "")).strip()[:2000],
+                            look=normalize_look(c.get("look"))))
+        timings.append([start, end])
+    made.sort(key=lambda s: s.start)
+    timings.sort(key=lambda t: t[0])
+    job.segments = made
+    apply_timings(job, timings)
+    # a key moment remembers the line it sits in: the lines moved, so that is looked up again from its time
+    hl = job.highlights if isinstance(job.highlights, dict) else None
+    for p in (hl or {}).get("points") or []:
+        if isinstance(p, dict) and "at" in p:
+            at = float(p.get("at") or 0)
+            p["line"] = next((k for k, s in enumerate(job.segments) if s.start <= at < s.end), None)
+
+
 def render_job(job: Job, *, lines: Optional[list[str]], voice: Optional[str], style: Optional[str],
                keep_bgm: Optional[bool], name: Optional[str], channel_id: Any = _UNSET,
                layout: Optional[dict] = None, engine: Optional[str] = None,
                timings: Optional[list[list[float]]] = None,
                looks: Optional[list[Optional[dict]]] = None,
                highlights: Optional[dict] = None, mode: Optional[str] = None, sub_lang: Optional[str] = None,
-               names: Optional[list] = None) -> Job:
-    """Render (again) with edited lines / options. Allowed from ``review``,
+               names: Optional[list] = None, cues: Optional[list[dict]] = None) -> Job:
+    """Render (again) with edited lines / options. ``cues`` = the whole list of lines when the editor changed how many
+    there are (split / merge / add / remove) — it replaces ``lines`` / ``timings`` / ``looks``. Allowed from ``review``,
     ``done`` and ``error`` (after a render failure). ``timings`` = new
     [start, end] per line from the timeline editor; ``sub_lang`` = the language
     the edited lines are in (the editor re-translates them, see :func:`subtitle_lines`)."""
@@ -2063,6 +2105,9 @@ def render_job(job: Job, *, lines: Optional[list[str]], voice: Optional[str], st
         raise DubError("Lồng tiếng đọc tiếng Việt — các câu đang là " + SUB_LANGS.get(new_lang, new_lang)
                        + ". Đổi “Ngôn ngữ phụ đề” sang tiếng Việt trước.")
     _upgrade_voice_key(job)
+    if cues is not None:
+        apply_cues(job, cues)
+        lines = timings = looks = None
     if timings is not None:
         apply_timings(job, timings)
     if looks is not None:

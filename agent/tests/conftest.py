@@ -30,6 +30,7 @@ os.environ.setdefault("FLOWBOARD_SECRETS_PATH", str(Path(_TMPDIR) / "secrets.jso
 os.environ["FLOWBOARD_LICENSE_KEY"] = str(Path(_TMPDIR) / "no-licence-key")
 # the "gói lồng tiếng" never comes from the machine running the tests (services/dub_addon.py)
 os.environ["FLOWBOARD_DUB_ADDON_DIR"] = str(Path(_TMPDIR) / "addons" / "dub")
+os.environ["FLOWBOARD_MACHINE_FILE"] = str(Path(_TMPDIR) / "machine.json")  # the card check's answer (services/machine.py)
 os.environ["FLOWBOARD_TOOLS_DIR"] = str(Path(_TMPDIR) / "tools")  # the own yt-dlp copy never lands in the repo
 os.environ.pop("FLOWBOARD_LICENSE_STRICT", None)
 

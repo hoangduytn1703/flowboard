@@ -262,7 +262,9 @@ def _run_ytdlp(url: str, media_id: str, max_duration_s: Optional[float] = None) 
     stderr = proc.stderr.decode("utf-8", "replace").strip()
     title = next((line.split("title::", 1)[1].strip() for line in stdout.splitlines() if "title::" in line), "")
     path = next((p for p in out_dir.glob(f"{media_id}.*") if p.suffix.lower() in (".mp4", ".webm", ".mov", ".mkv")), None)
-    if path is None and max_duration_s and "does not pass filter" in stdout + stderr:
+    # yt-dlp skips a video the filter refuses and still exits 0; with --print it does not always say why (seen on
+    # Windows: nothing on stdout / stderr) — so "exit 0 and no file" is that refusal too
+    if path is None and max_duration_s and ("does not pass filter" in stdout + stderr or proc.returncode == 0):
         return None, title, f"video dài hơn {max_duration_s / 60:.0f} phút — chọn video ngắn hơn"
     if proc.returncode != 0 or path is None:
         tail = [l for l in stderr.splitlines() if l.startswith("ERROR")] or stderr.splitlines()[-3:]
