@@ -384,6 +384,7 @@
   color: #fde68a; background: rgba(234, 179, 8, 0.1); border: 1px solid rgba(234, 179, 8, 0.35); }
 .qt-addon__err { margin: 0; padding: 8px 10px; border-radius: 9px; font-size: 13.5px; line-height: 1.45;
   color: #fca5a5; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.35); word-break: break-word; }
+.qt-addon__err a { color: #ffd2c2; text-decoration: underline; word-break: break-all; }
 .qt-addon__acts { display: flex; gap: 8px; flex-wrap: wrap; }
 .qt-addon__run { display: flex; flex-direction: column; gap: 8px; }
 .qt-addon__bar { height: 10px; border-radius: 99px; background: rgba(255, 255, 255, 0.07); overflow: hidden; }

@@ -55,6 +55,28 @@ PACKAGES = ["faster-whisper==1.2.1", "ctranslate2==4.8.0", "sherpa-onnx==1.13.0"
 #: CUDA 12 libraries for ctranslate2 4.8 (cuBLAS 12 + cuDNN 9) — the ones torch 2.8 / cu128 ships
 GPU_WHEELS = (("nvidia-cudnn-cu12", "9.10.2.21"), ("nvidia-cublas-cu12", "12.8.4.1"))
 #: rough download sizes (MB) for the progress bar and the "tải khoảng …" line
+#: The Microsoft Visual C++ 2015–2022 runtime (x64). ctranslate2.dll and onnxruntime load MSVCP140.dll,
+#: VCRUNTIME140.dll and VCRUNTIME140_1.dll from System32 — the Python uv downloads does not carry MSVCP140 — and Windows
+#: does not always have them (a fresh install, or only the 2015 / 2017 runtime, without VCRUNTIME140_1). Then importing
+#: faster_whisper fails with "Could not find module …\ctranslate2.dll (or one of its dependencies)" (a friend's
+#: machine, 10/11). Microsoft's own installer, checked for its signature, run once with the user's go-ahead (UAC).
+VC_REDIST_URL = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+VC_DLLS = ("msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll")
+#: vc_redist exit codes that mean the runtime is there: done / a newer or the same one already in / done, restart later
+VC_OK_CODES = (0, 1638, 3010, 1641)
+#: what a job does first: load every native library of the add-on (a missing one is not a DLL problem)
+PROBE = (
+    "import importlib\n"
+    "bad = []\n"
+    "for name in ('ctranslate2', 'onnxruntime', 'sherpa_onnx'):\n"
+    "    try:\n"
+    "        importlib.import_module(name)\n"
+    "    except ModuleNotFoundError:\n"
+    "        pass\n"
+    "    except BaseException as exc:\n"
+    "        bad.append(f'{name}: {exc}')\n"
+    "print(' | '.join(bad) or 'ok')\n"
+)
 SIZE_MB = {"uv": 16, "python": 30, "gpu": 1261, "packages": 330, "whisper": 1620, "spleeter": 40, "vieneu": 600}
 #: free space asked for before starting (the venv unpacks bigger than its downloads)
 NEED_FREE_MB = {True: 9000, False: 5000}
@@ -398,6 +420,91 @@ def _run(cmd: list[str], root: Path, env: Optional[dict[str, str]] = None, timeo
     return text
 
 
+def _system32() -> Path:
+    return Path(os.environ.get("SystemRoot") or r"C:\Windows") / "System32"
+
+
+def vc_runtime_missing() -> list[str]:
+    """The Visual C++ runtime DLLs this Windows lacks (empty elsewhere / when all are there)."""
+    if sys.platform != "win32":
+        return []
+    return [name for name in VC_DLLS if not (_system32() / name).is_file()]
+
+
+def dll_problem(text: str) -> bool:
+    """A library that would not load because a DLL it needs is missing / too old (Windows error 126 / 127)."""
+    t = (text or "").lower()
+    return any(k in t for k in ("could not find module", "dll load failed", "winerror 126", "winerror 127",
+                                "specified module could not be found", "specified procedure could not be found",
+                                "msvcp140", "vcruntime140"))
+
+
+def _powershell(script: str, root: Path, timeout: int, **env: str) -> str:
+    exe = _system32() / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    return _run([str(exe) if exe.is_file() else "powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                 "-Command", script], root, env=clean_env(**env), timeout=timeout)
+
+
+def _install_vc_runtime(root: Path) -> None:
+    """Download Microsoft's vc_redist.x64.exe, make sure Microsoft signed it, and run it elevated (one UAC prompt)."""
+    if sys.platform != "win32":
+        return
+    _set(phase="Cài Microsoft Visual C++ Runtime (thư viện Windows mà AI cần) — Windows sẽ hỏi quyền: bấm Yes / Có. "
+               "Không thấy hộp thoại thì nhìn thanh taskbar")
+    exe = download([VC_REDIST_URL], root / "downloads" / "vc_redist.x64.exe")
+    signed = _powershell("$s = Get-AuthenticodeSignature -LiteralPath $env:DFLOW_VC; "
+                         "Write-Output ('SIG ' + $s.Status + ' ' + $s.SignerCertificate.Subject)",
+                         root, 120, DFLOW_VC=str(exe))
+    sig = next((ln for ln in signed.splitlines() if ln.startswith("SIG ")), "")
+    if not sig.startswith("SIG Valid") or "O=Microsoft Corporation" not in sig:
+        exe.unlink(missing_ok=True)
+        raise AddonError("Bộ cài Visual C++ Runtime tải về không có chữ ký của Microsoft — đã bỏ. Thử lại sau, hoặc tự cài "
+                         f"từ {VC_REDIST_URL}")
+    out = _powershell("try { $p = Start-Process -FilePath $env:DFLOW_VC -ArgumentList '/install','/quiet','/norestart' "
+                      "-Verb RunAs -Wait -PassThru; Write-Output ('EXIT ' + $p.ExitCode) } "
+                      "catch { Write-Output ('FAIL ' + $_.Exception.Message) }",
+                      root, 1200, DFLOW_VC=str(exe))
+    line = next((ln for ln in reversed(out.splitlines()) if ln.startswith(("EXIT ", "FAIL "))), "")
+    if line.startswith("EXIT ") and line[5:].strip().lstrip("-").isdigit() and int(line[5:]) in VC_OK_CODES:
+        logger.info("dub add-on: Visual C++ runtime installed (%s)", line)
+        return
+    if line.startswith("FAIL ") and "cancel" in line.lower():
+        raise AddonError("Bạn đã bấm Không (No) ở hộp thoại của Windows nên chưa cài được Visual C++ Runtime — bấm Cài lại "
+                         f"và chọn Yes / Có, hoặc tự cài từ {VC_REDIST_URL} rồi bấm Cài lại.")
+    raise AddonError(f"Cài Visual C++ Runtime không xong ({(line or out)[-200:]}) — tự cài từ {VC_REDIST_URL} rồi bấm Cài lại.")
+
+
+def _probe(root: Path, python: Path) -> str:
+    """'' when every native library of the add-on loads in its Python; else what failed."""
+    try:
+        out = _run([str(python), "-c", PROBE], root, env=clean_env(PYTHONIOENCODING="utf-8"), timeout=300)
+    except AddonError as exc:
+        return str(exc) or "Python của gói không chạy"
+    last = next((ln.strip() for ln in reversed(out.splitlines()) if ln.strip()), "")
+    return "" if last == "ok" else (last or "Python của gói không chạy")
+
+
+def _ensure_libraries_load(root: Path, python: Path) -> None:
+    """Right after the libraries are installed (before the 1.6 GB of Whisper): load them like a job will. A DLL problem
+    on Windows gets the Visual C++ runtime installed, then one more try."""
+    problem = _probe(root, python)
+    if problem and dll_problem(problem) and sys.platform == "win32":
+        logger.warning("dub add-on: libraries do not load (%s) — installing the Visual C++ runtime", problem)
+        _install_vc_runtime(root)
+        problem = _probe(root, python)
+    if problem:
+        raise AddonError(load_failure(problem))
+
+
+def load_failure(problem: str) -> str:
+    """What to tell the user when the add-on's libraries do not load."""
+    msg = f"Thư viện AI của gói không nạp được trên máy này: {problem[:300]}"
+    if dll_problem(problem) and sys.platform == "win32":
+        msg += (f" — Cài (hoặc cài lại) Microsoft Visual C++ Runtime từ {VC_REDIST_URL} rồi bấm Cài lại. Vẫn lỗi thì phần "
+                "mềm diệt virus có thể đã xoá file: thêm thư mục gói vào danh sách loại trừ rồi Gỡ gói và cài lại.")
+    return msg
+
+
 def _ensure_uv(root: Path) -> Path:
     exe = root / "uv" / ("uv.exe" if sys.platform == "win32" else "uv")
     if exe.is_file():
@@ -470,6 +577,9 @@ def _install(gpu: Optional[dict[str, Any]]) -> None:
     _set(total_mb=total, done_mb=0)
     base = 0
 
+    if vc_runtime_missing():  # ask for it now, while the user is watching, not after an hour of downloads
+        _install_vc_runtime(root)
+
     _set(phase="Tải uv (bộ cài thư viện Python)")
     uv = _ensure_uv(root)
     base += SIZE_MB["uv"]
@@ -508,6 +618,9 @@ def _install(gpu: Optional[dict[str, Any]]) -> None:
     base += SIZE_MB["packages"]
     _set(done_mb=base)
 
+    _set(phase="Kiểm tra thư viện AI nạp được trên máy này")
+    _ensure_libraries_load(root, python)
+
     _set(phase="Tải mô hình Whisper large-v3-turbo (~1,6 GB)")
     meter = _Meter(base, SIZE_MB["whisper"])
     wdir = root / "models" / WHISPER_DIR
@@ -531,7 +644,8 @@ def _install(gpu: Optional[dict[str, Any]]) -> None:
     _set(phase="Kiểm tra Whisper chạy được" + (" trên card NVIDIA" if use_gpu else ""))
     check = _check(root, python)
     if not check.get("ok"):
-        raise AddonError(check.get("error") or "Whisper không chạy được sau khi cài")
+        error = check.get("error") or "Whisper không chạy được sau khi cài"
+        raise AddonError(load_failure(error) if dll_problem(error) else error)
 
     data = {"version": ADDON_VERSION, "installed_at": time.strftime("%Y-%m-%d %H:%M:%S"), "gpu": gpu,
             "device": check.get("device"), "cuda": bool(check.get("cuda")), "cuda_error": check.get("cuda_error") or "",

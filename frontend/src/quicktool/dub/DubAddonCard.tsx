@@ -8,6 +8,16 @@ import "../dub.css";
 const gb = (mb: number) => `${(mb / 1024).toFixed(1).replace(".", ",")} GB`;
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+/** The error with its links clickable (the Visual C++ runtime's download, when Windows lacks it) — the app opens
+ * them in the normal browser. */
+function withLinks(text: string) {
+  return text.split(/(https?:\/\/[^\s)]+)/).map((part, i) =>
+    /^https?:\/\//.test(part)
+      ? <a key={i} href={part} target="_blank" rel="noreferrer">{part}</a>
+      : part,
+  );
+}
+
 function elapsed(since: string | null): string {
   if (!since) return "";
   const s = Math.max(0, Math.round((Date.now() - new Date(since).getTime()) / 1000));
@@ -160,7 +170,7 @@ export function DubAddonCard({ initial, compact = false, onReady }: {
             <li className="qt-addon__muted">Cài vào <code>{st.dir}</code></li>
           </ul>
           {short && <p className="qt-addon__warn">Ổ đĩa không đủ chỗ — dọn bớt (hoặc đổi Thư mục dữ liệu ở Cài đặt → 🖥 Máy này) rồi cài.</p>}
-          {st.error && <p className="qt-addon__err">{st.error}</p>}
+          {st.error && <p className="qt-addon__err">{withLinks(st.error)}</p>}
           {!st.supported ? (
             <p className="qt-addon__warn">Gói lồng tiếng chỉ có cho Windows.</p>
           ) : (

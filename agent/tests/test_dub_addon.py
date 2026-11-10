@@ -121,6 +121,10 @@ def test_install_runs_every_step_and_writes_addon_json_last(addon, monkeypatch):
             py = dub_addon.venv_python(root)
             py.parent.mkdir(parents=True, exist_ok=True)
             py.write_text("")
+        if "-c" in cmd:  # the libraries load
+            assert any("pip" in c for c in commands)  # … tried right after they are installed
+            assert not any(dub_addon.WHISPER_FILES[-1] == d for d in downloaded)  # … before the 1.6 GB of Whisper
+            return "ok"
         return ""
 
     monkeypatch.setattr(dub_addon, "download", fake_download)
@@ -141,10 +145,125 @@ def test_install_runs_every_step_and_writes_addon_json_last(addon, monkeypatch):
 
     # no NVIDIA card: no CUDA wheels, smaller download
     commands.clear()
+    downloaded.clear()
     dub_addon._install(None)
     pip = next(c for c in commands if "pip" in c)
     assert not any("nvidia" in a for a in pip)
     assert dub_addon.plan_mb(False) < dub_addon.plan_mb(True)
+
+
+def test_visual_cpp_runtime_missing_from_system32_is_seen(monkeypatch, tmp_path):
+    system32 = tmp_path / "System32"
+    system32.mkdir()
+    (system32 / "vcruntime140.dll").write_bytes(b"x")
+    monkeypatch.setenv("SystemRoot", str(tmp_path))
+    monkeypatch.setattr(dub_addon.sys, "platform", "win32")
+    assert dub_addon.vc_runtime_missing() == ["msvcp140.dll", "vcruntime140_1.dll"]
+    for name in dub_addon.VC_DLLS:
+        (system32 / name).write_bytes(b"x")
+    assert dub_addon.vc_runtime_missing() == []
+    monkeypatch.setattr(dub_addon.sys, "platform", "linux")
+    (system32 / "msvcp140.dll").unlink()
+    assert dub_addon.vc_runtime_missing() == []  # only Windows has it
+
+
+def test_the_friends_error_is_a_dll_problem():
+    seen = ("ctranslate2: Could not find module 'E:\\DFlowData\\addons\\dub\\.venv\\Lib\\site-packages\\ctranslate2\\"
+            "ctranslate2.dll' (or one of its dependencies). Try using the full path with constructor syntax.")
+    assert dub_addon.dll_problem(seen)
+    assert dub_addon.dll_problem("onnxruntime: DLL load failed while importing onnxruntime_pybind11_state")
+    assert not dub_addon.dll_problem("ctranslate2: No module named 'numpy'")
+
+
+def test_libraries_that_do_not_load_get_the_visual_cpp_runtime_then_one_more_try(addon, monkeypatch):
+    monkeypatch.setattr(dub_addon.sys, "platform", "win32")
+    installed: list[Path] = []
+    monkeypatch.setattr(dub_addon, "_install_vc_runtime", lambda root: installed.append(root))
+    dll = "ctranslate2: Could not find module 'x\\ctranslate2.dll' (or one of its dependencies)."
+    answers = iter([dll, ""])
+    monkeypatch.setattr(dub_addon, "_probe", lambda root, python: next(answers))
+    dub_addon._ensure_libraries_load(addon, addon / "python.exe")
+    assert installed == [addon]
+
+    # still failing after the runtime: say what to do (the runtime's link, antivirus), do not loop
+    installed.clear()
+    monkeypatch.setattr(dub_addon, "_probe", lambda root, python: dll)
+    with pytest.raises(dub_addon.AddonError, match="Visual C\\+\\+ Runtime") as err:
+        dub_addon._ensure_libraries_load(addon, addon / "python.exe")
+    assert dub_addon.VC_REDIST_URL in str(err.value) and installed == [addon]
+
+    # a failure that is not about a DLL: no runtime install, just the reason
+    installed.clear()
+    monkeypatch.setattr(dub_addon, "_probe", lambda root, python: "sherpa_onnx: bad wheel")
+    with pytest.raises(dub_addon.AddonError, match="bad wheel"):
+        dub_addon._ensure_libraries_load(addon, addon / "python.exe")
+    assert installed == []
+
+
+def test_probe_reads_what_failed(addon, monkeypatch):
+    out = iter(["ok", "ctranslate2: boom"])
+    monkeypatch.setattr(dub_addon, "_run", lambda cmd, root, env=None, timeout=0: next(out))
+    assert dub_addon._probe(addon, addon / "python.exe") == ""
+    assert dub_addon._probe(addon, addon / "python.exe") == "ctranslate2: boom"
+
+    def crash(cmd, root, env=None, timeout=0):
+        raise dub_addon.AddonError("thoát mã 3")
+
+    monkeypatch.setattr(dub_addon, "_run", crash)
+    assert dub_addon._probe(addon, addon / "python.exe") == "thoát mã 3"
+
+
+def test_visual_cpp_runtime_install_checks_microsofts_signature_and_the_exit_code(addon, monkeypatch):
+    monkeypatch.setattr(dub_addon.sys, "platform", "win32")
+
+    def fake_download(urls, dest, on_bytes=None, expect=0, attempts=4):
+        assert urls == [dub_addon.VC_REDIST_URL]
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"MZ")
+        return dest
+
+    monkeypatch.setattr(dub_addon, "download", fake_download)
+    state = {"sig": "SIG Valid CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond", "run": "EXIT 3010"}
+    scripts: list[str] = []
+
+    def fake_ps(script, root, timeout, **env):
+        scripts.append(script)
+        assert env["DFLOW_VC"].endswith("vc_redist.x64.exe")  # the path goes in through the environment, never quoted
+        return state["sig"] if "Get-AuthenticodeSignature" in script else state["run"]
+
+    monkeypatch.setattr(dub_addon, "_powershell", fake_ps)
+    dub_addon._install_vc_runtime(addon)  # 3010 = installed, restart later: fine
+    assert "-Verb RunAs" in scripts[-1] and "/quiet" in scripts[-1]
+    state["run"] = "EXIT 1638"  # a newer one was already there
+    dub_addon._install_vc_runtime(addon)
+
+    state["run"] = "FAIL This command cannot be run due to the error: The operation was canceled by the user."
+    with pytest.raises(dub_addon.AddonError, match="Không \\(No\\)"):
+        dub_addon._install_vc_runtime(addon)
+    state["run"] = "EXIT 1603"
+    with pytest.raises(dub_addon.AddonError, match="không xong"):
+        dub_addon._install_vc_runtime(addon)
+
+    state["sig"] = "SIG NotSigned "
+    with pytest.raises(dub_addon.AddonError, match="chữ ký"):
+        dub_addon._install_vc_runtime(addon)
+    assert not (addon / "downloads" / "vc_redist.x64.exe").exists()  # never run, thrown away
+
+
+def test_install_asks_for_the_visual_cpp_runtime_first_when_windows_lacks_it(addon, monkeypatch):
+    order: list[str] = []
+    monkeypatch.setattr(dub_addon, "_free_mb", lambda p: 100_000)
+    monkeypatch.setattr(dub_addon, "vc_runtime_missing", lambda: ["vcruntime140_1.dll"])
+    monkeypatch.setattr(dub_addon, "_install_vc_runtime", lambda root: order.append("runtime"))
+
+    def stop_at_uv(root):
+        order.append("uv")
+        raise dub_addon.AddonError("stop here")
+
+    monkeypatch.setattr(dub_addon, "_ensure_uv", stop_at_uv)
+    with pytest.raises(dub_addon.AddonError, match="stop here"):
+        dub_addon._install(None)
+    assert order == ["runtime", "uv"]
 
 
 def test_install_refuses_a_full_disk_and_reports_failures(addon, monkeypatch):
