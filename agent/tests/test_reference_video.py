@@ -131,7 +131,7 @@ def test_fetch_route_downloads_with_ytdlp(client, monkeypatch, tmp_path):
     r = client.post("/api/reference-video/fetch", json={"url": "https://www.tiktok.com/@shop/video/123"})
     assert r.status_code == 200, r.text
     assert r.json()["title"] == "My TikTok ad" and r.json()["size"] == 10
-    assert "--no-plugin-dirs" in seen["cmd"] and "--max-filesize" in seen["cmd"]
+    assert "--no-plugin-dirs" in seen["cmd"] and "--max-filesize" not in seen["cmd"]  # no size cap (10/11)
     assert client.get(f"/media/{r.json()['media_id']}").status_code == 200
 
     assert client.post("/api/reference-video/fetch", json={"url": "https://example.com/v.mp4"}).status_code == 400

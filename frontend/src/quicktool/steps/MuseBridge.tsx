@@ -10,7 +10,6 @@ import {
 } from "../muse";
 import { askConfirm } from "../../components/Dialogs";
 
-const MAX_FILE_BYTES = 200 * 1024 * 1024; // /api/reference-video/upload
 
 /** When each running Flow clip of the board was sent (its request's
  * `created_at`, ms), by video node id. Polled while any clip is running —
@@ -317,8 +316,7 @@ export function MuseBridge({ roles, productName, boardName, boardId, focus, wait
 
   const assigned = files.filter((f) => f.scene !== null);
   const dupes = new Set(assigned.map((f) => f.scene).filter((n, i, a) => a.indexOf(n) !== i));
-  const tooBig = files.filter((f) => f.file.size > MAX_FILE_BYTES);
-  const canAttach = assigned.length > 0 && dupes.size === 0 && !assigned.some((f) => f.file.size > MAX_FILE_BYTES) && !attaching;
+  const canAttach = assigned.length > 0 && dupes.size === 0 && !attaching;
 
   async function attach() {
     const running = assigned
@@ -479,7 +477,6 @@ export function MuseBridge({ roles, productName, boardName, boardId, focus, wait
                           {f.width > 0 && !isPortrait916(f.width, f.height) && (
                             <small className="qt-muse__warn">Không phải khung dọc 9:16 — khi ghép sẽ được cắt hoặc thêm viền đen cho vừa.</small>
                           )}
-                          {f.file.size > MAX_FILE_BYTES && <small className="qt-muse__warn">File quá 200 MB.</small>}
                           <label className="qt-muse__assign">
                             Gắn vào
                             <select value={f.scene ?? ""} onChange={(e) => setScene(f.key, e.target.value ? Number(e.target.value) : null)}>
@@ -506,7 +503,6 @@ export function MuseBridge({ roles, productName, boardName, boardId, focus, wait
                     {attaching ? "Đang gắn video…" : `✓ Gắn ${assigned.length} video vào cảnh`}
                   </button>
                   {dupes.size > 0 && <small className="qt-muse__warn">Mỗi cảnh chỉ một video.</small>}
-                  {tooBig.length > 0 && <small className="qt-muse__warn">{tooBig.length} file quá 200 MB.</small>}
                 </div>
               )}
             </div>

@@ -35,7 +35,7 @@ from sqlmodel import select
 from flowboard.db import get_session
 from flowboard.db.models import Asset, Board, Node
 from flowboard.services import media as media_service
-from flowboard.services import dub_addon, dub_decor, dub_names, dub_remotion, key_moments, sfx, tts
+from flowboard.services import dub_addon, dub_decor, dub_names, dub_remotion, key_moments, sfx, tts, ytdlp
 from flowboard.services.llm import run_llm
 from flowboard.services.llm.base import LLMError
 from flowboard.services.video_export import _encode_args, _run, probe_clip
@@ -99,7 +99,7 @@ NO_RUNTIME = ("Máy này chưa có gói lồng tiếng (AI nghe tiếng Whisper,
 def status() -> dict[str, Any]:
     rt = dub_addon.runtime()
     root = rt[0] if rt else dub_addon.addon_dir()
-    out: dict[str, Any] = {"available": False, "root": str(root), "ytdlp": shutil.which("yt-dlp") is not None,
+    out: dict[str, Any] = {"available": False, "root": str(root), "ytdlp": ytdlp.available(),
                            "whisper": False, "separate": False, "runtime": "none"}
     rm_ok, rm_why = dub_remotion.available()
     out["remotion"] = rm_ok

@@ -225,7 +225,7 @@ export function StepMedia({ roles, kind, productName = "", boardName = "", voice
         {kind === "video" && (
           <p className="qt-card__hint">
             Mỗi clip 8 giây bằng {videoModel === "omni_flash" ? "Omni Flash (~12 credit)" : "Veo 3.1"}, thường 1–2 phút. Clip chưa ưng thì bấm "Tạo lại…" ở cảnh đó và ghi muốn sửa gì,
-            hoặc <strong>⬆ Dùng video của bạn</strong> để thay bằng cảnh quay thật (mp4/mov, tối đa 200 MB, không tốn credit).
+            hoặc <strong>⬆ Dùng video của bạn</strong> để thay bằng cảnh quay thật (mp4/mov, không tốn credit).
             Flow chậm quá hoặc bỏ lượt thì làm cảnh đó bằng <strong>Muse</strong> (khung "🎬 Làm video bằng Muse" bên dưới).
           </p>
         )}

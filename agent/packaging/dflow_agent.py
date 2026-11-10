@@ -78,10 +78,28 @@ def _exit_with_parent() -> None:
     threading.Thread(target=wait, name="parent-watch", daemon=True).start()
 
 
+def _temp_in_home(home: Path) -> None:
+    """Python's temp files (an uploaded video is spooled there before the agent copies it — gigabytes for "Cắt video")
+    in the data folder, not in %TEMP% on drive C. Leftovers older than a day (a crash mid-upload) are removed."""
+    import tempfile
+    import time
+
+    tmp = home / "tmp"
+    try:
+        tmp.mkdir(parents=True, exist_ok=True)
+        for old in tmp.iterdir():
+            if old.is_file() and time.time() - old.stat().st_mtime > 86400:
+                old.unlink(missing_ok=True)
+    except OSError:
+        return
+    tempfile.tempdir = str(tmp)
+
+
 def main() -> None:
     multiprocessing.freeze_support()
     home = _home()
     home.mkdir(parents=True, exist_ok=True)
+    _temp_in_home(home)
     os.environ.setdefault("FLOWBOARD_HOME", str(home))
     os.environ.setdefault("FLOWBOARD_APP", "1")
     if getattr(sys, "frozen", False) or os.environ.get("FLOWBOARD_LOG_TO_FILE") == "1":

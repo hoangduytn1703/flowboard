@@ -56,7 +56,7 @@ DFlow chạy trên máy của bạn (không phải trang web có sẵn), nên c�
 | Bạn muốn | Cần cài | Hướng dẫn |
 |---|---|---|
 | **Cơ bản**: mở app, làm clip quảng cáo, sản phẩm, bài viết, lịch đăng | File cài **DFlow-Setup.exe** + Chrome + Claude Code + extension DFlow Bridge (chạy từ mã nguồn thì thêm uv, Node.js, Git, ffmpeg) | [Mục 3](#3-cài-đặt-lần-đầu-windows) |
-| Tải video từ link TikTok / YouTube / Instagram / Facebook | yt-dlp (Douyin không cần) | [Mục 6.1](#61-tải-video-từ-link) |
+| Tải video từ link TikTok / YouTube / Instagram / Facebook | yt-dlp — bản app từ 1.8.4 tự tải, không cần cài (Douyin không cần) | [Mục 6.1](#61-tải-video-từ-link) |
 | **Lồng tiếng video**, chèn phụ đề, cắt video theo lời, giọng VieNeu miễn phí | **Gói lồng tiếng** — bấm cài một lần trong app (~3,9 GB, nên có card NVIDIA) | [Mục 6.2](#62-lồng-tiếng-video-xoá-phụ-đề-ai-giọng-vieneu) |
 | Xoá phụ đề có sẵn bằng AI | Bộ VieDub (pyvideotrans) đầy đủ — nặng | [Mục 6.2](#62-lồng-tiếng-video-xoá-phụ-đề-ai-giọng-vieneu) |
 | Edit auto CapCut | CapCut bản máy tính | [Mục 6.3](#63-edit-auto-capcut) |
@@ -282,7 +282,8 @@ bấm nút **tải lại** (↻) ở ô DFlow Bridge, rồi F5 tab Flow.
 
 ### 6.1 Tải video từ link
 
-Cho các ô dán link TikTok, YouTube, Instagram, Facebook (link Douyin chạy sẵn, không cần cài):
+Bản app từ **1.8.4 không cần cài gì**: lần đầu dán link TikTok, YouTube, Instagram, Facebook, app tự tải công cụ yt-dlp bản chính thức (kiểm mã
+SHA-256) vào thư mục dữ liệu và 3 ngày tự cập nhật một lần. Link Douyin chạy sẵn. Chạy từ mã nguồn (start.ps1) hoặc app cũ hơn thì cài tay:
 
 ```powershell
 winget install -e --id yt-dlp.yt-dlp --accept-source-agreements --accept-package-agreements

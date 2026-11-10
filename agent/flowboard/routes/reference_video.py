@@ -33,7 +33,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/reference-video", tags=["reference-video"])
 
-MAX_VIDEO_BYTES = 200 * 1024 * 1024
 _EXT_BY_MIME = {
     "video/mp4": ".mp4",
     "video/quicktime": ".mov",
@@ -55,23 +54,43 @@ async def upload_reference_video(file: UploadFile = File(...)) -> dict[str, Any]
             ext, mime = guess, next(m for m, e in _EXT_BY_MIME.items() if e == guess)
         else:
             raise HTTPException(415, f"unsupported video type {mime or guess!r}; use mp4 / mov / webm")
-    raw = await file.read(MAX_VIDEO_BYTES + 1)
-    if not raw:
-        raise HTTPException(400, "empty file")
-    if len(raw) > MAX_VIDEO_BYTES:
-        raise HTTPException(413, f"video too large: {len(raw) // (1024 * 1024)} MB > 200 MB")
+    import asyncio
+
     media_id = uuid.uuid4().hex
     media_service.MEDIA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     path = media_service.MEDIA_CACHE_DIR / f"{media_id}{ext}"
-    path.write_bytes(raw)
+    # No size limit (a 60-minute video for "Cắt video" is easily 1–2 GB): copied to disk in chunks, never held in memory.
+    try:
+        size = await asyncio.to_thread(_save_upload, file.file, path)
+    except OSError as exc:
+        raise HTTPException(507, f"Không lưu được video (ổ đĩa đầy?): {exc}")
+    if not size:
+        raise HTTPException(400, "empty file")
     with get_session() as s:
         s.add(Asset(kind="video", uuid_media_id=media_id, local_path=str(path), mime=mime))
         s.commit()
     info = probe_clip(path)
-    logger.info("reference-video: stored %s (%d bytes, %.1fs)", media_id, len(raw), info.duration if info else -1)
-    return {"media_id": media_id, "mime": mime, "size": len(raw),
+    logger.info("reference-video: stored %s (%d bytes, %.1fs)", media_id, size, info.duration if info else -1)
+    return {"media_id": media_id, "mime": mime, "size": size,
             "duration_s": round(info.duration, 1) if info else None,
             "width": info.width if info else None, "height": info.height if info else None}
+
+
+def _save_upload(src: Any, dest: Path) -> int:
+    """Copy an uploaded file to ``dest`` through a ``.part`` file; returns its size (0 = empty, nothing kept)."""
+    import os
+    import shutil
+
+    part = dest.with_name(dest.name + ".part")
+    try:
+        with open(part, "wb") as fh:
+            shutil.copyfileobj(src, fh, 1 << 20)
+        size = part.stat().st_size
+        if size:
+            os.replace(part, dest)
+        return size
+    finally:
+        part.unlink(missing_ok=True)
 
 
 def _video_path(media_id: str) -> Path:
@@ -192,7 +211,8 @@ _ALLOWED_HOSTS = (
     "tiktok.com", "youtube.com", "youtu.be", "instagram.com", "facebook.com", "fb.watch",
     "douyin.com", "iesdouyin.com", "x.com", "twitter.com",
 )
-FETCH_TIMEOUT_S = 240
+#: a 60-minute video for "Cắt video" at 720p is several hundred MB
+FETCH_TIMEOUT_S = 1800
 
 
 class FetchBody(BaseModel):
@@ -206,26 +226,28 @@ def _host_allowed(url: str) -> bool:
     return any(host == h or host.endswith("." + h) for h in _ALLOWED_HOSTS)
 
 
-def _run_ytdlp(url: str, media_id: str) -> tuple[Optional[Path], str, str]:
-    """Download ``url`` as ``<media_id>.mp4`` (≤ 720p, ≤ 200 MB). Returns
-    ``(path, title, error_tail)``."""
-    import shutil
+def _run_ytdlp(url: str, media_id: str, max_duration_s: Optional[float] = None) -> tuple[Optional[Path], str, str]:
+    """Download ``url`` as ``<media_id>.mp4`` (≤ 720p, any size; longer than ``max_duration_s`` is refused before the
+    download). Returns ``(path, title, error_tail)``. yt-dlp is this machine's or the agent's own copy (services/ytdlp)."""
     import subprocess
 
-    ytdlp = shutil.which("yt-dlp")
-    if ytdlp is None:
-        return None, "", "yt-dlp không có trên máy — cài bằng `winget install yt-dlp`"
+    from flowboard.services import ytdlp as ytdlp_tool
+
+    try:
+        ytdlp = ytdlp_tool.ensure()
+    except ytdlp_tool.YtdlpError as exc:
+        return None, "", f"chưa có công cụ tải video yt-dlp: {exc}"
     out_dir = media_service.MEDIA_CACHE_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
+    limit = ["--match-filter", f"!duration | duration <= {int(max_duration_s)}"] if max_duration_s else []
     cmd = [
         ytdlp,
         # The POT-provider plugin on this machine times out; nothing here
         # needs it for the formats below.
         "--no-plugin-dirs", "--no-playlist", "--no-progress", "--no-simulate",
-        "--encoding", "utf-8",
+        "--encoding", "utf-8", *ytdlp_tool.js_args(), *limit,
         "-f", "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b",
         "--merge-output-format", "mp4",
-        "--max-filesize", "200M",
         "--print", "after_move:title::%(title)s",
         "-o", str(out_dir / f"{media_id}.%(ext)s"),
         url,
@@ -240,6 +262,8 @@ def _run_ytdlp(url: str, media_id: str) -> tuple[Optional[Path], str, str]:
     stderr = proc.stderr.decode("utf-8", "replace").strip()
     title = next((line.split("title::", 1)[1].strip() for line in stdout.splitlines() if "title::" in line), "")
     path = next((p for p in out_dir.glob(f"{media_id}.*") if p.suffix.lower() in (".mp4", ".webm", ".mov", ".mkv")), None)
+    if path is None and max_duration_s and "does not pass filter" in stdout + stderr:
+        return None, title, f"video dài hơn {max_duration_s / 60:.0f} phút — chọn video ngắn hơn"
     if proc.returncode != 0 or path is None:
         tail = [l for l in stderr.splitlines() if l.startswith("ERROR")] or stderr.splitlines()[-3:]
         return None, title, " ".join(tail)[-400:] or f"yt-dlp exited {proc.returncode}"

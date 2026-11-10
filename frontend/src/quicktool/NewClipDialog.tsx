@@ -1007,7 +1007,7 @@ export function NewClipDialog({
                       </div>
                     </>
                   ) : (
-                    <div className="qt-ref__placeholder">+ Chọn video từ máy (mp4 / mov / webm, ≤ 200 MB, nên dưới 90 giây)</div>
+                    <div className="qt-ref__placeholder">+ Chọn video từ máy (mp4 / mov / webm, nên dưới 90 giây)</div>
                   )}
                 </div>
                 <input ref={fileRef} type="file" accept="video/mp4,video/quicktime,video/webm" hidden

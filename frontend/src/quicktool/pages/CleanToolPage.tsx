@@ -16,7 +16,6 @@ import {
   frameUrl,
   cleanInfo,
   getCleanJob,
-  MAX_CLEAN_VIDEO_BYTES,
   startAiErase,
   stopCleanJob,
   uploadCleanVideo,
@@ -114,10 +113,6 @@ export function CleanToolPage() {
     const ext = file.name.toLowerCase().split(".").pop() ?? "";
     if (!["mp4", "mov", "webm"].includes(ext) && !file.type.startsWith("video/")) {
       setUploadError("Chỉ nhận video mp4 / mov / webm.");
-      return;
-    }
-    if (file.size > MAX_CLEAN_VIDEO_BYTES) {
-      setUploadError(`Video ${Math.round(file.size / 1024 / 1024)} MB — tối đa 200 MB.`);
       return;
     }
     setUploading(true);
@@ -347,7 +342,7 @@ export function CleanToolPage() {
           <span className="qt-card__eyebrow">Bước 1 · Video nguồn</span>
           <h2 className="qt-card__title">Chọn video cần làm sạch</h2>
           <p className="qt-card__hint">
-            Video có sẵn của bạn (mp4 / mov / webm, tối đa 200 MB). Video chỉ nằm trên máy này, không gửi lên Flow.
+            Video có sẵn của bạn (mp4 / mov / webm). Video chỉ nằm trên máy này, không gửi lên Flow.
           </p>
           <label
             className={`clean-drop${dragOver ? " clean-drop--over" : ""}`}

@@ -64,7 +64,6 @@ async function json<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export const MAX_CLEAN_VIDEO_BYTES = 200 * 1024 * 1024;
 
 export async function uploadCleanVideo(file: File): Promise<CleanVideo> {
   const form = new FormData();

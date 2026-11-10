@@ -148,7 +148,7 @@ def fetch_video(text: str, media_id: str, out_dir: Path, *, max_duration_s: Opti
             if "tối đa" in str(exc):
                 raise
             errors.append(f"Douyin: {exc}")
-    path, title, err = _run_ytdlp(url, media_id)
+    path, title, err = _run_ytdlp(url, media_id, max_duration_s)
     if path is None:
         errors.append(f"yt-dlp: {err}")
         raise FetchError(" · ".join(errors))

@@ -66,9 +66,9 @@ def test_fetch_video_uses_douyin_then_falls_back_to_ytdlp(monkeypatch, tmp_path)
     monkeypatch.setattr(vf, "douyin_info", boom)
     import flowboard.routes.reference_video as rv
 
-    monkeypatch.setattr(rv, "_run_ytdlp", lambda url, mid: (tmp_path / f"{mid}.mp4", "via yt-dlp", ""))
+    monkeypatch.setattr(rv, "_run_ytdlp", lambda url, mid, limit=None: (tmp_path / f"{mid}.mp4", "via yt-dlp", ""))
     assert vf.fetch_video(SHARE, "m2", tmp_path)[1] == "via yt-dlp"
-    monkeypatch.setattr(rv, "_run_ytdlp", lambda url, mid: (None, "", "Fresh cookies are needed"))
+    monkeypatch.setattr(rv, "_run_ytdlp", lambda url, mid, limit=None: (None, "", "Fresh cookies are needed"))
     with pytest.raises(vf.FetchError, match="Douyin: chặn · yt-dlp: Fresh cookies"):
         vf.fetch_video(SHARE, "m3", tmp_path)
     with pytest.raises(vf.FetchError, match="Không thấy link"):
