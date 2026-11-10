@@ -3,7 +3,7 @@ import { useBoardStore } from "../store/board";
 import { useChatStore } from "../store/chat";
 import { useGenerationStore } from "../store/generation";
 import { usePipelineStore } from "../store/pipeline";
-import { useToastStore, type ToastKind } from "../store/toast";
+import { TOAST_MS, useToastStore, type ToastKind } from "../store/toast";
 
 const ICON: Record<ToastKind, string> = { success: "✓", info: "i", warning: "!", error: "!" };
 const LABEL: Record<ToastKind, string> = { success: "Thành công", info: "Thông báo", warning: "Lưu ý", error: "Lỗi" };
@@ -33,7 +33,7 @@ function Toast({ kind, message, duration, onClose }: { kind: ToastKind; message:
 }
 
 /**
- * The toast stack (top right). Shows the toasts pushed with `toast.*` and,
+ * The toast stack (bottom left). Shows the toasts pushed with `toast.*` and,
  * as error toasts, the `error` that the board / chat / generation / pipeline
  * stores raise (one at a time, in that priority).
  */
@@ -61,7 +61,7 @@ export function Toaster() {
   if (!storeError && toasts.length === 0) return null;
   return (
     <div className="toast-stack" aria-live="polite">
-      {storeError && <Toast key={`store:${storeError}`} kind="error" message={storeError} duration={9000} onClose={clearStoreError} />}
+      {storeError && <Toast key={`store:${storeError}`} kind="error" message={storeError} duration={TOAST_MS} onClose={clearStoreError} />}
       {toasts.map((t) => (
         <Toast key={t.id} kind={t.kind} message={t.message} duration={t.duration} onClose={() => dismiss(t.id)} />
       ))}

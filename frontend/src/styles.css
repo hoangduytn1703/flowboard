@@ -2397,11 +2397,11 @@ button:disabled {
 
 /* ── Toaster ─────────────────────────────────────────────────────────────────── */
 
-/* Toasts: one stack, top right, above every dialog (they sit at 200–1100). */
+/* Toasts: one stack, bottom left (out of the way of the buttons being worked), above every dialog (they sit at 200–1100). */
 .toast-stack {
   position: fixed;
-  top: 20px;
-  right: 20px;
+  bottom: 20px;
+  left: 20px;
   z-index: 1200;
   display: flex;
   flex-direction: column;
@@ -2467,9 +2467,18 @@ button:disabled {
   transform-origin: left;
   animation: toast-bar linear forwards;
 }
-@keyframes toast-in { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
+@keyframes toast-in { from { opacity: 0; transform: translateX(-16px); } to { opacity: 1; transform: none; } }
 @keyframes toast-bar { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 @media (prefers-reduced-motion: reduce) { .toast, .toast__bar { animation: none; } }
+
+/* Sliders with notches (components/TickRange.tsx): ticks sit under the track; the thumb is 16 px wide. */
+.tick-range { position: relative; display: block; min-width: 0; padding-bottom: 8px; }
+.tick-range > input[type="range"] { display: block; width: 100%; margin: 0; accent-color: var(--qt-accent, #ff6a2b); }
+.tick-range__ticks { position: absolute; left: 0; right: 0; bottom: 0; height: 7px; pointer-events: none; }
+.tick-range__ticks i { position: absolute; bottom: 0; width: 1px; height: 4px; margin-left: -0.5px; background: #5b6272; }
+.tick-range__ticks i.is-mark { width: 2px; height: 7px; margin-left: -1px; background: #8e96a8; border-radius: 1px; }
+.tick-range__ticks i.is-mark.is-on { background: var(--qt-accent, #ff6a2b); }
+.tick-range.is-disabled { opacity: 0.5; }
 
 /* ── Chat Sidebar ─────────────────────────────────────────────────────────────── */
 

@@ -4,6 +4,7 @@ import {
   type CanvasAspect, type CanvasFit, type DubCanvas, type DubLayout,
 } from "../../../api/dub";
 import { toast } from "../../../store/toast";
+import { TickRange } from "../../../components/TickRange";
 import { canvasRect, innerCrop } from "../../../remotion/canvasGeom";
 import { PLATFORMS, platformOf, type PlatformKey } from "./platforms";
 
@@ -178,21 +179,21 @@ export function FormatBar({ layout, srcW, srcH, readOnly, onLayout, platform, on
           {cutting && (
             <label className="dx-format__pos" title="Cắt lệch về bên nào (trái / phải hoặc trên / dưới)">
               Vị trí cắt
-              <input type="range" min={0} max={1} step={0.01} value={c.cut} disabled={readOnly}
-                     onChange={(e) => set({ cut: Number(e.target.value) }, "canvas-cut")} />
+              <TickRange min={0} max={1} step={0.01} value={c.cut} disabled={readOnly}
+                         onChange={(v) => set({ cut: v }, "canvas-cut")} />
             </label>
           )}
           {!fill && (
             <>
               <label className="dx-format__pos" title="Video nằm trên / dưới (hoặc trái / phải) trong khung">
                 Vị trí video
-                <input type="range" min={0} max={1} step={0.01} value={c.pos} disabled={readOnly}
-                       onChange={(e) => set({ pos: Number(e.target.value) }, "canvas-pos")} />
+                <TickRange min={0} max={1} step={0.01} value={c.pos} disabled={readOnly}
+                           onChange={(v) => set({ pos: v }, "canvas-pos")} />
               </label>
               <label className="dx-format__pos" title="Cỡ video trong khung — nhỏ hơn thì nền hiện xung quanh">
                 Cỡ video {Math.round(c.scale * 100)}%
-                <input type="range" min={0.5} max={1} step={0.01} value={c.scale} disabled={readOnly}
-                       onChange={(e) => set({ scale: Number(e.target.value) }, "canvas-scale")} />
+                <TickRange min={0.5} max={1} step={0.01} value={c.scale} disabled={readOnly} every={0.05}
+                           marks={[0.5, 0.75, 1]} onChange={(v) => set({ scale: v }, "canvas-scale")} />
               </label>
             </>
           )}
@@ -219,8 +220,8 @@ export function FormatBar({ layout, srcW, srcH, readOnly, onLayout, platform, on
             </label>
             <label className="dx-format__pos" title="Cỡ ô lưới">
               Ô
-              <input type="range" min={0.04} max={0.3} step={0.01} value={c.cell} disabled={readOnly}
-                     onChange={(e) => set({ cell: Number(e.target.value) }, "canvas-cell")} />
+              <TickRange min={0.04} max={0.3} step={0.01} value={c.cell} disabled={readOnly} every={0.02}
+                         marks={[0.04, 0.11, 0.3]} onChange={(v) => set({ cell: v }, "canvas-cell")} />
             </label>
           </>
         )}

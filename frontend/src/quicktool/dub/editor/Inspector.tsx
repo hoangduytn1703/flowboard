@@ -7,6 +7,7 @@ import {
 } from "../../../api/dub";
 import { ChannelPicker } from "../../channels/ChannelPicker";
 import { VoiceField } from "../../VoiceField";
+import { TickRange } from "../../../components/TickRange";
 import { DecorControls } from "../DecorControls";
 import { clock, effectiveLayout, readingLoad, W_MAX, W_MIN, type EditCue, type GeomPatch } from "./cues";
 import type { Sel } from "./EditorStage";
@@ -242,24 +243,24 @@ export function Inspector({
                 </div>
               )}
               <label className="qt-field"><span>Cỡ chữ <small>{Math.round(geo.scale * 100)}%</small></span>
-                <input type="range" min={0.5} max={2.2} step={0.05} value={geo.scale} disabled={readOnly}
-                       onChange={(e) => setPos({ scale: Number(e.target.value) }, "sub-scale")} /></label>
+                <TickRange min={0.5} max={2.2} step={0.05} value={geo.scale} disabled={readOnly} every={0.1}
+                           marks={[0.5, 1, 1.5, 2.2]} onChange={(v) => setPos({ scale: v }, "sub-scale")} /></label>
               <label className="qt-field">
                 <span>Độ rộng phụ đề <small>{geo.w ? pct(geo.w) : "tự động"}</small></span>
                 <div className="dx-insp__wrow">
-                  <input type="range" min={W_MIN} max={W_MAX} step={0.01} value={geo.w ?? 0.88} disabled={readOnly}
-                         onChange={(e) => setPos({ w: Number(e.target.value) }, "sub-width")} />
+                  <TickRange min={W_MIN} max={W_MAX} step={0.01} value={geo.w ?? 0.88} disabled={readOnly} every={0.1}
+                             marks={[0.5, 0.75, 0.88]} onChange={(v) => setPos({ w: v }, "sub-width")} />
                   <label className="qt-check"><input type="checkbox" checked={!geo.w} disabled={readOnly}
                          onChange={(e) => setPos({ w: e.target.checked ? null : 0.88 }, "")} /> Tự động</label>
                 </div>
               </label>
               <div className="dx-insp__row2">
                 <label className="qt-field"><span>Ngang <small>{pct(geo.x)}</small></span>
-                  <input type="range" min={0.05} max={0.95} step={0.005} value={geo.x} disabled={readOnly}
-                         onChange={(e) => setPos({ x: Number(e.target.value) }, "sub-x")} /></label>
+                  <TickRange min={0.05} max={0.95} step={0.005} value={geo.x} disabled={readOnly} every={0.1}
+                             marks={[0.25, 0.5, 0.75]} onChange={(v) => setPos({ x: v }, "sub-x")} /></label>
                 <label className="qt-field"><span>Dọc <small>{pct(geo.y)}</small></span>
-                  <input type="range" min={0.08} max={0.98} step={0.005} value={geo.y} disabled={readOnly}
-                         onChange={(e) => setPos({ y: Number(e.target.value) }, "sub-y")} /></label>
+                  <TickRange min={0.08} max={0.98} step={0.005} value={geo.y} disabled={readOnly} every={0.1}
+                             marks={[0.25, 0.5, 0.75, 0.9]} onChange={(v) => setPos({ y: v }, "sub-y")} /></label>
               </div>
               <div className="qt-posts__chips">
                 {POS_PRESETS.map((p) => (
@@ -340,15 +341,20 @@ export function Inspector({
                 <h4 className="dx-insp__h">Vùng {bi + 1}</h4>
                 <div className="dx-insp__row2">
                   <label className="qt-field"><span>Cao <small>{pct(blur.h)}</small></span>
-                    <input type="range" min={0.02} max={0.4} step={0.005} value={blur.h} disabled={readOnly} onChange={(e) => setBlur({ h: Number(e.target.value) }, "blur-h")} /></label>
+                    <TickRange min={0.02} max={0.4} step={0.005} value={blur.h} disabled={readOnly} every={0.02}
+                               marks={[0.1, 0.2, 0.3, 0.4]} onChange={(v) => setBlur({ h: v }, "blur-h")} /></label>
                   <label className="qt-field"><span>Rộng <small>{pct(blur.w)}</small></span>
-                    <input type="range" min={0.05} max={1} step={0.01} value={blur.w} disabled={readOnly} onChange={(e) => setBlur({ w: Number(e.target.value) }, "blur-w")} /></label>
+                    <TickRange min={0.05} max={1} step={0.01} value={blur.w} disabled={readOnly} every={0.05}
+                               marks={[0.25, 0.5, 0.75, 1]} onChange={(v) => setBlur({ w: v }, "blur-w")} /></label>
                   <label className="qt-field"><span>Vị trí dọc <small>{pct(blur.y)}</small></span>
-                    <input type="range" min={0} max={0.97} step={0.005} value={blur.y} disabled={readOnly} onChange={(e) => setBlur({ y: Number(e.target.value) }, "blur-y")} /></label>
+                    <TickRange min={0} max={0.97} step={0.005} value={blur.y} disabled={readOnly} every={0.1}
+                               marks={[0, 0.25, 0.5, 0.75]} onChange={(v) => setBlur({ y: v }, "blur-y")} /></label>
                   <label className="qt-field"><span>Vị trí ngang <small>{pct(blur.x)}</small></span>
-                    <input type="range" min={0} max={0.95} step={0.005} value={blur.x} disabled={readOnly} onChange={(e) => setBlur({ x: Number(e.target.value) }, "blur-x")} /></label>
+                    <TickRange min={0} max={0.95} step={0.005} value={blur.x} disabled={readOnly} every={0.1}
+                               marks={[0, 0.25, 0.5, 0.75]} onChange={(v) => setBlur({ x: v }, "blur-x")} /></label>
                   <label className="qt-field"><span>Độ mờ <small>{blur.amount}/10</small></span>
-                    <input type="range" min={1} max={10} step={1} value={blur.amount} disabled={readOnly} onChange={(e) => setBlur({ amount: Number(e.target.value) }, "blur-a")} /></label>
+                    <TickRange min={1} max={10} step={1} value={blur.amount} disabled={readOnly} every={1}
+                               marks={[1, 5, 10]} onChange={(v) => setBlur({ amount: v }, "blur-a")} /></label>
                 </div>
                 <div className="qt-post__actions">
                   <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" disabled={readOnly} onClick={() => setBlur({ x: 0.05, w: 0.9 }, "")}>Rộng gần hết khung</button>
@@ -488,8 +494,8 @@ function HighlightsPane({ hl, layout, status, readOnly, selected, onSelect }: {
               <label className="qt-field">
                 <span>Vị trí chữ to <small>{Math.round(y * 100)}%{v.y === null ? " · trên phụ đề" : ""}</small></span>
                 <div className="dx-insp__wrow">
-                  <input type="range" min={HL_Y_MIN} max={HL_Y_MAX} step={0.005} value={y} disabled={readOnly}
-                         onChange={(e) => hl.set({ y: Number(e.target.value) }, "hl-y")} />
+                  <TickRange min={HL_Y_MIN} max={HL_Y_MAX} step={0.005} value={y} disabled={readOnly} every={0.1}
+                             marks={[0.25, 0.5, 0.75]} onChange={(v) => hl.set({ y: v }, "hl-y")} />
                   <label className="qt-check"><input type="checkbox" checked={v.y === null} disabled={readOnly}
                          onChange={(e) => hl.set({ y: e.target.checked ? null : y })} /> Tự động</label>
                 </div>

@@ -5,6 +5,7 @@ import {
 } from "../../../api/dub";
 import { toast } from "../../../store/toast";
 import { askConfirm, askText } from "../../../components/Dialogs";
+import { LookThumb } from "./LookThumb";
 
 /**
  * "★ Mẫu chỉnh sửa": the whole look of a dubbed clip — subtitle place / size / style, blur boxes, output format, frame,
@@ -104,6 +105,7 @@ export function LookPresets({ current, readOnly, onApply }: {
                                 d.layout?.frame ? "khung trang trí" : "", d.layout?.mascot?.media_id ? "nhân vật" : "", d.highlights?.on ? "nhấn chữ" : "", d.engine === "remotion" ? "Remotion" : ""].filter(Boolean);
                   return (
                     <li key={p.id} className={p.id === defaultId ? "is-default" : ""}>
+                      <LookThumb preset={p} />
                       <button type="button" className="dx-presets__use" disabled={readOnly} onClick={() => apply(p)} title="Áp mẫu này cho clip đang mở">
                         <strong>{p.id === defaultId ? "★ " : ""}{p.name}</strong>
                         <small>{bits.join(" · ")}{p.uses ? ` · dùng ${p.uses} lần` : ""}</small>

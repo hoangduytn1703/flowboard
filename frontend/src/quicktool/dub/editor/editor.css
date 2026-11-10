@@ -245,6 +245,7 @@
 .dx-insp__custom { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 12.5px; color: #67e8f9; }
 .dx-insp__wrow { display: flex; align-items: center; gap: 10px; }
 .dx-insp__wrow input[type="range"] { flex: 1 1 auto; }
+.dx-insp__wrow .tick-range { flex: 1 1 auto; }
 .dx-insp__wrow .qt-check { flex: none; font-size: 12.5px; white-space: nowrap; }
 .dx-insp__select { width: 100%; padding: 8px 10px; border-radius: 9px; border: 1px solid var(--border); background: #1c2029; color: var(--text); font: inherit; font-size: 14px; }
 
@@ -305,6 +306,7 @@
 .dx-format__shape { display: inline-block; border: 1.5px solid currentColor; border-radius: 2px; opacity: 0.85; }
 .dx-format__pos { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
 .dx-format__pos input { width: 110px; accent-color: var(--qt-accent); }
+.dx-format__pos .tick-range { width: 130px; flex: none; }
 .dx-format__size { margin-left: auto; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 /* "★ Mẫu" (LookPresets.tsx): saved looks, applied in one click */
@@ -318,6 +320,15 @@
 .dx-presets__list li { display: flex; align-items: center; gap: 6px; padding: 4px; border: 1px solid var(--border); border-radius: 9px; }
 .dx-presets__list li .qt-btn { white-space: nowrap; flex: 0 0 auto; }
 .dx-presets__list li.is-default { border-color: rgba(255, 106, 43, 0.6); }
+.dx-lookthumb { flex: none; display: grid; place-items: center; width: 64px; height: 114px; border-radius: 8px; background: #0c0e13; border: 1px solid var(--border); overflow: hidden; }
+.dx-lookthumb__f { position: relative; display: block; overflow: hidden; border-radius: 3px; }
+.dx-lookthumb__abs { position: absolute; inset: 0; }
+.dx-lookthumb__video { position: absolute; display: grid; place-items: center; font-size: 9px; color: rgba(255, 255, 255, 0.55);
+  background: linear-gradient(135deg, #56688d, #2a3347); box-sizing: border-box; overflow: hidden; }
+.dx-lookthumb__blur { position: absolute; background: rgba(255, 255, 255, 0.22); outline: 1px dashed rgba(255, 255, 255, 0.7); box-sizing: border-box; }
+.dx-lookthumb__mascot { position: absolute; transform: translate(-50%, -100%); background: #ff6a2b center / cover no-repeat; border: 1px solid #fff; box-sizing: border-box; }
+.dx-lookthumb__sub { position: absolute; transform: translate(-50%, -100%); display: grid; place-items: center; border-radius: 2px; box-sizing: border-box; }
+.dx-lookthumb__sub i { display: block; width: 70%; height: 2px; border-radius: 1px; }
 .dx-presets__use { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 4px 6px;
   background: none; border: 0; color: inherit; text-align: left; cursor: pointer; }
 .dx-presets__use:hover:not(:disabled) strong { color: var(--qt-accent); }

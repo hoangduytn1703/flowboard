@@ -45,7 +45,31 @@ MAX_LINKS = 10
 #: sessions waiting + running at once
 MAX_QUEUE = 20
 HOWS = ("ai", "prompt", "even")
-PROMPT_MAX = 600
+PROMPT_MAX = 4000
+#: saved cut prompts ("Prompt đã lưu"): AppSetting in the account's database, [{id, name, text}]
+PROMPTS_KEY = "cut_prompts"
+MAX_SAVED_PROMPTS = 30
+#: languages offered for the titles the AI writes (Vietnamese names — they go into the prompt as written)
+TITLE_LANGS = ("Việt", "Tây Ban Nha", "Anh", "Bồ Đào Nha", "Pháp", "Đức", "Indonesia", "Thái", "Nhật", "Hàn", "Trung")
+#: the saved prompt an account starts with (edit / delete it like any other)
+DEFAULT_PROMPT_NAME = "Hook TikTok · 70–150 giây · tiêu đề từng đoạn"
+DEFAULT_PROMPT = """Gợi ý cho tôi 1 tiêu đề (Name) tối ưu nhất để đăng TikTok thỏa mãn các điều kiện:
+- Tiêu đề chứa hook hoặc tạo sự tò mò/kịch tính cao nhất, đạt chuẩn SEO TikTok để thu hút người xem và dễ viral.
+- Được viết bằng NGÔN NGỮ TIÊU ĐỀ đã chọn (độ dài từ 3 đến 8 từ).
+- Tuyệt đối KHÔNG chứa tên riêng của nhân vật, hãy thay bằng các từ chung (cô gái, chàng trai, người phụ nữ, người đàn ông...).
+Lấy tiêu đề đó gán cho biến (Name).
+
+NHIỆM VỤ PHÂN TÍCH VÀ CẮT:
+Quét toàn bộ video từ giây đầu tiên đến giây cuối cùng để trích xuất TẤT CẢ các đoạn thỏa mãn điều kiện.
+Số lượng đoạn cắt là HOÀN TOÀN TỰ ĐỘNG, từ 2 đoạn trở lên. Video có bao nhiêu đoạn đạt tiêu chuẩn thì trích xuất hết, không bỏ sót.
+
+TIÊU CHÍ CHỌN ĐOẠN CẮT (BẮT BUỘC):
+1. Hook: câu thứ 1 hoặc thứ 2 của mỗi đoạn phải đủ giật gân, kịch tính, gây sốc hoặc gây tò mò để giữ người xem đến hết clip. Đoạn không có hook mạnh ở 2 câu đầu thì BỎ QUA.
+2. Thời lượng: mỗi đoạn dài trên 70 giây và ngắn hơn 2 phút 30 giây (70s < thời lượng < 150s).
+3. Bỏ Intro & Outro:
+- Bỏ Intro (khoảng 15-30 giây đầu nếu là nội dung lặp lại / preview).
+- Bỏ Outro (khoảng 20 giây cuối: lời cảm ơn, MC giao lưu / tóm tắt, hoặc clip chèn nhạc).
+4. Tiêu đề từng đoạn (title_bottom_N): viết bằng NGÔN NGỮ TIÊU ĐỀ đã chọn, 3-8 từ, có hook, giật gân, không chứa tên riêng."""
 DEFAULT_MIN_S, DEFAULT_MAX_S = 30.0, 60.0
 TAG_PREFIX = "flowboard-cut:"
 LLM_TIMEOUT_S = 240
@@ -89,6 +113,10 @@ class Session:
     rows: list[dict] = field(default_factory=list)
     by: str = ""
     note: str = ""
+    #: one title for the whole video, when the request asks for one ("Name")
+    name: str = ""
+    #: the language the AI writes the titles in ("" = what the request says, else Vietnamese)
+    title_lang: str = ""
     #: the parts cut so far [{index, start, end, title, job_id, board_id, media_id}]
     parts: list[dict] = field(default_factory=list)
     #: "★ Mẫu chỉnh sửa" picked for this cut (dub.normalize_look_preset): every new part comes out in that look
@@ -102,7 +130,7 @@ class Session:
 
     SAVED = ("id", "run_id", "url", "source_media_id", "how", "prompt", "min_s", "max_s", "max_parts", "review", "channel_id",
              "status", "phase", "progress", "title", "duration_s", "width", "height", "language", "segments", "heard", "prepared",
-             "rows", "by", "note", "parts", "look", "error", "started_at", "position")
+             "rows", "by", "note", "name", "title_lang", "parts", "look", "error", "started_at", "position")
 
     def to_dict(self) -> dict[str, Any]:
         return {k: getattr(self, k) for k in self.SAVED}
@@ -150,7 +178,61 @@ def normalize_max_parts(n: Any) -> int:
 
 
 def clean_prompt(text: Any) -> str:
-    return re.sub(r"\s+", " ", str(text or "")).strip()[:PROMPT_MAX]
+    """A cut request as typed — a long, structured prompt keeps its lines (spaces tidied, blank runs collapsed)."""
+    lines = [re.sub(r"[ \t\f\v]+", " ", ln).strip() for ln in str(text or "").replace("\r", "").split("\n")]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()[:PROMPT_MAX]
+
+
+def normalize_title_lang(lang: Any) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\-]", " ", str(lang or ""))).strip()[:30]
+
+
+# ── saved prompts ──────────────────────────────────────────────────────────
+
+def normalize_prompts(raw: Any) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for p in raw if isinstance(raw, list) else []:
+        if not isinstance(p, dict):
+            continue
+        text = clean_prompt(p.get("text"))
+        if not text:
+            continue
+        pid = re.sub(r"[^A-Za-z0-9_-]", "", str(p.get("id") or ""))[:24]
+        if not pid or pid in seen:
+            pid = _uid()
+        seen.add(pid)
+        name = re.sub(r"\s+", " ", str(p.get("name") or "")).strip()[:60] or f"Prompt {len(out) + 1}"
+        out.append({"id": pid, "name": name, "text": text})
+    return out[:MAX_SAVED_PROMPTS]
+
+
+def saved_prompts() -> list[dict[str, str]]:
+    """The account's saved cut prompts; an account that never saved any starts with the built-in one."""
+    from flowboard.db import get_session
+    from flowboard.db.models import AppSetting
+
+    with get_session() as db:
+        row = db.get(AppSetting, PROMPTS_KEY)
+        if row is None:
+            return [{"id": "default", "name": DEFAULT_PROMPT_NAME, "text": DEFAULT_PROMPT}]
+        try:
+            return normalize_prompts(json.loads(row.value or "[]"))
+        except (TypeError, ValueError):
+            return []
+
+
+def save_prompts(raw: Any) -> list[dict[str, str]]:
+    from flowboard.db import get_session
+    from flowboard.db.models import AppSetting
+
+    prompts = normalize_prompts(raw)
+    with get_session() as db:
+        row = db.get(AppSetting, PROMPTS_KEY) or AppSetting(key=PROMPTS_KEY, value="")
+        row.value = json.dumps(prompts, ensure_ascii=False)
+        db.add(row)
+        db.commit()
+    return prompts
 
 
 # ── persistence ────────────────────────────────────────────────────────────
@@ -256,7 +338,7 @@ def status() -> dict[str, Any]:
     st = dub.status()
     return {"whisper": bool(st.get("available")), "whisper_reason": "" if st.get("available") else st.get("reason", ""),
             "remotion": bool(st.get("remotion")), "max_minutes": MAX_DURATION_S // 60, "max_links": MAX_LINKS,
-            "max_parts": dub_split.MAX_PARTS, "prompt_max": PROMPT_MAX,
+            "max_parts": dub_split.MAX_PARTS, "prompt_max": PROMPT_MAX, "title_langs": list(TITLE_LANGS),
             "default_min": DEFAULT_MIN_S, "default_max": DEFAULT_MAX_S}
 
 
@@ -264,7 +346,7 @@ def status() -> dict[str, Any]:
 
 def start(*, links: list[str], media: list[dict[str, Any]], how: str = "ai", prompt: str = "", min_s: Any = None,
           max_s: Any = None, max_parts: Any = 0, review: bool = False, channel_id: Optional[int] = None,
-          look: Optional[dict] = None) -> tuple[str, list[Session]]:
+          look: Optional[dict] = None, title_lang: Any = "") -> tuple[str, list[Session]]:
     """One session per link / file, all in one run (their parts are one batch in the editor). ``look`` = a saved
     "★ Mẫu chỉnh sửa" (:func:`dub.look_preset`) every part is rendered in. Returns ``(run_id, sessions)``."""
     from flowboard.services.video_fetch import extract_url
@@ -295,6 +377,7 @@ def start(*, links: list[str], media: list[dict[str, Any]], how: str = "ai", pro
     for i, (kind, value) in enumerate(items):
         s = Session(id=_uid(), run_id=run_id, how=how, prompt=prompt, min_s=lo, max_s=hi,
                     max_parts=normalize_max_parts(max_parts), review=bool(review), channel_id=channel_id,
+                    title_lang=normalize_title_lang(title_lang),
                     look=dub.normalize_look_preset(look) if look else None, started_at=now, position=i)
         if kind == "url":
             s.url = str(value)[:2000]
@@ -337,7 +420,7 @@ def _run(s: Session) -> None:
             _prepare(s)
         _set(s, "AI đang chọn đoạn cắt" if s.how != "even" and s.segments else "Đang chia đoạn", 62)
         res = asyncio.run(suggest(s))
-        s.rows, s.by, s.note = res["rows"], res["by"], res["note"]
+        s.rows, s.by, s.note, s.name = res["rows"], res["by"], res["note"], res.get("name", "")
         if not s.rows:
             raise CutError("Không chia được đoạn nào")
         if s.review:
@@ -442,10 +525,16 @@ _SYSTEM = (
     "long) — it wins over the other rules. Without a request keep only the moments worth a short video on their own (a "
     "strong hook, one whole idea, a payoff or a surprise) and leave out intros, outros, sponsor reads, greetings, filler "
     "and repeats. Keep each part inside the length asked for when the content allows; never more parts than asked for. "
-    "Give each part a catchy Vietnamese title (<= 60 chars) about what that part shows — no clickbait lies, no hashtags, "
-    "no quotes. If the request cannot be met (the video has no such moment), return the closest parts and say why in "
+    "Give each part a title about what that part shows. When the request sets rules for the titles (language, number of "
+    "words, a hook, no proper names, SEO…), write every title by those rules; otherwise a catchy Vietnamese title (<= 60 "
+    "chars), no clickbait lies, no hashtags, no quotes. A TITLE LANGUAGE line, when given, is the language of every "
+    "title and of the name — it overrides any other language instruction. When the request also asks for ONE title for "
+    "the whole video (it may call it Name), put it in \"name\" by the request's rules; otherwise name is empty. The "
+    "request may describe its own output layout (one line, 'start_1 | end_1 | title_bottom_1', mm:ss times…): ignore that "
+    "layout — answer in the JSON below; a per-part title it names (title_bottom_N…) goes in that part's \"title\", and "
+    "the times come from the line numbers. If the request cannot be met (the video has no such moment), return the closest parts and say why in "
     "\"note\" (one Vietnamese sentence); otherwise note is empty. Output ONLY one JSON object: "
-    "{\"parts\": [{\"from\": <first line number>, \"to\": <last line number>, \"title\": str}], \"note\": str}"
+    "{\"name\": str, \"parts\": [{\"from\": <first line number>, \"to\": <last line number>, \"title\": str}], \"note\": str}"
 )
 
 
@@ -453,13 +542,18 @@ def ai_prompt(s: Session) -> str:
     lines = [f"[{i}] ({x['start']:.1f}-{x['end']:.1f}s) {str(x['text'])[:220]}" for i, x in enumerate(s.segments, 1)]
     want = f"Each short video: {s.min_s:.0f}-{s.max_s:.0f} seconds" + (f"; at most {s.max_parts} videos" if s.max_parts else "")
     req = s.prompt if s.how == "prompt" else ""
+    if req:  # a request sets its own length and number of parts (the form has no pickers for it)
+        want = ("Length of each short video and how many: as the request below says; where it says nothing, 30-180 seconds "
+                "each and as many as the content gives" + (f" (never more than {s.max_parts})" if s.max_parts else ""))
+    lang = f"TITLE LANGUAGE: tiếng {s.title_lang}\n" if s.title_lang and s.how != "even" else ""
     return (f"Video title: {s.title or '-'}\nVideo length: {s.duration_s:.0f} s. Language heard: {s.language or '?'}.\n{want}.\n"
-            + (f"THE SELLER'S REQUEST (follow it): {req}\n" if req else
+            + lang
+            + (f"THE SELLER'S REQUEST (follow it): {req}\nEND OF THE REQUEST.\n" if req else
                "No request from the seller: pick the moments that make the best short videos on their own.\n")
             + f"TRANSCRIPT ({len(lines)} lines):\n" + "\n".join(lines))
 
 
-async def ai_rows(s: Session) -> tuple[list[dict[str, Any]], str]:
+async def ai_rows(s: Session) -> tuple[list[dict[str, Any]], str, str]:
     prompt = ai_prompt(s)
     data: Optional[dict[str, Any]] = None
     for attempt in (1, 2):  # an answer that is not JSON (seen once from the Claude CLI) is asked again before giving up
@@ -479,7 +573,10 @@ async def ai_rows(s: Session) -> tuple[list[dict[str, Any]], str]:
     rows = dub_split.parts_from_ai(_as_job(s), data)
     if s.max_parts:
         rows = rows[:s.max_parts]
-    return rows, re.sub(r"\s+", " ", str(data.get("note") or "")).strip()[:240]
+    def tidy(v: Any, n: int) -> str:
+        return re.sub(r"\s+", " ", str(v or "")).strip()[:n]
+
+    return rows, tidy(data.get("note"), 240), tidy(data.get("name"), 120)
 
 
 async def suggest(s: Session) -> dict[str, Any]:
@@ -488,17 +585,18 @@ async def suggest(s: Session) -> dict[str, Any]:
         if not s.segments:
             why = ("Video không có lời nói nên AI không chọn theo nội dung được" if s.heard else
                    "Máy này chưa nghe được lời trong video (cần Whisper của pyvideotrans) nên AI không chọn theo nội dung được")
-            return {"rows": even_rows(s), "by": "even", "note": f"{why} — đã chia đều theo độ dài."}
+            return {"rows": even_rows(s), "by": "even", "note": f"{why} — đã chia đều theo độ dài.", "name": ""}
         try:
-            rows, note = await ai_rows(s)
-            return {"rows": rows, "by": "ai", "note": note}
+            rows, note, name = await ai_rows(s)
+            return {"rows": rows, "by": "ai", "note": note, "name": name}
         except dub_split.SplitError as exc:
             logger.warning("video_cut %s: AI pick failed, even split instead: %s", s.id, exc)
-            return {"rows": even_rows(s), "by": "even", "note": f"AI chưa chọn được đoạn ({str(exc)[:160]}) — đã chia đều theo chỗ ngắt câu."}
-    return {"rows": even_rows(s), "by": "even", "note": ""}
+            return {"rows": even_rows(s), "by": "even", "note": f"AI chưa chọn được đoạn ({str(exc)[:160]}) — đã chia đều theo chỗ ngắt câu.", "name": ""}
+    return {"rows": even_rows(s), "by": "even", "note": "", "name": ""}
 
 
-async def suggest_again(s: Session, *, how: str, prompt: str, min_s: Any, max_s: Any, max_parts: Any) -> dict[str, Any]:
+async def suggest_again(s: Session, *, how: str, prompt: str, min_s: Any, max_s: Any, max_parts: Any,
+                        title_lang: Any = None) -> dict[str, Any]:
     """"✨ Gợi ý lại" with other options (nothing is cut)."""
     if s.status in BUSY:
         raise CutError("Video này đang chạy — chờ xong")
@@ -509,8 +607,10 @@ async def suggest_again(s: Session, *, how: str, prompt: str, min_s: Any, max_s:
         raise CutError("Gõ yêu cầu cắt trước")
     s.min_s, s.max_s = normalize_lengths(min_s, max_s)
     s.max_parts = normalize_max_parts(max_parts)
+    if title_lang is not None:
+        s.title_lang = normalize_title_lang(title_lang)
     res = await suggest(s)
-    s.rows, s.by, s.note = res["rows"], res["by"], res["note"]
+    s.rows, s.by, s.note, s.name = res["rows"], res["by"], res["note"], res.get("name", "")
     persist(s)
     return res
 

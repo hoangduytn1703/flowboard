@@ -8,6 +8,7 @@ import {
 import { toast } from "../../store/toast";
 import { generateStandaloneImage } from "../standaloneImage";
 import { askConfirm } from "../../components/Dialogs";
+import { TickRange } from "../../components/TickRange";
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const pct = (v: number) => `${Math.round(v * 100)}%`;
@@ -244,7 +245,8 @@ export function DecorControls({ layout, onChange, orientation = "portrait" }: {
           <>
             <div className="qt-subpos__fields">
               <label className="qt-field"><span>Cỡ video trong khung <small>{pct(frame.scale)}</small></span>
-                <input type="range" min={0.6} max={1} step={0.01} value={frame.scale} onChange={(e) => setFrame({ scale: Number(e.target.value) })} /></label>
+                <TickRange min={0.6} max={1} step={0.01} value={frame.scale} every={0.05} marks={[0.6, 0.8, 1]}
+                           onChange={(v) => setFrame({ scale: v })} /></label>
               <label className="qt-field"><span>Nền khung</span>
                 <select value={frame.bg} onChange={(e) => setFrame({ bg: e.target.value as DubFrame["bg"] })}>
                   <option value="blur">Chính video, làm mờ</option>
@@ -256,7 +258,8 @@ export function DecorControls({ layout, onChange, orientation = "portrait" }: {
                   <input type="color" value={frame.color} onChange={(e) => setFrame({ color: e.target.value })} /></label>
               )}
               <label className="qt-field"><span>Viền <small>{frame.border ? `${(frame.border * 100).toFixed(1)}%` : "không"}</small></span>
-                <input type="range" min={0} max={0.03} step={0.001} value={frame.border} onChange={(e) => setFrame({ border: Number(e.target.value) })} /></label>
+                <TickRange min={0} max={0.03} step={0.001} value={frame.border} every={0.005} marks={[0, 0.015, 0.03]}
+                           onChange={(v) => setFrame({ border: v })} /></label>
               {frame.border > 0 && (
                 <label className="qt-field"><span>Màu viền</span>
                   <input type="color" value={frame.border_color} onChange={(e) => setFrame({ border_color: e.target.value })} /></label>
@@ -317,7 +320,8 @@ export function DecorControls({ layout, onChange, orientation = "portrait" }: {
                       <option value="plain">Giữ nguyên ảnh (nền trong / GIF)</option>
                     </select></label>
                   <label className="qt-field"><span>Cỡ <small>{pct(mascot.size)}</small></span>
-                    <input type="range" min={0.08} max={0.6} step={0.01} value={mascot.size} onChange={(e) => setMascot({ size: Number(e.target.value) })} /></label>
+                    <TickRange min={0.08} max={0.6} step={0.01} value={mascot.size} every={0.05} marks={[0.1, 0.2, 0.3, 0.45, 0.6]}
+                               onChange={(v) => setMascot({ size: v })} /></label>
                 </div>
                 <div className="qt-posts__chips">
                   {CORNERS.map((c) => <button key={c.label} type="button" className="qt-chip" onClick={() => setMascot({ x: c.x, y: c.y })}>{c.label}</button>)}

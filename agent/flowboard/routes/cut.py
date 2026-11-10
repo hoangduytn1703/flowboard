@@ -5,11 +5,12 @@
                                           look_preset_id} — the parts come out rendered in that ★ Mẫu chỉnh sửa
   GET  /api/cut/sessions                 newest first (brief: no lines)
   GET  /api/cut/sessions/{id}
-  POST /api/cut/sessions/{id}/suggest    {how, prompt, min_s, max_s, max_parts} → {rows, by, note} (nothing cut)
+  POST /api/cut/sessions/{id}/suggest    {how, prompt, min_s, max_s, max_parts, title_lang} → {rows, by, note, name} (nothing cut)
   POST /api/cut/sessions/{id}/cut        {rows} — cut / cut again
   POST /api/cut/sessions/{id}/stop | /again
   POST /api/cut/sessions/delete          {ids} — the list only; the parts (clips + projects) stay
   GET  /api/cut/parts?run=|session=      the parts' editing projects (dub jobs of kind "cut"), in cut order
+  GET  /api/cut/prompts | PUT {prompts: [{id, name, text}]}   the account's saved cut prompts (whole list)
   POST /api/cut/clips                    {board_ids} → the clips' final videos (dubbing a cut part later)
 The parts are edited through the dubbing editor's routes (/api/dub/jobs/{id}/render, …).
 """
@@ -34,7 +35,9 @@ class StartBody(BaseModel):
     links: list[str] = Field(default_factory=list, max_length=video_cut.MAX_LINKS)
     media: list[MediaItem] = Field(default_factory=list, max_length=video_cut.MAX_LINKS)
     how: str = Field(default="ai", pattern="^(ai|prompt|even)$")
-    prompt: str = Field(default="", max_length=2000)
+    prompt: str = Field(default="", max_length=8000)
+    #: the language of the titles the AI writes ("" = what the request says, else Vietnamese)
+    title_lang: str = Field(default="", max_length=40)
     min_s: float = video_cut.DEFAULT_MIN_S
     max_s: float = video_cut.DEFAULT_MAX_S
     max_parts: int = Field(default=0, ge=0, le=100)
@@ -46,7 +49,9 @@ class StartBody(BaseModel):
 
 class SuggestBody(BaseModel):
     how: str = Field(default="ai", pattern="^(ai|prompt|even)$")
-    prompt: str = Field(default="", max_length=2000)
+    prompt: str = Field(default="", max_length=8000)
+    #: the language of the titles the AI writes ("" = what the request says, else Vietnamese)
+    title_lang: str = Field(default="", max_length=40)
     min_s: float = video_cut.DEFAULT_MIN_S
     max_s: float = video_cut.DEFAULT_MAX_S
     max_parts: int = Field(default=0, ge=0, le=100)
@@ -82,6 +87,26 @@ def get_status() -> dict[str, Any]:
     return video_cut.status()
 
 
+class SavedPrompt(BaseModel):
+    id: str = Field(default="", max_length=40)
+    name: str = Field(default="", max_length=200)
+    text: str = Field(max_length=8000)
+
+
+class PromptsBody(BaseModel):
+    prompts: list[SavedPrompt] = Field(max_length=video_cut.MAX_SAVED_PROMPTS)
+
+
+@router.get("/prompts")
+def get_prompts() -> list[dict[str, str]]:
+    return video_cut.saved_prompts()
+
+
+@router.put("/prompts")
+def put_prompts(body: PromptsBody) -> list[dict[str, str]]:
+    return video_cut.save_prompts([p.model_dump() for p in body.prompts])
+
+
 @router.post("/sessions", status_code=201)
 def start(body: StartBody) -> dict[str, Any]:
     try:
@@ -91,7 +116,8 @@ def start(body: StartBody) -> dict[str, Any]:
     try:
         run_id, made = video_cut.start(links=body.links, media=[m.model_dump() for m in body.media], how=body.how,
                                        prompt=body.prompt, min_s=body.min_s, max_s=body.max_s, max_parts=body.max_parts,
-                                       review=body.review, channel_id=body.channel_id, look=look)
+                                       review=body.review, channel_id=body.channel_id, look=look,
+                                       title_lang=body.title_lang)
     except video_cut.CutError as exc:
         raise HTTPException(400, str(exc))
     return {"run_id": run_id, "sessions": [video_cut.public(s, brief=True) for s in made]}
@@ -118,7 +144,7 @@ async def suggest(session_id: str, body: SuggestBody) -> dict[str, Any]:
     s = _session(session_id)
     try:
         return await video_cut.suggest_again(s, how=body.how, prompt=body.prompt, min_s=body.min_s, max_s=body.max_s,
-                                             max_parts=body.max_parts)
+                                             max_parts=body.max_parts, title_lang=body.title_lang)
     except video_cut.CutError as exc:
         raise HTTPException(400, str(exc))
 

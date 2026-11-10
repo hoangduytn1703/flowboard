@@ -15,6 +15,8 @@ export interface CutToolStatus {
   max_links: number;
   max_parts: number;
   prompt_max: number;
+  /** languages offered for the titles the AI writes */
+  title_langs?: string[];
   default_min: number;
   default_max: number;
 }
@@ -68,6 +70,10 @@ export interface CutSession {
   rows: DubCutRow[];
   by: string;
   note: string;
+  /** one title for the whole video, when the request asked for one ("Name") */
+  name?: string;
+  /** the language the AI writes the titles in ("" = what the request says, else Vietnamese) */
+  title_lang?: string;
   parts: CutPartView[];
   error: string | null;
   started_at: number;
@@ -84,6 +90,7 @@ export interface CutStart {
   max_parts: number;
   review: boolean;
   channel_id: number | null;
+  title_lang?: string;
   /** a saved "★ Mẫu chỉnh sửa" (frame, background, sticker, blur boxes…) every part is rendered in; null = raw pieces */
   look_preset_id?: number | null;
 }
@@ -98,8 +105,8 @@ export const getCutStatus = () => api<CutToolStatus>("/api/cut/status");
 export const listCutSessions = () => api<CutSession[]>("/api/cut/sessions");
 export const getCutSession = (id: string) => api<CutSession>(`/api/cut/sessions/${id}`);
 export const startCut = (body: CutStart) => post<{ run_id: string; sessions: CutSession[] }>("/api/cut/sessions", body);
-export const suggestCut = (id: string, body: { how: CutHow; prompt: string; min_s: number; max_s: number; max_parts: number }) =>
-  post<{ rows: DubCutRow[]; by: string; note: string }>(`/api/cut/sessions/${id}/suggest`, body);
+export const suggestCut = (id: string, body: { how: CutHow; prompt: string; min_s: number; max_s: number; max_parts: number; title_lang?: string }) =>
+  post<{ rows: DubCutRow[]; by: string; note: string; name?: string }>(`/api/cut/sessions/${id}/suggest`, body);
 export const cutNow = (id: string, rows: DubCutRow[]) => post<CutSession>(`/api/cut/sessions/${id}/cut`, { rows });
 export const stopCut = (id: string) => post<CutSession>(`/api/cut/sessions/${id}/stop`, {});
 export const cutAgain = (id: string) => post<CutSession>(`/api/cut/sessions/${id}/again`, {});
@@ -111,6 +118,24 @@ export const listCutParts = (q: { run?: string; session?: string }) =>
 /** The finished video of clips — the dubbing page dubs videos picked from "Clip của tôi". */
 export const clipVideos = (boardIds: number[]) =>
   post<{ board_id: number; name: string; media_id: string }[]>("/api/cut/clips", { board_ids: boardIds });
+
+/** A saved cut prompt ("Prompt đã lưu") — kept with the account, so every machine has them. */
+export interface CutPrompt { id: string; name: string; text: string }
+export const listCutPrompts = () => api<CutPrompt[]>("/api/cut/prompts");
+export const saveCutPrompts = (prompts: CutPrompt[]) =>
+  api<CutPrompt[]>("/api/cut/prompts", { method: "PUT", body: JSON.stringify({ prompts }) });
+
+const clock = (v: number) => {
+  const s = Math.max(0, Math.round(v));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), pad = (n: number) => String(n).padStart(2, "0");
+  return h ? `${h}:${pad(m)}:${pad(s % 60)}` : `${pad(m)}:${pad(s % 60)}`;
+};
+/** ``Name: X | start_1: mm:ss | end_1: mm:ss | title_bottom_1: Y | …`` — the one-line form other clip tools take. */
+export function pipeText(name: string, rows: { start: number; end: number; title?: string }[]): string {
+  const out = [`Name: ${name.trim() || "Video"}`];
+  rows.forEach((r, i) => out.push(`start_${i + 1}: ${clock(r.start)}`, `end_${i + 1}: ${clock(r.end)}`, `title_bottom_${i + 1}: ${(r.title ?? "").trim()}`));
+  return out.join(" | ");
+}
 
 /** Length presets of one short video (seconds). */
 export const LENGTHS: { key: string; label: string; min: number; max: number }[] = [

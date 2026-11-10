@@ -239,7 +239,7 @@ def _run_ytdlp(url: str, media_id: str, max_duration_s: Optional[float] = None) 
         return None, "", f"chưa có công cụ tải video yt-dlp: {exc}"
     out_dir = media_service.MEDIA_CACHE_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
-    limit = ["--match-filter", f"!duration | duration <= {int(max_duration_s)}"] if max_duration_s else []
+    limit = ["--match-filter", f"duration <=? {int(max_duration_s)}"] if max_duration_s else []
     cmd = [
         ytdlp,
         # The POT-provider plugin on this machine times out; nothing here

@@ -9,13 +9,14 @@ import {
 } from "../../api/dub";
 import {
   cutAgain, cutNow, deleteCutSessions, getCutStatus, isBusy, LENGTHS, listCutParts, listCutSessions,
-  PROMPT_IDEAS, startCut, stopCut, suggestCut,
-  type CutHow, type CutPartView, type CutSession, type CutToolStatus,
+  listCutPrompts, pipeText, PROMPT_IDEAS, startCut, stopCut, suggestCut,
+  type CutHow, type CutPartView, type CutPrompt, type CutSession, type CutToolStatus,
 } from "../../api/cut";
 import { ChannelPicker } from "../channels/ChannelPicker";
 import { DubEditor, type BatchLook } from "../dub/editor/DubEditor";
 import { fmtClock, TimeBox } from "../dub/editor/CutPane";
 import { PageEmpty, PageLoading } from "../PageState";
+import { PromptBox } from "../cut/PromptBox";
 import { toast } from "../../store/toast";
 import "../dub.css";
 import "../posts.css";
@@ -26,11 +27,18 @@ const FORM_KEY = "flowboard.cut.form";
 const WORKING = ["queued", "running", "rendering"];
 const isWorking = (j: DubJob) => WORKING.includes(j.status);
 const MAX_PARTS_CHOICES = [0, 3, 5, 8, 10, 15, 20, 30];
+/** the quick-idea chips under the request box — hidden (saved prompts replace them); true brings them back */
+const SHOW_PROMPT_IDEAS = false;
+const DEFAULT_LANGS = ["Việt", "Tây Ban Nha", "Anh"];
 const errMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-interface FormPrefs { how: CutHow; lenKey: string; maxParts: number; review: boolean }
+interface FormPrefs { how: CutHow; lenKey: string; maxParts: number; review: boolean; promptId: string; titleLang: string }
+function copyText(text: string, ok: string) {
+  void navigator.clipboard.writeText(text).then(() => toast.success(ok)).catch(() => toast.error("Không copy được — bôi đen rồi Ctrl+C."));
+}
+
 function loadForm(): FormPrefs {
-  const def: FormPrefs = { how: "ai", lenKey: "30-60", maxParts: 0, review: false };
+  const def: FormPrefs = { how: "ai", lenKey: "30-60", maxParts: 0, review: false, promptId: "", titleLang: "" };
   try {
     const raw = JSON.parse(window.localStorage.getItem(FORM_KEY) || "{}") as Partial<FormPrefs>;
     return {
@@ -38,6 +46,8 @@ function loadForm(): FormPrefs {
       lenKey: LENGTHS.some((l) => l.key === raw.lenKey) ? raw.lenKey! : def.lenKey,
       maxParts: MAX_PARTS_CHOICES.includes(Number(raw.maxParts)) ? Number(raw.maxParts) : 0,
       review: !!raw.review,
+      promptId: typeof raw.promptId === "string" ? raw.promptId : "",
+      titleLang: typeof raw.titleLang === "string" ? raw.titleLang.slice(0, 30) : "",
     };
   } catch {
     return def;
@@ -77,6 +87,10 @@ export function CutPage() {
   const [files, setFiles] = useState<UpFile[]>([]);
   const [how, setHow] = useState<CutHow>(prefs.how);
   const [prompt, setPrompt] = useState("");
+  // saved cut prompts (with the account) + the one picked last time, and the language of the titles
+  const [prompts, setPrompts] = useState<CutPrompt[]>([]);
+  const [promptId, setPromptId] = useState(prefs.promptId);
+  const [titleLang, setTitleLang] = useState(prefs.titleLang);
   const [lenKey, setLenKey] = useState(prefs.lenKey);
   const [maxParts, setMaxParts] = useState(prefs.maxParts);
   const [review, setReview] = useState(prefs.review);
@@ -96,14 +110,20 @@ export function CutPage() {
 
   useEffect(() => {
     void getCutStatus().then(setStatus).catch(() => setStatus({ whisper: false, whisper_reason: "", remotion: false, max_minutes: 60,
-      max_links: MAX_LINKS, max_parts: 30, prompt_max: 600, default_min: 30, default_max: 60 }));
+      max_links: MAX_LINKS, max_parts: 30, prompt_max: 4000, default_min: 30, default_max: 60 }));
     void getDubStatus().then(setDubStatus).catch(() => undefined);
     void listLookPresets().then(setLooks).catch(() => setLooks([]));
+    void listCutPrompts().then((list) => {
+      setPrompts(list);
+      // the prompt used last time is back in the box (the only saved one when nothing was picked yet)
+      const last = list.find((p) => p.id === prefs.promptId) ?? (list.length === 1 && !prefs.promptId ? list[0] : undefined);
+      if (last) { setPromptId(last.id); setPrompt((cur) => cur || last.text); }
+    }).catch(() => undefined);
     void getDefaultLook().then((d) => setLookId(d.id)).catch(() => undefined);
   }, []);
   useEffect(() => {
-    try { window.localStorage.setItem(FORM_KEY, JSON.stringify({ how, lenKey, maxParts, review })); } catch { /* private mode */ }
-  }, [how, lenKey, maxParts, review]);
+    try { window.localStorage.setItem(FORM_KEY, JSON.stringify({ how, lenKey, maxParts, review, promptId, titleLang })); } catch { /* private mode */ }
+  }, [how, lenKey, maxParts, review, promptId, titleLang]);
 
   function refresh() {
     void listCutSessions().then(setSessions).catch((e) => { toast.error(errMessage(e)); setSessions((s) => s ?? []); });
@@ -253,7 +273,8 @@ export function CutPage() {
     setStarting(true);
     try {
       const r = await startCut({ links: cleanLinks, media: readyFiles.map((f) => ({ media_id: f.media_id!, name: f.name })), how, prompt,
-                                 min_s: len.min, max_s: len.max, max_parts: maxParts, review, channel_id: channelId,
+                                 min_s: len.min, max_s: len.max, max_parts: how === "prompt" ? 0 : maxParts, review, channel_id: channelId,
+                                 title_lang: how === "even" ? "" : titleLang,
                                  look_preset_id: lookId });
       const lookName = looks.find((p) => p.id === lookId)?.name;
       toast.success(`Đã đưa ${r.sessions.length} video vào hàng cắt — tải về, nghe lời, chọn đoạn rồi cắt${lookName ? `; mỗi video cắt ra được áp mẫu "${lookName}"` : ""}.`);
@@ -355,32 +376,48 @@ export function CutPage() {
               </div>
               {how === "prompt" && (
                 <div className="qt-field">
-                  <span>Yêu cầu cắt</span>
-                  <textarea className="qt-textarea" rows={3} maxLength={status.prompt_max} value={prompt} onChange={(e) => setPrompt(e.target.value)}
-                            placeholder="VD: Mỗi đoạn là một mẹo, bỏ phần giới thiệu và kêu gọi đăng ký kênh" />
-                  <div className="ct__chips">
-                    {PROMPT_IDEAS.map((p) => <button key={p} type="button" className="qt-chip" onClick={() => setPrompt(p)}>{p}</button>)}
-                  </div>
+                  <span>Yêu cầu cắt <small>(prompt — chọn cái đã lưu hoặc viết mới)</small></span>
+                  <PromptBox prompts={prompts} onPrompts={setPrompts} pickedId={promptId} onPick={setPromptId} text={prompt} onText={setPrompt}
+                             lang={titleLang} onLang={setTitleLang} langs={status.title_langs ?? DEFAULT_LANGS} maxLength={status.prompt_max} />
+                  {SHOW_PROMPT_IDEAS && (
+                    <div className="ct__chips">
+                      {PROMPT_IDEAS.map((p) => <button key={p} type="button" className="qt-chip" onClick={() => setPrompt(p)}>{p}</button>)}
+                    </div>
+                  )}
                 </div>
+              )}
+              {how === "ai" && (
+                <label className="qt-field" title="AI đặt tiêu đề cho từng đoạn bằng tiếng này">
+                  <span>Tiêu đề từng đoạn bằng tiếng</span>
+                  <select className="qt-input" value={titleLang} onChange={(e) => setTitleLang(e.target.value)}>
+                    <option value="">Việt (mặc định)</option>
+                    {(status.title_langs ?? DEFAULT_LANGS).filter((l) => l !== "Việt").map((l) => <option key={l} value={l}>{l}</option>)}
+                  </select>
+                </label>
               )}
               {how !== "even" && !status.whisper && (
                 <p className="ct__warn">⚠ Máy này chưa nghe được lời trong video (chưa có gói lồng tiếng) — AI không chọn theo nội dung được, tool sẽ chia
                   đều theo độ dài. <button type="button" className="qt-link" onClick={() => navigate("/tools/dub")}>Cài gói lồng tiếng →</button></p>
               )}
-              <div className="qt-field">
-                <span>Mỗi video ngắn dài</span>
-                <div className="ct__chips">
-                  {LENGTHS.map((l) => (
-                    <button key={l.key} type="button" className={`qt-chip${lenKey === l.key ? " qt-chip--on" : ""}`} onClick={() => setLenKey(l.key)}>{l.label}</button>
-                  ))}
-                </div>
-              </div>
-              <label className="qt-field">
-                <span>Số video tối đa mỗi link</span>
-                <select className="qt-input" value={maxParts} onChange={(e) => setMaxParts(Number(e.target.value))}>
-                  {MAX_PARTS_CHOICES.map((n) => <option key={n} value={n}>{n ? `${n} video` : "Tự động (theo nội dung)"}</option>)}
-                </select>
-              </label>
+              {/* a request sets its own length and number of parts — the two pickers would only contradict it */}
+              {how !== "prompt" && (
+                <>
+                  <div className="qt-field">
+                    <span>Mỗi video ngắn dài</span>
+                    <div className="ct__chips">
+                      {LENGTHS.map((l) => (
+                        <button key={l.key} type="button" className={`qt-chip${lenKey === l.key ? " qt-chip--on" : ""}`} onClick={() => setLenKey(l.key)}>{l.label}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <label className="qt-field">
+                    <span>Số video tối đa mỗi link</span>
+                    <select className="qt-input" value={maxParts} onChange={(e) => setMaxParts(Number(e.target.value))}>
+                      {MAX_PARTS_CHOICES.map((n) => <option key={n} value={n}>{n ? `${n} video` : "Tự động (theo nội dung)"}</option>)}
+                    </select>
+                  </label>
+                </>
+              )}
               <label className="qt-check">
                 <input type="checkbox" checked={review} onChange={(e) => setReview(e.target.checked)} /> Cho mình xem lại các đoạn trước khi cắt
               </label>
@@ -415,6 +452,7 @@ export function CutPage() {
             ) : sessions.map((s) => (
               <SessionCard key={s.id} s={s} focused={s.id === focusSession || (!focusSession && s.run_id === focusRun)}
                            cardRef={(el) => { cardRefs.current[s.id] = el; }} onChanged={refresh}
+                           prompts={prompts} onPrompts={setPrompts} langs={status.title_langs ?? DEFAULT_LANGS} promptMax={status.prompt_max}
                            onEdit={(part, only) => openEditor(part, s, only)}
                            onDub={(boardIds) => navigate(`/tools/dub?clips=${boardIds.join(",")}`)} />
             ))}
@@ -425,7 +463,11 @@ export function CutPage() {
   );
 }
 
-function SessionCard({ s, focused, cardRef, onChanged, onEdit, onDub }: {
+function SessionCard({ s, focused, cardRef, onChanged, onEdit, onDub, prompts, onPrompts, langs, promptMax }: {
+  prompts: CutPrompt[];
+  onPrompts: (list: CutPrompt[]) => void;
+  langs: string[];
+  promptMax: number;
   s: CutSession;
   focused: boolean;
   cardRef: (el: HTMLElement | null) => void;
@@ -459,7 +501,7 @@ function SessionCard({ s, focused, cardRef, onChanged, onEdit, onDub }: {
           <small>
             {[s.url ? hostOf(s.url) : "file tải lên", s.duration_s ? fmtClock(s.duration_s) : "", s.language ? `tiếng ${s.language}` : "",
               s.prepared ? (s.lines ? `${s.lines} câu` : s.heard ? "không có lời" : "chưa nghe lời") : "", howLabel,
-              `${s.min_s}–${s.max_s} giây`].filter(Boolean).join(" · ")}
+              s.how === "prompt" ? "" : `${s.min_s}–${s.max_s} giây`].filter(Boolean).join(" · ")}
           </small>
         </div>
         <div className="ct-s__acts">
@@ -477,8 +519,18 @@ function SessionCard({ s, focused, cardRef, onChanged, onEdit, onDub }: {
       )}
       {s.status === "error" && s.error && <p className="ct__err">⚠ {s.error}</p>}
       {s.note && !busy && <p className="ct-s__note">💡 {s.note}</p>}
+      {s.name && !busy && !showRows && (
+        <p className="ct-s__name">
+          <span>🏷 Tiêu đề video: <strong>{s.name}</strong></span>
+          <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={() => copyText(s.name ?? "", "Đã copy tiêu đề video.")}>📋 Copy</button>
+          {parts.length > 0 && (
+            <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" title="Name | start_1 | end_1 | title_bottom_1 | … — một dòng, dán sang công cụ dựng clip khác"
+                    onClick={() => copyText(pipeText(s.name ?? "", parts), "Đã copy Name + mốc giờ + tiêu đề từng đoạn.")}>📋 Copy cả tiêu đề các đoạn</button>
+          )}
+        </p>
+      )}
       {showRows && s.prepared && (
-        <RowsEditor s={s} initial={s.status === "done" && s.parts.length ? s.parts.map((p) => ({ start: p.start, end: p.end, title: p.title })) : s.rows}
+        <RowsEditor s={s} prompts={prompts} onPrompts={onPrompts} langs={langs} promptMax={promptMax} initial={s.status === "done" && s.parts.length ? s.parts.map((p) => ({ start: p.start, end: p.end, title: p.title })) : s.rows}
                     onCancel={s.status === "done" ? () => setEditingRows(false) : undefined}
                     onDone={() => { setEditingRows(false); onChanged(); }} />
       )}
@@ -548,12 +600,16 @@ function PartCard({ p, picked, onPick, onEdit, onDub }: {
 }
 
 /** Check / change the parts before cutting (or cut again): title, start, end — with the source to watch each one. */
-function RowsEditor({ s, initial, onCancel, onDone }: {
+function RowsEditor({ s, initial, onCancel, onDone, prompts, onPrompts, langs, promptMax }: {
   s: CutSession; initial: DubCutRow[]; onCancel?: () => void; onDone: () => void;
+  prompts: CutPrompt[]; onPrompts: (list: CutPrompt[]) => void; langs: string[]; promptMax: number;
 }) {
   const [rows, setRows] = useState<DubCutRow[]>(initial);
   const [how, setHow] = useState<CutHow>(s.how);
   const [prompt, setPrompt] = useState(s.prompt);
+  const [promptId, setPromptId] = useState(() => prompts.find((p) => p.text.trim() === s.prompt.trim())?.id ?? "");
+  const [titleLang, setTitleLang] = useState(s.title_lang ?? "");
+  const [name, setName] = useState(s.name ?? "");
   const [lenKey, setLenKey] = useState(() => LENGTHS.find((l) => l.min === s.min_s && l.max === s.max_s)?.key ?? "30-60");
   const [maxParts, setMaxParts] = useState(s.max_parts);
   const [busy, setBusy] = useState<"" | "suggest" | "cut">("");
@@ -585,9 +641,10 @@ function RowsEditor({ s, initial, onCancel, onDone }: {
     if (how === "prompt" && !prompt.trim()) { toast.warning("Gõ yêu cầu cắt trước."); return; }
     setBusy("suggest");
     try {
-      const r = await suggestCut(s.id, { how, prompt, min_s: len.min, max_s: len.max, max_parts: maxParts });
+      const r = await suggestCut(s.id, { how, prompt, min_s: len.min, max_s: len.max, max_parts: how === "prompt" ? 0 : maxParts, title_lang: titleLang });
       setRows(r.rows);
       setNote(r.note);
+      setName(r.name ?? "");
       toast.success(`${r.by === "ai" ? "AI gợi ý" : "Chia được"} ${r.rows.length} đoạn — xem lại rồi bấm Cắt.`);
     } catch (e) {
       toast.error(errMessage(e));
@@ -622,8 +679,11 @@ function RowsEditor({ s, initial, onCancel, onDone }: {
           <select className="qt-input" value={how} onChange={(e) => setHow(e.target.value as CutHow)}>
             {HOWS.map((h) => <option key={h.key} value={h.key}>{h.icon} {h.label}</option>)}
           </select>
-          {how === "prompt" && <input className="qt-input" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Yêu cầu cắt…" />}
-          <div className="ct-rows__opts">
+          {how === "prompt" && (
+            <PromptBox compact prompts={prompts} onPrompts={onPrompts} pickedId={promptId} onPick={setPromptId} text={prompt} onText={setPrompt}
+                       lang={titleLang} onLang={setTitleLang} langs={langs} maxLength={promptMax} />
+          )}
+          <div className="ct-rows__opts" hidden={how === "prompt"}>
             <select className="qt-input" value={lenKey} onChange={(e) => setLenKey(e.target.value)}>
               {LENGTHS.map((l) => <option key={l.key} value={l.key}>{l.label}</option>)}
             </select>
@@ -635,6 +695,12 @@ function RowsEditor({ s, initial, onCancel, onDone }: {
             {busy === "suggest" ? "Đang gợi ý…" : "✨ Gợi ý lại"}
           </button>
           {note && <p className="ct-s__note">💡 {note}</p>}
+          {name && (
+            <p className="ct-s__name">
+              <span>🏷 Tiêu đề video: <strong>{name}</strong></span>
+              <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={() => copyText(pipeText(name, rows), "Đã copy Name + mốc giờ + tiêu đề từng đoạn.")}>📋 Copy cả dòng</button>
+            </p>
+          )}
         </div>
       </div>
       <div className="ct-rows__table">

@@ -47,7 +47,10 @@ def test_options_are_kept_in_range():
     assert video_cut.normalize_lengths("30", "20") == (30.0, 35.0)
     assert video_cut.normalize_lengths(None, None) == (video_cut.DEFAULT_MIN_S, video_cut.DEFAULT_MAX_S)
     assert video_cut.normalize_how("oops") == "ai" and video_cut.normalize_max_parts(999) == 30
-    assert len(video_cut.clean_prompt("x  " * 900)) == video_cut.PROMPT_MAX
+    assert len(video_cut.clean_prompt("x  " * 3000)) == video_cut.PROMPT_MAX
+    # a long structured prompt keeps its lines
+    assert video_cut.clean_prompt("Tiêu  đề:\r\n- 3 đến 8 từ\n\n\n\n2. Thời lượng  ") == "Tiêu đề:\n- 3 đến 8 từ\n\n2. Thời lượng"
+    assert video_cut.normalize_title_lang(" Tây Ban Nha\n(x) ") == "Tây Ban Nha x"
 
 
 def test_an_even_cut_ends_in_pauses_and_keeps_to_the_count_asked():
@@ -75,7 +78,8 @@ def test_the_ai_follows_the_request_and_says_when_it_cannot(monkeypatch):
     res = asyncio.run(video_cut.suggest(s))
     assert res["by"] == "ai" and [r["title"] for r in res["rows"]] == ["Mẹo một", "Mẹo hai"]  # at most 2
     assert res["note"] == "Video chỉ có hai mẹo rõ"
-    assert "THE SELLER'S REQUEST (follow it): chỉ giữ đoạn có mẹo" in seen["prompt"] and "15-45 seconds" in seen["prompt"]
+    assert "THE SELLER'S REQUEST (follow it): chỉ giữ đoạn có mẹo" in seen["prompt"] and "15-45 seconds" not in seen["prompt"]
+    assert "as the request below says" in seen["prompt"] and "never more than 2" in seen["prompt"]
     # a part starts in the pause before its first line (not at 0: the AI skipped the opening)
     assert 0 < res["rows"][0]["start"] < s.segments[1]["start"]
 
@@ -191,6 +195,42 @@ def test_a_video_is_cut_into_clips_and_projects_then_edited(client, tmp_path, mo
         video_cut.SESSIONS.pop(s.id, None)
         for j in jobs:
             dub.JOBS.pop(j, None)
+
+
+def test_a_saved_prompt_writes_the_titles_and_a_name_for_the_whole_video(monkeypatch):
+    s = _session()
+    s.how, s.prompt, s.title_lang = "prompt", video_cut.DEFAULT_PROMPT, "Tây Ban Nha"
+    assert video_cut.clean_prompt(video_cut.DEFAULT_PROMPT) == video_cut.DEFAULT_PROMPT  # fits, lines kept
+    seen = {}
+
+    async def fake_llm(feature, prompt, **kw):
+        seen["prompt"], seen["system"] = prompt, kw["system_prompt"]
+        return ('{"name": "La  chica que nadie esperaba", "parts": [{"from": 2, "to": 5, "title": "Ella lo sabía todo"},'
+                ' {"from": 7, "to": 10, "title": "El secreto del hombre"}], "note": ""}')
+
+    monkeypatch.setattr(video_cut, "run_llm", fake_llm)
+    res = asyncio.run(video_cut.suggest(s))
+    assert res["name"] == "La chica que nadie esperaba"
+    assert [r["title"] for r in res["rows"]] == ["Ella lo sabía todo", "El secreto del hombre"]
+    assert "TITLE LANGUAGE: tiếng Tây Ban Nha" in seen["prompt"] and "70s < thời lượng < 150s" in seen["prompt"]
+    assert "as the request below says" in seen["prompt"] and "END OF THE REQUEST" in seen["prompt"]
+    assert "title_bottom_N" in seen["system"] and '"name"' in seen["system"]
+    # the even split has no name
+    s.how = "even"
+    assert asyncio.run(video_cut.suggest(s))["name"] == ""
+
+
+def test_cut_prompts_are_saved_with_the_account(client):
+    first = client.get("/api/cut/prompts").json()
+    assert len(first) == 1 and first[0]["id"] == "default" and "title_bottom_N" in first[0]["text"]  # the built-in one
+    saved = client.put("/api/cut/prompts", json={"prompts": [
+        {"id": "default", "name": "  Hook  TikTok ", "text": "Dòng 1\n\n\n\nDòng 2"},
+        {"id": "default", "name": "", "text": "Chỉ giữ đoạn hài"}, {"name": "rỗng", "text": "   "}]}).json()
+    assert [p["name"] for p in saved] == ["Hook TikTok", "Prompt 2"] and saved[0]["text"] == "Dòng 1\n\nDòng 2"
+    assert saved[0]["id"] == "default" and saved[1]["id"] not in ("", "default")
+    assert client.get("/api/cut/prompts").json() == saved
+    assert client.put("/api/cut/prompts", json={"prompts": []}).json() == []
+    assert client.get("/api/cut/prompts").json() == []  # deleting the built-in one sticks
 
 
 def test_routes_check_what_they_get(client, monkeypatch):

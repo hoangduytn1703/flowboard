@@ -113,7 +113,7 @@ def test_link_download_has_no_size_cap_and_refuses_long_videos(tmp_path, monkeyp
     path, title, err = rv._run_ytdlp("https://youtu.be/x", "m1", 3600)
     assert path == tmp_path / "m1.mp4" and title == "Learjet 60 crash" and not err
     assert "--max-filesize" not in seen["cmd"]
-    assert "!duration | duration <= 3600" in seen["cmd"]
+    assert "duration <=? 3600" in seen["cmd"]
     seen["long"] = True
     path, _t, err = rv._run_ytdlp("https://youtu.be/y", "m2", 3600)
     assert path is None and "dài hơn 60 phút" in err

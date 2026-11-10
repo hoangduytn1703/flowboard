@@ -13,6 +13,7 @@ export interface ToastItem {
 
 interface ToastState {
   toasts: ToastItem[];
+  /** ``opts`` is still accepted by callers but ignored: all toasts last TOAST_MS. */
   push(kind: ToastKind, message: string, opts?: { duration?: number }): number;
   dismiss(id: number): void;
 }
@@ -20,21 +21,18 @@ interface ToastState {
 let nextId = 1;
 const MAX_VISIBLE = 4;
 
-/** A reader needs about 40 ms a character; errors stay longer than good news. */
-function defaultDuration(kind: ToastKind, message: string): number {
-  const base = { success: 4000, info: 5000, warning: 7000, error: 9000 }[kind];
-  return Math.min(15000, base + message.length * 40);
-}
+/** Every toast stays this long (the user asked for 1.5 s); hovering one holds it so a long message can still be read. */
+export const TOAST_MS = 1500;
 
 export const useToastStore = create<ToastState>((set, get) => ({
   toasts: [],
-  push(kind, message, opts) {
+  push(kind, message) {
     const text = (message || "").trim();
     if (!text) return -1;
     // The same message again replaces the one on screen, so its timer restarts.
     const same = get().toasts.find((t) => t.kind === kind && t.message === text);
     const id = nextId++;
-    const item: ToastItem = { id, kind, message: text, duration: opts?.duration ?? defaultDuration(kind, text) };
+    const item: ToastItem = { id, kind, message: text, duration: TOAST_MS };
     set((s) => ({ toasts: [...s.toasts.filter((t) => t !== same), item].slice(-MAX_VISIBLE) }));
     return id;
   },
