@@ -7,13 +7,14 @@ import { DEFAULT_BLUR, emphasisY, layoutBlurs, withBlurs, type DubBlur, type Dub
 import { mediaUrl } from "../../../api/client";
 import { DUB_FPS, DubSubtitles, emphasisAt, emphasisFont, zoomAt, type DubLayoutSpec, type DubRemotionStyle } from "../../../remotion/DubSubtitles";
 import { canvasRect, gridCss } from "../../../remotion/canvasGeom";
+import { adjustCss, textLayerCss, textShownAt } from "../../../remotion/textLayer";
 import { chunkAt, effectiveLayout, splitAll, W_MAX, W_MIN, type EditCue } from "./cues";
 import { DeviceChrome } from "./DeviceChrome";
 import { overlaps, platformOf, type PlatformKey, type Rect } from "./platforms";
 
 export type AudioMode = "dub" | "orig" | "off";
 export type Sel = { kind: "cue"; i: number } | { kind: "blur"; i: number } | { kind: "mascot" } | { kind: "frame" } | { kind: "style" }
-  | { kind: "hl"; i: number | null } | null;
+  | { kind: "hl"; i: number | null } | { kind: "text"; i: number } | null;
 
 export interface StageHandle {
   play(): void;
@@ -50,7 +51,8 @@ type Drag =
   | { kind: "width"; side: 1 | -1; x0: number; w0: number; cue: number | null }
   | { kind: "blur"; i: number; dx: number; dy: number }
   | { kind: "blur-size"; i: number; x0: number; y0: number }
-  | { kind: "mascot"; dx: number; dy: number };
+  | { kind: "mascot"; dx: number; dy: number }
+  | { kind: "text"; i: number; dx: number; dy: number };
 
 export const EditorStage = forwardRef<StageHandle, {
   src: string;
@@ -85,9 +87,14 @@ export const EditorStage = forwardRef<StageHandle, {
   platform?: PlatformKey | null;
   /** "Không có phụ đề" (a part of "✂️ Cắt video"): no subtitle box on the picture */
   noSubs?: boolean;
+  /** "Tốc độ" (layout.speed): how fast the preview plays — the export comes out at the same speed */
+  rate?: number;
+  /** a text layer was double-clicked: its words box takes the focus */
+  onTextFocus?: (i: number) => void;
 }>(function EditorStage({
   src, srcW, srcH, voiceUrl, bgmUrl, player, frameW, frameH, cues, layout, style, highlights, selected, readOnly, audio,
   onLayout, onSubGeom, onSelect, onEditText, onTime, onPlaying, onDuration, onNatural, platform = null, noSubs = false,
+  rate = 1, onTextFocus,
 }, ref) {
   const area = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
@@ -158,6 +165,11 @@ export const EditorStage = forwardRef<StageHandle, {
     }
   }
   useEffect(() => { applyAudioMode(playing); }, [audio]); // eslint-disable-line react-hooks/exhaustive-deps
+  // "tua nhanh": the picture, its blurred copies and the voice all play at the same speed
+  function applyRate() {
+    for (const m of [video.current, ...sideVideos(), ...audios()]) if (m) m.playbackRate = rate;
+  }
+  useEffect(applyRate, [rate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function setPlay(p: boolean) { setPlaying(p); onPlaying(p); }
   function play() {
@@ -165,6 +177,7 @@ export const EditorStage = forwardRef<StageHandle, {
     const v = video.current;
     if (!v) return;
     if (v.ended || v.currentTime >= (v.duration || 0) - 0.05) v.currentTime = 0;
+    applyRate();
     syncAudio(v.currentTime, true);
     void v.play().then(() => {
       for (const bg of sideVideos()) void bg.play().catch(() => undefined);
@@ -267,6 +280,8 @@ export const EditorStage = forwardRef<StageHandle, {
       ? <video className="dx-stage__cbg" src={canvasBgUrl} muted loop autoPlay playsInline onError={() => setBgBroken(canvasBgUrl)} />
     : <div className="dx-stage__cbg" style={{ background: canvas.color }} />;
   const mascot = layout.mascot ?? null;
+  const texts = layout.texts ?? [];
+  const tone = adjustCss(layout.adjust);
   const fontPx = stageH ? stageH * 0.036 * lay.scale : 16;
   const pad = fontPx * 0.25;
   // "✨ Nhấn chữ quan trọng": the same curve / timing the render uses (remotion/DubSubtitles)
@@ -318,7 +333,13 @@ export const EditorStage = forwardRef<StageHandle, {
     else if (drag.kind === "blur-size") setBlur(drag.i, { w: p.x - drag.x0, h: p.y - drag.y0 }, "blur-size");
     else if (drag.kind === "mascot" && mascot) {
       onLayout({ ...layout, mascot: { ...mascot, x: clamp(p.x + drag.dx, 0.05, 0.95), y: clamp(p.y + drag.dy, 0.15, 1) } }, "mascot-move");
+    } else if (drag.kind === "text") {
+      moveText(drag.i, p.x + drag.dx, p.y + drag.dy, "text-move");
     }
+  }
+  function moveText(i: number, x: number, y: number, key: string) {
+    const r = (v: number) => Math.round(v * 1000) / 1000;
+    onLayout({ ...layout, texts: texts.map((tx, k) => (k === i ? { ...tx, x: r(clamp(x, 0.02, 0.98)), y: r(clamp(y, 0.03, 0.97)) } : tx)) }, `${key}-${i}`);
   }
   function onUp() {
     if (drag?.kind === "sub" && !drag.moved && drag.cue !== null) onSelect({ kind: "cue", i: drag.cue });
@@ -403,6 +424,7 @@ export const EditorStage = forwardRef<StageHandle, {
               frameBgSrc: frameSpec?.bg === "image" && frameSpec.bg_image ? mediaUrl(frameSpec.bg_image) : undefined,
               srcWidth: srcW || undefined, srcHeight: srcH || undefined, canvasBgSrc: canvasBgUrl ?? undefined,
             }}
+            playbackRate={rate}
             durationInFrames={Math.max(1, Math.ceil(player.durationS * fps))}
             fps={fps}
             compositionWidth={player.width}
@@ -436,6 +458,8 @@ export const EditorStage = forwardRef<StageHandle, {
                                            : { objectFit: "fill" }) }
                            : { objectFit: "contain" }) : {}),
                        ...(zoom > 1 ? { transform: `scale(${zoom.toFixed(4)})`, transformOrigin: "50% 50%" } : {}),
+                       // brighter / darker: the same filter the export applies to the video itself
+                       ...(tone ? { filter: tone } : {}),
                      }}
                      onLoadedMetadata={(e) => {
                        const v = e.currentTarget;
@@ -476,6 +500,31 @@ export const EditorStage = forwardRef<StageHandle, {
                   onPointerDown={(e) => { onSelect({ kind: "blur", i }); startDrag(e, { kind: "blur-size", i, x0: blur.x, y0: blur.y }); }} />
           </div>
         ))}
+
+        {texts.map((tx, i) => {
+          const isSel = selected?.kind === "text" && selected.i === i;
+          const shown = textShownAt(tx, t);
+          if (!shown && !isSel) return null;
+          const step = 0.01;
+          return (
+            <div key={i}
+                 className={`dx-stage__text${isSel ? " is-selected" : ""}${shown ? "" : " dx-stage__text--idle"}${live ? " dx-stage__text--ghost" : ""}`}
+                 style={textLayerCss(tx, stageH || 1)} role="slider" tabIndex={0}
+                 aria-label="Chữ trên video — kéo để dời, bấm đúp để sửa chữ, mũi tên để nhích"
+                 aria-valuetext={`ngang ${Math.round(tx.x * 100)}%, dọc ${Math.round(tx.y * 100)}%`}
+                 title="Kéo để dời · bấm đúp để sửa chữ"
+                 onPointerDown={(e) => { onSelect({ kind: "text", i }); const p = pointFrom(e); startDrag(e, { kind: "text", i, dx: tx.x - p.x, dy: tx.y - p.y }); }}
+                 onDoubleClick={(e) => { e.stopPropagation(); onSelect({ kind: "text", i }); onTextFocus?.(i); }}
+                 onKeyDown={(e) => {
+                   if (readOnly) return;
+                   const d: Record<string, [number, number]> = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+                   if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); onTextFocus?.(i); return; }
+                   if (d[e.key]) { e.preventDefault(); e.stopPropagation(); moveText(i, tx.x + d[e.key][0] * (e.shiftKey ? 5 : 1), tx.y + d[e.key][1] * (e.shiftKey ? 5 : 1), "text-key"); }
+                 }}>
+              {tx.text.trim() ? tx.text : tx.role === "title" ? "Tiêu đề" : tx.role === "subtitle" ? "Tiêu đề phụ" : "Chữ"}
+            </div>
+          );
+        })}
 
         {emph && !live && (
           <div className={`dx-stage__emph${selected?.kind === "hl" ? " is-selected" : ""}`}

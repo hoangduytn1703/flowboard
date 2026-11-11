@@ -59,3 +59,15 @@
 .bgt__row--failed .bgt__ico { background: rgba(239, 68, 68, 0.16); color: #f87171; font-weight: 800; }
 .bgt__row--failed .bgt__detail { color: #fca5a5; }
 .bgt__row--failed .bgt__go { color: #f87171; }
+
+/* the pill + its "×": finished work goes away by itself after a few seconds, or at once with × */
+.bgt__dock { display: flex; align-items: center; gap: 6px; }
+.bgt__close {
+  flex: none; width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border-radius: 50%; cursor: pointer;
+  border: 1px solid #3a4050; background: #1d212a; color: #c9ced9; font-size: 16px; line-height: 1;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+}
+.bgt__close:hover { border-color: #ff6a2b; color: #fff; }
+/* shrunk while something still runs: only the spinner (and its percent) */
+.bgt--mini .bgt__pill { padding: 9px; gap: 6px; opacity: 0.85; }
+.bgt--mini .bgt__label, .bgt--mini .bgt__count { display: none; }

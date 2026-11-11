@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import subprocess
 import threading
 import time
 import uuid
@@ -259,12 +260,26 @@ def start(job: dub.Job, rows: list[dict[str, Any]]) -> dict[str, Any]:
     return dict(st)
 
 
-def _cut(ffmpeg: str, src: Path, start: float, end: float, dst: Path, tag: str) -> None:
+def _cut(ffmpeg: str, src: Path, start: float, end: float, dst: Path, tag: str, stop: Optional[Any] = None) -> None:
     # -ss before -i + re-encode: exact to the frame (as VieDub does), and fast to seek on a long video
     cmd = [ffmpeg, "-y", "-v", "error", "-ss", f"{start:.3f}", "-i", str(src), "-t", f"{end - start:.3f}",
            "-map", "0:v:0", "-map", "0:a:0?", *_encode_args(ffmpeg), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k",
            "-metadata", f"comment={tag}", "-movflags", "+faststart", str(dst)]
-    err = _run(cmd, CUT_TIMEOUT_S)
+    if stop is not None:
+        # "Dừng" while a part is being cut: ffmpeg is killed at once (not after the part is done)
+        from flowboard.services.proc import Stopped, remove_soon, run_stoppable
+
+        try:
+            proc = run_stoppable(cmd, CUT_TIMEOUT_S, stop)
+        except Stopped:
+            remove_soon(dst)
+            raise SplitError("Đã dừng theo yêu cầu") from None
+        except subprocess.TimeoutExpired:
+            remove_soon(dst)
+            raise SplitError(f"ffmpeg cắt quá {CUT_TIMEOUT_S}s") from None
+        err = None if proc.returncode == 0 else ((proc.stderr or b"").decode("utf-8", "replace").strip()[-500:] or f"exit code {proc.returncode}")
+    else:
+        err = _run(cmd, CUT_TIMEOUT_S)
     if err or not dst.is_file() or dst.stat().st_size == 0:
         raise SplitError(f"ffmpeg cắt lỗi: {err or 'file rỗng'}")
 

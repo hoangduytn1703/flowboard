@@ -99,9 +99,13 @@ def _load_whisper(cpu: bool = False):
     attempts = [("cuda", "float16"), ("cuda", "int8_float16")] if not cpu and _cuda() else []
     attempts += [("cpu", "int8"), ("cpu", "float32")]
     last = None
+    # on the CPU faster-whisper takes 4 threads unless told: a machine without a card has all its cores to give
+    # (physical ones — hyper-threads slow ctranslate2 down)
+    threads = max(4, min(16, (os.cpu_count() or 8) // 2))
     for device, compute in attempts:
         try:
-            return WhisperModel(local_dir, device=device, compute_type=compute), device
+            extra = {"cpu_threads": threads} if device == "cpu" else {}
+            return WhisperModel(local_dir, device=device, compute_type=compute, **extra), device
         except Exception as exc:  # noqa: BLE001 — try the next precision / device
             last = exc
     raise SystemExit(f"could not load whisper: {last}")
@@ -121,11 +125,11 @@ def transcribe(audio: str, out: str, language: str | None, words: bool = False, 
     model, device = _load_whisper()
     _progress(15)
 
-    def hear(m):
+    def hear(m, dev):
         segments, info = m.transcribe(
             audio,
             language=language or None,
-            beam_size=5,
+            beam_size=5 if dev == "cuda" else 2,  # the CPU is 5–10× slower: a narrower search is most of the gain left
             vad_filter=True,
             vad_parameters={"min_silence_duration_ms": 350},
             condition_on_previous_text=False,
@@ -147,14 +151,14 @@ def transcribe(audio: str, out: str, language: str | None, words: bool = False, 
         return rows, info, total
 
     try:
-        rows, info, total = hear(model)
+        rows, info, total = hear(model, device)
     except Exception as exc:  # noqa: BLE001 — the card failed mid-way: hear it again on the CPU
         if device != "cuda" or not _gpu_failed(exc):
             raise
         sys.stderr.write(f"whisper on the GPU failed ({exc}); retrying on the CPU\n")
         del model
         model, device = _load_whisper(cpu=True)
-        rows, info, total = hear(model)
+        rows, info, total = hear(model, device)
     lang = getattr(info, "language", None) or language or ""
     if lang in ("zh", "yue"):
         try:

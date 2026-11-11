@@ -70,6 +70,8 @@ class RenderBody(BaseModel):
     # the editor split / merged / added / removed lines: the whole list [{start, end, text, src?, look?}] (replaces
     # lines / timings / looks)
     cues: Optional[list[dict[str, Any]]] = Field(default=None, max_length=2000)
+    # the layout is another clip's ("⇪ Áp cho cả loạt"): title / second-title layers keep this clip's own words
+    carried: bool = False
 
 
 @router.get("/addon")
@@ -206,6 +208,7 @@ async def render(job_id: str, body: RenderBody) -> dict[str, Any]:
         dub.render_job(job, lines=body.lines, voice=body.voice, style=body.style, keep_bgm=body.keep_bgm,
                        name=body.name, layout=body.layout, engine=body.engine, timings=body.timings, looks=body.looks,
                        highlights=body.highlights, mode=body.mode, sub_lang=body.sub_lang, names=body.names, cues=body.cues,
+                       carried=body.carried,
                        **({"channel_id": body.channel_id} if "channel_id" in sent else {}))
     except dub.DubError as exc:
         raise HTTPException(400, str(exc))
@@ -571,10 +574,7 @@ def delete_jobs(body: DeleteJobsBody) -> dict[str, Any]:
 
 @router.post("/jobs/{job_id}/stop")
 def stop(job_id: str) -> dict[str, Any]:
-    job = _job(job_id)
-    if job.status in ("queued", "running", "rendering"):
-        job.stop = True
-    return job.public()
+    return dub.stop_job(_job(job_id)).public()
 
 
 # ── "📚 Thư viện link": links imported from .txt / .md files, queued for dubbing (services/dub_links) ──

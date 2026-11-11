@@ -269,7 +269,7 @@ def test_analyse_first_then_each_video_waits_for_its_parts(monkeypatch):
         monkeypatch.setattr(video_cut, "_prepare", prepared)
         monkeypatch.setattr(video_cut, "suggest", no_ai)
         video_cut._run(s)
-        assert s.status == "review" and s.rows == [] and s.error is None and "Đã phân tích" in s.phase
+        assert s.status == "review" and s.rows == [] and s.error is None and "Đã tải xong" in s.phase
         assert video_cut.public(s, brief=True)["ask"] is True and made[1].status == "queued"
         # the seller types the parts: the card then says "tự cắt"
         monkeypatch.setattr(video_cut, "_source", lambda x: None)
@@ -376,3 +376,20 @@ def test_the_assistant_cuts_videos():
     q = assistant.parse_answer('{"reply": "ok", "actions": [{"tool": "cut_video", "args": {"urls": []}}]}')
     assert not q["actions"] and "link" in q["reply"]
     assert "Cắt" in assistant._plan_summary(out["actions"], {"channels": [], "products": []})[0]
+
+
+def test_a_length_typed_in_minutes_cuts_exact_parts_and_the_last_takes_the_rest():
+    """"Tuỳ chỉnh": 5 minutes a part on a 30:52 video = six parts of 5:00 and a last one of 0:52."""
+    s = _session(seconds=1851.9, lines=0) if False else video_cut.Session(id="c0ffee0000c1", run_id="r", duration_s=1851.9, prepared=True)
+    s.min_s, s.max_s = video_cut.normalize_lengths(300, 300)
+    assert (s.min_s, s.max_s) == (300.0, 300.0)
+    rows = video_cut.even_rows(s)
+    assert [(r["start"], r["end"]) for r in rows] == [(i * 300.0, (i + 1) * 300.0) for i in range(6)] + [(1800.0, 1851.9)]
+    # a tail too short to be a video joins the part before it; a cut moves to a pause near it
+    s.duration_s = 601.0
+    assert [(r["start"], r["end"]) for r in video_cut.even_rows(s)] == [(0.0, 300.0), (300.0, 601.0)]
+    s.duration_s, s.segments = 700.0, [{"start": 290.0, "end": 298.6, "text": "a"}, {"start": 299.4, "end": 310.0, "text": "b"}]
+    assert video_cut.even_rows(s)[0]["end"] == 299.0
+    assert "about 300 seconds" in video_cut.ai_prompt(s)
+    # the presets keep their old meaning
+    assert video_cut.normalize_lengths(30, 60) == (30.0, 60.0) and video_cut.normalize_lengths(30, 31) == (30.0, 35.0)

@@ -226,7 +226,8 @@ def _host_allowed(url: str) -> bool:
     return any(host == h or host.endswith("." + h) for h in _ALLOWED_HOSTS)
 
 
-def _run_ytdlp(url: str, media_id: str, max_duration_s: Optional[float] = None) -> tuple[Optional[Path], str, str]:
+def _run_ytdlp(url: str, media_id: str, max_duration_s: Optional[float] = None,
+               stop: Optional[Any] = None) -> tuple[Optional[Path], str, str]:
     """Download ``url`` as ``<media_id>.mp4`` (≤ 720p, any size; longer than ``max_duration_s`` is refused before the
     download). Returns ``(path, title, error_tail)``. yt-dlp is this machine's or the agent's own copy (services/ytdlp)."""
     import subprocess
@@ -245,6 +246,8 @@ def _run_ytdlp(url: str, media_id: str, max_duration_s: Optional[float] = None) 
         # The POT-provider plugin on this machine times out; nothing here
         # needs it for the formats below.
         "--no-plugin-dirs", "--no-playlist", "--no-progress", "--no-simulate",
+        # YouTube / Facebook serve the video in pieces: four at a time instead of one after another
+        "--concurrent-fragments", "4",
         "--encoding", "utf-8", *ytdlp_tool.js_args(), *limit,
         "-f", "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b",
         "--merge-output-format", "mp4",
@@ -253,7 +256,18 @@ def _run_ytdlp(url: str, media_id: str, max_duration_s: Optional[float] = None) 
         url,
     ]
     try:
-        proc = subprocess.run(cmd, capture_output=True, timeout=FETCH_TIMEOUT_S, check=False)
+        if stop is not None:
+            # "Dừng" half-way: yt-dlp (and the ffmpeg it runs) is killed at once, its partial files removed
+            from flowboard.services.proc import Stopped, remove_soon, run_stoppable
+
+            try:
+                proc = run_stoppable(cmd, FETCH_TIMEOUT_S, stop)
+            except Stopped:
+                for part in out_dir.glob(f"{media_id}.*"):
+                    remove_soon(part)
+                return None, "", "Đã dừng theo yêu cầu"
+        else:
+            proc = subprocess.run(cmd, capture_output=True, timeout=FETCH_TIMEOUT_S, check=False)
     except subprocess.TimeoutExpired:
         return None, "", f"tải quá {FETCH_TIMEOUT_S}s"
     except OSError as exc:

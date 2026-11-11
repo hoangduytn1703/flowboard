@@ -179,3 +179,32 @@
 .ct-rows__aibtns { display: flex; flex-wrap: wrap; gap: 6px; }
 .ct__steps { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.6; color: var(--muted); }
 .ct__steps b { color: var(--text); }
+
+/* ── the words heard in the background (Whisper): never blocks typing the parts ── */
+.ct-hear { display: flex; align-items: center; gap: 10px; margin: 8px 0 0; padding: 8px 10px; border: 1px solid rgba(56, 189, 248, 0.45); border-radius: 10px; background: rgba(56, 189, 248, 0.07); font-size: 13px; }
+.ct-hear__dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: #38bdf8; animation: ct-hear-pulse 1.2s ease-in-out infinite; }
+@keyframes ct-hear-pulse { 50% { opacity: 0.25; transform: scale(0.7); } }
+@media (prefers-reduced-motion: reduce) { .ct-hear__dot { animation: none; } }
+.ct-hear__body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.ct-hear__body small { color: var(--muted); line-height: 1.4; }
+.ct-hear__body .qt-dub__bar { height: 5px; }
+.ct-hear--idle { justify-content: space-between; border-style: dashed; border-color: var(--border); background: none; color: var(--muted); }
+
+/* ── watching the source: faster playback + brightness ── */
+.ct-rows__watch { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ct-rows__speed { display: flex; align-items: center; gap: 4px; font-size: 12.5px; color: var(--muted); }
+.ct-rows__speed > span { margin-right: 4px; }
+.ct-rows__speedbtn { padding: 3px 8px; font: inherit; font-size: 12.5px; font-weight: 700; color: var(--text); background: #1c2029; border: 1px solid var(--border); border-radius: 7px; cursor: pointer; font-variant-numeric: tabular-nums; }
+.ct-rows__speedbtn:hover { border-color: #ff6a2b; }
+.ct-rows__speedbtn.is-on { background: #ff6a2b; border-color: #ff6a2b; color: #fff; }
+.ct-rows__bright { display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; color: var(--muted); }
+.ct-rows__bright > span { display: flex; justify-content: space-between; gap: 8px; }
+.ct-rows__bright small { color: var(--text); font-variant-numeric: tabular-nums; }
+.ct-rows__custom { display: flex; align-items: center; gap: 8px; flex: 1 1 100%; font-size: 13px; color: var(--muted); }
+.ct-rows__custom input { width: 84px; flex: none; }
+.ct-rows__opts { flex-wrap: wrap; }
+.ct-rows__opts select { flex: 1 1 140px; }
+.ct-rows__opts select[hidden] { display: none; }
+.ct-rows__custom span { min-width: 0; line-height: 1.4; }
+.ct-rows__custom input.qt-input { width: 84px; flex: 0 0 84px; }
+.ct-rows__custom span { flex: 1 1 0; }

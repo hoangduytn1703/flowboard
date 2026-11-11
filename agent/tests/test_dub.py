@@ -125,7 +125,8 @@ def test_timeline_places_pieces_at_their_start_times(tmp_path):
 
 def test_layout_moves_the_box_and_narrows_lines(tmp_path):
     lay = dub.normalize_layout({"x": 0.2, "y": 1.5, "scale": "1.4", "junk": 1})
-    empty = {"blur": None, "blurs": [], "canvas": None, "frame": None, "mascot": None, "w": None}
+    empty = {"blur": None, "blurs": [], "canvas": None, "frame": None, "mascot": None, "w": None,
+             "texts": [], "adjust": None, "speed": 1.0}
     assert lay == {"x": 0.2, "y": 0.98, "scale": 1.4, **empty}
     assert dub.normalize_layout(None) == {**dub.DEFAULT_LAYOUT, **empty}
     text = dub.write_sub_ass([(0, 1, "A")], tmp_path / "l.ass", width=1000, height=2000, style="box_yellow",
@@ -146,7 +147,7 @@ def test_rerender_with_a_new_layout_reuses_the_voice_track(client, monkeypatch, 
     dub.JOBS["j3"] = job
     monkeypatch.setattr(dub, "_run_job", lambda j, render: None)
     r = client.post("/api/dub/jobs/j3/render", json={"layout": {"x": 0.5, "y": 0.6, "scale": 1.2}})
-    assert r.status_code == 200 and r.json()["phase"] == "Đang in lại phụ đề" and r.json()["layout"]["y"] == 0.6
+    assert r.status_code == 200 and r.json()["phase"] == "Chờ xuất lại" and r.json()["layout"]["y"] == 0.6
     job.status = "done"  # the stubbed runner never finished it
     r = client.post("/api/dub/jobs/j3/render", json={"lines": ["Khác"]})
     assert r.json()["phase"] == "Đang render"  # the text changed → voice must be made again

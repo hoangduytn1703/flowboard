@@ -97,7 +97,8 @@ def douyin_info(url: str, *, client: Optional[httpx.Client] = None) -> dict[str,
             c.close()
 
 
-def download_direct(url: str, dest: Path, *, referer: str = "https://www.douyin.com/", timeout: float = 300) -> None:
+def download_direct(url: str, dest: Path, *, referer: str = "https://www.douyin.com/", timeout: float = 300,
+                    stop: Optional[Any] = None) -> None:
     tmp = dest.with_suffix(".part")
     try:
         with httpx.Client(headers={"User-Agent": MOBILE_UA, "Referer": referer}, follow_redirects=True,
@@ -105,7 +106,9 @@ def download_direct(url: str, dest: Path, *, referer: str = "https://www.douyin.
             r.raise_for_status()
             got = 0
             with open(tmp, "wb") as f:
-                for chunk in r.iter_bytes(1 << 20):
+                for chunk in r.iter_bytes(1 << 18):
+                    if stop is not None and stop():
+                        raise FetchError(STOPPED)
                     f.write(chunk)
                     got += len(chunk)
                     if got > MAX_DIRECT_BYTES:
@@ -119,8 +122,14 @@ def download_direct(url: str, dest: Path, *, referer: str = "https://www.douyin.
         raise
 
 
-def fetch_video(text: str, media_id: str, out_dir: Path, *, max_duration_s: Optional[float] = None) -> tuple[Path, str]:
-    """Download the video linked in ``text`` as ``out_dir/<media_id>.mp4``.
+#: what a download stopped by the seller says (callers show it as it is)
+STOPPED = "Đã dừng theo yêu cầu"
+
+
+def fetch_video(text: str, media_id: str, out_dir: Path, *, max_duration_s: Optional[float] = None,
+                stop: Optional[Any] = None) -> tuple[Path, str]:
+    """Download the video linked in ``text`` as ``out_dir/<media_id>.mp4``. ``stop()`` turning true ends the
+    download at once (:class:`FetchError` saying :data:`STOPPED`).
     Returns ``(path, title)``; raises :class:`FetchError`. Douyin tells the
     duration before the download, so an over-long video (``max_duration_s``)
     is refused without fetching it."""
@@ -141,15 +150,17 @@ def fetch_video(text: str, media_id: str, out_dir: Path, *, max_duration_s: Opti
                 hint = " (link này là một tuyển tập/合集; chọn một video lẻ)" if info["duration"] > 2 * max_duration_s else ""
                 raise FetchError(f"video dài {info['duration'] / 60:.0f} phút — tối đa {max_duration_s / 60:.0f} phút{hint}") from None
             dest = out_dir / f"{media_id}.mp4"
-            download_direct(info["direct_url"], dest)
+            download_direct(info["direct_url"], dest, **({"stop": stop} if stop is not None else {}))
             logger.info("video_fetch: douyin %s → %s (%.0fs)", info["id"], media_id, info["duration"])
             return dest, info["title"]
         except FetchError as exc:
-            if "tối đa" in str(exc):
+            if "tối đa" in str(exc) or str(exc) == STOPPED:
                 raise
             errors.append(f"Douyin: {exc}")
-    path, title, err = _run_ytdlp(url, media_id, max_duration_s)
+    path, title, err = _run_ytdlp(url, media_id, max_duration_s, **({"stop": stop} if stop is not None else {}))
     if path is None:
+        if err == STOPPED:
+            raise FetchError(STOPPED)
         errors.append(f"yt-dlp: {err}")
         raise FetchError(" · ".join(errors))
     return path, title

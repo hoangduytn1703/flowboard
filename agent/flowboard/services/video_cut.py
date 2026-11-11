@@ -122,6 +122,16 @@ class Session:
     #: "🔍 Phân tích" first: the video is downloaded and heard, then waits (status review, no rows) for the seller to
     #: type the parts or ask the AI — with the real length known
     ask: bool = False
+    #: Whisper in the background of an analysed video ("" = not asked / an older session, wait, run, done, skip, error):
+    #: the parts can be typed and cut while it runs; only the AI's pick and the subtitles wait for it
+    hear: str = ""
+    hear_progress: int = 0
+    hear_error: str = ""
+    hear_stop: bool = False
+    #: "Sáng / tối" set on the cut page: every part starts with it (dub.normalize_adjust), None = untouched
+    adjust: Optional[dict] = None
+    #: "Tốc độ" set on the cut page (0.8–3): every part is exported that much faster / slower; None = untouched
+    speed: Optional[float] = None
     #: the parts cut so far [{index, start, end, title, job_id, board_id, media_id}]
     parts: list[dict] = field(default_factory=list)
     #: "★ Mẫu chỉnh sửa" picked for this cut (dub.normalize_look_preset): every new part comes out in that look
@@ -135,7 +145,8 @@ class Session:
 
     SAVED = ("id", "run_id", "url", "source_media_id", "how", "prompt", "min_s", "max_s", "max_parts", "review", "channel_id",
              "status", "phase", "progress", "title", "duration_s", "width", "height", "language", "segments", "heard", "prepared",
-             "rows", "by", "note", "name", "title_lang", "ask", "parts", "look", "error", "started_at", "position")
+             "rows", "by", "note", "name", "title_lang", "ask", "hear", "hear_progress", "hear_error", "adjust", "speed", "parts", "look",
+             "error", "started_at", "position")
 
     def to_dict(self) -> dict[str, Any]:
         return {k: getattr(self, k) for k in self.SAVED}
@@ -156,7 +167,8 @@ def _uid() -> str:
 # ── options ────────────────────────────────────────────────────────────────
 
 def normalize_lengths(min_s: Any, max_s: Any) -> tuple[float, float]:
-    """``(min, max)`` seconds of one part: 5 s … 20 min, max at least min + 5 s."""
+    """``(min, max)`` seconds of one part: 5 s … 20 min. ``min == max`` = "Tuỳ chỉnh": every part exactly that long
+    (the last one takes what is left)."""
     try:
         lo = float(min_s)
     except (TypeError, ValueError):
@@ -165,6 +177,9 @@ def normalize_lengths(min_s: Any, max_s: Any) -> tuple[float, float]:
         hi = float(max_s)
     except (TypeError, ValueError):
         hi = DEFAULT_MAX_S
+    if abs(hi - lo) < 0.05:  # one length typed by the seller
+        lo = hi = max(5.0, min(1200.0, lo))
+        return round(lo, 1), round(hi, 1)
     lo = max(5.0, min(600.0, lo))
     hi = max(lo + 5.0, min(1200.0, hi))
     return round(lo, 1), round(hi, 1)
@@ -302,6 +317,8 @@ def _from_dict(d: dict, work: Path) -> Session:
     if s.status in BUSY:
         s.status = "error"
         s.error = "Agent khởi động lại giữa chừng — bấm ↻ Làm lại"
+    if s.hear in ("wait", "run"):  # the agent stopped while it was listening: "🎧 Nghe lời" starts it again
+        s.hear, s.hear_progress = "", 0
     return s
 
 
@@ -355,6 +372,8 @@ def public(s: Session, *, brief: bool = False) -> dict[str, Any]:
     dub.load_jobs()
     out = {k: getattr(s, k) for k in Session.SAVED if k not in ("segments",)}
     out["lines"] = len(s.segments)
+    # "Dừng" was pressed and the work is winding down (a moment): the button says so instead of looking unpressed
+    out["stopping"] = bool(s.stop and s.status in BUSY)
     out["parts"] = [_part_view(p) for p in s.parts]
     if s.source_media_id:
         out["source_url"] = f"/media/{s.source_media_id}"
@@ -474,9 +493,13 @@ def _run(s: Session) -> None:
         if not s.prepared:
             _prepare(s)
         if s.ask and not s.rows:
-            # "🔍 Phân tích": ready — the seller now types the parts or asks the AI (the card shows the editor)
-            s.status, s.phase, s.progress = "review", "Đã phân tích — chọn các đoạn rồi bấm ✂️ Cắt", 100
+            # "🔍 Phân tích": ready — the seller now types the parts or asks the AI (the card shows the editor).
+            # The words are heard in the background: nothing waits for Whisper but the AI's pick and the subtitles.
+            s.status, s.phase, s.progress = "review", "Đã tải xong — chọn các đoạn rồi bấm ✂️ Cắt", 100
+            hear_later(s)
             return
+        if not s.heard and s.hear != "skip":
+            _hear(s, progress=lambda p: _set(s, "Đang nghe lời trong video (Whisper)", 8 + p * 0.5), stop=lambda: s.stop)
         if s.how == "manual":
             # "Tự cắt": the seller's parts, now checked against the video's real length
             _set(s, "Đang kiểm các đoạn đã nhập", 62)
@@ -507,18 +530,20 @@ def _run(s: Session) -> None:
 
 
 def _prepare(s: Session) -> None:
-    """Download (link) → probe → hear it once (Whisper)."""
+    """Download (link) → probe; a video that was not sent to be analysed is heard right away (Whisper)."""
     from flowboard.services.video_fetch import FetchError, extract_url, fetch_video
 
-    ffmpeg = dub._ffmpeg()
     assert s.work is not None
     s.work.mkdir(parents=True, exist_ok=True)
     if s.url and not s.source_media_id:
         _set(s, "Đang tải video về", 3)
         media_id = uuid.uuid4().hex
         try:
-            path, title = fetch_video(s.url, media_id, media_service.MEDIA_CACHE_DIR, max_duration_s=MAX_DURATION_S)
+            path, title = fetch_video(s.url, media_id, media_service.MEDIA_CACHE_DIR, max_duration_s=MAX_DURATION_S,
+                                      stop=lambda: s.stop)
         except FetchError as exc:
+            if s.stop:
+                raise CutError("Đã dừng theo yêu cầu") from exc
             raise CutError(f"Không tải được video: {exc}") from exc
         s.url = extract_url(s.url) or s.url
         mime = {".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime", ".mkv": "video/x-matroska"}.get(path.suffix.lower(), "video/mp4")
@@ -537,23 +562,110 @@ def _prepare(s: Session) -> None:
         raise CutError(f"Video dài {info.duration / 60:.0f} phút — tối đa {MAX_DURATION_S // 60} phút")
     s.duration_s, s.width, s.height = float(info.duration), int(info.width), int(info.height)
     s.segments, s.heard = [], False
-    if info.has_audio and dub.status().get("available"):
-        _set(s, "Đang tách tiếng", 6)
-        wav = s.work / "speech16.wav"
-        dub._extract_wav(ffmpeg, src, wav, 16000, True)
-        _set(s, "Đang nghe lời trong video (Whisper)", 8)
-        out = s.work / "asr.json"
-        hint = dub_names.asr_hint(s.title) if s.url else ""
-        dub._runner("transcribe", str(wav), str(out), "auto", "-", hint,
-                    progress=lambda p: _set(s, "Đang nghe lời trong video (Whisper)", 8 + p * 0.5), stop=lambda: s.stop)
-        data = json.loads(out.read_text(encoding="utf-8"))
-        s.language = str(data.get("language") or "")
-        s.segments = [{"start": round(float(x["start"]), 3), "end": round(float(x["end"]), 3), "text": str(x.get("text") or "").strip()}
-                      for x in data.get("segments") or [] if float(x["end"]) > float(x["start"])]
-        s.heard = True
-        wav.unlink(missing_ok=True)
     s.prepared = True
     persist(s)
+    if not s.ask:
+        _hear(s, progress=lambda p: _set(s, "Đang nghe lời trong video (Whisper)", 8 + p * 0.5), stop=lambda: s.stop)
+        persist(s)
+
+
+# ── hearing the words (Whisper) ────────────────────────────────────────────
+
+#: one video heard at a time on this machine (the card, or every CPU core)
+_WHISPER_LOCK = threading.Lock()
+
+
+def _hear(s: Session, *, progress: Any, stop: Any) -> None:
+    """Whisper hears the whole video once → ``s.segments`` (``heard``). A machine without Whisper leaves it unheard."""
+    src = _source(s)
+    info = probe_clip(src)
+    if info is None or not info.has_audio:
+        s.segments, s.heard = [], True  # nothing to hear
+        return
+    if not dub.status().get("available"):
+        return
+    assert s.work is not None
+    s.work.mkdir(parents=True, exist_ok=True)
+    wav = s.work / "speech16.wav"
+    out = s.work / "asr.json"
+    with _WHISPER_LOCK:
+        progress(0)
+        dub._extract_wav(dub._ffmpeg(), src, wav, 16000, True)
+        hint = dub_names.asr_hint(s.title) if s.url else ""
+        try:
+            dub._runner("transcribe", str(wav), str(out), "auto", "-", hint, progress=progress, stop=stop)
+        finally:
+            wav.unlink(missing_ok=True)
+    data = json.loads(out.read_text(encoding="utf-8"))
+    s.language = str(data.get("language") or "")
+    s.segments = [{"start": round(float(x["start"]), 3), "end": round(float(x["end"]), 3), "text": str(x.get("text") or "").strip()}
+                  for x in data.get("segments") or [] if float(x["end"]) > float(x["start"])]
+    s.heard = True
+
+
+def hear_later(s: Session) -> Session:
+    """Hear this video in the background (one at a time): the card stays usable — parts typed and cut meanwhile."""
+    if s.heard or s.hear in ("wait", "run") or not s.prepared:
+        return s
+    if not dub.status().get("available"):
+        return s
+    s.hear, s.hear_progress, s.hear_error, s.hear_stop = "wait", 0, "", False
+    persist(s)
+    threading.Thread(target=_hear_bg, args=(s,), name=f"cut-hear-{s.id}", daemon=True).start()
+    return s
+
+
+def hear_skip(s: Session) -> Session:
+    """"Bỏ nghe lời": stop listening (the parts are typed by hand; no AI pick, no subtitles from the words)."""
+    if s.hear in ("wait", "run"):
+        s.hear_stop = True
+        if s.hear == "wait":
+            s.hear = "skip"
+        persist(s)
+    return s
+
+
+def _hear_bg(s: Session) -> None:
+    def progress(p: int) -> None:
+        s.hear, s.hear_progress = "run", int(p)
+
+    def gone() -> bool:
+        return s.hear_stop or SESSIONS.get(s.id) is not s
+
+    try:
+        # waiting for the video before it: asked to stop meanwhile = never started
+        while not _WHISPER_LOCK.acquire(timeout=1.0):
+            if gone():
+                s.hear = "skip"
+                return
+        _WHISPER_LOCK.release()
+        if gone():
+            s.hear = "skip"
+            return
+        _hear(s, progress=progress, stop=gone)
+        s.hear, s.hear_progress = ("done", 100) if s.heard else ("", 0)
+        if s.heard:
+            _lines_for_parts(s)
+    except (CutError, dub.DubError) as exc:
+        s.hear, s.hear_error = ("skip", "") if s.hear_stop else ("error", str(exc)[:300])
+    except Exception as exc:  # noqa: BLE001 — never die silently
+        s.hear, s.hear_error = "error", f"{type(exc).__name__}: {exc}"[:300]
+        logger.exception("video_cut: hearing %s crashed", s.id)
+    finally:
+        if SESSIONS.get(s.id) is s:
+            persist(s)
+
+
+def _lines_for_parts(s: Session) -> None:
+    """Parts cut before the video was heard get their lines now (subtitles can be switched on in the editor)."""
+    for p in s.parts:
+        job = dub.find_job(str(p.get("job_id") or ""))
+        if job is None or job.segments or job.status in ("queued", "running", "rendering"):
+            continue
+        job.segments = part_lines(s, float(p["start"]), float(p["end"]))
+        job.language = s.language
+        if job.segments:
+            dub.persist(job)
 
 
 def _source(s: Session) -> Path:
@@ -573,7 +685,29 @@ def _as_job(s: Session) -> dub.Job:
     return job
 
 
+def exact_rows(s: Session) -> list[dict[str, Any]]:
+    """"Tuỳ chỉnh": parts of exactly ``min_s`` seconds one after another — a cut moves to the pause between two lines
+    when one is within a couple of seconds — and the last part is whatever is left (a tail under 3 s joins it)."""
+    job = _as_job(s)
+    dur, step = float(s.duration_s or 0), float(s.min_s)
+    if dur <= 0:
+        return []
+    pts = dub_split.cut_points(job)
+    spans: list[tuple[float, float]] = []
+    start, k = 0.0, 1
+    while k * step < dur - dub_split.CUT_MIN and len(spans) < dub_split.MAX_PARTS - 1:
+        cut = dub_split.snap(k * step, pts)
+        if cut - start >= dub_split.CUT_MIN and dur - cut >= dub_split.CUT_MIN:
+            spans.append((start, cut))
+            start = cut
+        k += 1
+    spans.append((start, dur))
+    return dub_split._titled(job, spans)
+
+
 def even_rows(s: Session) -> list[dict[str, Any]]:
+    if s.min_s == s.max_s:
+        return exact_rows(s)
     target = (s.min_s + s.max_s) / 2
     if s.max_parts and s.duration_s / target > s.max_parts:
         target = s.duration_s / s.max_parts
@@ -608,7 +742,9 @@ _SYSTEM = (
 
 def ai_prompt(s: Session) -> str:
     lines = [f"[{i}] ({x['start']:.1f}-{x['end']:.1f}s) {str(x['text'])[:220]}" for i, x in enumerate(s.segments, 1)]
-    want = f"Each short video: {s.min_s:.0f}-{s.max_s:.0f} seconds" + (f"; at most {s.max_parts} videos" if s.max_parts else "")
+    want = ((f"Each short video: about {s.min_s:.0f} seconds (cut at the end of the sentence nearest to it; the last one "
+             "may be shorter — it takes what is left)") if s.min_s == s.max_s else f"Each short video: {s.min_s:.0f}-{s.max_s:.0f} seconds"
+            ) + (f"; at most {s.max_parts} videos" if s.max_parts else "")
     req = s.prompt if s.how == "prompt" else ""
     if req:  # a request sets its own length and number of parts (the form has no pickers for it)
         want = ("Length of each short video and how many: as the request below says; where it says nothing, 30-180 seconds "
@@ -669,7 +805,10 @@ async def suggest_again(s: Session, *, how: str, prompt: str, min_s: Any, max_s:
     if s.status in BUSY:
         raise CutError("Video này đang chạy — chờ xong")
     if not s.prepared:
-        raise CutError("Video chưa tải / nghe xong — bấm ↻ Làm lại")
+        raise CutError("Video chưa tải xong — bấm ↻ Làm lại")
+    if normalize_how(how) in ("ai", "prompt") and s.hear in ("wait", "run"):
+        raise CutError(f"Tool đang nghe lời trong video ({s.hear_progress}%) — AI chọn đoạn theo nội dung được khi nghe xong. "
+                       "Trong lúc chờ bạn tự nhập đoạn, hoặc chọn Chia đều.")
     s.how, s.prompt = normalize_how(how), clean_prompt(prompt)
     if s.how == "prompt" and not s.prompt:
         raise CutError("Gõ yêu cầu cắt trước")
@@ -695,13 +834,13 @@ def check_rows(s: Session, rows: Any) -> list[dict[str, Any]]:
     return rows
 
 
-def cut(s: Session, rows: Any, how: Optional[str] = None) -> Session:
+def cut(s: Session, rows: Any, how: Optional[str] = None, adjust: Any = None, speed: Any = None) -> Session:
     """Cut (or cut again) with these rows, in a thread. Part n reuses the project + clip of the old part n.
     ``how == "manual"``: the seller typed the rows (the card says "tự cắt")."""
     if s.status in BUSY:
         raise CutError("Video này đang chạy — chờ xong")
     if not s.prepared:
-        raise CutError("Video chưa tải / nghe xong — bấm ↻ Làm lại")
+        raise CutError("Video chưa tải xong — bấm ↻ Làm lại")
     _source(s)
     rows = check_rows(s, rows)
     for p in s.parts:
@@ -709,6 +848,10 @@ def cut(s: Session, rows: Any, how: Optional[str] = None) -> Session:
         if job is not None and job.status in ("queued", "running", "rendering"):
             raise CutError(f"Video {p.get('index')} đang xuất — chờ xong rồi cắt lại")
     s.rows, s.by = rows, s.by or "manual"
+    if speed is not None:  # the speed slider of the cut page (1 = back to the source's speed)
+        s.speed = dub.normalize_speed(speed)
+    if adjust is not None:  # the slider of the cut page ({} = back to untouched)
+        s.adjust = dub.normalize_adjust(adjust) or {}
     if how == "manual":
         s.how = s.by = "manual"
     s.status, s.phase, s.progress, s.error, s.stop = "cutting", "Chuẩn bị cắt", 0, None, False
@@ -741,7 +884,7 @@ def _cut_all(s: Session, rows: list[dict[str, Any]], *, base: int) -> None:
         _set(s, f"Đang cắt video {i}/{total}", base + (100 - base) * (i - 1) / total)
         media_id = uuid.uuid4().hex
         dst = media_service.MEDIA_CACHE_DIR / f"{media_id}.mp4"
-        dub_split._cut(ffmpeg, src, row["start"], row["end"], dst, f"{TAG_PREFIX}{s.id}")
+        dub_split._cut(ffmpeg, src, row["start"], row["end"], dst, f"{TAG_PREFIX}{s.id}", stop=lambda: s.stop)
         with get_session() as db:
             db.add(Asset(kind="video", uuid_media_id=media_id, local_path=str(dst), mime="video/mp4"))
             db.commit()
@@ -759,6 +902,10 @@ def _cut_all(s: Session, rows: list[dict[str, Any]], *, base: int) -> None:
         s.parts = parts + [p for k, p in sorted(old.items()) if k > i]
         persist(s)
     s.parts = parts  # parts past the new count keep their clips (the seller may have edited them), not listed here
+    if s.adjust == {}:  # "back to untouched" was put on every part: nothing left to remember
+        s.adjust = None
+    if s.speed == 1.0:
+        s.speed = None
     s.status, s.phase, s.progress, s.error = "done", f"Đã cắt {total} video", 100, None
 
 
@@ -766,8 +913,9 @@ def needs_render(job: dub.Job) -> bool:
     """A part just cut is the raw piece. It is rendered at once when its project has something to put on it: a
     look (the cut's preset, or what the seller set before cutting again — 9:16 frame, background, blur boxes,
     sticker), subtitles to burn, or key-moment emphasis."""
-    return (dub.normalize_layout(job.layout) != dub.normalize_layout(None) or job.sub_lang != "none"
-            or bool((job.highlights or {}).get("on")))
+    lay = dub.normalize_layout(job.layout)
+    lay["texts"] = dub.shown_texts(lay)  # a title slot that is switched off puts nothing on the picture
+    return (lay != dub.normalize_layout(None) or job.sub_lang != "none" or bool((job.highlights or {}).get("on")))
 
 
 def part_lines(s: Session, start: float, end: float) -> list[dub.Segment]:
@@ -785,6 +933,8 @@ def _part_job(s: Session, index: int, total: int, row: dict[str, Any], title: st
     prev = dub.find_job(str(old.get("job_id") or "")) if old else None
     info = probe_clip(path)
     job = prev or dub.Job(id=uuid.uuid4().hex[:12], url=None, source_media_id=media_id, sub_lang="none")
+    # what the title layers showed before this cut: a layer still showing it follows the new title
+    was = {"title": dub.default_text(job, "title"), "subtitle": dub.default_text(job, "subtitle")} if prev is not None else {}
     job.url = None
     job.kind, job.mode = "cut", "sub"
     job.source_media_id = job.media_id = media_id
@@ -796,6 +946,15 @@ def _part_job(s: Session, index: int, total: int, row: dict[str, Any], title: st
         job.channel_id = s.channel_id
         if s.look:  # the cut's "★ Mẫu chỉnh sửa": the part starts (and is rendered) in that look
             dub.apply_look(job, s.look)
+    if prev is not None and (job.layout or {}).get("texts"):
+        lay = dub.normalize_layout(job.layout)
+        lay["texts"] = [dict(t, text=dub.default_text(job, t["role"])) if t["role"] != "text" and t["text"] in ("", was.get(t["role"]))
+                        else t for t in lay["texts"]]
+        job.layout = lay
+    if s.adjust is not None:  # "Sáng / tối" of the cut page: every part, new or cut again
+        job.layout = {**dub.normalize_layout(job.layout), "adjust": dub.normalize_adjust(s.adjust)}
+    if s.speed is not None:  # "Tốc độ" of the cut page: every part, new or cut again
+        job.layout = {**dub.normalize_layout(job.layout), "speed": dub.normalize_speed(s.speed)}
     job.language = s.language
     job.duration_s = float(info.duration) if info else float(row["end"] - row["start"])
     job.width, job.height = (int(info.width), int(info.height)) if info else (s.width, s.height)
@@ -874,6 +1033,7 @@ def delete(ids: list[str]) -> tuple[list[str], list[dict[str, str]]]:
         if s.status in BUSY:
             skipped.append({"id": sid, "reason": "đang chạy — dừng trước rồi xoá"})
             continue
+        s.hear_stop = True
         SESSIONS.pop(sid, None)
         work = s.work
         if work is not None and work.parent == _root() and work.is_dir():
@@ -886,6 +1046,10 @@ def running_items() -> list[dict[str, Any]]:
     out = []
     for s in sessions():
         if s.status not in BUSY:
+            if s.hear == "run":
+                out.append({"key": f"cuthear:{s.id}", "kind": "cut", "title": f"Nghe lời “{s.title or s.url or 'video'}”"[:90],
+                            "detail": "AI đang nghe lời trong video — vẫn chọn đoạn và cắt được", "progress": s.hear_progress,
+                            "started_at": s.started_at, "link": f"/tools/cut?session={s.id}"})
             continue
         out.append({"key": f"cut:{s.id}", "kind": "cut", "title": f"Cắt “{s.title or s.url or 'video'}”"[:90],
                     "detail": s.phase or "Đang chờ", "progress": s.progress if s.status != "queued" else None,
@@ -900,8 +1064,18 @@ def outcome(session_id: str) -> dict[str, Any]:
     if s.status == "error":
         return {"ok": False, "message": s.error or "Cắt video lỗi"}
     if s.status == "review":
-        return {"ok": True, "message": f"AI chọn {len(s.rows)} đoạn — xem lại rồi bấm Cắt"}
+        return {"ok": True, "message": f"AI chọn {len(s.rows)} đoạn — xem lại rồi bấm Cắt" if s.rows else
+                "Video đã tải xong — chọn các đoạn rồi bấm Cắt"}
     return {"ok": True, "message": f"Đã cắt {len(s.parts)} video — bấm để xem"}
+
+
+def hear_outcome(session_id: str) -> dict[str, Any]:
+    s = find(session_id)
+    if s is None or s.hear == "skip":
+        return {"ok": True, "message": ""}
+    if s.hear == "error":
+        return {"ok": False, "message": s.hear_error or "Nghe lời lỗi"}
+    return {"ok": True, "message": f"Đã nghe xong lời trong video ({len(s.segments)} câu) — AI chọn đoạn được rồi"}
 
 
 def boards_of(run_id: str) -> list[int]:

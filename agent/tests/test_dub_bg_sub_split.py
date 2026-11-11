@@ -134,6 +134,7 @@ def test_subtitles_only_keeps_the_videos_sound_and_reads_no_voice(client, tmp_pa
     ran: list[list[str]] = []
     real_run = dub._run
     monkeypatch.setattr(dub, "_run", lambda cmd, timeout: ran.append(list(cmd)) or real_run(cmd, timeout))
+    monkeypatch.setattr(dub, "_run_encode", lambda cmd, timeout, *a, **k: dub._run(cmd, timeout))
     job = dub.Job(id="5ab000000001", url=None, source_media_id="src", mode="sub", keep_bgm=True)
     job.segments = [dub.Segment(0.2, 1.4, "你好", "Xin chào"), dub.Segment(1.6, 2.8, "再见", "Tạm biệt")]
     job.duration_s = 3.0

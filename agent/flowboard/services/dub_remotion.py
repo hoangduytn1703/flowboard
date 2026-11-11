@@ -90,7 +90,10 @@ def build_spec(*, src: Path, out: Path, cues: list[tuple], layout: dict[str, Any
                        "mascot": layout.get("mascot") or None,
                        # several blur boxes + the output format (width / height above are already the format's)
                        "blurs": list(layout.get("blurs") or ([layout["blur"]] if layout.get("blur") else [])),
-                       "canvas": layout.get("canvas") or None},
+                       "canvas": layout.get("canvas") or None,
+                       # "🔤 Chữ" (only the layers that are drawn) + brightness / contrast / saturation of the video
+                       "texts": [x for x in (layout.get("texts") or []) if x.get("on") and str(x.get("text") or "").strip()],
+                       "adjust": layout.get("adjust") or None},
             "style": style,
             "muted": False,
             "highlights": highlights,

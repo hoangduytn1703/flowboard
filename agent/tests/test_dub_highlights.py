@@ -114,6 +114,7 @@ def test_a_render_burns_the_key_word_zooms_and_adds_the_sounds(client, tmp_path,
         return real_run(cmd, timeout)
 
     monkeypatch.setattr(dub, "_run", spy)
+    monkeypatch.setattr(dub, "_run_encode", lambda cmd, timeout, *a, **k: dub._run(cmd, timeout))
     job = dub.Job(id="c0ffee000001", url=None, source_media_id="src")
     job.segments = [dub.Segment(0, 1.5, "a", "Giá chỉ 99k thôi"), dub.Segment(2, 3.5, "b", "Mua ngay nha")]
     job.duration_s = 4.0

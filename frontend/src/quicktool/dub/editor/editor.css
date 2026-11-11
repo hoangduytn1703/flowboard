@@ -530,3 +530,93 @@
 .dx-stage__bgmiss { position: absolute; left: 4px; top: 4px; z-index: 6; max-width: calc(100% - 8px); padding: 2px 6px; border-radius: 5px;
   font-size: 10.5px; line-height: 1.3; color: #fde68a; background: rgba(0, 0, 0, 0.72); pointer-events: auto; }
 .dx-side .dx-format__row > label:has(select) { flex: 1 1 100%; }
+
+/* ── the work area under the top bar (covered while "⇪ Áp cho cả loạt" runs) ── */
+.dx__work { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.dx-side__tab { min-width: 46px; padding: 7px 4px 6px; }
+
+/* ── "tua nhanh": playback speed of the preview ── */
+.dx__speed { display: inline-flex; align-items: center; margin-left: 8px; padding: 2px; border-radius: 8px; background: var(--dx-panel-2); border: 1px solid var(--dx-line); }
+.dx__speedbtn { padding: 3px 7px; font: inherit; font-size: 12px; font-weight: 700; color: var(--dx-mute); background: none; border: 0; border-radius: 6px; cursor: pointer; font-variant-numeric: tabular-nums; }
+.dx__speedbtn:hover { color: var(--dx-text); }
+.dx__speedbtn.is-on { background: var(--qt-accent, #ff6a2b); color: #fff; }
+
+/* ── "🔤 Chữ": text layers on the picture ── */
+.dx-stage__text { z-index: 5; cursor: grab; user-select: none; touch-action: none; border-radius: 2px; }
+.dx-stage__text:hover { outline: 1px dashed rgba(255, 255, 255, 0.7); outline-offset: 2px; }
+.dx-stage__text.is-selected, .dx-stage__text:focus-visible { outline: 2px solid #ff6a2b; outline-offset: 2px; }
+.dx-stage__text--idle { opacity: 0.45; }
+.dx-stage__text--ghost { background: transparent !important; color: transparent !important; text-shadow: none !important; outline: 2px dashed rgba(255, 255, 255, 0.75); }
+.dx-text__list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 5px; }
+.dx-text__list li { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 9px; }
+.dx-text__list li.is-on { border-color: #ff6a2b; background: rgba(255, 106, 43, 0.08); }
+.dx-text__list li.is-off .dx-text__pick { opacity: 0.6; }
+.dx-text__tick { display: grid; place-items: center; flex: none; cursor: pointer; }
+.dx-text__tick input { width: 17px; height: 17px; accent-color: #ff6a2b; cursor: pointer; }
+.dx-text__pick { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; padding: 2px 4px; text-align: left; font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+.dx-text__pick strong { font-size: 13.5px; }
+.dx-text__pick small { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dx-text__words { width: 100%; resize: vertical; min-height: 56px; font-size: 14.5px; line-height: 1.4; }
+.dx-text__looks { display: flex; flex-wrap: wrap; gap: 6px; }
+.dx-text__look { width: 40px; height: 30px; border-radius: 7px; border: 2px solid transparent; font: inherit; font-size: 14px; font-weight: 800; cursor: pointer; }
+.dx-text__look.is-on { border-color: #ff6a2b; box-shadow: 0 0 0 2px rgba(255, 106, 43, 0.35); }
+.dx-text__look:disabled { opacity: 0.5; cursor: default; }
+.dx-text__colors { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 13px; }
+.dx-text__colors label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.dx-text__colors input[type="color"] { width: 30px; height: 24px; padding: 0; border: 1px solid var(--border); border-radius: 5px; background: none; cursor: pointer; }
+.dx-text__show { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font-size: 13px; color: var(--muted); }
+.dx-text__show select { padding: 4px 6px; border-radius: 7px; border: 1px solid var(--border); background: #1c2029; color: var(--text); font: inherit; font-size: 13px; }
+.dx-insp__h small { margin-left: 8px; font-weight: 400; font-size: 12px; color: #fbbf24; }
+
+/* ── "Sáng / tối & màu" ── */
+.dx-adjust { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--dx-line); }
+.dx-adjust__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.dx-adjust__row { display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
+.dx-adjust__row > span { display: flex; justify-content: space-between; color: var(--dx-text); }
+.dx-adjust__row small { color: var(--dx-mute); font-variant-numeric: tabular-nums; }
+.dx-adjust__row input[type="range"] { width: 100%; }
+
+/* ── "⇪ Áp cho cả loạt" at work ── */
+.dx-batch { position: absolute; inset: 0; z-index: 40; display: grid; place-items: center; padding: 16px; background: rgba(10, 10, 12, 0.78); backdrop-filter: blur(3px); border-radius: 8px; }
+.dx-batch__box { width: min(620px, 100%); max-height: 100%; display: flex; flex-direction: column; gap: 10px; padding: 18px 20px; background: var(--dx-panel); border: 1px solid #ff6a2b; border-radius: 14px; box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55); }
+.dx-batch__head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.dx-batch__head strong { font-size: 17px; }
+.dx-batch__pct { font-size: 26px; font-weight: 800; color: #ff8a52; font-variant-numeric: tabular-nums; }
+.dx-batch__bar { height: 10px; border-radius: 999px; background: #2a2a31; overflow: hidden; }
+.dx-batch__bar span { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #ff6a2b, #ffb020); transition: width 0.5s ease; }
+.dx-batch__bar span.is-live { background-image: linear-gradient(90deg, #ff6a2b, #ffb020), repeating-linear-gradient(-45deg, rgba(255,255,255,0.22) 0 8px, transparent 8px 16px); background-blend-mode: overlay; background-size: auto, 32px 100%; animation: dx-batch-run 1s linear infinite; }
+@keyframes dx-batch-run { to { background-position: 0 0, 32px 0; } }
+@media (prefers-reduced-motion: reduce) { .dx-batch__bar span.is-live { animation: none; } }
+.dx-batch__sum { margin: 0; font-size: 13px; line-height: 1.5; color: var(--dx-mute); }
+.dx-batch__list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; min-height: 0; }
+.dx-batch__list li { display: grid; grid-template-columns: 26px minmax(0, 1fr) 90px 128px; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; background: var(--dx-panel-2); font-size: 13.5px; }
+.dx-batch__n { text-align: center; color: var(--dx-mute); font-variant-numeric: tabular-nums; }
+.dx-batch__name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dx-batch__name em { font-style: normal; color: var(--dx-mute); font-size: 12px; }
+.dx-batch__mini { height: 6px; border-radius: 999px; background: #33333b; overflow: hidden; }
+.dx-batch__mini i { display: block; height: 100%; background: #ff6a2b; border-radius: 999px; transition: width 0.5s ease; }
+.dx-batch__st { text-align: right; font-size: 12.5px; font-weight: 600; color: var(--dx-mute); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dx-batch__list li.is-working { outline: 1px solid rgba(255, 106, 43, 0.6); }
+.dx-batch__list li.is-working .dx-batch__st { color: #ffb020; }
+.dx-batch__list li.is-done .dx-batch__st { color: #4ade80; }
+.dx-batch__list li.is-done .dx-batch__mini i { background: #22c55e; }
+.dx-batch__list li.is-error .dx-batch__st { color: #f87171; }
+.dx-batch__list li.is-error .dx-batch__mini i { background: #ef4444; }
+.dx-batch__foot { display: flex; justify-content: flex-end; }
+/* six tools on the left rail: every tab shares the width, none is cut off */
+.dx-side--left .dx-side__tab { flex: 1 1 0; min-width: 0; padding: 7px 2px 6px; font-size: 11px; }
+/* time · buttons + speed · sound: one line when there is room, wrapping (never overlapping) when the stage is narrow */
+.dx__transport { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 10px; }
+.dx__transport .dx__tgroup { flex: 0 1 auto; }
+.dx__audio select { max-width: 170px; }
+@media (max-width: 1320px) { .dx__transport { justify-content: center; } }
+.dx-side__body > .dx-text { padding: 10px 12px 14px; }
+.dx-side__body > .dx-adjust { margin: 12px 12px 14px; }
+/* "Tốc độ": a slider (0.8–3) — what the preview plays at is what the export comes out at */
+.dx__speed { display: flex; flex-direction: column; gap: 1px; width: 190px; margin-left: 10px; padding: 3px 8px 1px; background: var(--dx-panel-2); border: 1px solid var(--dx-line); border-radius: 8px; font-size: 12px; color: var(--dx-mute); }
+.dx__speed.is-on { border-color: var(--qt-accent, #ff6a2b); }
+.dx__speed > span:first-child { display: flex; align-items: baseline; gap: 4px; white-space: nowrap; }
+.dx__speed b { color: var(--dx-text); font-variant-numeric: tabular-nums; }
+.dx__speed.is-on b { color: #ff8a52; }
+.dx__speed small { font-size: 11px; }
+.dx__speed input[type="range"] { width: 100%; }

@@ -8,6 +8,7 @@
   POST /api/cut/sessions/{id}/suggest    {how, prompt, min_s, max_s, max_parts, title_lang} → {rows, by, note, name} (nothing cut)
   POST /api/cut/sessions/{id}/cut        {rows} — cut / cut again
   POST /api/cut/sessions/{id}/stop | /again
+  POST /api/cut/sessions/{id}/hear       {on} — hear the words in the background now / stop hearing
   POST /api/cut/sessions/delete          {ids} — the list only; the parts (clips + projects) stay
   GET  /api/cut/parts?run=|session=      the parts' editing projects (dub jobs of kind "cut"), in cut order
   GET  /api/cut/prompts | PUT {prompts: [{id, name, text}]}   the account's saved cut prompts (whole list)
@@ -73,6 +74,15 @@ class CutBody(BaseModel):
     rows: list[Row] = Field(max_length=100)
     #: "manual" = the seller typed these rows
     how: Optional[str] = Field(default=None, pattern="^(manual)$")
+    #: "Sáng / tối" of the preview: {brightness, contrast, saturation} put on every part ({} = untouched)
+    adjust: Optional[dict[str, Any]] = None
+    #: "Tốc độ" of the preview (0.8–3): every part is exported at that speed (1 = the source's)
+    speed: Optional[float] = Field(default=None, ge=0.1, le=10)
+
+
+class HearBody(BaseModel):
+    #: true = hear the words now (Whisper, in the background); false = stop / skip it
+    on: bool = True
 
 
 class IdsBody(BaseModel):
@@ -161,9 +171,22 @@ async def suggest(session_id: str, body: SuggestBody) -> dict[str, Any]:
 def cut(session_id: str, body: CutBody) -> dict[str, Any]:
     s = _session(session_id)
     try:
-        video_cut.cut(s, [r.model_dump() for r in body.rows], how=body.how)
+        video_cut.cut(s, [r.model_dump() for r in body.rows], how=body.how, adjust=body.adjust, speed=body.speed)
     except video_cut.CutError as exc:
         raise HTTPException(400, str(exc))
+    return video_cut.public(s, brief=True)
+
+
+@router.post("/sessions/{session_id}/hear")
+def hear(session_id: str, body: HearBody) -> dict[str, Any]:
+    """Whisper for a video that was analysed: start it (it was skipped, failed, or the agent restarted) or stop it."""
+    s = _session(session_id)
+    if body.on:
+        if not video_cut.status()["whisper"]:
+            raise HTTPException(400, "Máy này chưa có gói nghe lời (Whisper) — cài ở Cài đặt → 🖥 Máy này → Gói lồng tiếng.")
+        video_cut.hear_later(s)
+    else:
+        video_cut.hear_skip(s)
     return video_cut.public(s, brief=True)
 
 

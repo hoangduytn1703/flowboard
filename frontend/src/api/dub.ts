@@ -101,6 +101,100 @@ export interface DubLayout {
   frame?: DubFrame | null;
   /** a bouncing sticker (a saved model, an image or GIF) */
   mascot?: DubMascot | null;
+  /** "🔤 Chữ": the title, the second title and free text on the picture */
+  texts?: DubText[];
+  /** brightness / contrast / saturation of the video itself (null = untouched) */
+  adjust?: DubAdjust | null;
+  /** "Tốc độ": the export plays this much faster / slower than the source (0.8–3, 1 = as it is) */
+  speed?: number;
+}
+export const SPEED_MIN = 0.8, SPEED_MAX = 3;
+export const SPEED_MARKS = [0.8, 1, 1.5, 2, 2.5, 3];
+/** mirrors services/dub.normalize_speed */
+export function normSpeed(v: unknown): number {
+  const n = typeof v === "number" && Number.isFinite(v) ? Math.round(Math.min(SPEED_MAX, Math.max(SPEED_MIN, v)) * 100) / 100 : 1;
+  return Math.abs(n - 1) < 0.005 ? 1 : n;
+}
+export const speedLabel = (v: number) => `${String(Math.round(v * 100) / 100).replace(".", ",")}×`;
+
+/** "title" / "subtitle" = the two lines typed when a video is cut (each clip its own words); "text" = free text. */
+export type TextRole = "title" | "subtitle" | "text";
+export interface DubText {
+  role: TextRole;
+  /** off = kept in the editor, not drawn */
+  on: boolean;
+  text: string;
+  /** the centre of the text, fractions of the frame */
+  x: number;
+  y: number;
+  /** × the subtitle base size, 0.5–4 */
+  size: number;
+  color: string;
+  /** the box behind the text; "" = none (the text gets an outline) */
+  bg: string;
+  /** the widest a line may be, fraction of the frame width */
+  w: number;
+  bold: boolean;
+  /** 0 = the whole clip, else only its first seconds */
+  secs: number;
+}
+export const MAX_TEXTS = 8;
+export const TEXT_ROLE_LABEL: Record<TextRole, string> = { title: "Tiêu đề", subtitle: "Tiêu đề phụ", text: "Chữ" };
+export const TEXT_DEFAULTS: Record<TextRole, Pick<DubText, "x" | "y" | "size" | "color" | "bg">> = {
+  title: { x: 0.5, y: 0.09, size: 1.5, color: "#ffffff", bg: "#e5322d" },
+  subtitle: { x: 0.5, y: 0.17, size: 1.1, color: "#141414", bg: "#ffffff" },
+  text: { x: 0.5, y: 0.5, size: 1.2, color: "#ffffff", bg: "" },
+};
+const r3 = (v: number) => Math.round(v * 1000) / 1000;
+const within = (v: unknown, lo: number, hi: number, def: number) => {
+  const n = typeof v === "number" ? v : Number.NaN;
+  return Number.isFinite(n) ? r3(Math.min(hi, Math.max(lo, n))) : def;
+};
+const hexOr = (v: unknown, def: string) => (typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : def);
+/** One text layer in the agent's shape (services/dub._norm_text) — the words stay as typed. */
+export function normText(raw: Partial<DubText> | null | undefined): DubText {
+  const role: TextRole = raw?.role === "title" || raw?.role === "subtitle" ? raw.role : "text";
+  const d = TEXT_DEFAULTS[role];
+  return {
+    role, on: raw?.on ?? true, text: String(raw?.text ?? ""),
+    x: within(raw?.x, 0.02, 0.98, d.x), y: within(raw?.y, 0.03, 0.97, d.y), size: within(raw?.size, 0.5, 4, d.size),
+    color: hexOr(raw?.color, d.color), bg: raw?.bg === undefined ? d.bg : raw.bg ? hexOr(raw.bg, "") : "",
+    w: within(raw?.w, 0.2, 0.96, 0.86), bold: raw?.bold ?? true, secs: within(raw?.secs, 0, 3600, 0),
+  };
+}
+export function normTexts(raw: Partial<DubText>[] | null | undefined): DubText[] {
+  const seen = new Set<string>();
+  return (raw ?? []).map(normText).map((t) => {
+    if (t.role === "text") return t;
+    if (seen.has(t.role)) return { ...t, role: "text" as TextRole };
+    seen.add(t.role);
+    return t;
+  }).slice(0, MAX_TEXTS);
+}
+/** The editor always lists a title and a second title (off until switched on): a clip that never had them gets
+ * the two slots with the words it was cut with ("" when it has none). */
+export function withTextSlots(texts: DubText[], title: string, subtitle: string): DubText[] {
+  const slot = (role: TextRole, text: string) => texts.find((t) => t.role === role) ?? normText({ role, on: false, text });
+  return [slot("title", title), slot("subtitle", subtitle), ...texts.filter((t) => t.role === "text")].slice(0, MAX_TEXTS);
+}
+/** Text layers coming from another clip (a saved look): place, size and colours are theirs; a title / second
+ * title keeps THIS clip's words — mirrors services/dub.carry_texts. */
+export function carryTexts(theirs: DubText[], own: DubText[], title: string, subtitle: string): DubText[] {
+  const mine = (role: TextRole) => own.find((t) => t.role === role)?.text || (role === "title" ? title : subtitle);
+  return theirs.map((t) => (t.role === "text" ? t : { ...t, text: mine(t.role) }));
+}
+
+export interface DubAdjust { brightness: number; contrast: number; saturation: number }
+export const NO_ADJUST: DubAdjust = { brightness: 1, contrast: 1, saturation: 1 };
+export const ADJUST_RANGE: Record<keyof DubAdjust, [number, number]> = { brightness: [0.4, 1.8], contrast: [0.5, 1.6], saturation: [0, 2] };
+/** null when nothing is changed — mirrors services/dub.normalize_adjust */
+export function normAdjust(raw: Partial<DubAdjust> | null | undefined): DubAdjust | null {
+  if (!raw) return null;
+  const out: DubAdjust = {
+    brightness: within(raw.brightness, ...ADJUST_RANGE.brightness, 1), contrast: within(raw.contrast, ...ADJUST_RANGE.contrast, 1),
+    saturation: within(raw.saturation, ...ADJUST_RANGE.saturation, 1),
+  };
+  return Object.values(out).every((v) => Math.abs(v - 1) < 0.005) ? null : out;
 }
 
 export interface DubFrame {
@@ -216,7 +310,7 @@ export function normLayout(raw: Partial<DubLayout> | null | undefined): DubLayou
   const r = { ...DEFAULT_LAYOUT, ...(raw ?? {}) };
   const blurs = layoutBlurs(r);
   return { x: r.x, y: r.y, scale: r.scale, w: r.w ?? null, blur: blurs[0] ?? null, blurs, canvas: normCanvas(r.canvas),
-           frame: r.frame ?? null, mascot: r.mascot ?? null };
+           frame: r.frame ?? null, mascot: r.mascot ?? null, texts: normTexts(r.texts), adjust: normAdjust(r.adjust), speed: normSpeed(r.speed) };
 }
 
 /** One key moment: the key words are said at ``at`` (line ``line`` of the translation, when known). */
@@ -372,6 +466,8 @@ export interface DubJob {
   job_id: string;
   /** unix seconds the job was started */
   started_at?: number;
+  /** "Dừng" was pressed and the work is winding down */
+  stopping?: boolean;
   /** brief lists only: how many lines (the lines themselves are left out) */
   lines?: number;
   status: DubJobStatus;
@@ -415,7 +511,7 @@ export interface DubJob {
   /** "cut" = one part of a video cut on the "✂️ Cắt video" page (no voice, its own sound, subtitles optional) */
   kind?: string;
   cut?: { session_id: string; run_id: string; index: number; total: number; start: number; end: number;
-          source_url?: string | null; source_title?: string };
+          source_url?: string | null; source_title?: string; subtitle?: string };
   language: string;
   title: string;
   duration_s: number;
@@ -577,6 +673,8 @@ export interface DubRender {
   names?: DubName[];
   /** the editor split / merged / added / removed lines: the whole list (replaces lines / timings / looks) */
   cues?: { start: number; end: number; text: string; src: string; look: SubLook | null }[];
+  /** the layout is another clip's ("⇪ Áp cho cả loạt"): title / second-title layers keep this clip's own words */
+  carried?: boolean;
 }
 
 /** "✨ AI chọn chữ quan trọng": the key moments for the lines as the editor holds them, without rendering. */

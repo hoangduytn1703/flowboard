@@ -41,7 +41,9 @@ export function announceRunning(): void {
 const POLL_ACTIVE_MS = 4000;
 const POLL_IDLE_MS = 15000;
 /** A finished task stays on the badge this long ("✓ … xong — mở"). */
+/** a failure stays until read; "xong" only long enough to be noticed (the pill sits over the page's own buttons) */
 const DONE_KEEP_MS = 3 * 60 * 1000;
+const OK_KEEP_MS = 4000;
 
 const KIND_ICON: Record<string, string> = {
   dub: "🎙", clean: "🧽", clip: "🎬", flow: "🖼", capcut: "🎞", cut: "✂️", addon: "⬇",
@@ -94,6 +96,9 @@ export function BackgroundTasks() {
   const { pathname, search } = useLocation();
   const [items, setItems] = useState<RunningItem[]>([]);
   const [done, setDone] = useState<DoneItem[]>([]);
+  const hover = useRef(false);
+  // "×" while something still runs: the pill shrinks to a small circle (it was covering a button of the page)
+  const [mini, setMini] = useState(false);
   const [open, setOpen] = useState(false);
   const prev = useRef<Map<string, RunningItem>>(new Map());
   const panel = useRef<HTMLDivElement>(null);
@@ -131,9 +136,11 @@ export function BackgroundTasks() {
   // Forget old "xong" entries.
   useEffect(() => {
     if (!done.length) return;
-    const t = window.setInterval(() => setDone((d) => d.filter((x) => Date.now() - x.doneAt < DONE_KEEP_MS)), 15000);
+    const fresh = (x: DoneItem) => Date.now() - x.doneAt < (x.ok ? OK_KEEP_MS : DONE_KEEP_MS);
+    // (kept while the list is open or the mouse is on the pill: it is being read)
+    const t = window.setInterval(() => { if (!open && !hover.current) setDone((d) => (d.every(fresh) ? d : d.filter(fresh))); }, 1000);
     return () => window.clearInterval(t);
-  }, [done.length]);
+  }, [done.length, open]);
   // Close the list on an outside click.
   useEffect(() => {
     if (!open) return;
@@ -149,6 +156,7 @@ export function BackgroundTasks() {
     setDone((d) => (d.some((x) => isHere(x.link, pathname, search)) ? d.filter((x) => !isHere(x.link, pathname, search)) : d));
   }, [pathname, search]);
 
+  useEffect(() => { if (!away.length) setMini(false); }, [away.length]);
   if (!away.length && !doneAway.length) return null;
 
   function go(item: RunningItem) {
@@ -169,7 +177,8 @@ export function BackgroundTasks() {
   const pct = running && away.length === 1 && first.progress !== null ? first.progress : null;
 
   return (
-    <div className="bgt" ref={panel}>
+    <div className={`bgt${mini && running ? " bgt--mini" : ""}`} ref={panel}
+         onMouseEnter={() => { hover.current = true; }} onMouseLeave={() => { hover.current = false; }}>
       {open && (
         <div className="bgt__panel" role="dialog" aria-label="Việc đang chạy">
           <div className="bgt__head">
@@ -205,10 +214,11 @@ export function BackgroundTasks() {
           </ul>
         </div>
       )}
+      <div className="bgt__dock">
       <button
         type="button"
         className={`bgt__pill${running ? "" : failedAway.length ? " bgt__pill--failed" : " bgt__pill--done"}`}
-        onClick={() => (total === 1 ? go(first) : setOpen((o) => !o))}
+        onClick={() => { if (mini && running) { setMini(false); return; } if (total === 1) go(first); else setOpen((o) => !o); }}
         title={total === 1
           ? `${first.title} — ${"message" in first && !running ? (first as DoneItem).message : first.detail}. Bấm để quay lại.`
           : "Xem các việc đang chạy"}
@@ -222,6 +232,12 @@ export function BackgroundTasks() {
         {pct !== null && <span className="bgt__pct">{pct}%</span>}
         {total > 1 && <span className="bgt__count">{total}</span>}
       </button>
+      {!(mini && running) && (
+        <button type="button" className="bgt__close" aria-label={running ? "Thu nhỏ" : "Đóng"}
+                title={running ? "Thu nhỏ lại (việc vẫn chạy) — bấm vòng tròn để mở ra" : "Đóng thông báo này"}
+                onClick={() => { hover.current = false; setOpen(false); setDone([]); if (running) setMini(true); }}>×</button>
+      )}
+      </div>
     </div>
   );
 }

@@ -21,6 +21,7 @@ import { ClipPost } from "../steps/ClipPost";
 import { VoiceField } from "../VoiceField";
 import "../dub.css";
 import { ProgressRing } from "../dub/ProgressRing";
+import { StopButton } from "../../components/StopButton";
 import { DubAddonCard } from "../dub/DubAddonCard";
 
 const POLL_MS = 2000;
@@ -383,7 +384,7 @@ export function DubPage() {
     let sent = 0;
     for (const t of targets) {
       try {
-        await renderDub(t.job_id, { layout: look.layout, style: look.style, engine: look.engine, highlights: look.highlights });
+        await renderDub(t.job_id, { layout: look.layout, style: look.style, engine: look.engine, highlights: look.highlights, carried: true });
         sent++;
       } catch (e) {
         toast.error(`${t.name || t.title || t.job_id}: ${errMessage(e)}`);
@@ -458,6 +459,7 @@ export function DubPage() {
           <>
             <DubEditor key={job.job_id} job={job} status={status} onClose={closeJob}
                        onJob={(j) => { setJob(j); setBatch((b) => (b ? { ...b, jobs: b.jobs.map((x) => (x.job_id === j.job_id ? j : x)) } : b)); }}
+                       onSibling={(j) => setBatch((b) => (b ? { ...b, jobs: b.jobs.map((x) => (x.job_id === j.job_id ? j : x)) } : b))}
                        siblings={batch ? batchJobs : undefined} onSwitch={batch ? switchJob : undefined} onApplyAll={batch ? applyLookToBatch : undefined} />
             {job.status === "done" && job.board_id && (
               <ClipPost boardId={job.board_id} productId={null} channelId={job.channel_id} />
@@ -673,7 +675,7 @@ export function DubPage() {
                           </div>
                           {isWorking(j) && j.status !== "queued" && <div className="qt-dub__bar"><span style={{ width: `${j.progress}%` }} /></div>}
                         </div>
-                        {isWorking(j) && <button type="button" className="qt-btn qt-btn--small qt-btn--danger" onClick={() => void stopDub(j.job_id).catch((e) => toast.error(errMessage(e)))}>Dừng</button>}
+                        {isWorking(j) && <StopButton stopping={j.stopping} onStop={() => stopDub(j.job_id).catch((e) => { toast.error(errMessage(e)); throw e; })} />}
                       </li>
                     ))}
                   </ol>
@@ -691,7 +693,8 @@ export function DubPage() {
                     hint={`${job.language ? `tiếng gốc: ${job.language}` : ""}${job.duration_s ? ` · ${job.duration_s}s` : ""}${job.segments.length ? ` · ${job.segments.length} câu` : ""}`.replace(/^ · /, "")}
                     phase={job.status === "queued" ? job.phase || "Chờ đến lượt" : `${job.phase}…`}
                     message={job.error ?? undefined}
-                    onStop={isWorking(job) ? () => void stopDub(job.job_id).then(setJob).catch((e) => toast.error(errMessage(e))) : undefined}
+                    stopping={job.stopping}
+                    onStop={isWorking(job) ? () => stopDub(job.job_id).then(setJob, (e) => { toast.error(errMessage(e)); throw e; }) : undefined}
                   />
                 ) : (
                   <section className="qt-card">

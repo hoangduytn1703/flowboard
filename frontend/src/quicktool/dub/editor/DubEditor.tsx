@@ -3,10 +3,14 @@ import { useNavigate } from "react-router-dom";
 import { announceRunning } from "../../../components/BackgroundTasks";
 import { detectBands } from "../../../api/clean";
 import {
-  canvasSize, checkDubNames, DEFAULT_BLUR, dubFilmstripUrl, dubSubtitleLines, dubWaveUrl, layoutBlurs, linesAreVietnamese, MAX_BLURS,
-  normHighlights, normLayout, normNames, pickDubHighlights, renderDub, stopDub, subLangName, withBlurs,
-  type DubEngine, type DubHighlights, type DubJob, type DubLayout, type DubName, type DubRender, type DubStatus, type SubLang,
+  canvasSize, carryTexts, checkDubNames, DEFAULT_BLUR, dubFilmstripUrl, dubSubtitleLines, dubWaveUrl, layoutBlurs, linesAreVietnamese, MAX_BLURS,
+  normHighlights, normLayout, normNames, normSpeed, pickDubHighlights, renderDub, SPEED_MARKS, SPEED_MAX, SPEED_MIN, speedLabel, stopDub, subLangName,
+  withBlurs, withTextSlots,
+  type DubEngine, type DubHighlights, type DubJob, type DubLayout, type DubName, type DubRender, type DubStatus, type DubText, type SubLang,
 } from "../../../api/dub";
+import { AdjustPane, TextPane } from "./TextPane";
+import { TickRange } from "../../../components/TickRange";
+import { BatchProgress, batchSummary, type BatchRun } from "./BatchProgress";
 import { FormatBar, sourceBoxToFrame } from "./FormatBar";
 import { platformOf, type PlatformKey } from "./platforms";
 import { LookPresets } from "./LookPresets";
@@ -19,20 +23,22 @@ import { Inspector, type OutSettings } from "./Inspector";
 import { CutPane } from "./CutPane";
 import "./editor.css";
 import { askConfirm } from "../../../components/Dialogs";
+import { StopButton } from "../../../components/StopButton";
 
 const MIN_SLOT = 0.3;
 const COALESCE_MS = 900;
 const errMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** The tools on the left (what can be put on the video) and the details on the right (what is selected + export). */
-type LeftTab = "format" | "list" | "decor" | "blur" | "hl";
+type LeftTab = "format" | "text" | "list" | "decor" | "blur" | "hl";
 type RightTab = "sub" | "cut" | "out";
 const LEFT_TABS: { key: LeftTab; icon: string; label: string }[] = [
-  { key: "format", icon: "🎞", label: "Khung nền" },
+  { key: "format", icon: "🎞", label: "Khung" },
+  { key: "text", icon: "🔤", label: "Chữ" },
   { key: "list", icon: "📜", label: "Các câu" },
   { key: "decor", icon: "🎨", label: "Trang trí" },
   { key: "blur", icon: "🌫", label: "Làm mờ" },
-  { key: "hl", icon: "✨", label: "Nhấn chữ" },
+  { key: "hl", icon: "✨", label: "Nhấn" },
 ];
 const RIGHT_TABS: { key: RightTab; icon: string; label: string }[] = [
   { key: "sub", icon: "💬", label: "Phụ đề" },
@@ -40,10 +46,56 @@ const RIGHT_TABS: { key: RightTab; icon: string; label: string }[] = [
   { key: "out", icon: "⚙", label: "Xuất" },
 ];
 
+/** The words a part was cut with ("✂️ Cắt video"): its title and second title — what the two title layers start with. */
+function cutWords(job: DubJob): { title: string; subtitle: string } {
+  return job.kind === "cut" ? { title: (job.name || job.title || "").trim(), subtitle: (job.cut?.subtitle ?? "").trim() } : { title: "", subtitle: "" };
+}
+/** The job's layout as the editor holds it: always with the title + second-title slots (off until switched on). */
+function jobLayout(job: DubJob): DubLayout {
+  const l = normLayout(job.layout);
+  const w = cutWords(job);
+  return { ...l, texts: withTextSlots(l.texts ?? [], w.title, w.subtitle) };
+}
+
+/**
+ * Edits kept while the seller works on another clip of the batch ("lưu tạm"): switching clips (or leaving the page)
+ * never asks to save — the edits wait here, in this tab's memory, and come back when the clip is opened again. They
+ * are dropped when the clip is exported (or re-rendered by something else: its ``basis`` no longer matches), and
+ * when the editor is closed after the "chưa xuất" warning.
+ */
+interface Draft { doc: EditDoc; out: OutSettings; basis: string }
+const DRAFTS = new Map<string, Draft>();
+const basisOf = (job: DubJob) => `${job.started_at ?? ""}|${job.media_id ?? ""}|${job.segments.length}`;
+function draftOf(job: DubJob): Draft | null {
+  const d = DRAFTS.get(job.job_id);
+  if (!d) return null;
+  if (d.basis !== basisOf(job)) { DRAFTS.delete(job.job_id); return null; }
+  return d;
+}
+
+/** What "Xuất lại video" sends for ``doc`` / ``out`` edited on top of ``job``. */
+function renderBodyOf(job: DubJob, doc: EditDoc, out: OutSettings): DubRender {
+  const body: DubRender = {
+    lines: doc.cues.map((c) => c.text), style: doc.style, layout: doc.layout, highlights: doc.highlights,
+    voice: out.voice, engine: out.engine, keep_bgm: out.keepBgm, name: out.name.trim(), channel_id: out.channelId,
+    mode: out.mode, sub_lang: doc.lang, names: normNames(doc.names),
+  };
+  if (doc.cues.length !== job.segments.length) {
+    // lines were split / merged / added / removed: the whole list replaces the project's
+    delete body.lines;
+    body.cues = doc.cues.map((c) => ({ start: c.start, end: c.end, text: c.text, src: c.src, look: cleanLook(c.look) }));
+    return body;
+  }
+  const was = job.segments;
+  if (doc.cues.some((c, i) => Math.abs(c.start - was[i].start) > 0.005 || Math.abs(c.end - was[i].end) > 0.005)) body.timings = doc.cues.map((c) => [c.start, c.end]);
+  if (doc.cues.some((c, i) => c.look || !sameJson(c.look ?? null, cleanLook(was[i].look)))) body.looks = doc.cues.map((c) => cleanLook(c.look));
+  return body;
+}
+
 function docFrom(job: DubJob): EditDoc {
   return {
     cues: job.segments.map((s) => ({ start: s.start, end: s.end, src: s.src, text: s.text, look: cleanLook(s.look) })),
-    layout: normLayout(job.layout),
+    layout: jobLayout(job),
     style: job.style,
     highlights: normHighlights(job.highlights),
     lang: job.sub_lang ?? "vi",
@@ -75,7 +127,9 @@ export interface BatchLook {
   lang?: SubLang;
 }
 
-export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch, onApplyAll }: {
+export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch, onApplyAll, onSibling }: {
+  /** another clip of the batch was sent to be exported from here ("Xuất cả N clip đã sửa"): its new state */
+  onSibling?: (j: DubJob) => void;
   job: DubJob;
   status: DubStatus;
   onJob: (j: DubJob) => void;
@@ -87,13 +141,14 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
   onApplyAll?: (look: BatchLook) => Promise<number>;
 }) {
   const navigate = useNavigate();
-  const [doc, setDoc] = useState<EditDoc>(() => docFrom(job));
+  // the edits left here earlier (another clip was opened in between) come back; else the agent's copy
+  const [doc, setDoc] = useState<EditDoc>(() => draftOf(job)?.doc ?? docFrom(job));
   const docRef = useRef(doc);
   const past = useRef<EditDoc[]>([]);
   const future = useRef<EditDoc[]>([]);
   const lastKey = useRef<{ key: string; at: number } | null>(null);
   const [, setHistoryTick] = useState(0);
-  const [out, setOut] = useState<OutSettings>(() => outFrom(job));
+  const [out, setOut] = useState<OutSettings>(() => draftOf(job)?.out ?? outFrom(job));
   const [sel, setSel] = useState<Sel>(null);
   // dragging / sliders change: only the selected line ("cue") or every line ("all")
   const [scope, setScopeState] = useState<"all" | "cue">(() => {
@@ -111,6 +166,10 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
     try { if (p) window.localStorage.setItem("flowboard.dub.platform", p); else window.localStorage.removeItem("flowboard.dub.platform"); } catch { /* private mode */ }
   };
   const [focusText, setFocusText] = useState(0);
+  // "🔤 Chữ": the words box of the selected layer takes the focus (double-click on the preview)
+  const [focusLayer, setFocusLayer] = useState(0);
+  // "⇪ Áp cho cả loạt" under way: the editor is covered until every clip is exported
+  const [batch, setBatch] = useState<BatchRun | null>(null);
   const [time, setTime] = useState(0);
   const timeRef = useRef(0);
   const lastUi = useRef(0);
@@ -129,7 +188,8 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
   const timeline = useRef<TimelineHandle>(null);
 
   const working = ["queued", "running", "rendering"].includes(job.status);
-  const readOnly = working || exporting;
+  const batchBusy = applyingAll || batch !== null;
+  const readOnly = working || exporting || batchBusy;
   // a part of "✂️ Cắt video": no voice-over, its own sound, subtitles optional
   const isCut = job.kind === "cut";
 
@@ -191,6 +251,8 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
     setHistoryTick((n) => n + 1);
   }
   const setLayout = (l: DubLayout, coalesce?: string) => change((d) => ({ ...d, layout: l }), coalesce);
+  const setTexts = (texts: DubText[], coalesce?: string) => change((d) => ({ ...d, layout: { ...d.layout, texts } }), coalesce);
+  const selText = sel?.kind === "text" && (doc.layout.texts ?? [])[sel.i] ? sel.i : null;
   /** The subtitle box was moved / resized for line ``cue``: that line's own look
    * ("Riêng câu này") or the clip-wide layout ("Tất cả câu"). */
   function subGeom(patch: GeomPatch, cue: number | null, coalesce?: string) {
@@ -336,6 +398,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
     if (s.kind === "cue" || s.kind === "style") setRightTab("sub");
     else if (s.kind === "blur") setLeftTab("blur");
     else if (s.kind === "hl") setLeftTab("hl");
+    else if (s.kind === "text") setLeftTab("text");
     else setLeftTab("decor");
   }
   function selectCue(i: number, seekTo = true) {
@@ -357,7 +420,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
   // ── keyboard ─────────────────────────────────────────────────────────────
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (isTyping(e.target)) return;
+      if (isTyping(e.target) || batchBusy) return;
       const mod = e.ctrlKey || e.metaKey;
       if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
       if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
@@ -372,7 +435,16 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
         case "ArrowDown": e.preventDefault(); selectCue(Math.min(doc.cues.length - 1, (cur ?? -1) + 1)); break;
         case "Home": e.preventDefault(); stage.current?.seek(0); break;
         case "Enter": if (sel?.kind === "cue") { e.preventDefault(); setRightTab("sub"); setFocusText((n) => n + 1); } break;
-        case "Delete": case "Backspace": if (sel?.kind === "cue") { e.preventDefault(); removeCue(sel.i); } break;
+        case "Delete": case "Backspace":
+          if (sel?.kind === "cue") { e.preventDefault(); removeCue(sel.i); }
+          else if (selText !== null) {
+            // free text is removed; a title slot is only switched off (its words stay)
+            e.preventDefault();
+            const list = docRef.current.layout.texts ?? [];
+            if (list[selText].role === "text") { setTexts(list.filter((_, k) => k !== selText)); setSel(null); }
+            else setTexts(list.map((x, k) => (k === selText ? { ...x, on: false } : x)));
+          }
+          break;
         case "Escape": select(null); break;
         default: break;
       }
@@ -390,7 +462,9 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
   const structDirty = doc.cues.length !== job.segments.length;
   // after a split / merge the old lines no longer line up by number: no "edited" marks, no "back to the old line"
   const originShown = structDirty ? [] : origin;
-  const layoutDirty = !sameJson(doc.layout, normLayout(job.layout));
+  const layoutDirty = !sameJson(doc.layout, jobLayout(job));
+  // "Tốc độ": what the preview plays at IS what the export comes out at
+  const speed = normSpeed(doc.layout.speed);
   const styleDirty = doc.style !== job.style;
   const hlDirty = !sameJson(doc.highlights, normHighlights(job.highlights));
   const langDirty = doc.lang !== (job.sub_lang ?? "vi");
@@ -410,7 +484,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
     langDirty ? `phụ đề ${subLangName(doc.lang, job.language)}` : "",
     namesDirty ? "tên riêng" : "",
     voiceDirty ? "giọng đọc" : "",
-    layoutDirty ? "vị trí / khung / vùng mờ" : "",
+    layoutDirty ? "bố cục (vị trí, khung, chữ, vùng mờ, sáng tối, tốc độ)" : "",
     styleDirty ? "kiểu chữ" : "",
     hlDirty ? "nhấn chữ quan trọng" : "",
     otherDirty ? "cài đặt xuất" : "",
@@ -420,30 +494,31 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
   const needVoice = !subOnly && (structDirty || textEdits > 0 || timeEdits > 0 || voiceDirty || namesDirty || !job.voice_url);
   const neverRendered = job.status === "review" || !job.media_url;
 
+  // "lưu tạm": leaving this clip (another clip of the batch, another page) keeps its unexported edits for later —
+  // unless the editor was closed through the warning (``discard``)
+  const discard = useRef(false);
+  const latest = useRef({ doc, out, dirty, job });
+  latest.current = { doc, out, dirty, job };
+  useEffect(() => () => {
+    const l = latest.current;
+    if (!discard.current && l.dirty) DRAFTS.set(l.job.job_id, { doc: l.doc, out: l.out, basis: basisOf(l.job) });
+    else DRAFTS.delete(l.job.job_id);
+  }, []);
+  // the other clips of the batch with edits waiting
+  const drafted = siblings.filter((s) => s.job_id !== job.job_id && draftOf(s) !== null);
   useEffect(() => {
-    if (!dirty) return;
+    if (!dirty && !drafted.length) return;
     const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty]);
+  }, [dirty, drafted.length]);
 
   async function exportNow() {
     stage.current?.pause();
     setExporting(true);
     try {
-      const body: DubRender = {
-        lines: doc.cues.map((c) => c.text), style: doc.style, layout: doc.layout, highlights: doc.highlights,
-        voice: out.voice, engine: out.engine, keep_bgm: out.keepBgm, name: out.name.trim(), channel_id: out.channelId,
-        mode: out.mode, sub_lang: doc.lang, names: normNames(doc.names),
-      };
-      if (structDirty) {
-        delete body.lines;
-        body.cues = doc.cues.map((c) => ({ start: c.start, end: c.end, text: c.text, src: c.src, look: cleanLook(c.look) }));
-      } else {
-        if (timeEdits) body.timings = doc.cues.map((c) => [c.start, c.end]);
-        if (lookEdits || customCount) body.looks = doc.cues.map((c) => cleanLook(c.look));
-      }
-      onJob(await renderDub(job.job_id, body));
+      onJob(await renderDub(job.job_id, renderBodyOf(job, doc, out)));
+      DRAFTS.delete(job.job_id);
       announceRunning();
       toast.info(isCut ? "Đang xuất video đã chỉnh — nhanh thôi."
         : subOnly ? "Đang xuất: chèn phụ đề, giữ tiếng gốc — nhanh thôi."
@@ -505,14 +580,46 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
       setNamesBusy(false);
     }
   }
+  const nounOf = isCut ? "video" : "clip";
   async function close() {
-    if (dirty && !await askConfirm(`Còn ${changes.join(", ")} chưa xuất. Đóng trình chỉnh sửa và bỏ các thay đổi?`)) return;
+    if (dirty || drafted.length) {
+      const what = [dirty ? `${nounOf} này (${changes.join(", ")})` : "",
+                    drafted.length ? `${drafted.length} ${nounOf} khác đang lưu tạm (${drafted.map((s) => s.name || s.title || "Video").join(", ").slice(0, 120)})` : ""].filter(Boolean).join(" và ");
+      if (!await askConfirm(`Còn thay đổi chưa xuất ở ${what}.\nĐóng trình chỉnh sửa và bỏ các thay đổi đó?`, { ok: "Đóng, bỏ thay đổi", cancel: "Ở lại", danger: true })) return;
+    }
+    discard.current = true;
+    for (const s of siblings) DRAFTS.delete(s.job_id);
     onClose();
   }
-  async function switchTo(id: string) {
+  /** Another clip of the batch: no question asked — this clip's edits are kept ("lưu tạm") and come back with it. */
+  function switchTo(id: string) {
     if (id === job.job_id || !onSwitch) return;
-    if (dirty && !await askConfirm(`Còn ${changes.join(", ")} chưa xuất ở clip này. Chuyển sang clip khác và bỏ các thay đổi?`)) return;
+    if (dirty) toast.info(`Đã lưu tạm thay đổi của “${(out.name || job.name || "video này").slice(0, 40)}” — quay lại là còn, nhớ bấm Xuất.`);
     onSwitch(id);
+  }
+  /** "Xuất cả N đã sửa": this clip (when it has changes) and every clip with edits waiting, one after another. */
+  async function exportDrafts() {
+    const waiting = drafted.map((s) => ({ s, d: draftOf(s) })).filter((x): x is { s: DubJob; d: Draft } => x.d !== null);
+    if (!waiting.length && !dirty) return;
+    setApplyingAll(true);
+    stage.current?.pause();
+    const inRun = siblings.filter((s) => (s.job_id === job.job_id ? dirty : waiting.some((x) => x.s.job_id === s.job_id)));
+    setBatch({ ids: inRun.map((s) => s.job_id), before: Object.fromEntries(inRun.map((s) => [s.job_id, s.started_at])) });
+    try {
+      if (dirty) await exportNow();
+      for (const { s, d } of waiting) {
+        try {
+          const j = await renderDub(s.job_id, renderBodyOf(s, d.doc, d.out));
+          DRAFTS.delete(s.job_id);
+          onSibling?.(j);
+        } catch (e) {
+          toast.error(`${s.name || s.title || s.job_id}: ${errMessage(e)}`);
+        }
+      }
+      announceRunning();
+    } finally {
+      setApplyingAll(false);
+    }
   }
   /** This clip's look → every other clip of the batch (and this one is exported first when it has changes). */
   async function applyAll() {
@@ -520,21 +627,32 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
     const others = siblings.filter((s) => s.job_id !== job.job_id);
     if (!others.length) return;
     const nBlurs = layoutBlurs(doc.layout).length;
+    const nTexts = (doc.layout.texts ?? []).filter((x) => x.on).length;
     const parts = ["vị trí / cỡ / độ rộng phụ đề", "kiểu chữ", nBlurs ? `${nBlurs} vùng mờ` : "",
+                   nTexts ? `${nTexts} lớp chữ (tiêu đề của video nào theo video đó)` : "", doc.layout.adjust ? "sáng tối / màu" : "",
+                   speed !== 1 ? `tốc độ ${speedLabel(speed)}` : "",
                    doc.layout.canvas ? `khung xuất ${doc.layout.canvas.aspect}` : "", doc.layout.frame ? "khung" : "",
                    doc.layout.mascot?.media_id ? "nhân vật" : "", doc.highlights.on ? "nhấn chữ quan trọng (AI chọn chỗ riêng cho từng clip)" : "",
                    isCut ? (doc.lang === "none" ? "tắt phụ đề" : `phụ đề ${subLangName(doc.lang, job.language)}`) : ""].filter(Boolean).join(", ");
+    const lost = drafted.length ? `\n⚠ ${drafted.length} ${nounOf} khác đang có thay đổi lưu tạm — sẽ bị thay bằng kiểu này.` : "";
     if (!await askConfirm(isCut
-      ? `Áp ${parts} của video này cho ${others.length} video còn lại?\nCác video đó sẽ được xuất lại; phụ đề của mỗi video lấy từ lời của chính nó.`
+      ? `Áp ${parts} của video này cho ${others.length} video còn lại?\nCác video đó sẽ được xuất lại; phụ đề của mỗi video lấy từ lời của chính nó.${lost}`
       : `Áp ${parts} của clip này cho ${others.length} clip còn lại của loạt?\nCác clip đó sẽ được in lại (giữ giọng đã đọc). Chữ, giờ và câu chỉnh riêng của từng clip không đổi.`)) return;
     setApplyingAll(true);
+    stage.current?.pause();
+    // this clip too when it has changes; a clip counts as sent once the agent gives it a new start time
+    const mine = dirty || neverRendered;
+    const inRun = siblings.filter((s) => mine || s.job_id !== job.job_id);
+    setBatch({ ids: inRun.map((s) => s.job_id), before: Object.fromEntries(inRun.map((s) => [s.job_id, s.started_at])) });
+    for (const s of others) DRAFTS.delete(s.job_id);
     try {
-      if (dirty || neverRendered) await exportNow();
+      if (mine) await exportNow();
       const n = await onApplyAll({ layout: doc.layout, style: doc.style, engine: out.engine, highlights: { ...doc.highlights, points: [], picked: "" },
                                    ...(isCut ? { lang: doc.lang } : {}) });
-      toast.success(`Đã gửi kiểu này cho ${n} clip — đang in lại.`);
+      if (!n && !mine) setBatch(null);
     } catch (e) {
       toast.error(errMessage(e));
+      setBatch(null);
     } finally {
       setApplyingAll(false);
     }
@@ -587,14 +705,17 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
   return (
     <div className={`dx${landscapeClass(frameW, frameH)}`}>
       <div className="dx__top">
-        <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={close} title={isCut ? "Về trang Cắt video" : "Về trang Lồng tiếng"}>← Danh sách</button>
+        <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={close} disabled={applyingAll}
+                title={isCut ? "Về trang Cắt video" : "Về trang Lồng tiếng"}>← Danh sách</button>
         {siblings.length > 1 ? (
           <label className="dx__pick" title="Clip trong loạt — chọn clip cần chỉnh">
             <span>{isCut ? "Video" : "Clip"} {Math.max(1, siblings.findIndex((s) => s.job_id === job.job_id) + 1)}/{siblings.length}</span>
-            <select value={job.job_id} onChange={(e) => switchTo(e.target.value)} disabled={applyingAll}>
+            <select value={job.job_id} onChange={(e) => switchTo(e.target.value)} disabled={batchBusy}>
               {siblings.map((s, i) => (
                 <option key={s.job_id} value={s.job_id}>
-                  {i + 1}. {(s.name || s.title || s.url || "Video").slice(0, 48)}{s.status === "error" ? " ⚠ lỗi" : ["queued", "running", "rendering"].includes(s.status) ? " ⏳" : ""}
+                  {i + 1}. {(s.name || s.title || s.url || "Video").slice(0, 48)}{s.status === "error" ? " — ⚠ lỗi" : s.status === "queued" ? " — chờ xuất"
+                    : ["running", "rendering"].includes(s.status) ? ` — đang xuất ${s.progress}%`
+                    : (s.job_id === job.job_id ? dirty : draftOf(s) !== null) ? " — ● chưa xuất" : ""}
                 </option>
               ))}
             </select>
@@ -607,12 +728,13 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
           </div>
         )}
         <div className="dx__state">
-          {working ? (
+          {batch ? (
+            <span className="dx__dirty">⇪ Đang áp cho cả loạt — {batchSummary(siblings, batch, applyingAll).percent}%</span>
+          ) : working ? (
             <>
-              <div className="qt-dub__bar"><span style={{ width: `${job.progress}%` }} /></div>
-              <span>{job.phase}… {job.progress}%</span>
-              <button type="button" className="qt-btn qt-btn--small qt-btn--danger"
-                      onClick={() => void stopDub(job.job_id).then(onJob).catch((e) => toast.error(errMessage(e)))}>Dừng</button>
+              <div className="qt-dub__bar"><span style={{ width: `${job.status === "queued" ? 0 : job.progress}%` }} /></div>
+              <span>{job.stopping ? "Đang dừng…" : job.status === "queued" ? job.phase : `${job.phase}… ${job.progress}%`}</span>
+              <StopButton stopping={job.stopping} onStop={() => stopDub(job.job_id).then(onJob, (e) => { toast.error(errMessage(e)); throw e; })} />
             </>
           ) : job.status === "error" ? (
             <span className="dx__err" title={job.error}>⚠ Lần xuất trước lỗi: {job.error}</span>
@@ -625,17 +747,20 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
           )}
         </div>
         <div className="dx__actions">
-          {job.media_url && <button type="button" className="qt-btn qt-btn--small" onClick={() => { stage.current?.pause(); setShowResult(true); }} title="Xem video đã xuất">▶ Bản đã xuất</button>}
+          {job.media_url && <button type="button" className="qt-btn qt-btn--small" disabled={batchBusy} onClick={() => { stage.current?.pause(); setShowResult(true); }} title="Xem video đã xuất">▶ Bản đã xuất</button>}
           {job.media_url && (
             <a className="qt-btn qt-btn--small" href={job.media_url}
                download={`${(job.name || job.title || "video-long-tieng").replace(/[\\/:*?"<>|]+/g, " ").trim()}.mp4`}>⬇ Tải</a>
           )}
-          {job.board_id && <button type="button" className="qt-btn qt-btn--small" onClick={() => navigate(`/clips/${job.board_id}/export`)}>Mở clip →</button>}
+          {job.board_id && <button type="button" className="qt-btn qt-btn--small" disabled={batchBusy} onClick={() => navigate(`/clips/${job.board_id}/export`)}>Mở clip →</button>}
           <LookPresets readOnly={readOnly}
                        current={{ layout: doc.layout, style: doc.style, engine: out.engine, highlights: doc.highlights }}
                        onApply={(d, name) => {
-                         // the whole look in one undo step; this clip's own key-moment points stay
-                         change((x) => ({ ...x, layout: normLayout(d.layout), style: d.style,
+                         // the whole look in one undo step; this clip's own key-moment points and title words stay
+                         const theirs = normLayout(d.layout);
+                         const w = cutWords(job);
+                         change((x) => ({ ...x, style: d.style,
+                                          layout: { ...theirs, texts: withTextSlots(carryTexts(theirs.texts ?? [], x.layout.texts ?? [], w.title, w.subtitle), w.title, w.subtitle) },
                                           highlights: { ...normHighlights(d.highlights), points: x.highlights.points, picked: x.highlights.picked } }));
                          setOut((o) => ({ ...o, engine: d.engine }));
                          toast.success(`Đã áp mẫu "${name}" — xem trước rồi bấm Xuất lại video.`);
@@ -643,7 +768,13 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
           {siblings.length > 1 && onApplyAll && (
             <button type="button" className="qt-btn qt-btn--small" disabled={readOnly || applyingAll} onClick={() => void applyAll()}
                     title="Vị trí / cỡ / độ rộng phụ đề, kiểu chữ, vùng mờ, khung và nhân vật của clip này → mọi clip trong loạt">
-              {applyingAll ? "Đang áp…" : `⇪ Áp cho cả loạt (${siblings.length - 1})`}
+              {batchBusy ? "Đang áp cho cả loạt…" : `⇪ Áp cho cả loạt (${siblings.length - 1})`}
+            </button>
+          )}
+          {drafted.length > 0 && (
+            <button type="button" className="qt-btn qt-btn--small" disabled={readOnly || langBusy} onClick={() => void exportDrafts()}
+                    title={`Xuất ${dirty ? `${nounOf} này và ` : ""}${drafted.length} ${nounOf} đang lưu tạm: ${drafted.map((s) => s.name || s.title || "Video").join(", ")}`}>
+              ✓ Xuất cả {drafted.length + (dirty ? 1 : 0)} {nounOf} đã sửa
             </button>
           )}
           {langBlocked ? (
@@ -658,7 +789,24 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
         </div>
       </div>
 
-      <div className="dx__main">
+      <div className="dx__work">
+      {batch && (
+        <BatchProgress jobs={siblings} run={batch} sending={applyingAll} currentId={job.job_id} noun={isCut ? "video" : "clip"}
+                       onStopAll={() => {
+                         for (const s of siblings) {
+                           if (batch.ids.includes(s.job_id) && ["queued", "running", "rendering"].includes(s.status)) {
+                             void stopDub(s.job_id).then((j) => { if (j.job_id === job.job_id) onJob(j); }).catch((e) => toast.error(errMessage(e)));
+                           }
+                         }
+                       }}
+                       onClose={() => {
+                         const s = batchSummary(siblings, batch, false);
+                         if (s.failed) toast.warning(`Áp cho cả loạt: ${s.done} xong, ${s.failed} lỗi — mở từng ${isCut ? "video" : "clip"} lỗi để xem.`);
+                         else toast.success(`Đã áp xong cho ${s.done} ${isCut ? "video" : "clip"}${s.skipped ? ` (${s.skipped} đang bận nên bỏ qua)` : ""}.`);
+                         setBatch(null);
+                       }} />
+      )}
+      <div className="dx__main" aria-hidden={batch ? true : undefined}>
         {/* tools: what goes on the video */}
         <aside className="dx-side dx-side--left">
           <div className="dx-side__tabs" role="tablist" aria-label="Công cụ">
@@ -671,8 +819,15 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
           </div>
           <div className="dx-side__body">
             {leftTab === "format" ? (
-              <FormatBar layout={doc.layout} srcW={srcW} srcH={srcH} readOnly={readOnly} onLayout={setLayout}
-                         platform={platform} onPlatform={setPlatform} />
+              <>
+                <FormatBar layout={doc.layout} srcW={srcW} srcH={srcH} readOnly={readOnly} onLayout={setLayout}
+                           platform={platform} onPlatform={setPlatform} />
+                <AdjustPane adjust={doc.layout.adjust} readOnly={readOnly}
+                            onAdjust={(a, key) => setLayout({ ...docRef.current.layout, adjust: a }, key)} />
+              </>
+            ) : leftTab === "text" ? (
+              <TextPane texts={doc.layout.texts ?? []} selected={selText} readOnly={readOnly} focus={focusLayer} cutWords={cutWords(job)}
+                        onSelect={(i) => setSel(i === null ? null : { kind: "text", i })} onTexts={setTexts} />
             ) : (
               <Inspector bare tab={leftTab} onTab={() => undefined}
           selected={sel}
@@ -755,6 +910,8 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
             onDuration={(d) => { if (d) setDuration(d); }}
             onNatural={(w, h) => setNatural({ w, h })}
             platform={platform}
+            rate={speed}
+            onTextFocus={(i) => { select({ kind: "text", i }); setFocusLayer((n) => n + 1); }}
           />
           <div className="dx__transport">
             <div className="dx__tgroup">
@@ -763,9 +920,13 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
             </div>
             <div className="dx__tgroup dx__tgroup--mid">
               <button type="button" className="dx__tbtn" title="Về đầu (Home)" onClick={() => stage.current?.seek(0)}>⏮</button>
-              <button type="button" className="dx__tbtn" title="Câu trước (↑)" onClick={() => selectCue(Math.max(0, (activeCue ?? (sel?.kind === "cue" ? sel.i : 1)) - 1))}>⏪</button>
               <button type="button" className="dx__tbtn dx__tbtn--play" title="Phát / dừng (Space)" onClick={() => stage.current?.toggle()}>{playing ? "⏸" : "▶"}</button>
-              <button type="button" className="dx__tbtn" title="Câu sau (↓)" onClick={() => selectCue(Math.min(doc.cues.length - 1, (activeCue ?? (sel?.kind === "cue" ? sel.i : -1)) + 1))}>⏩</button>
+              <label className={`dx__speed${speed !== 1 ? " is-on" : ""}`}
+                     title="Tốc độ video: xem thử nhanh / chậm thế nào thì video XUẤT RA cũng nhanh / chậm như vậy (hình và tiếng cùng đổi, giọng không bị méo). 1× = như gốc">
+                <span>Tốc độ <b>{speedLabel(speed)}</b>{speed !== 1 && total ? <small> · xuất dài {clock(total / speed, false)}</small> : null}</span>
+                <TickRange min={SPEED_MIN} max={SPEED_MAX} step={0.1} value={speed} every={0.1} marks={SPEED_MARKS} disabled={readOnly} ariaLabel="Tốc độ video"
+                           onChange={(v) => setLayout({ ...docRef.current.layout, speed: normSpeed(v) }, "speed")} />
+              </label>
             </div>
             <div className="dx__tgroup dx__tgroup--end">
               <label className="dx__audio" title="Nghe gì khi xem thử">
@@ -885,6 +1046,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
           </div>
         )}
       />
+      </div>
       <div className="dx__keys">
         <kbd>Space</kbd> phát/dừng · <kbd>←</kbd><kbd>→</kbd> từng khung (Shift = 1 s) · <kbd>↑</kbd><kbd>↓</kbd> câu trước/sau ·
         <kbd>Enter</kbd> sửa chữ · <kbd>Ctrl</kbd>+<kbd>B</kbd> tách câu · <kbd>Delete</kbd> xoá câu · <kbd>Ctrl</kbd>+<kbd>Z</kbd> hoàn tác

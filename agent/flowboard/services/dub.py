@@ -158,14 +158,16 @@ def _runner(*args: str, progress: Optional[Callable[[int], None]] = None,
 
     t = threading.Thread(target=pump, daemon=True)
     t.start()
+    from flowboard.services.proc import kill_tree
+
     while proc.poll() is None:
         if stop and stop():
-            proc.kill()
+            kill_tree(proc)
             raise DubError("Đã dừng theo yêu cầu")
         if time.time() > deadline:
-            proc.kill()
+            kill_tree(proc)
             raise DubError(f"bước {args[0]} quá {timeout}s")
-        time.sleep(0.5)
+        time.sleep(0.15)
     t.join(timeout=5)
     out = (proc.stdout.read() if proc.stdout else b"").decode("utf-8", "replace").strip().splitlines()
     if proc.returncode != 0:
@@ -341,6 +343,138 @@ def normalize_canvas(raw: Any) -> Optional[dict[str, Any]]:
             "cut": _num(raw, "cut", 0.0, 1.0, pos if fit == "crop" else 0.5)}
 
 
+#: text put on the picture ("🔤 Chữ"): the title and the second title of a part cut on "✂️ Cắt video" (each clip its
+#: own words), and free text. Position = the centre of the text, fractions of the output frame.
+MAX_TEXTS = 8
+TEXT_ROLES = ("title", "subtitle", "text")
+TEXT_MAX_CHARS = 300
+TEXT_DEFAULTS: dict[str, dict[str, Any]] = {
+    "title": {"x": 0.5, "y": 0.09, "size": 1.5, "color": "#ffffff", "bg": "#e5322d"},
+    "subtitle": {"x": 0.5, "y": 0.17, "size": 1.1, "color": "#141414", "bg": "#ffffff"},
+    "text": {"x": 0.5, "y": 0.5, "size": 1.2, "color": "#ffffff", "bg": ""},
+}
+
+
+def _norm_text(raw: Any) -> Optional[dict[str, Any]]:
+    """``{role, on, text, x, y, size, color, bg, w, bold, secs}`` — ``size`` × the subtitle base size, ``bg`` "" = no
+    box (the text gets an outline), ``w`` the widest a line may be (fraction of the frame), ``secs`` 0 = the whole
+    clip, else only its first seconds. An empty ``text`` is kept (the slot stays in the editor) and not drawn."""
+    if not isinstance(raw, dict):
+        return None
+    role = raw.get("role") if raw.get("role") in TEXT_ROLES else "text"
+    d = TEXT_DEFAULTS[role]
+    lines = [re.sub(r"[ \t]+", " ", x).strip() for x in str(raw.get("text") or "").replace("\r", "").split("\n")]
+    text = "\n".join(x for x in lines if x)[:TEXT_MAX_CHARS]
+    # no ``bg`` key = the role's own box; an empty one = no box
+    bg = str(raw.get("bg") or "").strip() if "bg" in raw else d["bg"]
+    return {"role": role, "on": bool(raw.get("on", True)), "text": text,
+            "x": _num(raw, "x", 0.02, 0.98, d["x"]), "y": _num(raw, "y", 0.03, 0.97, d["y"]),
+            "size": _num(raw, "size", 0.5, 4.0, d["size"]),
+            "color": dub_decor._hex(raw.get("color"), d["color"]), "bg": dub_decor._hex(bg, "") if bg else "",
+            "w": _num(raw, "w", 0.2, 0.96, 0.86), "bold": bool(raw.get("bold", True)),
+            "secs": _num(raw, "secs", 0.0, 3600.0, 0.0)}
+
+
+def normalize_texts(raw: Any) -> list[dict[str, Any]]:
+    """At most one title and one second title (a later one becomes free text), MAX_TEXTS in all."""
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for x in raw if isinstance(raw, list) else []:
+        t = _norm_text(x)
+        if t is None:
+            continue
+        if t["role"] != "text":
+            if t["role"] in seen:
+                t["role"] = "text"
+            seen.add(t["role"])
+        out.append(t)
+    return out[:MAX_TEXTS]
+
+
+def shown_texts(layout: Optional[dict]) -> list[dict[str, Any]]:
+    """The text layers that are drawn: switched on and not empty."""
+    return [t for t in normalize_texts((layout or {}).get("texts")) if t["on"] and t["text"].strip()]
+
+
+def normalize_adjust(raw: Any) -> Optional[dict[str, float]]:
+    """``{brightness, contrast, saturation}`` of the video itself — multipliers like the CSS filters of the same
+    name (1 = untouched); None when nothing is changed."""
+    if not isinstance(raw, dict):
+        return None
+    out = {"brightness": _num(raw, "brightness", 0.4, 1.8, 1.0), "contrast": _num(raw, "contrast", 0.5, 1.6, 1.0),
+           "saturation": _num(raw, "saturation", 0.0, 2.0, 1.0)}
+    return None if all(abs(v - 1.0) < 0.005 for v in out.values()) else out
+
+
+def adjust_filter(adjust: Optional[dict]) -> str:
+    """The ffmpeg filters of :func:`normalize_adjust` ("" = none). Brightness multiplies the picture like CSS
+    ``brightness()`` (luma and chroma scaled around black / grey); contrast and saturation are ``eq``."""
+    a = normalize_adjust(adjust)
+    if a is None:
+        return ""
+    parts = []
+    b = a["brightness"]
+    if abs(b - 1.0) >= 0.005:
+        parts.append(f"lutyuv=y='clip((val-minval)*{b:.3f}+minval,minval,maxval)':"
+                     f"u='clip((val-128)*{b:.3f}+128,minval,maxval)':v='clip((val-128)*{b:.3f}+128,minval,maxval)'")
+    if abs(a["contrast"] - 1.0) >= 0.005 or abs(a["saturation"] - 1.0) >= 0.005:
+        parts.append(f"eq=contrast={a['contrast']:.3f}:saturation={a['saturation']:.3f}")
+    return ",".join(parts)
+
+
+#: "Tốc độ": the exported video plays this much faster / slower than the source (picture and sound together, the
+#: voice keeps its pitch); the editor's timeline, lines and text stay in the source's own time
+SPEED_MIN, SPEED_MAX = 0.8, 3.0
+
+
+def normalize_speed(value: Any) -> float:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return 1.0
+    if v != v:  # NaN
+        return 1.0
+    v = round(min(SPEED_MAX, max(SPEED_MIN, v)), 2)
+    return 1.0 if abs(v - 1.0) < 0.005 else v
+
+
+def atempo_chain(speed: float) -> str:
+    """ffmpeg ``atempo`` for ``speed`` (one filter handles 0.5–2: above that, two in a row)."""
+    return f"atempo={speed:.3f}" if speed <= 2.0 else f"atempo=2.0,atempo={speed / 2.0:.3f}"
+
+
+def speed_graph(speed: float, fps: str, vlabel: str, alabel: Optional[str]) -> tuple[str, str, Optional[str]]:
+    """``(graph, video label, audio label)``: the finished picture ``vlabel`` and sound ``alabel`` (a filter label
+    or a stream like "0:a:0"; None = silent) re-timed to ``speed`` — the last step, so subtitles, text and sounds
+    burned before it stay in step. The frame rate stays the source's."""
+    parts = [f"{vlabel}setpts=PTS/{speed:.3f},fps={fps}[vsp]"]
+    out_a = None
+    if alabel:
+        src = alabel if alabel.startswith("[") else f"[{alabel}]"
+        parts.append(f"{src}{atempo_chain(speed)}[asp]")
+        out_a = "[asp]"
+    return ";".join(parts), "[vsp]", out_a
+
+
+def retime_file(ffmpeg: str, path: Path, speed: float, tag: str = "") -> None:
+    """Re-time a finished mp4 in place (the Remotion engine draws in the source's time; the speed goes on after)."""
+    info = probe_clip(path)
+    if info is None:
+        raise DubError("Không đọc được video vừa xuất để đổi tốc độ")
+    graph, v, a = speed_graph(speed, probe_fps(path), "[0:v]", "0:a:0" if info.has_audio else None)
+    tmp = path.with_suffix(".speed.mp4")
+    cmd = [ffmpeg, "-y", "-v", "error", "-i", str(path), "-filter_complex", graph, "-map", v]
+    if a:
+        cmd += ["-map", a, "-c:a", "aac", "-b:a", "160k"]
+    cmd += [*_encode_args(ffmpeg), "-pix_fmt", "yuv420p", *(["-metadata", f"comment={tag}"] if tag else []),
+            "-movflags", "+faststart", str(tmp)]
+    err = _run(cmd, ENCODE_TIMEOUT_S)
+    if err or not tmp.is_file() or tmp.stat().st_size == 0:
+        tmp.unlink(missing_ok=True)
+        raise DubError(f"ffmpeg đổi tốc độ lỗi: {err or 'file rỗng'}")
+    os.replace(tmp, path)
+
+
 def normalize_layout(raw: Any) -> dict[str, Any]:
     """``{x, y, scale, blurs, canvas, …}`` — ``blurs`` are rectangles
     ``{x, y, w, h, amount}`` (top-left + size as frame fractions, amount
@@ -356,7 +490,13 @@ def normalize_layout(raw: Any) -> dict[str, Any]:
     out["frame"] = None   # services/dub_decor: shrink onto a blurred / coloured background
     out["mascot"] = None  # services/dub_decor: a bouncing sticker
     out["w"] = None       # subtitle box width (fraction of the frame); None = automatic
+    out["texts"] = []     # "🔤 Chữ": the title / second title / free text drawn on the picture
+    out["adjust"] = None  # brightness / contrast / saturation of the video itself
+    out["speed"] = 1.0    # the export plays this much faster / slower (0.8–3)
     if isinstance(raw, dict):
+        out["speed"] = normalize_speed(raw.get("speed"))
+        out["texts"] = normalize_texts(raw.get("texts"))
+        out["adjust"] = normalize_adjust(raw.get("adjust"))
         out["x"] = _num(raw, "x", 0.05, 0.95, out["x"])
         out["y"] = _num(raw, "y", 0.08, 0.98, out["y"])
         out["scale"] = _num(raw, "scale", 0.5, 2.2, out["scale"])
@@ -648,6 +788,10 @@ def video_filter(ass: Path, width: int, height: int, layout: Optional[dict],
     lay = normalize_layout(layout)
     parts: list[str] = []
     src = "[0:v]"
+    tone = adjust_filter(lay.get("adjust"))
+    if tone:  # brighter / darker: the video itself, before anything is put around or over it
+        parts.append(f"{src}{tone}[va]")
+        src = "[va]"
     if zoom:
         parts.append(f"{src}{zoom}[vz]")
         src = "[vz]"
@@ -689,8 +833,67 @@ def sub_max_chars(width: int, height: int, layout: Optional[dict] = None) -> int
     return max(10, min(SUB_MAX_CHARS, int(usable / (font * 0.56))))
 
 
+def _ass_colour(hex_colour: str) -> str:
+    """"#rrggbb" → ASS "&H00BBGGRR"."""
+    h = hex_colour.lstrip("#")
+    return f"&H00{h[4:6]}{h[2:4]}{h[0:2]}".upper()
+
+
+def _is_light(hex_colour: str) -> bool:
+    h = hex_colour.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return 0.299 * r + 0.587 * g + 0.114 * b > 140
+
+
+def wrap_text(text: str, max_chars: int) -> list[str]:
+    """The lines of a text layer: its own line breaks kept, longer lines wrapped at spaces."""
+    out: list[str] = []
+    for raw in text.split("\n"):
+        line = ""
+        for word in raw.split():
+            if line and len(line) + 1 + len(word) > max_chars:
+                out.append(line)
+                line = word
+            else:
+                line = f"{line} {word}".strip()
+        if line:
+            out.append(line)
+    return out
+
+
+def text_font_px(height: int, size: float) -> int:
+    return max(14, round(height * 0.036 * size))
+
+
+def text_ass(texts: list[dict[str, Any]], width: int, height: int, total_s: float) -> tuple[list[str], list[str]]:
+    """``(style lines, events)`` of the text layers — each its own style ``T<i>``: a filled box (BorderStyle 3) when
+    it has a background colour, else outlined text; centred on (x, y), over the subtitles."""
+    styles, events = [], []
+    for i, t in enumerate(texts):
+        font = text_font_px(height, t["size"])
+        primary = _ass_colour(t["color"])
+        bold = -1 if t["bold"] else 0
+        if t["bg"]:
+            box = _ass_colour(t["bg"])
+            styles.append(f"Style: T{i},Arial,{font},{primary},&H000000FF,{box},{box},{bold},0,0,0,100,100,0,0,3,"
+                          f"{max(6, font // 4)},0,5,0,0,0,1")
+        else:
+            edge = "&H00000000" if _is_light(t["color"]) else "&H00FFFFFF"
+            styles.append(f"Style: T{i},Arial,{font},{primary},&H000000FF,{edge},&H80000000,{bold},0,0,0,100,100,0,0,1,"
+                          f"{max(2, font // 11)},1,5,0,0,0,1")
+        chars = max(4, int(width * t["w"] / (font * 0.52)))
+        body = "\\N".join(x.replace("{", "(").replace("}", ")") for x in wrap_text(t["text"], chars))
+        end = min(total_s, t["secs"]) if t["secs"] > 0 and total_s > 0 else (total_s or t["secs"] or 36000.0)
+        if not body or end <= 0.05:
+            continue
+        events.append(f"Dialogue: 2,{_ass_time(0)},{_ass_time(end)},T{i},,0,0,0,,"
+                      f"{{\\an5\\pos({round(width * t['x'])},{round(height * t['y'])})}}{body}")
+    return styles, events
+
+
 def write_sub_ass(cues: list[tuple[float, float, str]], path: Path, *, width: int, height: int, style: str = "box_yellow",
-                  layout: Optional[dict] = None, emphasis: Optional[list[tuple[float, float, str, float, float]]] = None) -> Path:
+                  layout: Optional[dict] = None, emphasis: Optional[list[tuple[float, float, str, float, float]]] = None,
+                  total_s: float = 0.0) -> Path:
     """Subtitles for libass. ``box_*``: BorderStyle 3 — an opaque box behind
     each line (yellow / white) with dark bold text, like the reference page;
     ``outline``: classic white text with a dark outline. Lines are cut to
@@ -714,13 +917,14 @@ def write_sub_ass(cues: list[tuple[float, float, str]], path: Path, *, width: in
     emph_font = round(font * 1.6)
     emph_line = (f"Style: Emph,Arial,{emph_font},&H0014D8FF,&H000000FF,&H00101010,&H80000000,-1,0,0,0,100,100,0,0,1,"
                  f"{max(3, emph_font // 10)},{max(1, emph_font // 20)},5,{margin_x},{margin_x},0,1")
+    text_styles, text_events = text_ass(shown_texts(lay), width, height, total_s)
     header = "\n".join([
         "[Script Info]", "ScriptType: v4.00+", f"PlayResX: {width}", f"PlayResY: {height}", "WrapStyle: 0", "",
         "[V4+ Styles]",
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, "
         "Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, "
         "MarginR, MarginV, Encoding",
-        line, emph_line, "", "[Events]",
+        line, emph_line, *text_styles, "", "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ])
     events = []
@@ -740,6 +944,7 @@ def write_sub_ass(cues: list[tuple[float, float, str]], path: Path, *, width: in
         cx, cy = round(width * ex), round(height * (ey - 0.03))  # \an5: the anchor is the centre
         pop = "\\fscx70\\fscy70\\t(0,120,\\fscx100\\fscy100)"
         events.append(f"Dialogue: 1,{_ass_time(a)},{_ass_time(b)},Emph,,0,0,0,,{{\\an5\\pos({cx},{cy}){pop}}}{text}")
+    events += text_events
     path.write_text(header + "\n" + "\n".join(events) + "\n", encoding="utf-8")
     return path
 
@@ -835,6 +1040,8 @@ class Job:
         out: dict[str, Any] = {
             "job_id": self.id, "status": self.status, "phase": self.phase, "progress": self.progress,
             "started_at": self.started_at,
+            # "Dừng" pressed, the work is winding down: the button says "Đang dừng…" instead of looking unpressed
+            "stopping": bool(self.stop and self.status in ("queued", "running", "rendering")),
             "url": self.url, "source_media_id": self.source_media_id, "voice": self.voice, "keep_bgm": self.keep_bgm,
             "style": self.style, "engine": self.engine, "layout": dict(self.layout), "highlights": normalize_highlights(self.highlights),
             "channel_id": self.channel_id, "name": self.name, "language": self.language,
@@ -888,8 +1095,11 @@ def _download(job: Job) -> Path:
 
     media_id = uuid.uuid4().hex
     try:
-        path, title = fetch_video(job.url or "", media_id, media_service.MEDIA_CACHE_DIR, max_duration_s=MAX_DURATION_S)
+        path, title = fetch_video(job.url or "", media_id, media_service.MEDIA_CACHE_DIR, max_duration_s=MAX_DURATION_S,
+                                  stop=lambda: job.stop)
     except FetchError as exc:
+        if job.stop:
+            raise DubError("Đã dừng theo yêu cầu") from exc
         raise DubError(f"Không tải được video: {exc}") from exc
     job.url = extract_url(job.url or "") or job.url
     mime = {".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime", ".mkv": "video/x-matroska"}.get(path.suffix.lower(), "video/mp4")
@@ -1491,10 +1701,14 @@ def _render(job: Job) -> None:
 
         bgm_thread = threading.Thread(target=separate, name=f"dub-bgm-{job.id}", daemon=True)
         bgm_thread.start()
+    # nothing to read again (subtitles only, or the voice is still right): the picture is all the work, so the bar
+    # is the encoder's own progress from 0, not the tail of a full dub
+    quick = sub_only or (voice.is_file() and job.voice_key == key)
+    enc_lo, enc_hi = (4, 96) if quick else (91, 97)
     if sub_only:
-        _set(job, "Chỉ chèn phụ đề — giữ nguyên tiếng gốc", 85)
-    elif voice.is_file() and job.voice_key == key:
-        _set(job, "Dùng lại giọng đã đọc", 81)  # only the subtitles / layout changed
+        _set(job, "Chuẩn bị xuất — giữ nguyên tiếng gốc", 2)
+    elif quick:
+        _set(job, "Dùng lại giọng đã đọc", 2)  # only the subtitles / layout changed
     else:
         pieces = _voice_pieces(job)
         _set(job, "Đang xếp giọng theo thời gian", 81)
@@ -1522,20 +1736,20 @@ def _render(job: Job) -> None:
     sfx_track: Optional[Path] = None
     sfx_pieces = sfx.pieces(hl["points"], hl["sfx_set"]) if hl["on"] and hl["sfx"] and hl["points"] else []
     if sfx_pieces:
-        _set(job, "Đang xếp tiếng hiệu ứng", 90)
+        _set(job, "Đang xếp tiếng hiệu ứng", 3 if quick else 90)
         sfx_track = job.work / "sfx.wav"
         _timeline_wav(ffmpeg, sfx_pieces, info.duration, sfx_track)
-    _set(job, "Đang ghép video + phụ đề", 91)
+    _set(job, "Đang xuất video", enc_lo)
     cues: list[tuple[float, float, str]] = []
     for s in ([] if job.sub_lang == "none" else job.segments):  # "không có phụ đề": the lines are kept, not burned
         own = effective_layout(job.layout, s.look)
         for a, b, t in split_cue(s.start, s.end, s.text, sub_max_chars(out_w, out_h, own)):
             cues.append((a, b, t, s.look) if s.look else (a, b, t))
     if job.engine == "remotion":
-        _render_remotion(job, ffmpeg, src, None if sub_only else voice, bgm, info, cues, hl, sfx_pieces)
+        _render_remotion(job, ffmpeg, src, None if sub_only else voice, bgm, info, cues, hl, sfx_pieces, span=(enc_lo, enc_hi))
         return
     ass = write_sub_ass(cues, job.work / "subs.ass", width=out_w, height=out_h, style=job.style, layout=job.layout,
-                        emphasis=emphasis_events(hl, job.layout, info.duration))
+                        emphasis=emphasis_events(hl, job.layout, info.duration), total_s=info.duration)
     media_id = uuid.uuid4().hex
     dst = media_service.MEDIA_CACHE_DIR / f"{media_id}.mp4"
     cmd = [ffmpeg, "-y", "-v", "error", "-i", str(src)]
@@ -1570,12 +1784,25 @@ def _render(job: Job) -> None:
                           zoom=zoom_filter(hl, info.width, info.height, probe_fps(src)), source=(info.width, info.height),
                           canvas_bg_index=canvas_bg_index)
     agraph, amap = (audio_mix_sub(info.has_audio, sfx_index) if sub_only else audio_mix(bgm is not None, sfx_index))
-    cmd += ["-filter_complex", f"{vgraph};{agraph}" if agraph else vgraph, "-map", "[v]"]
+    speed = normalize_layout(job.layout)["speed"]
+    vmap = "[v]"
+    if speed != 1.0:  # "Tốc độ": the finished picture and sound together, last
+        sgraph, vmap, amap = speed_graph(speed, probe_fps(src), "[v]", amap)
+        agraph = f"{agraph};{sgraph}" if agraph else sgraph
+    cmd += ["-filter_complex", f"{vgraph};{agraph}" if agraph else vgraph, "-map", vmap]
     if amap:
         cmd += ["-map", amap]
     cmd += [*_encode_args(ffmpeg), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-shortest",
             "-metadata", f"comment={output_tag(job)}", "-movflags", "+faststart", str(dst)]
-    err = _run(cmd, ENCODE_TIMEOUT_S)
+    def encoding(frac: float) -> None:  # (never raises: the encoder is stopped through ``stop``)
+        job.phase, job.progress = "Đang xuất video", int(enc_lo + (enc_hi - enc_lo) * frac)
+
+    err = _run_encode(cmd, ENCODE_TIMEOUT_S, info.duration / speed, encoding, stop=lambda: job.stop)
+    if job.stop:
+        from flowboard.services.proc import remove_soon
+
+        remove_soon(dst)
+        raise DubError("Đã dừng theo yêu cầu")
     if err or not dst.is_file() or dst.stat().st_size == 0:
         raise DubError(f"ffmpeg ghép lỗi: {err or 'file rỗng'}")
     _record_output(job, dst, media_id)
@@ -1586,6 +1813,54 @@ def _render(job: Job) -> None:
     _set(job, "Đang lưu thành clip", 97)
     job.board_id = _save_board(job)
     job.phase, job.progress, job.status = "Xong", 100, "done"
+
+
+def _run_encode(cmd: list[str], timeout: int, total_s: float, on_progress: Callable[[float], None],
+                stop: Optional[Callable[[], bool]] = None) -> Optional[str]:
+    """ffmpeg like ``_run`` (None = fine, else the error) with its progress read from ``-progress``:
+    ``on_progress(0..1)`` about twice a second; ``stop()`` true kills it."""
+    import threading
+
+    full = cmd[:1] + ["-progress", "pipe:1", "-nostats"] + cmd[1:]
+    try:
+        proc = subprocess.Popen(full, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except OSError as exc:
+        return f"could not launch ffmpeg: {exc}"
+    tail: list[bytes] = []
+
+    def errors() -> None:
+        assert proc.stderr is not None
+        for raw in proc.stderr:
+            tail.append(raw)
+            del tail[:-20]
+
+    th = threading.Thread(target=errors, daemon=True)
+    th.start()
+    deadline = time.time() + timeout
+    assert proc.stdout is not None
+    for raw in proc.stdout:
+        line = raw.decode("ascii", "replace").strip()
+        if line.startswith(("out_time_us=", "out_time_ms=")):  # both are microseconds
+            try:
+                done = int(line.split("=", 1)[1]) / 1_000_000
+                if total_s > 0:
+                    on_progress(max(0.0, min(1.0, done / total_s)))
+            except ValueError:
+                pass
+        if stop is not None and stop():
+            proc.kill()
+            proc.wait()
+            return "Đã dừng theo yêu cầu"
+        if time.time() > deadline:
+            proc.kill()
+            proc.wait()
+            return f"timed out after {timeout}s"
+    proc.wait()
+    th.join(timeout=5)
+    if proc.returncode != 0:
+        text = b"".join(tail).decode("utf-8", "replace").strip()
+        return text[-500:] if text else f"exit code {proc.returncode}"
+    return None
 
 
 def audio_mix(with_bgm: bool, sfx_index: Optional[int]) -> tuple[str, str]:
@@ -1616,7 +1891,8 @@ def audio_mix_sub(has_audio: bool, sfx_index: Optional[int]) -> tuple[str, Optio
 
 def has_picture_layers(job: Job) -> bool:
     lay = normalize_layout(job.layout)
-    return bool(lay.get("frame") or lay.get("blurs") or lay.get("mascot") or lay.get("canvas"))
+    return bool(lay.get("frame") or lay.get("blurs") or lay.get("mascot") or lay.get("canvas") or lay.get("adjust")
+                or shown_texts(lay))
 
 
 def render_clean_video(job: Job, dst: Path) -> Path:
@@ -1639,7 +1915,8 @@ def render_clean_video(job: Job, dst: Path) -> Path:
     work = job.work if job.work is not None else dst.parent
     lay = normalize_layout(job.layout)
     out_w, out_h = canvas_size(info.width, info.height, job.layout)
-    ass = write_sub_ass([], work / "capcut_nosub.ass", width=out_w, height=out_h, style=job.style, layout=job.layout)
+    ass = write_sub_ass([], work / "capcut_nosub.ass", width=out_w, height=out_h, style=job.style, layout=job.layout,
+                        total_s=info.duration)
     cmd = [ffmpeg, "-y", "-v", "error", "-i", str(src)]
     next_index = 1
     canvas_bg = canvas_bg_file(job.layout)
@@ -1671,13 +1948,13 @@ def render_clean_video(job: Job, dst: Path) -> Path:
 
 def _render_remotion(job: Job, ffmpeg: str, src: Path, voice: Optional[Path], bgm: Optional[Path], info: Any,
                      cues: list[tuple[float, float, str]], hl: Optional[dict[str, Any]] = None,
-                     sfx_pieces: Optional[list[tuple[float, Path, float]]] = None) -> None:
+                     sfx_pieces: Optional[list[tuple[float, Path, float]]] = None, span: tuple[int, int] = (91, 97)) -> None:
     """The second engine: ffmpeg only muxes the dubbed audio into the video
     (``nosub.mp4``, stream copy when possible), Remotion draws the subtitles
     and the blur band on top (``services/dub_remotion``)."""
     assert job.work is not None
     nosub = job.work / "nosub.mp4"
-    _set(job, "Đang ghép tiếng vào video (chưa có phụ đề)", 91)
+    _set(job, "Đang ghép tiếng vào video (chưa có phụ đề)", span[0])
 
     def mux(copy_video: bool) -> Optional[str]:
         if voice is None:  # subtitles only: the source as it is (its own sound)
@@ -1733,12 +2010,16 @@ def _render_remotion(job: Job, ffmpeg: str, src: Path, voice: Optional[Path], bg
               "select": "Remotion: đọc video"}
 
     def prog(frac: float, phase: str) -> None:
-        _set(job, labels.get(phase, "Remotion: đang vẽ phụ đề"), int(92 + frac * 5))
+        _set(job, labels.get(phase, "Remotion: đang vẽ phụ đề"), int(span[0] + 1 + frac * (span[1] - span[0] - 1)))
 
     try:
         dub_remotion.render(spec, progress=prog, stop=lambda: job.stop)
     except dub_remotion.RemotionError as exc:
         raise DubError(str(exc)) from exc
+    speed = normalize_layout(job.layout)["speed"]
+    if speed != 1.0:
+        _set(job, "Đang đổi tốc độ video", span[1])
+        retime_file(ffmpeg, dst, speed)
     _tag_file(ffmpeg, dst, output_tag(job))
     _record_output(job, dst, media_id)
     with get_session() as s:
@@ -1920,7 +2201,9 @@ def normalize_look_preset(raw: Any) -> dict[str, Any]:
     engine = _check_engine(str(d.get("engine") or "ass"))
     hl = normalize_highlights(d.get("highlights"))
     hl["points"], hl["picked"] = [], ""
-    return {"layout": normalize_layout(d.get("layout")), "style": _style_for(engine, str(d.get("style") or "box_yellow")),
+    layout = normalize_layout(d.get("layout"))
+    layout["texts"] = [dict(t, text="") if t["role"] != "text" else t for t in layout["texts"]]  # each clip its own title
+    return {"layout": layout, "style": _style_for(engine, str(d.get("style") or "box_yellow")),
             "engine": engine, "highlights": hl}
 
 
@@ -1955,13 +2238,48 @@ def default_look_id() -> Optional[int]:
         return pid if p is not None and p.kind == "look" else None
 
 
+def default_text(job: Job, role: str) -> str:
+    """The words a title layer starts with: a part cut on "✂️ Cắt video" has a title and maybe a second title."""
+    if job.kind != "cut":
+        return ""
+    if role == "title":
+        return (job.name or job.title or "").strip()
+    if role == "subtitle":
+        return str((job.cut or {}).get("subtitle") or "").strip()
+    return ""
+
+
+def carry_texts(job: Job, layout: Optional[dict]) -> dict[str, Any]:
+    """``layout`` coming from another clip (a saved look, "⇪ Áp cho cả loạt"): its text layers keep their place,
+    size and colours, but a title / second title shows THIS clip's own words — what it already had, else its cut
+    title. Free text is copied as it is."""
+    lay = normalize_layout(layout)
+    mine = {t["role"]: t["text"] for t in normalize_texts((job.layout or {}).get("texts")) if t["role"] != "text" and t["text"]}
+    lay["texts"] = [dict(t, text=mine.get(t["role"]) or default_text(job, t["role"])) if t["role"] != "text" else t
+                    for t in lay["texts"]]
+    return lay
+
+
 def apply_look(job: Job, look: dict[str, Any]) -> None:
     """Put a saved look on ``job``: layout (subtitle place, blur boxes, output format, frame, sticker), style,
     engine and the key-moment settings — the points stay this clip's own (picked at render when on)."""
     job.engine = _check_engine(str(look.get("engine") or job.engine))
     job.style = _style_for(job.engine, str(look.get("style") or job.style))
-    job.layout = normalize_layout(look.get("layout"))
+    job.layout = carry_texts(job, look.get("layout"))
     job.highlights = {**normalize_highlights(look.get("highlights")), "points": [], "picked": ""}
+
+
+def stop_job(job: Job) -> Job:
+    """"Dừng": a job still waiting its turn ends right here; a running one is told to stop — every long step (download,
+    Whisper, the voice, the encoder) checks a few times a second and kills what it runs."""
+    if job.status == "queued":
+        job.status, job.error, job.phase = "error", "Đã dừng theo yêu cầu", "Đã dừng"
+        job._render_only = False  # type: ignore[attr-defined]
+        persist(job)
+        _pump()
+    elif job.status in ("running", "rendering"):
+        job.stop = True
+    return job
 
 
 def start_job(*, url: Optional[str], source_media_id: Optional[str], voice: str, keep_bgm: bool, style: str,
@@ -2090,7 +2408,7 @@ def render_job(job: Job, *, lines: Optional[list[str]], voice: Optional[str], st
                timings: Optional[list[list[float]]] = None,
                looks: Optional[list[Optional[dict]]] = None,
                highlights: Optional[dict] = None, mode: Optional[str] = None, sub_lang: Optional[str] = None,
-               names: Optional[list] = None, cues: Optional[list[dict]] = None) -> Job:
+               names: Optional[list] = None, cues: Optional[list[dict]] = None, carried: bool = False) -> Job:
     """Render (again) with edited lines / options. ``cues`` = the whole list of lines when the editor changed how many
     there are (split / merge / add / remove) — it replaces ``lines`` / ``timings`` / ``looks``. Allowed from ``review``,
     ``done`` and ``error`` (after a render failure). ``timings`` = new
@@ -2132,7 +2450,8 @@ def render_job(job: Job, *, lines: Optional[list[str]], voice: Optional[str], st
     if style is not None or engine is not None:
         job.style = _style_for(job.engine, style or job.style)
     if layout is not None:
-        job.layout = normalize_layout(layout)
+        # ``carried``: the layout is another clip's ("⇪ Áp cho cả loạt") — this clip keeps its own title words
+        job.layout = carry_texts(job, layout) if carried else normalize_layout(layout)
     if highlights is not None:
         job.highlights = normalize_highlights(highlights)
     if keep_bgm is not None:
@@ -2151,7 +2470,7 @@ def render_job(job: Job, *, lines: Optional[list[str]], voice: Optional[str], st
     quick = job.mode == "sub" or (bool(job.work) and (job.work / "voice.wav").is_file() and job.voice_key == voice_key(job))
     job._render_only = True  # type: ignore[attr-defined]
     job.started_at = time.time()  # queue order: behind whatever waits already
-    job.status, job.phase, job.progress = "queued", "Đang in lại phụ đề" if quick else "Đang render", 61
+    job.status, job.phase, job.progress = "queued", "Chờ xuất lại" if quick else "Đang render", 0 if quick else 61
     persist(job)
     _pump()
     return job

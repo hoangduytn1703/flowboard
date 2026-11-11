@@ -10,6 +10,7 @@
 import { loadFont } from "@remotion/google-fonts/BeVietnamPro";
 import { AbsoluteFill, Audio, Html5Video, Img, interpolate, Loop, OffthreadVideo, Sequence, useCurrentFrame, useVideoConfig } from "remotion";
 import { canvasRect, gridCss } from "./canvasGeom";
+import { adjustCss, textLayerCss, textShownAt, type DubAdjustSpec, type DubTextSpec } from "./textLayer";
 
 const { fontFamily } = loadFont("normal", { weights: ["600", "700", "800"], subsets: ["latin", "vietnamese"] });
 
@@ -88,6 +89,10 @@ export interface DubLayoutSpec {
   canvas?: DubCanvasSpec | null;
   frame?: DubFrameSpec | null;
   mascot?: DubMascotSpec | null;
+  /** "🔤 Chữ": the title / second title / free text on the picture */
+  texts?: DubTextSpec[];
+  /** brightness / contrast / saturation of the video itself */
+  adjust?: DubAdjustSpec | null;
 }
 
 export type DubRemotionStyle = "rm_box" | "rm_karaoke" | "rm_outline";
@@ -228,10 +233,14 @@ export const DubSubtitles: React.FC<DubSubtitlesProps> = ({ src, width, height, 
       : rect ? {} : { objectFit: "contain" })
     : {};
   const cover: React.CSSProperties = { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" };
+  // brighter / darker: the video itself (and the blurred copies of it), never the background, the text or the sticker
+  const tone = adjustCss(layout.adjust);
+  const toneCss: React.CSSProperties = tone ? { filter: tone } : {};
+  const softBlur = `${tone ? `${tone} ` : ""}blur(${Math.round(Math.min(width, height) / 30)}px)`;
   const bgColor = canvas?.color || "#211915";
   const background = !canvas || !whole || whole === "black" ? null
     : whole === "blur"
-      ? <OffthreadVideo src={src} muted style={{ ...cover, filter: `blur(${Math.round(Math.min(width, height) / 30)}px)`, transform: "scale(1.08)" }} />
+      ? <OffthreadVideo src={src} muted style={{ ...cover, filter: softBlur, transform: "scale(1.08)" }} />
       : whole === "grid"
         ? <AbsoluteFill style={gridCss(bgColor, canvas.line || "#4a3a2e", canvas.cell || 0.11, width, height, width)} />
         : whole === "image" && canvasBgSrc
@@ -245,7 +254,7 @@ export const DubSubtitles: React.FC<DubSubtitlesProps> = ({ src, width, height, 
   const picture = (fill: "contain" | "fill") => (
     <>
       {background}
-      <OffthreadVideo src={src} muted={muted} style={{ objectFit: fill, ...videoBox, ...fitCss, ...zoomCss }} />
+      <OffthreadVideo src={src} muted={muted} style={{ objectFit: fill, ...videoBox, ...fitCss, ...zoomCss, ...toneCss }} />
     </>
   );
 
@@ -266,7 +275,7 @@ export const DubSubtitles: React.FC<DubSubtitlesProps> = ({ src, width, height, 
             : layout.frame.bg === "color"
               ? <AbsoluteFill style={{ background: layout.frame.color }} />
               : <OffthreadVideo src={src} muted style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover",
-                                                      filter: `blur(${Math.round(Math.min(width, height) / 30)}px)`, transform: "scale(1.08)" }} />}
+                                                      filter: softBlur, transform: "scale(1.08)" }} />}
           <div style={{
             position: "absolute", left: `${(1 - layout.frame.scale) * 50}%`, top: `${(1 - layout.frame.scale) * 50}%`,
             width: `${layout.frame.scale * 100}%`, height: `${layout.frame.scale * 100}%`, overflow: "hidden",
@@ -333,6 +342,9 @@ export const DubSubtitles: React.FC<DubSubtitlesProps> = ({ src, width, height, 
           {style === "rm_karaoke" ? <Karaoke cue={cue} t={t} /> : cue.text}
         </div>
       )}
+      {(layout.texts ?? []).filter((x) => textShownAt(x, t)).map((x, i) => (
+        <div key={i} style={textLayerCss(x, height, fontFamily)}>{x.text}</div>
+      ))}
     </AbsoluteFill>
   );
 };

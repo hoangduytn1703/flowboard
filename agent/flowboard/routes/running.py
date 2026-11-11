@@ -274,6 +274,10 @@ def outcome(key: str = Query(..., max_length=80)) -> dict[str, Any]:
         from flowboard.services import video_cut
 
         return video_cut.outcome(ident)
+    if kind == "cuthear":
+        from flowboard.services import video_cut
+
+        return video_cut.hear_outcome(ident)
     if kind == "dub":
         from flowboard.services import dub
 

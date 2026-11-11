@@ -1,3 +1,4 @@
+import { StopButton } from "../../components/StopButton";
 /** The dubbing job's progress as one big ring around the logo: the arc grows with the percentage and the
  *  colour walks orange → green → blue with it; an error turns everything red. Purely presentational —
  *  the job itself is polled and stopped by DubPage as before. */
@@ -16,7 +17,7 @@ export function ringColor(percent: number, error = false): string {
 }
 
 export function ProgressRing({
-  percent, error, waiting, title, hint, phase, message, onStop,
+  percent, error, waiting, title, hint, phase, message, onStop, stopping,
 }: {
   percent: number;
   error?: boolean;
@@ -26,7 +27,9 @@ export function ProgressRing({
   hint?: string;
   phase?: string;
   message?: string;
-  onStop?: () => void;
+  onStop?: () => Promise<unknown> | void;
+  /** "Dừng" already pressed (the agent says so) */
+  stopping?: boolean;
 }) {
   const pct = Math.max(0, Math.min(100, Math.round(percent)));
   const color = ringColor(pct, !!error);
@@ -60,7 +63,7 @@ export function ProgressRing({
       <div className="qt-dubring__phase">
         {error ? <span className="qt-dubring__err">{message || "Có lỗi xảy ra"}</span> : phase || (waiting ? "Chờ đến lượt…" : "Đang xử lý…")}
       </div>
-      {onStop && <button type="button" className="qt-btn qt-btn--small qt-btn--danger" onClick={onStop}>Dừng</button>}
+      {onStop && <StopButton stopping={stopping} onStop={onStop} />}
     </section>
   );
 }
