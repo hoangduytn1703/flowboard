@@ -1,7 +1,7 @@
 /* 🤖 Trợ lý DFlow (AssistantWidget): a draggable round button + its chat panel.
    Above the "việc đang chạy" badge (.bgt, 1100), under toasts (1200). */
 .dfa-launch {
-  position: fixed; z-index: 1150; width: 56px; height: 56px; display: grid; place-items: center; padding: 0;
+  position: fixed; z-index: 1150; width: 44px; height: 44px; display: grid; place-items: center; padding: 0;
   border: none; border-radius: 50%; cursor: grab; touch-action: none; user-select: none; color: #fff;
   background: radial-gradient(circle at 30% 25%, #ffb347 0%, #ff7a1a 45%, #e8480b 100%);
   box-shadow: 0 8px 22px rgba(255, 106, 43, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.12) inset;

@@ -29,7 +29,7 @@ const POLL_MS = 4000;
 export async function probeModel(mediaId: string): Promise<FlowCheck> {
   const gen = useGenerationStore.getState();
   const projectId = await gen.ensureProjectId();
-  if (!projectId) throw new Error("Chưa có Flow project — ghim một project trong Cài đặt.");
+  if (!projectId) throw new Error("Chưa kết nối xong Google Flow — làm theo bảng hướng dẫn vừa mở rồi bấm lại.");
   const req = await createRequest({
     type: "gen_video_omni",
     params: {

@@ -65,6 +65,18 @@ class ExtConn:
     tier: Optional[str] = None
     account_checked_at: Optional[float] = None
     account_error: Optional[str] = None
+    #: The Flow tab the account was read from, and the project that tab has open (setup guide: "use this one").
+    tab_url: Optional[str] = None
+    tab_project: Optional[str] = None
+
+
+def _tab_project(url: Optional[str]) -> Optional[str]:
+    """The project a Flow tab has open (``…/project/<uuid>``), or None on the home page / a non-project URL."""
+    if not url or "/project/" not in url:
+        return None
+    from flowboard.services.flow_project import normalize_project_id
+
+    return normalize_project_id(url)
 
 
 def _version_tuple(v: Optional[str]) -> tuple[int, ...]:
@@ -266,6 +278,8 @@ class FlowClient:
         conn.credits = _parse_credits(info.get("credits"))
         tier = info.get("tier")
         conn.tier = tier.strip().upper() if isinstance(tier, str) and tier.strip() else None
+        conn.tab_url = info.get("tabUrl") if isinstance(info.get("tabUrl"), str) else None
+        conn.tab_project = _tab_project(conn.tab_url)
         conn.account_checked_at = time.time()
         conn.account_error = None
         if conn.id == self._active:
@@ -273,7 +287,7 @@ class FlowClient:
             if conn.email and not self._user_info:
                 self._user_info = {"email": conn.email}
         logger.info("read_account conn=%s email=%s credits=%s tier=%s", conn.id, conn.email, conn.credits, conn.tier)
-        out = {"email": conn.email, "credits": conn.credits, "tier": conn.tier}
+        out = {"email": conn.email, "credits": conn.credits, "tier": conn.tier, "project_id": conn.tab_project}
         if conn.id == self._active:
             for fn in list(self.account_listeners):
                 try:

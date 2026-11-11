@@ -18,7 +18,7 @@ export async function generateStandaloneImage(
   refMediaIds: string[] = [],
 ): Promise<string> {
   const projectId = await useGenerationStore.getState().ensureProjectId();
-  if (!projectId) throw new Error("Chưa có Flow project — ghim một project trong Cài đặt.");
+  if (!projectId) throw new Error("Chưa kết nối xong Google Flow — làm theo bảng hướng dẫn vừa mở rồi bấm lại.");
   const settings = useSettingsStore.getState();
   const tier = useGenerationStore.getState().paygateTier;
   const req = await createRequest({
@@ -65,7 +65,7 @@ export async function generateStandaloneVideo(
 ): Promise<string> {
   const gen = useGenerationStore.getState();
   const projectId = await gen.ensureProjectId();
-  if (!projectId) throw new Error("Chưa có Flow project — ghim một project trong Cài đặt.");
+  if (!projectId) throw new Error("Chưa kết nối xong Google Flow — làm theo bảng hướng dẫn vừa mở rồi bấm lại.");
   const req = await createRequest({
     type: "gen_video_omni",
     params: {

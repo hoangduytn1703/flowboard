@@ -1,3 +1,4 @@
+import { SetupCard } from "../../components/SetupGuide";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { clipThumbUrl, exportsZipUrl, listBoardSummaries, type BoardSummary } from "../../api/client";
@@ -186,6 +187,7 @@ export function TodayPage() {
         <span className="qt-header__crumb">Hôm nay</span>
       </header>
       <div className="qt-home qt-today td-page">
+        <SetupCard />
         <div className="td-hero">
           <div>
             <h1 className="td-hero__title">Tổng quan hôm nay</h1>

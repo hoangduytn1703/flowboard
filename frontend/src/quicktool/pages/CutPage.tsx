@@ -80,6 +80,7 @@ function sessionName(s: CutSession): string {
  */
 export function CutPage() {
   const navigate = useNavigate();
+  useEffect(() => { document.title = "Cắt video · DFlow"; }, []);
   const [params, setParams] = useSearchParams();
   const [status, setStatus] = useState<CutToolStatus | null>(null);
   const [dubStatus, setDubStatus] = useState<DubStatus | null>(null);

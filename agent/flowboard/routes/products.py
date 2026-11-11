@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Response
 from pydantic import BaseModel, Field
 from sqlmodel import select
 
@@ -16,7 +16,7 @@ from flowboard.db import get_session
 from flowboard.db.models import Product, _utcnow
 from flowboard.services import media as media_service
 from flowboard.services.products import list_products, product_dict
-from flowboard.services import product_gender, product_link, tab_import
+from flowboard.services import product_describe, product_gender, product_link, tab_import
 from flowboard.services.llm import gemini_api
 from flowboard.services.templates import CATEGORIES
 
@@ -94,7 +94,7 @@ def get_products() -> list[dict]:
 
 
 @router.post("")
-def create_product(body: ProductBody) -> dict:
+def create_product(body: ProductBody, background: BackgroundTasks) -> dict:
     row = Product(name="")
     _apply(row, body)
     # Not given: guess it from the words ("áo thun nam", "váy", "unisex"…).
@@ -105,6 +105,9 @@ def create_product(body: ProductBody) -> dict:
         s.add(row)
         s.commit()
         s.refresh(row)
+        # no English description (empty, or Vietnamese typed): the AI writes it after the answer goes out
+        if product_describe.needs_writing(row.description or ""):
+            background.add_task(product_describe.fill, int(row.id))
         return product_dict(row)
 
 
@@ -143,7 +146,7 @@ def get_product(product_id: int) -> dict:
 
 
 @router.patch("/{product_id}")
-def patch_product(product_id: int, body: ProductBody) -> dict:
+def patch_product(product_id: int, body: ProductBody, background: BackgroundTasks) -> dict:
     with get_session() as s:
         row = s.get(Product, product_id)
         if row is None:
@@ -154,6 +157,8 @@ def patch_product(product_id: int, body: ProductBody) -> dict:
         s.add(row)
         s.commit()
         s.refresh(row)
+        if product_describe.needs_writing(row.description or ""):
+            background.add_task(product_describe.fill, int(row.id))
         return product_dict(row)
 
 

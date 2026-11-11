@@ -88,7 +88,7 @@ def test_read_account_parses_the_panel_and_fills_the_active_identity():
         return await task
 
     out = asyncio.run(go())
-    assert out == {"email": "x@gmail.com", "credits": 1250, "tier": "PRO"}
+    assert out == {"email": "x@gmail.com", "credits": 1250, "tier": "PRO", "project_id": None}
     assert c.credits == 1250 and c.user_info == {"email": "x@gmail.com"}
     acc = c.accounts()[0]
     assert acc["email"] == "x@gmail.com" and acc["active"] and acc["account_error"] is None

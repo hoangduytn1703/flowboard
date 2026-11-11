@@ -20,6 +20,7 @@ from flowboard.routes import export_extras as export_extras_route
 from flowboard.routes import account as account_route
 from flowboard.routes import account_admin as account_admin_route
 from flowboard.routes import cloud as cloud_route
+from flowboard.routes import setup as setup_route
 from flowboard import accounts, licensing
 from flowboard import plans as account_plans  # service plans; `plans` below is the Canvas route
 from flowboard.routes import exports as exports_route
@@ -282,6 +283,7 @@ app.include_router(account_admin_route.router)
 app.include_router(account_admin_route.plans_router)
 app.include_router(account_admin_route.billing_router)
 app.include_router(cloud_route.router)
+app.include_router(setup_route.router)
 app.include_router(boards.router)
 app.include_router(templates.router)
 app.include_router(nodes.router)

@@ -1191,6 +1191,9 @@ def _prefetch_edge(job: Job, spoken: list[Segment]) -> None:
 
         await asyncio.gather(*(one(s) for s in spoken))
 
+    # say so before the first line comes back: when Edge is refusing, that can take a minute, and the bar used to
+    # sit on "Đã dịch xong" all that time
+    _set(job, f"Đang tạo giọng đọc (0/{total}, {EDGE_PARALLEL} câu một lúc)", 62)
     asyncio.run(run())
 
 

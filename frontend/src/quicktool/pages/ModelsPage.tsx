@@ -282,7 +282,7 @@ function ModelEditor({ item, onDone }: { item: SavedCharacter | null; onDone: ()
     setBusy("upload");
     try {
       const projectId = await useGenerationStore.getState().ensureProjectId();
-      if (!projectId) throw new Error("Chưa có Flow project — ghim một project trong Cài đặt.");
+      if (!projectId) throw new Error("Chưa kết nối xong Google Flow — làm theo bảng hướng dẫn vừa mở rồi bấm lại.");
       const up = await uploadImage(file, projectId);
       setPhoto({ mediaId: up.media_id, aspect: up.aspect_ratio ?? null });
     } catch (e) {

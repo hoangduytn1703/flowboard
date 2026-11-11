@@ -1812,3 +1812,10 @@
 
 /* step 5 of a part of "✂️ Cắt video": edit / dub buttons */
 .qt-dubclip__acts { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* "Clip mới": the eight kinds used to take two screens. Each card shows two lines; the picked one shows all of it. */
+.qt-new .tpl-grid { grid-template-columns: repeat(3, 1fr); }
+.qt-new .tpl-card { padding: 9px 11px; }
+.qt-new .tpl-card__blurb { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+.qt-new .tpl-card--active .tpl-card__blurb { display: block; -webkit-line-clamp: unset; line-clamp: unset; overflow: visible; }
+@media (max-width: 760px) { .qt-new .tpl-grid { grid-template-columns: repeat(2, 1fr); } }

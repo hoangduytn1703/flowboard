@@ -44,6 +44,8 @@ import { SwipesPage } from "./pages/SwipesPage";
 import { useFlowCredits } from "../components/credits";
 import { AccountSwitchBanner } from "../components/AccountSwitchBanner";
 import { BackgroundTasks } from "../components/BackgroundTasks";
+import { SetupDialog } from "../components/SetupGuide";
+import { useSetupStore } from "../store/setup";
 import { AssistantWidget } from "../components/AssistantWidget";
 import { useFeature } from "../lib/features";
 import { FeatureGate } from "./FeatureGate";
@@ -121,6 +123,7 @@ export function QuicktoolApp() {
       <div className="qt-content">
         <AccountSwitchBanner />
         <BackgroundTasks />
+        <SetupDialog />
         {assistantOn && <AssistantWidget />}
         <Routes>
           {/* Static paths first so "new" / "from-video" are never read as a clip id. */}
@@ -515,6 +518,7 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
 
   /** The auto run, after saying what it will spend. */
   async function startAuto() {
+    if (!(await useSetupStore.getState().ensureReady("tạo video tự động"))) return;
     const images = roles.scenes.filter((s) => !hasMedia(s.image)).length + (roles.model && !hasMedia(roles.model) ? 1 : 0);
     const videos = isDrama ? 0 : roles.scenes.filter((s) => s.video && !hasMedia(s.video)).length;
     const cost = videos * creditsPerClip(videoModel, videoQuality);
@@ -524,6 +528,12 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
     // (measured 26/10: 5 stills + 4 clips + export in ~4.5 min).
     const mins = Math.max(1, Math.round(Math.ceil(images / 2) * 0.5 + Math.ceil(videos / 3) * 1.2 + 1.5));
     const balance = flowCredits === null ? "" : `\nTài khoản Flow còn ${flowCredits.toLocaleString("vi-VN")} credit${cost > flowCredits ? " — KHÔNG ĐỦ, clip sẽ hỏng giữa chừng" : ""}.`;
+    // a clip about a product nobody showed the AI comes out as some other product: say so before the credits go
+    if (roles.products.length > 0 && !roles.products.some((p) => p.data.mediaId)) {
+      const go = await askConfirm("⚠ Chưa có ảnh sản phẩm.\nKhông có ảnh thật, AI sẽ tự tưởng tượng sản phẩm — clip dễ ra sai món hàng. Nên upload ảnh ở Bước 1 trước.",
+        { ok: "Vẫn tạo, không cần ảnh", cancel: "Về Bước 1 thêm ảnh" });
+      if (!go) { if (boardId !== null) navigate(`/clips/${boardId}/setup`); return; }
+    }
     if (!await askConfirm(`${what}${balance}\nKhoảng ${mins} phút. Tiếp tục?`)) return;
     void runAuto();
   }
@@ -628,12 +638,12 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
   return (
     <>
       <header className="qt-header">
-        <span className="qt-header__crumb">Công cụ nhanh · {kindLabel}</span>
+        <span className="qt-header__crumb">{boardName || kindLabel}</span>
       </header>
 
       <div className="qt-project">
         <div className="qt-project__meta">
-          <div className="qt-card__eyebrow">Dự án · {kindLabel}</div>
+          <div className="qt-card__eyebrow">Clip · {kindLabel}</div>
           <select
             className="qt-project__select"
             value={routeId}

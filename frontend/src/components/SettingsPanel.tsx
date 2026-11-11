@@ -51,12 +51,12 @@ const IMAGE_MODELS: { key: ImageModelKey; label: string; hint: string }[] = [
   {
     key: "NANO_BANANA_PRO",
     label: "Nano Banana Pro",
-    hint: "GEM_PIX_2 — cao cấp, ảnh nét hơn, chậm hơn một chút",
+    hint: "Bản cao cấp: ảnh nét hơn, chậm hơn một chút — nên dùng.",
   },
   {
     key: "NANO_BANANA_2",
     label: "Nano Banana 2",
-    hint: "NARWHAL — nhanh hơn, bản nhẹ hơn",
+    hint: "Bản nhẹ, nhanh hơn — Flow hay từ chối bản này, chỉ chọn khi bản Pro lỗi.",
   },
 ];
 
@@ -99,8 +99,8 @@ const VIDEO_QUALITIES: {
 ];
 
 const OMNI_HINT =
-  "Tạo video từ ảnh tham chiếu. Thời lượng 4 / 6 / 8 / 10 s chọn cho mỗi lần tạo. Hỗ trợ cả dọc lẫn ngang. " +
-  "Khuyên dùng: Veo 3.1 Lite hiện bị Flow nhận rồi huỷ trên tài khoản Pro thường.";
+  "Nên dùng. Làm video 8 giây từ ảnh cảnh (≈12 credit Flow mỗi video), dọc lẫn ngang đều được, " +
+  "ổn định nhất trên cả gói Pro lẫn Ultra.";
 
 type SettingsTab = "gen" | "flow" | "ai" | "keys" | "data" | "machine" | "about";
 const TABS: { key: SettingsTab; icon: string; label: string }[] = [
@@ -376,7 +376,7 @@ export function SettingsPanel({
                         }
                       }}
                     >
-                      <option value="omni_flash">Omni Flash (r2v) — mặc định</option>
+                      <option value="omni_flash">Omni Flash — nên dùng</option>
                       {VIDEO_QUALITIES.map((q) => {
                         const locked = q.ultraOnly && !isUltra;
                         return (
@@ -443,8 +443,8 @@ export function SettingsPanel({
                     <>
                       {flowProject.source === "none" && (
                         <div className="settings-panel__project-error">
-                          Chưa có project Flow nào được cấu hình nên mọi lần tạo đều sẽ lỗi.
-                          Hãy mở một project tại{" "}
+                          Chưa chọn dự án Flow nên chưa tạo được ảnh / video. Cách nhanh nhất: mở trang
+                          Hôm nay → thẻ Thiết lập → “Dùng dự án đang mở”. Hoặc mở một dự án tại{" "}
                           <a
                             className="settings-panel__about-link"
                             href="https://flow.google.com/"
@@ -453,7 +453,7 @@ export function SettingsPanel({
                           >
                             flow.google.com
                           </a>
-                          , copy uuid trên thanh địa chỉ rồi dán vào ô bên dưới.
+                          , copy địa chỉ trang đó rồi dán vào ô bên dưới.
                         </div>
                       )}
 
@@ -462,7 +462,7 @@ export function SettingsPanel({
                           type="text"
                           className="settings-panel__project-input"
                           value={projectDraft}
-                          placeholder="1dfd992a-4149-4f97-9d68-a1ede77d3fc3"
+                          placeholder="Dán link dự án Flow (https://flow.google.com/…/project/…)"
                           spellCheck={false}
                           autoComplete="off"
                           disabled={projectSaving}

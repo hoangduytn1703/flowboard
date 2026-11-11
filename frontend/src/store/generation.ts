@@ -1,3 +1,4 @@
+import { useSetupStore } from "./setup";
 import { create } from "zustand";
 import type { ExportItem } from "../api/client";
 import { exportSources } from "../lib/exportOrder";
@@ -634,6 +635,8 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
   },
 
   async ensureProjectId() {
+    // Extension not connected / no Flow project yet: open the setup guide instead of failing with a raw error.
+    if (!(await useSetupStore.getState().ensureReady("tạo ảnh và video"))) return null;
     const cached = get().projectId;
     if (cached !== null) return cached;
     const boardId = useBoardStore.getState().boardId;
@@ -644,7 +647,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
         const res = await fetch("/api/flow/projects/pinned");
         const pinned = res.ok ? ((await res.json()) as { flow_project_id?: string | null }).flow_project_id : null;
         if (!pinned) {
-          set({ error: "Chưa ghim Flow project — mở Cài đặt → Google Flow project và dán uuid." });
+          useSetupStore.getState().openGuide("tạo ảnh và video");
           return null;
         }
         return pinned;

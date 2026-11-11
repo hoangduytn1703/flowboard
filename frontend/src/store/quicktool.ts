@@ -438,7 +438,7 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
   async uploadToNode(rfId, file) {
     const projectId = await useGenerationStore.getState().ensureProjectId();
     if (!projectId) {
-      set({ error: "Chưa có Flow project — ghim một project trong Settings." });
+      set({ error: "Chưa kết nối xong Google Flow — làm theo bảng hướng dẫn vừa mở rồi bấm lại." });
       return false;
     }
     const dbId = parseInt(rfId, 10);

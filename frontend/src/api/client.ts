@@ -10,84 +10,57 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     // Session gone (logged out elsewhere, agent restarted with auth on):
     // the auth gate listens for this and shows the login page.
     if (res.status === 401) window.dispatchEvent(new Event("flowboard:unauthorized"));
-    throw new Error(`${res.status} ${res.statusText}`);
+    // the agent's own words (`detail`), made readable — not "502 Bad Gateway"
+    throw new Error(await extractErrorMessage(res));
   }
   return res.json() as Promise<T>;
 }
 
-// Map cryptic Flow / pipeline error tokens to a sentence the user can act on.
-// Returns null when the token is unrecognised, so the caller falls through to
-// the raw message.
-function humanizeBackendError(token: string): string | null {
+// Turn the agent's / Flow's error tokens into a sentence a seller can act on (Vietnamese, no env-variable names).
+// Returns null when the token is unrecognised, so the caller falls through to the raw message.
+export function humanizeBackendError(token: string): string | null {
   const t = token.toLowerCase();
   if (t.startsWith("paygate_tier_invalid")) {
-    return (
-      "DFlow doesn't recognise the configured Google Flow plan. Set "
-      + "FLOWBOARD_PAYGATE_TIER to PAYGATE_TIER_TWO (Ultra) or "
-      + "PAYGATE_TIER_ONE (Pro) and restart the agent. It refuses to "
-      + "dispatch in this state rather than guessing, because the plan "
-      + "picks which video checkpoint renders."
-    );
+    return "DFlow chưa biết tài khoản Google Flow của bạn là gói Pro hay Ultra. Mở Cài đặt → 🖥 Máy này → chọn đúng gói rồi thử lại.";
   }
   if (t.includes("no_flow_project")) {
-    // This is what a user with nothing pinned sees on their first failed
-    // generation — the exact moment to name the field that fixes it, rather
-    // than the .env-and-restart workflow that no longer has to be used.
-    return (
-      "Flow no longer lets DFlow create projects — that endpoint went "
-      + "with Google's September 2026 migration. Open a project at "
-      + "flow.google.com, copy its address, and paste it into Settings → "
-      + "Google Flow project."
-    );
+    return "Chưa chọn dự án Flow. Mở flow.google.com, bấm “+ Dự án mới”, rồi vào Hôm nay → Thiết lập → “Dùng dự án đang mở”.";
+  }
+  if (t.includes("extension_disconnected") || t.includes("extension not connected")) {
+    return "Chrome chưa kết nối với DFlow: mở Chrome (có extension DFlow Bridge) và một tab flow.google.com rồi thử lại.";
+  }
+  if (t.includes("extension_outdated")) {
+    return "Extension DFlow Bridge là bản cũ: vào chrome://extensions bấm nút tải lại (↻) ở ô DFlow Bridge, rồi F5 tab Flow.";
   }
   if (t.includes("unsupported_on_batch_api")) {
-    // Not transient and not the user's fault: Flow's current API has no
-    // equivalent for this. Retrying will never help, so say so.
-    return (
-      token
-      + " — this capability has no equivalent on Flow's current API, so "
-      + "retrying will not help."
-    );
+    return "Google Flow hiện không còn hỗ trợ thao tác này — thử lại cũng không được.";
   }
   if (t.includes("no_at_token")) {
-    return (
-      "The Flow tab is open but hasn't finished loading, so it can't sign "
-      + "the request yet. Reload https://flow.google.com/ , wait for the "
-      + "app to appear, then retry."
-    );
+    return "Tab Flow đang mở nhưng chưa tải xong. Tải lại tab flow.google.com (F5), chờ trang hiện đầy đủ rồi thử lại.";
   }
   if (t.includes("no_flow_tab") || t.includes("flow_tab_discarded")) {
-    return (
-      "DFlow needs one signed-in https://flow.google.com/ tab left "
-      + "open — only the page itself can sign a Flow request, so nothing "
-      + "works headless. Open it and retry."
-    );
+    return "Cần một tab flow.google.com đã đăng nhập và để mở trong Chrome. Mở tab đó rồi thử lại.";
   }
   if (t === "no_media_id_in_upload_response") {
-    return (
-      "Google Flow accepted the upload but didn't return a media handle — "
-      + "this usually means the image was silently rejected by Flow's "
-      + "content filter (logos, watermarks, copyrighted brand imagery). "
-      + "Try a different image or download it locally and upload as a file. "
-      + "Check the agent terminal for the full Flow response."
-    );
+    return "Google Flow nhận ảnh nhưng không giữ — thường do bộ lọc nội dung (logo, watermark, hình có bản quyền). Thử ảnh khác.";
   }
   if (t.includes("captcha_failed: no current window")) {
-    return (
-      "Chrome has no open windows for the extension to attach a Flow tab to. "
-      + "Open any Chrome window (or click the extension's '⋯ → Open Flow') "
-      + "and retry — DFlow will reuse the existing window automatically."
-    );
+    return "Chrome không có cửa sổ nào đang mở. Mở một cửa sổ Chrome rồi thử lại.";
   }
-  if (t.startsWith("captcha_failed:")) {
-    // CAPTCHA failures are rarely the user's fault — surface the underlying
-    // reason verbatim but keep the prefix so power-users can grep for it.
-    return token;
+  if (t.startsWith("captcha_failed")) {
+    return "Google Flow chưa xác minh được trình duyệt (captcha). Tải lại tab flow.google.com (F5) rồi thử lại sau vài giây.";
+  }
+  if (t.includes("flow_dropped_job") || t.includes("timeout_waiting_video")) {
+    return "Flow bỏ lượt này (thường do gương mặt người mẫu hoặc nội dung bị lọc) — credit được hoàn. Thử tạo lại hoặc đổi ảnh.";
+  }
+  if (t.includes("returned no media url")) {
+    return "Flow không trả ảnh — thường do bộ lọc nội dung. Sửa mô tả ảnh (bỏ từ nhạy cảm) rồi tạo lại.";
   }
   if (t.startsWith("public_error_")) {
-    // Veo / Imagen content filters are returned verbatim by Flow — these
-    // are already self-describing, just prettify the prefix.
-    return token.replace(/^PUBLIC_ERROR_/i, "Flow rejected: ").replace(/_/g, " ");
+    return "Flow từ chối: " + token.replace(/^PUBLIC_ERROR_/i, "").replace(/_/g, " ").toLowerCase();
+  }
+  if (/^(502|503|504)/.test(t) || t === "failed to fetch" || t.includes("networkerror")) {
+    return "DFlow chưa trả lời được (đang khởi động hoặc mất kết nối). Chờ vài giây rồi thử lại.";
   }
   return null;
 }

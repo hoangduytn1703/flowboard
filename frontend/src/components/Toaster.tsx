@@ -3,7 +3,8 @@ import { useBoardStore } from "../store/board";
 import { useChatStore } from "../store/chat";
 import { useGenerationStore } from "../store/generation";
 import { usePipelineStore } from "../store/pipeline";
-import { TOAST_MS, useToastStore, type ToastKind } from "../store/toast";
+import { toastMs, useToastStore, type ToastKind } from "../store/toast";
+import { humanizeBackendError } from "../api/client";
 
 const ICON: Record<ToastKind, string> = { success: "✓", info: "i", warning: "!", error: "!" };
 const LABEL: Record<ToastKind, string> = { success: "Thành công", info: "Thông báo", warning: "Lưu ý", error: "Lỗi" };
@@ -61,7 +62,7 @@ export function Toaster() {
   if (!storeError && toasts.length === 0) return null;
   return (
     <div className="toast-stack" aria-live="polite">
-      {storeError && <Toast key={`store:${storeError}`} kind="error" message={storeError} duration={TOAST_MS} onClose={clearStoreError} />}
+      {storeError && <Toast key={`store:${storeError}`} kind="error" message={humanizeBackendError(storeError) ?? storeError} duration={toastMs("error", storeError)} onClose={clearStoreError} />}
       {toasts.map((t) => (
         <Toast key={t.id} kind={t.kind} message={t.message} duration={t.duration} onClose={() => dismiss(t.id)} />
       ))}

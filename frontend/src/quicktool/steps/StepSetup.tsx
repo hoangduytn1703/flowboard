@@ -541,14 +541,14 @@ export function StepSetup({ roles, sourceMediaId = null, personRequired = false,
 
         <div className="qt-settings">
           <div className="qt-setting"><span>Tỉ lệ</span><strong>9:16 dọc (TikTok)</strong></div>
-          <div className="qt-setting"><span>Model ảnh</span><strong>{imageModel}</strong></div>
+          <div className="qt-setting"><span>Model ảnh</span><strong>{imageModel === "NANO_BANANA_2" ? "Nano Banana 2" : "Nano Banana Pro"}</strong></div>
           <div className="qt-setting">
             <span>Model video</span>
             <strong>{videoModel === "omni_flash" ? `Omni Flash · ${omniDuration}s/clip` : `Veo 3.1 ${videoQuality}`}</strong>
           </div>
           <div className="qt-setting"><span>Số cảnh</span><strong>{roles.scenes.length}</strong></div>
         </div>
-        <p className="qt-card__hint">Đổi model ảnh/video trong ⚙ Settings (góc dưới trái).</p>
+        <p className="qt-card__hint">Đổi model ảnh / video ở ⚙ Cài đặt → Tạo ảnh & video.</p>
       </section>
     </div>
   );

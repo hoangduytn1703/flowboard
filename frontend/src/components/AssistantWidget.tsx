@@ -9,10 +9,11 @@ import { toast } from "../store/toast";
 import { announceRunning } from "./BackgroundTasks";
 import "./assistant.css";
 
-const SIZE = 56;
+const SIZE = 44;
 const MARGIN = 10;
 const GAP = 12;
-const POS_KEY = "dflow.assistant.pos";
+// "pos2": the default moved from the bottom right (on top of "Tiếp tục →" and the timeline) to the page header
+const POS_KEY = "dflow.assistant.pos2";
 const SUGGESTIONS = [
   "Viết tập tiếp theo của loạt truyện cho kênh của mình rồi lên lịch 20h tối nay",
   "Viết 3 bài khác nhau về sản phẩm mới nhất cho kênh của mình, mỗi bài 1 ảnh",
@@ -47,8 +48,8 @@ function loadAnchor(): Anchor {
     const a = JSON.parse(window.localStorage.getItem(POS_KEY) || "null");
     if (a && (a.h === "l" || a.h === "r") && typeof a.ox === "number") return a as Anchor;
   } catch { /* private mode / bad value */ }
-  // bottom right, one row above the "việc đang chạy" badge (.bgt sits at right 22 / bottom 22)
-  return { h: "r", ox: 22, v: "b", oy: 22 + 58 };
+  // top right, inside the page header band: nothing else lives there, so it covers no button
+  return { h: "r", ox: 18, v: "t", oy: 7 };
 }
 function saveAnchor(p: Pos) {
   try { window.localStorage.setItem(POS_KEY, JSON.stringify(toAnchor(p))); } catch { /* private mode */ }
@@ -350,7 +351,7 @@ export function AssistantWidget() {
 
           <form className="dfa-input" onSubmit={(e) => { e.preventDefault(); void send(draft); }}>
             <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={2} disabled={sending}
-                      placeholder="VD: viết tập 7 loạt hệ mặt trời cho kênh Chúng ta hay tò mò, lên lịch 20h tối nay"
+                      placeholder="VD: thêm sản phẩm từ link này rồi tạo clip quảng cáo, viết bài đăng lên Page lúc 20h tối nay"
                       onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(draft); } }} />
             <button type="submit" className="dfa-send" disabled={sending || !draft.trim()} aria-label="Gửi">
               <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 12l15-7-5 15-3-6z" fill="currentColor" /></svg>

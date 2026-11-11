@@ -28,7 +28,7 @@ const errMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
 type LeftTab = "format" | "list" | "decor" | "blur" | "hl";
 type RightTab = "sub" | "cut" | "out";
 const LEFT_TABS: { key: LeftTab; icon: string; label: string }[] = [
-  { key: "format", icon: "🎞", label: "Khung & nền" },
+  { key: "format", icon: "🎞", label: "Khung nền" },
   { key: "list", icon: "📜", label: "Các câu" },
   { key: "decor", icon: "🎨", label: "Trang trí" },
   { key: "blur", icon: "🌫", label: "Làm mờ" },
@@ -132,6 +132,10 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
   const readOnly = working || exporting;
   // a part of "✂️ Cắt video": no voice-over, its own sound, subtitles optional
   const isCut = job.kind === "cut";
+
+  // The editor fills one screen: the page may still be scrolled from the form the seller came from (the bar with
+  // the export button ended up under the page header).
+  useEffect(() => { document.querySelector(".qt-content")?.scrollTo({ top: 0 }); }, [job.job_id]);
 
   // A render finished (or started over): the agent's copy is the truth again.
   const prevStatus = useRef(job.status);

@@ -1,7 +1,7 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { AccountPanel } from "../components/AccountPanel";
 import { UserChip } from "../components/UserChip";
-import { CreditBadge } from "../components/CreditBadge";
+import { FlowPill } from "../components/SetupGuide";
 import { useAccountStore } from "../store/account";
 import { hasFeature } from "../lib/features";
 import { useBoardStore } from "../store/board";
@@ -124,7 +124,7 @@ export function QuicktoolSidebar() {
 
       {/* the footer: credit + who is signed in, the Flow account, then © + version as one block */}
       <div className="qt-sidebar__foot">
-        <div className="qt-sidebar__credit"><CreditBadge /></div>
+        <div className="qt-sidebar__credit"><FlowPill /></div>
         <UserChip />
         <AccountPanel />
       </div>

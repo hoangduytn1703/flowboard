@@ -21,8 +21,17 @@ interface ToastState {
 let nextId = 1;
 const MAX_VISIBLE = 4;
 
-/** Every toast stays this long (the user asked for 1.5 s); hovering one holds it so a long message can still be read. */
+/** A short "done" toast stays this long (the user asked for 1.5 s); hovering holds it. Errors: see toastMs. */
 export const TOAST_MS = 1500;
+
+/**
+ * How long a toast stays. "Saved" needs a glance (TOAST_MS); an error or a warning has to be READ before it goes, so it
+ * gets reading time by its length — 1.5 s was gone before a sentence could be read, and the click looked like nothing.
+ */
+export function toastMs(kind: ToastKind, text: string): number {
+  if (kind === "success" || kind === "info") return text.length > 70 ? 3000 : TOAST_MS;
+  return Math.min(9000, Math.max(3500, 1500 + text.length * 55));
+}
 
 export const useToastStore = create<ToastState>((set, get) => ({
   toasts: [],
@@ -32,7 +41,7 @@ export const useToastStore = create<ToastState>((set, get) => ({
     // The same message again replaces the one on screen, so its timer restarts.
     const same = get().toasts.find((t) => t.kind === kind && t.message === text);
     const id = nextId++;
-    const item: ToastItem = { id, kind, message: text, duration: TOAST_MS };
+    const item: ToastItem = { id, kind, message: text, duration: toastMs(kind, text) };
     set((s) => ({ toasts: [...s.toasts.filter((t) => t !== same), item].slice(-MAX_VISIBLE) }));
     return id;
   },

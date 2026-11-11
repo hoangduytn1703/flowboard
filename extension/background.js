@@ -530,7 +530,15 @@ async function handleOpenFlowTab(msg) {
   try {
     const url = 'https://flow.google.com/' + (email ? '?authuser=' + encodeURIComponent(email) : '');
     const tabs = await chrome.tabs.query({ url: ['https://flow.google.com/*', 'https://labs.google/fx/*'] });
-    const existing = tabs.find((t) => t.active) || tabs[0];
+    // Prefer the tab that is inside a project: that is the one generation uses.
+    const existing = tabs.find((t) => t.url && t.url.includes('/project/')) || tabs.find((t) => t.active) || tabs[0];
+    if (existing && params && params.focus_only) {
+      // The setup guide only wants the tab in front of the user; navigating it home would close their project.
+      await chrome.tabs.update(existing.id, { active: true });
+      try { await chrome.windows.update(existing.windowId, { focused: true }); } catch (e) { /* ignore */ }
+      sendToAgent({ id, status: 200, data: JSON.stringify({ opened: true, url: existing.url, focused: true }) });
+      return;
+    }
     if (existing) {
       await chrome.tabs.update(existing.id, { url, active: true });
       try { await chrome.windows.update(existing.windowId, { focused: true }); } catch (e) { /* ignore */ }

@@ -1,0 +1,72 @@
+/* First-run guide (SetupGuide.tsx): the card on "Hôm nay", the dialog in front of a generation, the sidebar pill. */
+
+.su-card { border: 1px solid rgba(255, 106, 43, 0.45); border-radius: 16px; padding: 18px 20px 14px; margin-bottom: 18px;
+  background: linear-gradient(180deg, rgba(255, 106, 43, 0.09), rgba(255, 106, 43, 0.02) 60%), #14171e; }
+.su-card--ready { border-color: rgba(52, 211, 153, 0.4); background: linear-gradient(180deg, rgba(52, 211, 153, 0.08), rgba(52, 211, 153, 0.01) 60%), #14171e; }
+.su-card__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.su-card__title { margin: 0; font-size: 20px; font-weight: 800; color: #fff; }
+.su-card__sub { margin: 4px 0 0; font-size: 14.5px; color: #aab1c0; line-height: 1.5; }
+.su-hide { border: 0; background: none; color: #8b93a5; font: inherit; font-size: 13px; cursor: pointer; padding: 4px 6px; }
+.su-hide:hover { color: #fff; text-decoration: underline; }
+.su-bar { height: 6px; border-radius: 999px; background: rgba(255, 255, 255, 0.07); margin: 12px 0 2px; overflow: hidden; }
+.su-bar span { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #ff8a52, #ff6a2b); transition: width 0.4s ease; }
+
+.su-steps { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.su-step { display: flex; gap: 12px; padding: 9px 10px; border-radius: 12px; }
+.su-step__n { flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 800;
+  border: 1.5px solid #3a4050; color: #8b93a5; margin-top: 1px; }
+.su-step__body { min-width: 0; flex: 1; }
+.su-step__title { font-size: 15.5px; font-weight: 700; color: #e9ecf3; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.su-step__opt { font-size: 11.5px; font-weight: 700; color: #8b93a5; border: 1px solid #3a4050; border-radius: 999px; padding: 1px 8px; text-transform: uppercase; letter-spacing: 0.04em; }
+.su-step__detail { font-size: 14px; color: #9aa2b3; line-height: 1.5; margin-top: 1px; overflow-wrap: anywhere; }
+.su-step.is-done .su-step__n { border-color: #34d399; background: rgba(52, 211, 153, 0.15); color: #6ee7b7; }
+.su-step.is-done .su-step__title { color: #b8c0cf; font-weight: 600; }
+.su-step.is-now { background: rgba(255, 255, 255, 0.045); outline: 1px solid rgba(255, 106, 43, 0.4); }
+.su-step.is-now .su-step__n { border-color: #ff6a2b; background: #ff6a2b; color: #fff; }
+.su-step.is-now .su-step__title { color: #fff; }
+.su-step.is-now .su-step__detail { color: #c5cbd8; }
+.su-step.is-later { opacity: 0.6; }
+
+.su-act { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.su-btns { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.su-btns a.qt-btn { text-decoration: none; display: inline-flex; align-items: center; }
+.su-how { margin: 0; padding-left: 20px; font-size: 14px; color: #c5cbd8; line-height: 1.7; }
+.su-how code, .su-path { font-family: ui-monospace, Consolas, monospace; font-size: 13px; background: rgba(255, 255, 255, 0.07); border-radius: 6px; padding: 1px 6px; color: #ffd9c7; overflow-wrap: anywhere; }
+.su-link { border: 0; background: none; padding: 0 2px; font: inherit; font-size: 13px; font-weight: 700; color: #ff8a52; cursor: pointer; }
+.su-link:hover { text-decoration: underline; }
+.su-wait { margin: 0; font-size: 13.5px; color: #9aa2b3; line-height: 1.5; }
+.su-more summary { cursor: pointer; font-size: 13.5px; color: #9aa2b3; }
+.su-more summary:hover { color: #fff; }
+.su-paste { display: flex; gap: 8px; margin-top: 8px; }
+.su-paste input { flex: 1; min-width: 0; padding: 8px 10px; border-radius: 9px; border: 1px solid #3a4050; background: #0f1116; color: #fff; font: inherit; font-size: 14px; }
+.su-paste input:focus { outline: none; border-color: #ff6a2b; }
+
+.su-backdrop { z-index: 1260; }
+.project-modal.su-dialog { width: min(94vw, 620px); max-height: min(88vh, 760px); overflow-y: auto; display: flex; flex-direction: column; padding: 20px 22px 16px; }
+.su-dialog__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.su-dialog__head h2 { margin: 0; font-size: 19px; font-weight: 800; color: #fff; }
+.su-x { border: 0; background: none; color: #8b93a5; font-size: 24px; line-height: 1; cursor: pointer; padding: 0 4px; }
+.su-x:hover { color: #fff; }
+.su-dialog__sub { margin: 6px 0 0; font-size: 14.5px; color: #aab1c0; line-height: 1.5; }
+.su-dialog__foot { display: flex; justify-content: flex-end; margin-top: 12px; }
+
+.su-pill { width: 100%; display: flex; align-items: center; gap: 9px; text-align: left; padding: 8px 10px; border-radius: 12px; cursor: pointer;
+  font: inherit; color: #e9ecf3; border: 1px solid #2c313d; background: rgba(255, 255, 255, 0.03); }
+.su-pill:hover { border-color: #4a5266; }
+.su-pill__dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: #34d399; box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.18); }
+.su-pill__text { min-width: 0; flex: 1; display: flex; flex-direction: column; line-height: 1.25; }
+.su-pill__text b { font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.su-pill__text small { font-size: 12px; color: #8b93a5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.su-pill__go { flex: none; font-size: 12.5px; font-weight: 700; color: #8b93a5; }
+.su-pill--todo { border-color: rgba(255, 106, 43, 0.55); background: rgba(255, 106, 43, 0.1); }
+.su-pill--todo .su-pill__dot { background: #ff6a2b; box-shadow: 0 0 0 3px rgba(255, 106, 43, 0.22); animation: su-pulse 1.6s ease-in-out infinite; }
+.su-pill--todo .su-pill__go { color: #ff8a52; }
+.su-pill--low .su-pill__dot { background: #fbbf24; box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.2); }
+.su-pill--low .su-pill__text small { color: #fbbf24; }
+@keyframes su-pulse { 50% { box-shadow: 0 0 0 6px rgba(255, 106, 43, 0.05); } }
+@media (prefers-reduced-motion: reduce) { .su-pill--todo .su-pill__dot { animation: none; } .su-bar span { transition: none; } }
+
+/* The sidebar pill says what the old Flow account row said; the row (and its env-variable warning) stays for Canvas. */
+.qt-sidebar__foot .account-panel, .qt-sidebar__foot .account-panel__tier-warning { display: none; }
+
+.project-modal.su-dialog { height: auto; min-height: 0; }

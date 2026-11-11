@@ -244,7 +244,7 @@ export function ProductsPanel({
         setBusy("upload");
         try {
           const projectId = await useGenerationStore.getState().ensureProjectId();
-          if (!projectId) throw new Error("Chưa có Flow project");
+          if (!projectId) throw new Error("Chưa kết nối xong Google Flow — làm theo bảng hướng dẫn vừa mở rồi bấm lại.");
           const resp = await uploadImageFromUrl(r.image_url, projectId);
           setDraft((d) => ({ ...d, media_ids: [resp.media_id], aspect_ratio: resp.aspect_ratio ?? null }));
         } catch (err) {
@@ -353,7 +353,7 @@ export function ProductsPanel({
     setBusy("upload");
     try {
       const projectId = await useGenerationStore.getState().ensureProjectId();
-      if (!projectId) throw new Error("Chưa có Flow project — ghim một project trong Settings");
+      if (!projectId) throw new Error("Chưa kết nối xong Google Flow — làm theo bảng hướng dẫn vừa mở rồi bấm lại.");
       const room = MAX_PHOTOS - draft.media_ids.length;
       for (const file of Array.from(files).slice(0, Math.max(room, 0))) {
         const resp = await uploadImage(file, projectId);
@@ -713,10 +713,9 @@ export function ProductsPanel({
                 />
               </div>
               <p className="project-modal__hint">
-                Ảnh chính + tối đa 2 ảnh phụ (mặt sau, cận chất liệu…) sẽ được nối vào các cảnh.
-                <strong> Mẹo:</strong> ảnh chính nên là ảnh <strong>người cầm sản phẩm trên tay</strong> hoặc
-                để cạnh người — AI mới hiểu đúng kích thước; chụp sản phẩm một mình thì cỡ hay bị sai
-                (bánh, hộp, ốp lưng…).
+                Ảnh chính + tối đa 3 ảnh phụ (mặt sau, cận chất liệu…) — AI nhìn các ảnh này để vẽ đúng sản phẩm.
+                <strong> Mẹo:</strong> nên có một ảnh <strong>bàn tay cầm sản phẩm</strong> để AI hiểu đúng kích thước
+                (bánh, hộp, ốp lưng…). <strong>Tránh ảnh có mặt người mẫu thật</strong> của shop: Flow hay từ chối làm video từ mặt người thật.
               </p>
 
               <div className="tpl-inputs">
@@ -804,7 +803,7 @@ export function ProductsPanel({
 
               <label className="tpl-inputs__field">
                 <span className="product-form__label-row">
-                  Mô tả cho AI (tiếng Anh — đưa vào prompt)
+                  Mô tả cho AI (không bắt buộc — để trống hoặc gõ tiếng Việt, DFlow tự viết bản tiếng Anh)
                   <button
                     type="button"
                     className="product-form__mini-btn"
@@ -820,7 +819,7 @@ export function ProductsPanel({
                   value={draft.description}
                   maxLength={600}
                   rows={2}
-                  placeholder="a white cotton t-shirt with a small red logo on the chest"
+                  placeholder="VD: áo thun cotton trắng, logo đỏ nhỏ trước ngực"
                   onChange={(e) => set("description", e.target.value)}
                 />
               </label>
