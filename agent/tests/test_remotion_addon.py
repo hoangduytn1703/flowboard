@@ -131,6 +131,6 @@ def test_a_thin_outline_burns(tmp_path):
     dub.write_sub_ass([(0, 1, "Chào")], ass, width=320, height=240, style="outline",
                       layout={"subfont": {"border": 0.4, "border_color": "#ff0000"}})
     png = tmp_path / "f.png"
-    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-ss", "0.5", "-i", str(src), "-vf", f"ass={ass}", "-frames:v", "1",
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-ss", "0.5", "-i", str(src), "-vf", f"ass='{dub._filter_path(ass)}'", "-frames:v", "1",
                     str(png)], check=True)
     assert png.stat().st_size > 0
