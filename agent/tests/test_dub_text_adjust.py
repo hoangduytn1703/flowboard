@@ -48,7 +48,7 @@ def test_text_layers_are_kept_in_shape():
     ]})
     a, b, c, d = lay["texts"]
     assert a == {"role": "title", "on": True, "text": "Xin chào\nbạn", "x": 0.98, "y": 0.03, "size": 4.0, "color": "#ffffff",
-                 "bg": "#e5322d", "w": 0.86, "bold": True, "secs": 0.0}
+                 "bg": "#e5322d", "w": 0.86, "bold": True, "weight": 1.0, "italic": False, "underline": False, "secs": 0.0}
     assert b["role"] == "text" and b["on"] is False          # only one title
     assert c["role"] == "subtitle" and c["text"] == ""        # an empty slot stays in the editor…
     assert d["role"] == "text" and d["bg"] == "" and d["secs"] == 3.0
@@ -317,3 +317,30 @@ def test_the_export_plays_at_the_speed_set(tmp_path, monkeypatch):
     dub.retime_file(FFMPEG, copy, 3.0)
     again = probe_clip(copy)
     assert again is not None and 1.7 <= again.duration <= 2.4
+
+
+def test_volume_and_text_styles():
+    assert dub.normalize_layout(None)["volume"] == 1.0 and dub.normalize_layout({"volume": 5})["volume"] == 3.0
+    assert dub.normalize_layout({"volume": 0})["volume"] == 0.0 and dub.normalize_layout({"volume": "to"})["volume"] == 1.0
+    assert dub.volume_graph(1.0, "0:a:0") == ("", "0:a:0") and dub.volume_graph(2.0, None) == ("", None)
+    assert dub.volume_graph(0.5, "[a]") == ("[a]volume=0.50[avol]", "[avol]")
+    assert dub.volume_graph(2.0, "0:a:0") == ("[0:a:0]volume=2.00,alimiter=limit=0.97[avol]", "[avol]")
+    job = dub.Job(id="vol", url=None, source_media_id="m", sub_lang="none")
+    job.layout = {"volume": 1.5}
+    assert video_cut.needs_render(job)  # a louder clip is something to export
+    t = dub.normalize_texts([{"role": "title", "text": "Xin chào", "italic": True, "underline": True, "bold": False}])[0]
+    assert (t["bold"], t["italic"], t["underline"]) == (False, True, True)
+    assert dub.normalize_texts([{"role": "title", "text": "a"}])[0]["italic"] is False
+    styles, _ = dub.text_ass([t], 720, 1280, 10.0)
+    assert ",0,-1,-1,0,100,100," in styles[0]  # Bold, Italic, Underline, StrikeOut
+
+
+def test_bold_can_be_lighter_or_heavier():
+    mk = lambda **kw: dub.normalize_texts([{"role": "title", "text": "Đậm", **kw}])[0]
+    assert mk()["weight"] == 1.0 and mk(weight=9)["weight"] == 2.5 and mk(weight=0)["weight"] == 0.3
+    assert dub.text_weight(mk(), 40) == (True, 0.0) and dub.text_weight(mk(bold=False, weight=2), 40) == (False, 0.0)
+    assert dub.text_weight(mk(weight=0.5), 40) == (False, 0.44) and dub.text_weight(mk(weight=2), 40) == (True, 1.2)
+    styles, events = dub.text_ass([mk(weight=2)], 720, 1280, 5.0)
+    assert len(styles) == 2 and styles[1].startswith("Style: T0s,") and len(events) == 2 and ",T0s," in events[1]
+    styles, events = dub.text_ass([mk()], 720, 1280, 5.0)
+    assert len(styles) == 1 and len(events) == 1

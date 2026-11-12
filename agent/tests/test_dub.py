@@ -126,7 +126,7 @@ def test_timeline_places_pieces_at_their_start_times(tmp_path):
 def test_layout_moves_the_box_and_narrows_lines(tmp_path):
     lay = dub.normalize_layout({"x": 0.2, "y": 1.5, "scale": "1.4", "junk": 1})
     empty = {"blur": None, "blurs": [], "canvas": None, "frame": None, "mascot": None, "w": None, "subfont": None,
-             "texts": [], "adjust": None, "speed": 1.0}
+             "texts": [], "adjust": None, "speed": 1.0, "volume": 1.0}
     assert lay == {"x": 0.2, "y": 0.98, "scale": 1.4, **empty}
     assert dub.normalize_layout(None) == {**dub.DEFAULT_LAYOUT, **empty}
     text = dub.write_sub_ass([(0, 1, "A")], tmp_path / "l.ass", width=1000, height=2000, style="box_yellow",

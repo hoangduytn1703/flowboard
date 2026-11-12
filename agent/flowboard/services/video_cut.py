@@ -132,6 +132,7 @@ class Session:
     adjust: Optional[dict] = None
     #: "Tốc độ" set on the cut page (0.8–3): every part is exported that much faster / slower; None = untouched
     speed: Optional[float] = None
+    volume: Optional[float] = None
     #: the parts cut so far [{index, start, end, title, job_id, board_id, media_id}]
     parts: list[dict] = field(default_factory=list)
     #: "★ Mẫu chỉnh sửa" picked for this cut (dub.normalize_look_preset): every new part comes out in that look
@@ -145,7 +146,7 @@ class Session:
 
     SAVED = ("id", "run_id", "url", "source_media_id", "how", "prompt", "min_s", "max_s", "max_parts", "review", "channel_id",
              "status", "phase", "progress", "title", "duration_s", "width", "height", "language", "segments", "heard", "prepared",
-             "rows", "by", "note", "name", "title_lang", "ask", "hear", "hear_progress", "hear_error", "adjust", "speed", "parts", "look",
+             "rows", "by", "note", "name", "title_lang", "ask", "hear", "hear_progress", "hear_error", "adjust", "speed", "volume", "parts", "look",
              "error", "started_at", "position")
 
     def to_dict(self) -> dict[str, Any]:
@@ -834,7 +835,8 @@ def check_rows(s: Session, rows: Any) -> list[dict[str, Any]]:
     return rows
 
 
-def cut(s: Session, rows: Any, how: Optional[str] = None, adjust: Any = None, speed: Any = None) -> Session:
+def cut(s: Session, rows: Any, how: Optional[str] = None, adjust: Any = None, speed: Any = None,
+        volume: Any = None) -> Session:
     """Cut (or cut again) with these rows, in a thread. Part n reuses the project + clip of the old part n.
     ``how == "manual"``: the seller typed the rows (the card says "tự cắt")."""
     if s.status in BUSY:
@@ -850,6 +852,8 @@ def cut(s: Session, rows: Any, how: Optional[str] = None, adjust: Any = None, sp
     s.rows, s.by = rows, s.by or "manual"
     if speed is not None:  # the speed slider of the cut page (1 = back to the source's speed)
         s.speed = dub.normalize_speed(speed)
+    if volume is not None:  # the volume slider of the cut page (1 = back to the source's loudness)
+        s.volume = dub.normalize_volume(volume)
     if adjust is not None:  # the slider of the cut page ({} = back to untouched)
         s.adjust = dub.normalize_adjust(adjust) or {}
     if how == "manual":
@@ -906,6 +910,8 @@ def _cut_all(s: Session, rows: list[dict[str, Any]], *, base: int) -> None:
         s.adjust = None
     if s.speed == 1.0:
         s.speed = None
+    if s.volume == 1.0:
+        s.volume = None
     s.status, s.phase, s.progress, s.error = "done", f"Đã cắt {total} video", 100, None
 
 
@@ -955,6 +961,8 @@ def _part_job(s: Session, index: int, total: int, row: dict[str, Any], title: st
         job.layout = {**dub.normalize_layout(job.layout), "adjust": dub.normalize_adjust(s.adjust)}
     if s.speed is not None:  # "Tốc độ" of the cut page: every part, new or cut again
         job.layout = {**dub.normalize_layout(job.layout), "speed": dub.normalize_speed(s.speed)}
+    if s.volume is not None:  # "Âm lượng" of the cut page: every part, new or cut again
+        job.layout = {**dub.normalize_layout(job.layout), "volume": dub.normalize_volume(s.volume)}
     job.language = s.language
     job.duration_s = float(info.duration) if info else float(row["end"] - row["start"])
     job.width, job.height = (int(info.width), int(info.height)) if info else (s.width, s.height)

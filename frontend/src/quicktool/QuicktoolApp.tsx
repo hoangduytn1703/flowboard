@@ -35,7 +35,6 @@ import { ChannelsPage } from "./pages/ChannelsPage";
 import { AccountsPage } from "./pages/AccountsPage";
 import { AccountPage } from "./pages/AccountPage";
 import { DubPage } from "./pages/DubPage";
-import { CapcutPage } from "./pages/CapcutPage";
 import { CutPage } from "./pages/CutPage";
 import { ClipChannel } from "./steps/ClipChannel";
 import { ClipPost } from "./steps/ClipPost";
@@ -143,7 +142,8 @@ export function QuicktoolApp() {
           <Route path="/schedule" element={<FeatureGate feature="facebook" title="Lịch đăng"><SchedulePage /></FeatureGate>} />
           <Route path="/swipes" element={<FeatureGate feature="swipes" title="Mẫu đang hot"><SwipesPage /></FeatureGate>} />
           <Route path="/tools/dub" element={<FeatureGate feature="dub" title="Lồng tiếng video"><DubPage /></FeatureGate>} />
-          <Route path="/tools/capcut" element={<FeatureGate feature="capcut" title="Edit auto CapCut"><CapcutPage /></FeatureGate>} />
+          {/* Edit auto CapCut is hidden (lib/features HIDDEN): it will come back inside the video editor; pages/CapcutPage.tsx is kept */}
+          <Route path="/tools/capcut" element={<Navigate to="/tools/cut" replace />} />
           <Route path="/tools/cut" element={<FeatureGate feature="cut" title="Cắt video"><CutPage /></FeatureGate>} />
           <Route path="/settings" element={<Library templates={templates} />} />
           <Route path="/clips/:id/:step" element={<Wizard templates={templates} />} />

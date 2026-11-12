@@ -11,6 +11,7 @@ import { adjustCss, textLayerCss, textShownAt } from "../../../remotion/textLaye
 import { chunkAt, effectiveLayout, splitAll, W_MAX, W_MIN, type EditCue } from "./cues";
 import { DeviceChrome } from "./DeviceChrome";
 import { overlaps, platformOf, type PlatformKey, type Rect } from "./platforms";
+import { setGain } from "../../../lib/audioBoost";
 
 export type AudioMode = "dub" | "orig" | "off";
 export type Sel = { kind: "cue"; i: number } | { kind: "blur"; i: number } | { kind: "mascot" } | { kind: "frame" } | { kind: "style" }
@@ -107,12 +108,14 @@ export const EditorStage = forwardRef<StageHandle, {
   noSubs?: boolean;
   /** "Tốc độ" (layout.speed): how fast the preview plays — the export comes out at the same speed */
   rate?: number;
+  /** "Âm lượng" (layout.volume, 0–2): the preview plays it as loud (lib/audioBoost) */
+  volume?: number;
   /** a text layer was double-clicked: its words box takes the focus */
   onTextFocus?: (i: number) => void;
 }>(function EditorStage({
   src, srcW, srcH, voiceUrl, bgmUrl, player, frameW, frameH, cues, layout, style, highlights, selected, readOnly, audio,
   onLayout, onSubGeom, onSelect, onEditText, onTime, onPlaying, onDuration, onNatural, platform = null, noSubs = false,
-  rate = 1, onTextFocus,
+  rate = 1, volume = 1, onTextFocus,
 }, ref) {
   const area = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
@@ -188,9 +191,14 @@ export const EditorStage = forwardRef<StageHandle, {
     for (const m of [video.current, ...sideVideos(), ...audios()]) if (m) m.playbackRate = rate;
   }
   useEffect(applyRate, [rate]); // eslint-disable-line react-hooks/exhaustive-deps
+  function applyVolume() {
+    for (const m of [video.current, ...audios()]) setGain(m, volume);  // above 100 % goes through Web Audio
+  }
+  useEffect(applyVolume, [volume, audio, src]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function setPlay(p: boolean) { setPlaying(p); onPlaying(p); }
   function play() {
+    applyVolume();
     if (live) { playerRef.current?.play(); return; }
     const v = video.current;
     if (!v) return;

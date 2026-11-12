@@ -143,8 +143,8 @@ footer { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line)
       <div class="nope"><span class="chip chip--ok">Windows 10 / 11</span><span class="chip">RAM 8 GB trở lên</span><span class="chip">Ổ cứng trống ~10 GB</span></div>
     </div>
     <div class="get__btns">
-      <a class="btn btn--main" id="dl" href="https://github.com/hoangduytn1703/dflow-releases/releases/download/v1.8.5/DFlow_1.8.5_x64-setup.exe">⬇ Tải DFlow 1.8.5</a>
-      <a class="btn btn--ghost" href="https://github.com/hoangduytn1703/dflow-releases/releases/latest">Trang tải (luôn có bản mới nhất)</a>
+      <a class="btn btn--main" id="dl" href="https://dflow.io.vn/tai-app">⬇ Tải DFlow 1.8.5</a>
+      <a class="btn btn--ghost" href="https://dflow.io.vn/dang-ky">Tạo tài khoản (dùng thử)</a>
     </div>
   </div>
 
@@ -219,7 +219,7 @@ footer { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line)
   <section id="cap-nhat">
     <h2>Cập nhật bản mới</h2>
     <p>DFlow tự báo khi có bản mới (thanh <b>“🎉 Có bản DFlow …”</b> ở dưới màn hình). Bấm <b>⬇ Cập nhật ngay</b>: app tự tải, đóng, cài và mở lại; dữ liệu và đăng nhập giữ nguyên. Sau đó vào <code>chrome://extensions</code> bấm nút tải lại (↻) ở ô DFlow Bridge.</p>
-    <p>Kiểm tra tay: <span class="where">⚙ Cài đặt → 🖥 Máy này → ↻ Kiểm tra cập nhật</span>. Bản trước 1.5.1 chưa tự cập nhật được: tải file mới nhất ở <a href="https://github.com/hoangduytn1703/dflow-releases/releases/latest">trang tải</a> rồi cài đè.</p>
+    <p>Kiểm tra tay: <span class="where">⚙ Cài đặt → 🖥 Máy này → ↻ Kiểm tra cập nhật</span>. Bản trước 1.5.1 chưa tự cập nhật được: <a href="https://dflow.io.vn/tai-app">tải file mới nhất</a> rồi cài đè.</p>
   </section>
 
   <section id="them">
@@ -277,7 +277,8 @@ footer { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line)
 </div>
 
 <script>
-// The download button follows the newest release (the static 1.8.5 link stays if GitHub cannot be reached).
+// The download button follows the newest release; if GitHub cannot be asked it keeps dflow.io.vn/tai-app, which
+// redirects to the newest installer too (no link to the release page: its "Source code" zips confuse people).
 fetch("https://api.github.com/repos/hoangduytn1703/dflow-releases/releases/latest")
   .then(function (r) { return r.ok ? r.json() : null; })
   .then(function (rel) {

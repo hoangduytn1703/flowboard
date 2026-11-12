@@ -51,6 +51,14 @@ FEATURES: list[dict[str, str]] = [
      "desc": "Nút chat góc dưới phải: gõ một câu, trợ lý làm giúp"},
 ]
 FEATURE_KEYS = [f["key"] for f in FEATURES]
+#: Features taken out of sight for now: no menu, not listed in the plans table or the upgrade screen. Their keys
+#: stay valid (signed plans may carry them) and their routes keep working. "capcut": to come back inside the video
+#: editor instead of as a page of its own.
+HIDDEN_FEATURES = {"capcut"}
+
+
+def shown_features() -> list[dict[str, str]]:
+    return [f for f in FEATURES if f["key"] not in HIDDEN_FEATURES]
 
 TRIAL_ID = "trial"
 TRIAL_DAYS = [3, 7, 14, 30]

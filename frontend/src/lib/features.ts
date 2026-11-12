@@ -9,7 +9,12 @@ import { useAccountStore } from "../store/account";
 export type FeatureKey =
   | "auto_clip" | "dub" | "cut" | "capcut" | "clean" | "posts" | "facebook" | "autopilot" | "swipes" | "assistant";
 
+/** Taken out of sight for now (agent: plans.HIDDEN_FEATURES) — no menu, no page, whatever the plan says.
+ *  "capcut" is to come back inside the video editor. */
+const HIDDEN: FeatureKey[] = ["capcut"];
+
 export function hasFeature(me: AccountMe | null, key: FeatureKey): boolean {
+  if (HIDDEN.includes(key)) return false;
   if (!me || !me.auth || !me.features) return true; // no login / an older agent: nothing is gated
   return me.features.includes(key);
 }

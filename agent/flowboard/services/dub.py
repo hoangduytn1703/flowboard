@@ -359,7 +359,7 @@ TEXT_DEFAULTS: dict[str, dict[str, Any]] = {
 
 
 def _norm_text(raw: Any) -> Optional[dict[str, Any]]:
-    """``{role, on, text, x, y, size, color, bg, w, bold, secs}`` — ``size`` × the subtitle base size, ``bg`` "" = no
+    """``{role, on, text, x, y, size, color, bg, w, bold, italic, underline, secs}`` — ``size`` × the subtitle base size, ``bg`` "" = no
     box (the text gets an outline), ``w`` the widest a line may be (fraction of the frame), ``secs`` 0 = the whole
     clip, else only its first seconds. An empty ``text`` is kept (the slot stays in the editor) and not drawn."""
     if not isinstance(raw, dict):
@@ -375,7 +375,23 @@ def _norm_text(raw: Any) -> Optional[dict[str, Any]]:
             "size": _num(raw, "size", 0.5, 4.0, d["size"]),
             "color": dub_decor._hex(raw.get("color"), d["color"]), "bg": dub_decor._hex(bg, "") if bg else "",
             "w": _num(raw, "w", 0.2, 0.96, 0.86), "bold": bool(raw.get("bold", True)),
+            "weight": _num(raw, "weight", TEXT_WEIGHT_MIN, TEXT_WEIGHT_MAX, 1.0),
+            "italic": bool(raw.get("italic", False)), "underline": bool(raw.get("underline", False)),
             "secs": _num(raw, "secs", 0.0, 3600.0, 0.0)}
+
+
+def text_weight(t: dict[str, Any], font: float) -> tuple[bool, float]:
+    """``(bold face, extra stroke px)`` of a text layer — "Độ đậm" (``weight``, only when bold is on): 1 = the bold
+    face as it is; below = the regular face thickened part of the way; above = the bold face thickened further.
+    The stroke is drawn in the text's own colour (mirrors ``textLayer.ts textWeight``)."""
+    if not t.get("bold"):
+        return False, 0.0
+    w = float(t.get("weight") or 1.0)
+    if abs(w - 1.0) < 0.02:
+        return True, 0.0
+    if w < 1.0:
+        return False, round(w * font * 0.022, 2)
+    return True, round((w - 1.0) * font * 0.03, 2)
 
 
 def normalize_texts(raw: Any) -> list[dict[str, Any]]:
@@ -441,6 +457,33 @@ def normalize_speed(value: Any) -> float:
     return 1.0 if abs(v - 1.0) < 0.005 else v
 
 
+#: "Âm lượng": the exported sound this much louder / quieter (0 = silent, 1 = as it is, 3 = three times as loud)
+VOLUME_MAX = 3.0
+#: "Độ đậm" of a bold text layer (1 = the bold face as it is)
+TEXT_WEIGHT_MIN, TEXT_WEIGHT_MAX = 0.3, 2.5
+
+
+def normalize_volume(value: Any) -> float:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return 1.0
+    if v != v:  # NaN
+        return 1.0
+    v = round(min(VOLUME_MAX, max(0.0, v)), 2)
+    return 1.0 if abs(v - 1.0) < 0.005 else v
+
+
+def volume_graph(volume: float, alabel: Optional[str]) -> tuple[str, Optional[str]]:
+    """``(graph, audio label)``: the finished sound ``alabel`` (a filter label or a stream like "0:a:0"; None =
+    silent) at ``volume``. Louder than the source is kept from clipping by a limiter."""
+    if not alabel or volume == 1.0:
+        return "", alabel
+    src = alabel if alabel.startswith("[") else f"[{alabel}]"
+    limit = ",alimiter=limit=0.97" if volume > 1.0 else ""
+    return f"{src}volume={volume:.2f}{limit}[avol]", "[avol]"
+
+
 def atempo_chain(speed: float) -> str:
     """ffmpeg ``atempo`` for ``speed`` (one filter handles 0.5–2: above that, two in a row)."""
     return f"atempo={speed:.3f}" if speed <= 2.0 else f"atempo=2.0,atempo={speed / 2.0:.3f}"
@@ -459,18 +502,27 @@ def speed_graph(speed: float, fps: str, vlabel: str, alabel: Optional[str]) -> t
     return ";".join(parts), "[vsp]", out_a
 
 
-def retime_file(ffmpeg: str, path: Path, speed: float, tag: str = "") -> None:
-    """Re-time a finished mp4 in place (the Remotion engine draws in the source's time; the speed goes on after)."""
+def retime_file(ffmpeg: str, path: Path, speed: float, tag: str = "", volume: float = 1.0) -> None:
+    """Re-time a finished mp4 in place and set its loudness (the Remotion engine draws in the source's time and
+    sound; the speed and the volume go on after). Only the volume = the picture is copied, not encoded again."""
     info = probe_clip(path)
     if info is None:
         raise DubError("Không đọc được video vừa xuất để đổi tốc độ")
-    graph, v, a = speed_graph(speed, probe_fps(path), "[0:v]", "0:a:0" if info.has_audio else None)
+    vgraph, a = volume_graph(volume, "0:a:0" if info.has_audio else None)
     tmp = path.with_suffix(".speed.mp4")
-    cmd = [ffmpeg, "-y", "-v", "error", "-i", str(path), "-filter_complex", graph, "-map", v]
-    if a:
-        cmd += ["-map", a, "-c:a", "aac", "-b:a", "160k"]
-    cmd += [*_encode_args(ffmpeg), "-pix_fmt", "yuv420p", *(["-metadata", f"comment={tag}"] if tag else []),
-            "-movflags", "+faststart", str(tmp)]
+    meta = [*(["-metadata", f"comment={tag}"] if tag else []), "-movflags", "+faststart", str(tmp)]
+    if speed == 1.0:
+        if not vgraph:
+            return
+        cmd = [ffmpeg, "-y", "-v", "error", "-i", str(path), "-filter_complex", vgraph, "-map", "0:v:0", "-map", a,
+               "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", *meta]
+    else:
+        graph, v, a = speed_graph(speed, probe_fps(path), "[0:v]", a)
+        cmd = [ffmpeg, "-y", "-v", "error", "-i", str(path), "-filter_complex", f"{vgraph};{graph}" if vgraph else graph,
+               "-map", v]
+        if a:
+            cmd += ["-map", a, "-c:a", "aac", "-b:a", "160k"]
+        cmd += [*_encode_args(ffmpeg), "-pix_fmt", "yuv420p", *meta]
     err = _run(cmd, ENCODE_TIMEOUT_S)
     if err or not tmp.is_file() or tmp.stat().st_size == 0:
         tmp.unlink(missing_ok=True)
@@ -524,9 +576,11 @@ def normalize_layout(raw: Any) -> dict[str, Any]:
     out["texts"] = []     # "🔤 Chữ": the title / second title / free text drawn on the picture
     out["adjust"] = None  # brightness / contrast / saturation of the video itself
     out["speed"] = 1.0    # the export plays this much faster / slower (0.8–3)
+    out["volume"] = 1.0   # the export's sound this much louder / quieter (0–3)
     out["subfont"] = None # ffmpeg subtitles: bold, outline / box thickness and colours (None = the style's own)
     if isinstance(raw, dict):
         out["speed"] = normalize_speed(raw.get("speed"))
+        out["volume"] = normalize_volume(raw.get("volume"))
         out["subfont"] = normalize_subfont(raw.get("subfont"))
         out["texts"] = normalize_texts(raw.get("texts"))
         out["adjust"] = normalize_adjust(raw.get("adjust"))
@@ -905,22 +959,27 @@ def text_ass(texts: list[dict[str, Any]], width: int, height: int, total_s: floa
     for i, t in enumerate(texts):
         font = text_font_px(height, t["size"])
         primary = _ass_colour(t["color"])
-        bold = -1 if t["bold"] else 0
+        face, stroke = text_weight(t, font)
+        bold = f'{-1 if face else 0},{-1 if t.get("italic") else 0},{-1 if t.get("underline") else 0}'  # B, I, U
         if t["bg"]:
             box = _ass_colour(t["bg"])
-            styles.append(f"Style: T{i},Arial,{font},{primary},&H000000FF,{box},{box},{bold},0,0,0,100,100,0,0,3,"
+            styles.append(f"Style: T{i},Arial,{font},{primary},&H000000FF,{box},{box},{bold},0,100,100,0,0,3,"
                           f"{max(6, font // 4)},0,5,0,0,0,1")
         else:
             edge = "&H00000000" if _is_light(t["color"]) else "&H00FFFFFF"
-            styles.append(f"Style: T{i},Arial,{font},{primary},&H000000FF,{edge},&H80000000,{bold},0,0,0,100,100,0,0,1,"
-                          f"{max(2, font // 11)},1,5,0,0,0,1")
+            styles.append(f"Style: T{i},Arial,{font},{primary},&H000000FF,{edge},&H80000000,{bold},0,100,100,0,0,1,"
+                          f"{max(2, font // 11) + stroke:g},1,5,0,0,0,1")
+        if stroke > 0:  # "Độ đậm": the same words once more on top, with a stroke in their own colour
+            styles.append(f"Style: T{i}s,Arial,{font},{primary},&H000000FF,{primary},&HFF000000,{bold},0,100,100,0,0,1,"
+                          f"{stroke:g},0,5,0,0,0,1")
         chars = max(4, int(width * t["w"] / (font * 0.52)))
         body = "\\N".join(x.replace("{", "(").replace("}", ")") for x in wrap_text(t["text"], chars))
         end = min(total_s, t["secs"]) if t["secs"] > 0 and total_s > 0 else (total_s or t["secs"] or 36000.0)
         if not body or end <= 0.05:
             continue
-        events.append(f"Dialogue: 2,{_ass_time(0)},{_ass_time(end)},T{i},,0,0,0,,"
-                      f"{{\\an5\\pos({round(width * t['x'])},{round(height * t['y'])})}}{body}")
+        for layer, name in ((2, f"T{i}"), (3, f"T{i}s")) if stroke > 0 else ((2, f"T{i}"),):
+            events.append(f"Dialogue: {layer},{_ass_time(0)},{_ass_time(end)},{name},,0,0,0,,"
+                          f"{{\\an5\\pos({round(width * t['x'])},{round(height * t['y'])})}}{body}")
     return styles, events
 
 
@@ -1825,6 +1884,9 @@ def _render(job: Job) -> None:
                           canvas_bg_index=canvas_bg_index)
     agraph, amap = (audio_mix_sub(info.has_audio, sfx_index) if sub_only else audio_mix(bgm is not None, sfx_index))
     speed = normalize_layout(job.layout)["speed"]
+    volgraph, amap = volume_graph(normalize_layout(job.layout)["volume"], amap)  # "Âm lượng": the whole mix
+    if volgraph:
+        agraph = f"{agraph};{volgraph}" if agraph else volgraph
     vmap = "[v]"
     if speed != 1.0:  # "Tốc độ": the finished picture and sound together, last
         sgraph, vmap, amap = speed_graph(speed, probe_fps(src), "[v]", amap)
@@ -2056,10 +2118,10 @@ def _render_remotion(job: Job, ffmpeg: str, src: Path, voice: Optional[Path], bg
         dub_remotion.render(spec, progress=prog, stop=lambda: job.stop)
     except dub_remotion.RemotionError as exc:
         raise DubError(str(exc)) from exc
-    speed = normalize_layout(job.layout)["speed"]
-    if speed != 1.0:
-        _set(job, "Đang đổi tốc độ video", span[1])
-        retime_file(ffmpeg, dst, speed)
+    speed, volume = normalize_layout(job.layout)["speed"], normalize_layout(job.layout)["volume"]
+    if speed != 1.0 or volume != 1.0:
+        _set(job, "Đang đổi tốc độ video" if speed != 1.0 else "Đang chỉnh âm lượng", span[1])
+        retime_file(ffmpeg, dst, speed, volume=volume)
     _tag_file(ffmpeg, dst, output_tag(job))
     _record_output(job, dst, media_id)
     with get_session() as s:

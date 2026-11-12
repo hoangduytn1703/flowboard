@@ -207,7 +207,7 @@ def _plans_payload() -> dict:
         if a["role"] != accounts.ROLE_ADMIN:
             pid = a["plan"] if a["plan"] in {p["id"] for p in data["plans"]} else data["default"]
             counts[pid] = counts.get(pid, 0) + 1
-    return {**data, "features": plans.FEATURES, "counts": counts, "max_plans": plans.MAX_PLANS,
+    return {**data, "features": plans.shown_features(), "counts": counts, "max_plans": plans.MAX_PLANS,
             "trial_id": plans.TRIAL_ID, "trial_days": plans.TRIAL_DAYS, "term_months": plans.TERM_MONTHS,
             "signed": licensing.doc_state(plans.SETTING_KEY), "can_sign": licensing.can_sign()}
 

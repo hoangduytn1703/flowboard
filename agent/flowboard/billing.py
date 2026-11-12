@@ -200,7 +200,7 @@ def offer(user: dict) -> dict[str, Any]:
         # the trial is never bought: only the plans after it are offered
         "plans": [{**p, "terms": p.get("terms") or [], "current": p["id"] == current["id"]}
                   for p in data["plans"] if p["id"] != plans.TRIAL_ID],
-        "features": plans.FEATURES,
+        "features": plans.shown_features(),
         "ready": ready(settings) and ok,
         "note": settings["note"] if ok else UNTRUSTED,
         "pending": pending_for(user["username"]),

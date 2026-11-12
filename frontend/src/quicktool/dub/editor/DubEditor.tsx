@@ -4,7 +4,7 @@ import { announceRunning } from "../../../components/BackgroundTasks";
 import { detectBands } from "../../../api/clean";
 import {
   canvasSize, carryTexts, checkDubNames, DEFAULT_BLUR, dubFilmstripUrl, dubSubtitleLines, dubWaveUrl, layoutBlurs, linesAreVietnamese, MAX_BLURS,
-  normHighlights, normLayout, normNames, normSpeed, pickDubHighlights, renderDub, SPEED_MARKS, SPEED_MAX, SPEED_MIN, speedLabel, stopDub, subLangName,
+  normHighlights, normLayout, normNames, normSpeed, normVolume, pickDubHighlights, renderDub, SPEED_MARKS, SPEED_MAX, SPEED_MIN, speedLabel, VOLUME_MARKS, VOLUME_MAX, volumeLabel, stopDub, subLangName,
   withBlurs, withTextSlots,
   type DubEngine, type DubHighlights, type DubJob, type DubLayout, type DubName, type DubRender, type DubStatus, type DubText, type SubLang,
 } from "../../../api/dub";
@@ -465,6 +465,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
   const layoutDirty = !sameJson(doc.layout, jobLayout(job));
   // "Tốc độ": what the preview plays at IS what the export comes out at
   const speed = normSpeed(doc.layout.speed);
+  const volume = normVolume(doc.layout.volume);
   const styleDirty = doc.style !== job.style;
   const hlDirty = !sameJson(doc.highlights, normHighlights(job.highlights));
   const langDirty = doc.lang !== (job.sub_lang ?? "vi");
@@ -630,7 +631,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
     const nTexts = (doc.layout.texts ?? []).filter((x) => x.on).length;
     const parts = ["vị trí / cỡ / độ rộng phụ đề", "kiểu chữ", nBlurs ? `${nBlurs} vùng mờ` : "",
                    nTexts ? `${nTexts} lớp chữ (tiêu đề của video nào theo video đó)` : "", doc.layout.adjust ? "sáng tối / màu" : "",
-                   speed !== 1 ? `tốc độ ${speedLabel(speed)}` : "",
+                   speed !== 1 ? `tốc độ ${speedLabel(speed)}` : "", volume !== 1 ? `âm lượng ${volumeLabel(volume)}` : "",
                    doc.layout.canvas ? `khung xuất ${doc.layout.canvas.aspect}` : "", doc.layout.frame ? "khung" : "",
                    doc.layout.mascot?.media_id ? "nhân vật" : "", doc.highlights.on ? "nhấn chữ quan trọng (AI chọn chỗ riêng cho từng clip)" : "",
                    isCut ? (doc.lang === "none" ? "tắt phụ đề" : `phụ đề ${subLangName(doc.lang, job.language)}`) : ""].filter(Boolean).join(", ");
@@ -911,6 +912,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
             onNatural={(w, h) => setNatural({ w, h })}
             platform={platform}
             rate={speed}
+            volume={volume}
             onTextFocus={(i) => { select({ kind: "text", i }); setFocusLayer((n) => n + 1); }}
           />
           <div className="dx__transport">
@@ -926,6 +928,12 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
                 <span>Tốc độ <b>{speedLabel(speed)}</b>{speed !== 1 && total ? <small> · xuất dài {clock(total / speed, false)}</small> : null}</span>
                 <TickRange min={SPEED_MIN} max={SPEED_MAX} step={0.1} value={speed} every={0.1} marks={SPEED_MARKS} disabled={readOnly} ariaLabel="Tốc độ video"
                            onChange={(v) => setLayout({ ...docRef.current.layout, speed: normSpeed(v) }, "speed")} />
+              </label>
+              <label className={`dx__speed${volume !== 1 ? " is-on" : ""}`}
+                     title="Âm lượng của video XUẤT RA: 0 = tắt tiếng, 100% = như gốc, 300% = to gấp ba. Nghe thử cũng to / nhỏ theo">
+                <span>Âm lượng <b>{volumeLabel(volume)}</b></span>
+                <TickRange min={0} max={VOLUME_MAX} step={0.05} value={volume} every={0.1} marks={VOLUME_MARKS} disabled={readOnly} ariaLabel="Âm lượng"
+                           onChange={(v) => setLayout({ ...docRef.current.layout, volume: normVolume(v) }, "volume")} />
               </label>
             </div>
             <div className="dx__tgroup dx__tgroup--end">

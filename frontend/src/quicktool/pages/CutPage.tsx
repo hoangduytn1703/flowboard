@@ -4,7 +4,7 @@ import { announceRunning } from "../../components/BackgroundTasks";
 import { askConfirm } from "../../components/Dialogs";
 import { exportsZipUrl } from "../../api/client";
 import {
-  dubSubtitleLines, getDefaultLook, getDubJob, getDubStatus, linksIn, listLookPresets, normAdjust, normSpeed, renderDub, SPEED_MARKS, SPEED_MAX, SPEED_MIN, speedLabel, subLangName, uploadDubVideo,
+  dubSubtitleLines, getDefaultLook, getDubJob, getDubStatus, linksIn, listLookPresets, normAdjust, normSpeed, normVolume, renderDub, SPEED_MARKS, SPEED_MAX, SPEED_MIN, speedLabel, VOLUME_MARKS, VOLUME_MAX, volumeLabel, subLangName, uploadDubVideo,
   type DecorPreset, type DubCutRow, type DubJob, type DubRender, type DubStatus,
 } from "../../api/dub";
 import { TickRange } from "../../components/TickRange";
@@ -23,6 +23,7 @@ import { newRow, PartsTable, planParts, rowsFrom, type PlanRow } from "../cut/Pa
 import { clockText } from "../cut/MinSec";
 import { toast } from "../../store/toast";
 import "../dub.css";
+import { setGain } from "../../lib/audioBoost";
 import "../posts.css";
 import "../cut.css";
 
@@ -623,10 +624,12 @@ function RowsEditor({ s, initial, onCancel, onDone, prompts, onPrompts, langs, p
   const [note, setNote] = useState(s.note);
   // "Tốc độ" and "Sáng / tối": previewed on the source right here, put on every part when cut (and exported so)
   const [rate, setRate] = useState(() => normSpeed(s.speed ?? 1));
+  const [vol, setVol] = useState(() => normVolume(s.volume ?? 1));
   const [bright, setBright] = useState(() => normAdjust(s.adjust ?? null)?.brightness ?? 1);
   const hearing = isHearing(s);
   const video = useRef<HTMLVideoElement>(null);
   useEffect(() => { if (video.current) video.current.playbackRate = rate; }, [rate]);
+  useEffect(() => { setGain(video.current, vol); }, [vol]);  // above 100 % goes through Web Audio
   const stopAt = useRef<number | null>(null);
   const dur = s.duration_s;
   const len = custom ? { min: cleanMin(customMin) * 60, max: cleanMin(customMin) * 60 } : LENGTHS.find((l) => l.key === lenKey) ?? LENGTHS[1];
@@ -697,7 +700,7 @@ function RowsEditor({ s, initial, onCancel, onDone, prompts, onPrompts, langs, p
       const adjust = normAdjust({ brightness: bright, contrast: 1, saturation: 1 });
       const hadAdjust = !!normAdjust(s.adjust ?? null);
       await cutNow(s.id, plan.parts, fromAi ? undefined : "manual", adjust ?? (hadAdjust ? {} : undefined),
-                   rate !== 1 || (s.speed ?? 1) !== 1 ? rate : undefined);
+                   rate !== 1 || (s.speed ?? 1) !== 1 ? rate : undefined, vol !== 1 || (s.volume ?? 1) !== 1 ? vol : undefined);
       announceRunning();
       toast.success(`Đang cắt ${plan.parts.length} video…`);
       onDone();
@@ -715,12 +718,16 @@ function RowsEditor({ s, initial, onCancel, onDone, prompts, onPrompts, langs, p
           <div className="ct-rows__watch">
             <video ref={video} className="ct-rows__video" src={s.source_url} controls playsInline preload="metadata"
                    style={Math.abs(bright - 1) >= 0.005 ? { filter: `brightness(${bright})` } : undefined}
-                   onLoadedMetadata={(e) => { e.currentTarget.playbackRate = rate; }}
-                   onPlay={(e) => { e.currentTarget.playbackRate = rate; }}
+                   onLoadedMetadata={(e) => { e.currentTarget.playbackRate = rate; setGain(e.currentTarget, vol); }}
+                   onPlay={(e) => { e.currentTarget.playbackRate = rate; setGain(e.currentTarget, vol); }}
                    onTimeUpdate={(e) => { const t = e.currentTarget.currentTime; if (stopAt.current !== null && t >= stopAt.current) { e.currentTarget.pause(); stopAt.current = null; } }} />
             <label className="ct-rows__bright" title="Tốc độ video: xem ở đây nhanh / chậm thế nào thì mọi đoạn cắt ra được XUẤT đúng tốc độ đó (hình và tiếng cùng đổi). 1× = như gốc; sửa tiếp được trong ✏️ Chỉnh">
               <span>Tốc độ <small>{speedLabel(rate)}{rate !== 1 ? " · các đoạn cắt xuất ra theo tốc độ này" : " · như gốc"}</small></span>
               <TickRange min={SPEED_MIN} max={SPEED_MAX} step={0.1} value={rate} every={0.1} marks={SPEED_MARKS} disabled={!!busy} onChange={(v) => setRate(normSpeed(v))} ariaLabel="Tốc độ video" />
+            </label>
+            <label className="ct-rows__bright" title="Âm lượng: mọi đoạn cắt ra được XUẤT to / nhỏ đúng mức này (0 = tắt tiếng, 100% = như gốc, 300% = to gấp ba). Nghe thử ở đây cũng to / nhỏ theo; sửa tiếp được trong ✏️ Chỉnh">
+              <span>Âm lượng <small>{volumeLabel(vol)}{vol !== 1 ? " · áp cho các đoạn cắt" : " · như gốc"}</small></span>
+              <TickRange min={0} max={VOLUME_MAX} step={0.05} value={vol} every={0.1} marks={VOLUME_MARKS} disabled={!!busy} onChange={(v) => setVol(normVolume(v))} ariaLabel="Âm lượng" />
             </label>
             <label className="ct-rows__bright" title="Làm sáng / tối video: mọi đoạn cắt ra đều theo mức này (sửa tiếp được trong ✏️ Chỉnh → Khung nền)">
               <span>Sáng / tối <small>{Math.round(bright * 100)}%{Math.abs(bright - 1) >= 0.005 ? " · áp cho các đoạn cắt" : ""}</small></span>

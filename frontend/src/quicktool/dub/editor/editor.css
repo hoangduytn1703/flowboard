@@ -626,3 +626,11 @@
 .dx-insp__colors { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 13px; }
 .dx-insp__colors label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .dx-insp__colors input[type="color"] { width: 30px; height: 24px; padding: 0; border: 1px solid var(--border); border-radius: 5px; background: none; cursor: pointer; }
+
+/* "🔤 Chữ": B / I / U */
+.dx-text__biu { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+.dx-text__biu button { width: 30px; height: 26px; padding: 0; font: inherit; font-size: 14px; color: var(--dx-text, #e8e8ee); background: none; border: 0; border-left: 1px solid var(--border); cursor: pointer; }
+.dx-text__biu button:first-child { border-left: 0; }
+.dx-text__biu button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.08); }
+.dx-text__biu button.is-on { background: var(--qt-accent, #ff6a2b); color: #fff; }
+.dx-text__biu button:disabled { opacity: 0.5; cursor: default; }

@@ -78,6 +78,8 @@ class CutBody(BaseModel):
     adjust: Optional[dict[str, Any]] = None
     #: "Tốc độ" of the preview (0.8–3): every part is exported at that speed (1 = the source's)
     speed: Optional[float] = Field(default=None, ge=0.1, le=10)
+    #: "Âm lượng" of the preview (0–2): every part is exported that loud (1 = the source's)
+    volume: Optional[float] = Field(default=None, ge=0, le=10)
 
 
 class HearBody(BaseModel):
@@ -171,7 +173,7 @@ async def suggest(session_id: str, body: SuggestBody) -> dict[str, Any]:
 def cut(session_id: str, body: CutBody) -> dict[str, Any]:
     s = _session(session_id)
     try:
-        video_cut.cut(s, [r.model_dump() for r in body.rows], how=body.how, adjust=body.adjust, speed=body.speed)
+        video_cut.cut(s, [r.model_dump() for r in body.rows], how=body.how, adjust=body.adjust, speed=body.speed, volume=body.volume)
     except video_cut.CutError as exc:
         raise HTTPException(400, str(exc))
     return video_cut.public(s, brief=True)

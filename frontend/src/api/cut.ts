@@ -89,6 +89,8 @@ export interface CutSession {
   adjust?: Partial<DubAdjust> | null;
   /** "Tốc độ" set on the cut page: every part is exported that much faster / slower */
   speed?: number | null;
+  /** "Âm lượng" set on the cut page: every part is exported that loud (0–2) */
+  volume?: number | null;
   /** one title for the whole video, when the request asked for one ("Name") */
   name?: string;
   /** the language the AI writes the titles in ("" = what the request says, else Vietnamese) */
@@ -131,8 +133,9 @@ export const startCut = (body: CutStart) => post<{ run_id: string; sessions: Cut
 export const suggestCut = (id: string, body: { how: CutHow; prompt: string; min_s: number; max_s: number; max_parts: number; title_lang?: string }) =>
   post<{ rows: DubCutRow[]; by: string; note: string; name?: string }>(`/api/cut/sessions/${id}/suggest`, body);
 /** ``how: "manual"`` = the seller typed these rows (the card then says "tự cắt") */
-export const cutNow = (id: string, rows: DubCutRow[], how?: "manual", adjust?: DubAdjust | Record<string, never>, speed?: number) =>
-  post<CutSession>(`/api/cut/sessions/${id}/cut`, { rows, ...(how ? { how } : {}), ...(adjust ? { adjust } : {}), ...(speed !== undefined ? { speed } : {}) });
+export const cutNow = (id: string, rows: DubCutRow[], how?: "manual", adjust?: DubAdjust | Record<string, never>, speed?: number, volume?: number) =>
+  post<CutSession>(`/api/cut/sessions/${id}/cut`, { rows, ...(how ? { how } : {}), ...(adjust ? { adjust } : {}), ...(speed !== undefined ? { speed } : {}),
+                                                    ...(volume !== undefined ? { volume } : {}) });
 /** Hear the words now (Whisper, in the background) / stop hearing. */
 export const hearCut = (id: string, on: boolean) => post<CutSession>(`/api/cut/sessions/${id}/hear`, { on });
 export const isHearing = (s: CutSession) => s.hear === "wait" || s.hear === "run";

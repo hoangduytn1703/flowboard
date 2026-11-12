@@ -18,6 +18,9 @@ export interface DubTextSpec {
   /** the widest a line may be, fraction of the frame width */
   w: number;
   bold: boolean;
+  weight?: number;
+  italic?: boolean;
+  underline?: boolean;
   /** 0 = the whole clip, else only its first seconds */
   secs: number;
 }
@@ -33,6 +36,14 @@ export function isLight(hex: string): boolean {
 
 export const textFontPx = (frameH: number, size: number) => Math.max(8, frameH * 0.036 * size);
 
+/** ``[bold face, extra stroke px]`` — mirrors services/dub.text_weight. */
+export function textWeight(x: DubTextSpec, font: number): [boolean, number] {
+  if (!x.bold) return [false, 0];
+  const w = x.weight ?? 1;
+  if (Math.abs(w - 1) < 0.02) return [true, 0];
+  return w < 1 ? [false, w * font * 0.022] : [true, (w - 1) * font * 0.03];
+}
+
 /** Is this layer on the picture at ``t`` seconds? */
 export const textShownAt = (x: DubTextSpec, t: number) => x.on !== false && !!x.text.trim() && (x.secs <= 0 || t < x.secs);
 
@@ -40,11 +51,16 @@ export const textShownAt = (x: DubTextSpec, t: number) => x.on !== false && !!x.
 export function textLayerCss(x: DubTextSpec, frameH: number, fontFamily = "Arial, Helvetica, sans-serif"): CSSProperties {
   const font = textFontPx(frameH, x.size);
   const edge = isLight(x.color) ? "#000" : "#fff";
-  const o = Math.max(1, font / 11);
+  const [face, stroke] = textWeight(x, font);
+  const o = Math.max(1, font / 11) + stroke;
   return {
     position: "absolute", left: `${x.x * 100}%`, top: `${x.y * 100}%`, transform: "translate(-50%, -50%)",
     width: "max-content", maxWidth: `${x.w * 100}%`, boxSizing: "border-box",
-    fontFamily, fontSize: font, fontWeight: x.bold ? 700 : 400, lineHeight: 1.25, textAlign: "center",
+    fontFamily, fontSize: font, fontWeight: face ? 700 : 400,
+    // a stroke is centred on the outline: twice the width grows the letters by ``stroke`` px outwards
+    ...(stroke > 0 ? { WebkitTextStroke: `${stroke * 2}px ${x.color}`, paintOrder: "stroke fill" } : {}),
+    fontStyle: x.italic ? "italic" : "normal",
+    textDecoration: x.underline ? "underline" : "none", lineHeight: 1.25, textAlign: "center",
     whiteSpace: "pre-wrap", wordBreak: "break-word", color: x.color,
     ...(x.bg
       ? { background: x.bg, padding: `${font * 0.2}px ${font * 0.3}px` }

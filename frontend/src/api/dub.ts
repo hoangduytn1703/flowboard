@@ -129,6 +129,8 @@ export interface DubLayout {
   adjust?: DubAdjust | null;
   /** "Tốc độ": the export plays this much faster / slower than the source (0.8–3, 1 = as it is) */
   speed?: number;
+  /** "Âm lượng": the export's sound this much louder / quieter (0–3, 1 = as it is) */
+  volume?: number;
   /** ffmpeg subtitles' lettering: bold, outline / box thickness, colours (null = the style's own) */
   subfont?: DubSubFont | null;
 }
@@ -160,6 +162,14 @@ export function normSpeed(v: unknown): number {
   const n = typeof v === "number" && Number.isFinite(v) ? Math.round(Math.min(SPEED_MAX, Math.max(SPEED_MIN, v)) * 100) / 100 : 1;
   return Math.abs(n - 1) < 0.005 ? 1 : n;
 }
+export const VOLUME_MAX = 3;
+export const VOLUME_MARKS = [0, 1, 2, 3];
+/** mirrors services/dub.normalize_volume */
+export function normVolume(v: unknown): number {
+  const n = typeof v === "number" && Number.isFinite(v) ? Math.round(Math.min(VOLUME_MAX, Math.max(0, v)) * 100) / 100 : 1;
+  return Math.abs(n - 1) < 0.005 ? 1 : n;
+}
+export const volumeLabel = (v: number) => (v === 0 ? "tắt tiếng" : `${Math.round(v * 100)}%`);
 export const speedLabel = (v: number) => `${String(Math.round(v * 100) / 100).replace(".", ",")}×`;
 
 /** "title" / "subtitle" = the two lines typed when a video is cut (each clip its own words); "text" = free text. */
@@ -180,6 +190,10 @@ export interface DubText {
   /** the widest a line may be, fraction of the frame width */
   w: number;
   bold: boolean;
+  /** "Độ đậm" when bold is on: 0.3–2.5, 1 = the bold face as it is */
+  weight: number;
+  italic: boolean;
+  underline: boolean;
   /** 0 = the whole clip, else only its first seconds */
   secs: number;
 }
@@ -204,7 +218,8 @@ export function normText(raw: Partial<DubText> | null | undefined): DubText {
     role, on: raw?.on ?? true, text: String(raw?.text ?? ""),
     x: within(raw?.x, 0.02, 0.98, d.x), y: within(raw?.y, 0.03, 0.97, d.y), size: within(raw?.size, 0.5, 4, d.size),
     color: hexOr(raw?.color, d.color), bg: raw?.bg === undefined ? d.bg : raw.bg ? hexOr(raw.bg, "") : "",
-    w: within(raw?.w, 0.2, 0.96, 0.86), bold: raw?.bold ?? true, secs: within(raw?.secs, 0, 3600, 0),
+    w: within(raw?.w, 0.2, 0.96, 0.86), bold: raw?.bold ?? true, weight: within(raw?.weight, 0.3, 2.5, 1), italic: raw?.italic ?? false, underline: raw?.underline ?? false,
+    secs: within(raw?.secs, 0, 3600, 0),
   };
 }
 export function normTexts(raw: Partial<DubText>[] | null | undefined): DubText[] {
@@ -356,7 +371,7 @@ export function normLayout(raw: Partial<DubLayout> | null | undefined): DubLayou
   const blurs = layoutBlurs(r);
   return { x: r.x, y: r.y, scale: r.scale, w: r.w ?? null, blur: blurs[0] ?? null, blurs, canvas: normCanvas(r.canvas),
            frame: r.frame ?? null, mascot: r.mascot ?? null, texts: normTexts(r.texts), adjust: normAdjust(r.adjust), speed: normSpeed(r.speed),
-           subfont: normSubFont(r.subfont) };
+           volume: normVolume(r.volume), subfont: normSubFont(r.subfont) };
 }
 
 /** One key moment: the key words are said at ``at`` (line ``line`` of the translation, when known). */

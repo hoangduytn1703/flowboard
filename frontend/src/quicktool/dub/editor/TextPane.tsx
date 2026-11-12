@@ -119,8 +119,22 @@ export function TextPane({ texts, selected, onSelect, onTexts, readOnly, focus, 
               <input type="checkbox" checked={!!cur.bg} disabled={readOnly} onChange={(e) => setCur({ bg: e.target.checked ? "#111111" : "" })} /> Nền
               {cur.bg && <input type="color" value={cur.bg} disabled={readOnly} onChange={(e) => setCur({ bg: e.target.value }, "text-bg")} />}
             </label>
-            <label title="Chữ đậm"><input type="checkbox" checked={cur.bold} disabled={readOnly} onChange={(e) => setCur({ bold: e.target.checked })} /> Đậm</label>
+            <span className="dx-text__biu" role="group" aria-label="Kiểu chữ">
+              <button type="button" className={cur.bold ? "is-on" : ""} aria-pressed={cur.bold} disabled={readOnly} title="Chữ đậm"
+                      onClick={() => setCur({ bold: !cur.bold })}><b>B</b></button>
+              <button type="button" className={cur.italic ? "is-on" : ""} aria-pressed={cur.italic} disabled={readOnly} title="Chữ nghiêng"
+                      onClick={() => setCur({ italic: !cur.italic })}><i>I</i></button>
+              <button type="button" className={cur.underline ? "is-on" : ""} aria-pressed={cur.underline} disabled={readOnly} title="Gạch chân"
+                      onClick={() => setCur({ underline: !cur.underline })}><u>U</u></button>
+            </span>
           </div>
+          {cur.bold && (
+            <label className="qt-field" title="Chữ đậm nhiều hay ít: 100% = đậm thường; kéo trái cho nhạt bớt, kéo phải cho đậm hơn">
+              <span>Độ đậm <small>{pct(cur.weight)}</small></span>
+              <TickRange min={0.3} max={2.5} step={0.05} value={cur.weight} disabled={readOnly} every={0.1} marks={[0.5, 1, 1.5, 2]}
+                         onChange={(v) => setCur({ weight: v }, "text-weight")} />
+            </label>
+          )}
           <div className="dx-insp__row2">
             <label className="qt-field"><span>Cỡ chữ <small>{pct(cur.size)}</small></span>
               <TickRange min={0.5} max={4} step={0.05} value={cur.size} disabled={readOnly} every={0.5} marks={[1, 2, 3]}
