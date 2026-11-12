@@ -81,6 +81,7 @@ def _rule(pattern: str, features: Any, methods: Optional[str] = None) -> None:
 
 _rule(r"^/api/dub/status$", None)                       # Bước 4 asks whether Remotion runs here
 _rule(r"^/api/dub/addon(/|$)", None)                    # machine setup: dubbing, cutting by the words, VieNeu voices
+_rule(r"^/api/dub/remotion-addon(/|$)", None)           # machine setup: the Remotion subtitle engine
 # "✂️ Cắt video" edits its parts in the dubbing editor: the editor's own routes serve both tools
 _rule(r"^/api/dub/jobs/[0-9a-f]+(/(render|subtitles|highlights/pick|names|stop|nosub|voice|bgm|filmstrip\.jpg|wave\.png))?$", ("dub", "cut"))
 _rule(r"^/api/dub/(mascot|background|decor)(/|$)", ("dub", "cut"))

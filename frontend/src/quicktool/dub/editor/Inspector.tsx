@@ -2,13 +2,15 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { NamesPanel, type NamesCtl } from "./NamesPanel";
 import {
   DEFAULT_BLUR, DEFAULT_LAYOUT, emphasisY, HL_Y_MAX, HL_Y_MIN, layoutBlurs, linesAreVietnamese, MAX_BLURS, SUB_LANGS,
-  subLangName, withBlurs,
-  type DubBlur, type DubEngine, type DubHighlights, type DubLayout, type DubMode, type DubStatus, type SubLang,
+  normSubFont, subLangName, SUBFONT_BORDER_MAX, withBlurs,
+  type DubBlur, type DubEngine, type DubHighlights, type DubLayout, type DubMode, type DubStatus, type DubSubFont, type SubLang,
 } from "../../../api/dub";
 import { ChannelPicker } from "../../channels/ChannelPicker";
 import { VoiceField } from "../../VoiceField";
 import { TickRange } from "../../../components/TickRange";
 import { DecorControls } from "../DecorControls";
+import { RemotionAddonCard } from "../RemotionAddonCard";
+import { toast } from "../../../store/toast";
 import { clock, effectiveLayout, readingLoad, W_MAX, W_MIN, type EditCue, type GeomPatch } from "./cues";
 import type { Sel } from "./EditorStage";
 
@@ -291,6 +293,10 @@ export function Inspector({
               <select className="dx-insp__select" value={style} disabled={readOnly} onChange={(e) => onStyle(e.target.value)} aria-label="Kiểu phụ đề">
                 {styles.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
               </select>
+              {out.engine !== "remotion" && !style.startsWith("rm_") && (
+                <SubFontControls style={style} value={layout.subfont ?? null} readOnly={readOnly}
+                                 onChange={(sf, key) => onLayout({ ...layout, subfont: normSubFont(sf) }, key)} />
+              )}
             </section>
           </>
         )}
@@ -433,9 +439,13 @@ export function Inspector({
                 if (!opts.some((o) => o.key === style)) onStyle(opts[0]?.key ?? (next === "remotion" ? "rm_box" : "box_yellow"));
               }}>
                 <option value="ass">ffmpeg · nhanh</option>
-                <option value="remotion" disabled={!status.remotion}>Remotion · font Việt, emoji màu{status.remotion ? "" : " (chưa dùng được)"}</option>
+                <option value="remotion" disabled={!status.remotion}>Remotion · font Việt, emoji màu{status.remotion ? "" : " (chưa cài gói Remotion)"}</option>
               </select>
             </label>
+            {!status.remotion && status.remotion_addon?.supported && (
+              <RemotionAddonCard compact initial={status.remotion_addon}
+                                 onReady={() => toast.info("Mở lại trang (F5) để chọn được Remotion.")} />
+            )}
             {out.mode === "dub" && (
               <label className="qt-check" title={status.separate ? "" : "Máy này chưa có mô hình tách giọng"}>
                 <input type="checkbox" checked={out.keepBgm} disabled={!status.separate || readOnly} onChange={(e) => onOut({ keepBgm: e.target.checked })} /> Giữ nhạc nền gốc
@@ -610,5 +620,44 @@ function TimeField({ label, value, onChange, disabled }: { label: string; value:
       </div>
       <small>{clock(value)}</small>
     </label>
+  );
+}
+
+const SUBFONT_DEFAULT: DubSubFont = { bold: true, border: 1, border_color: null, color: null };
+
+/** "Chữ đậm / Viền / Màu" of the ffmpeg subtitles (services/dub.normalize_subfont): the outline style's outline, or the
+ * box styles' box (its padding + colour). */
+function SubFontControls({ style, value, readOnly, onChange }: {
+  style: string;
+  value: DubSubFont | null;
+  readOnly: boolean;
+  onChange: (sf: DubSubFont, coalesce?: string) => void;
+}) {
+  const sf = value ?? SUBFONT_DEFAULT;
+  const outline = style === "outline";
+  const set = (patch: Partial<DubSubFont>, key?: string) => onChange({ ...sf, ...patch }, key);
+  const textDefault = outline ? "#ffffff" : "#141414";
+  const edgeDefault = outline ? "#000000" : style === "box_white" ? "#f4f4f4" : "#ffd814";
+  return (
+    <div className="dx-insp__subfont">
+      <label className="qt-check">
+        <input type="checkbox" checked={sf.bold} disabled={readOnly} onChange={(e) => set({ bold: e.target.checked })} /> Chữ đậm
+      </label>
+      <label className="qt-field">
+        <span>{outline ? "Độ dày viền" : "Đệm hộp"} <small>{sf.border === 0 ? "không viền" : `${Math.round(sf.border * 100)}%`}</small></span>
+        <TickRange min={0} max={SUBFONT_BORDER_MAX} step={0.05} value={sf.border} disabled={readOnly} every={0.25}
+                   marks={[0, 0.5, 1, 1.5, 2, 2.5]} onChange={(v) => set({ border: v }, "sub-border")} />
+      </label>
+      <div className="dx-insp__colors">
+        <label>Màu chữ <input type="color" value={sf.color ?? textDefault} disabled={readOnly}
+                              onChange={(e) => set({ color: e.target.value }, "sub-color")} /></label>
+        <label>{outline ? "Màu viền" : "Màu hộp"} <input type="color" value={sf.border_color ?? edgeDefault} disabled={readOnly}
+                              onChange={(e) => set({ border_color: e.target.value }, "sub-edge")} /></label>
+        {value && (
+          <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" disabled={readOnly}
+                  onClick={() => onChange(SUBFONT_DEFAULT)}>↺ Như kiểu gốc</button>
+        )}
+      </div>
+    </div>
   );
 }

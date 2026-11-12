@@ -105,6 +105,9 @@ def status() -> dict[str, Any]:
     out["remotion"] = rm_ok
     if not rm_ok:
         out["remotion_reason"] = rm_why
+        from flowboard.services import remotion_addon
+
+        out["remotion_addon"] = remotion_addon.status()
     if rt is None:
         out["reason"] = NO_RUNTIME
         out["addon"] = dub_addon.status()
@@ -475,6 +478,34 @@ def retime_file(ffmpeg: str, path: Path, speed: float, tag: str = "") -> None:
     os.replace(tmp, path)
 
 
+SUBFONT_BORDER_MAX = 2.5
+
+
+def normalize_subfont(raw: Any) -> Optional[dict[str, Any]]:
+    """The ffmpeg subtitles' lettering: ``{bold, border, border_color, color}`` — ``bold`` false = normal weight,
+    ``border`` = how thick the outline (style "outline") or the box padding (box styles) is, × the style's own
+    (0–2.5, 1 = as before), the colours "#rrggbb" or None = the style's own. None when all of it is the default."""
+    if not isinstance(raw, dict):
+        return None
+    out = {
+        "bold": raw.get("bold") is not False,
+        "border": round(_num(raw, "border", 0.0, SUBFONT_BORDER_MAX, 1.0), 2),
+        "border_color": dub_decor._hex(raw.get("border_color"), "") or None,
+        "color": dub_decor._hex(raw.get("color"), "") or None,
+    }
+    if out == {"bold": True, "border": 1.0, "border_color": None, "color": None}:
+        return None
+    return out
+
+
+def sub_border_px(font: int, style: str, subfont: Optional[dict[str, Any]]) -> float:
+    """The ASS ``Outline`` of the subtitles at this font size: the outline width ("outline") or the box padding."""
+    mult = float((subfont or {}).get("border", 1.0))
+    if style == "outline":
+        return round(max(2, font // 11) * mult, 1)
+    return max(2, round(max(8, font // 4) * mult))
+
+
 def normalize_layout(raw: Any) -> dict[str, Any]:
     """``{x, y, scale, blurs, canvas, …}`` — ``blurs`` are rectangles
     ``{x, y, w, h, amount}`` (top-left + size as frame fractions, amount
@@ -493,8 +524,10 @@ def normalize_layout(raw: Any) -> dict[str, Any]:
     out["texts"] = []     # "🔤 Chữ": the title / second title / free text drawn on the picture
     out["adjust"] = None  # brightness / contrast / saturation of the video itself
     out["speed"] = 1.0    # the export plays this much faster / slower (0.8–3)
+    out["subfont"] = None # ffmpeg subtitles: bold, outline / box thickness and colours (None = the style's own)
     if isinstance(raw, dict):
         out["speed"] = normalize_speed(raw.get("speed"))
+        out["subfont"] = normalize_subfont(raw.get("subfont"))
         out["texts"] = normalize_texts(raw.get("texts"))
         out["adjust"] = normalize_adjust(raw.get("adjust"))
         out["x"] = _num(raw, "x", 0.05, 0.95, out["x"])
@@ -904,15 +937,22 @@ def write_sub_ass(cues: list[tuple[float, float, str]], path: Path, *, width: in
     margin_v = round(height * (1 - lay["y"]))
     margin_x = round(width * SUB_MARGIN_X_FRAC)
     pos = f"{{\\an2\\pos({round(width * lay['x'])},{round(height * lay['y'])})}}"
+    sf = lay.get("subfont") or {}
+    bold = 0 if sf.get("bold") is False else -1
+    border = sub_border_px(font, style, sf)
     if style == "outline":
-        line = (f"Style: Sub,Arial,{font},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,"
-                f"{max(2, font // 11)},1,2,{margin_x},{margin_x},{margin_v},1")
+        text_col = _ass_colour(sf["color"]) if sf.get("color") else "&H00FFFFFF"
+        edge = _ass_colour(sf["border_color"]) if sf.get("border_color") else "&H00000000"
+        line = (f"Style: Sub,Arial,{font},{text_col},&H000000FF,{edge},&H80000000,{bold},0,0,0,100,100,0,0,1,"
+                f"{border},{1 if border else 0},2,{margin_x},{margin_x},{margin_v},1")
     else:
         back = "&H0014D8FF" if style == "box_yellow" else "&H00F4F4F4"  # ASS = &HAABBGGRR → yellow / near-white
-        text_col = "&H00141414"
+        if sf.get("border_color"):
+            back = _ass_colour(sf["border_color"])
+        text_col = _ass_colour(sf["color"]) if sf.get("color") else "&H00141414"
         # BorderStyle 3: Outline = box padding, Shadow 0. OutlineColour is the box colour.
-        line = (f"Style: Sub,Arial,{font},{text_col},&H000000FF,{back},{back},-1,0,0,0,100,100,0,0,3,"
-                f"{max(8, font // 4)},0,2,{margin_x},{margin_x},{margin_v},1")
+        line = (f"Style: Sub,Arial,{font},{text_col},&H000000FF,{back},{back},{bold},0,0,0,100,100,0,0,3,"
+                f"{border},0,2,{margin_x},{margin_x},{margin_v},1")
     # the key word ("✨ Nhấn chữ quan trọng"): big yellow bold with a dark outline, popping in
     emph_font = round(font * 1.6)
     emph_line = (f"Style: Emph,Arial,{emph_font},&H0014D8FF,&H000000FF,&H00101010,&H80000000,-1,0,0,0,100,100,0,0,1,"
@@ -937,7 +977,7 @@ def write_sub_ass(cues: list[tuple[float, float, str]], path: Path, *, width: in
         if look:
             own = effective_layout(lay, look)
             own_font = sub_font_px(height, own["scale"])
-            extra = "" if own_font == font else f"\\fs{own_font}" + ("" if style == "outline" else f"\\bord{max(8, own_font // 4)}")
+            extra = "" if own_font == font else f"\\fs{own_font}\\bord{sub_border_px(own_font, style, sf)}"
             tag = f"{{\\an2\\pos({round(width * own['x'])},{round(height * own['y'])}){extra}}}"
         events.append(f"Dialogue: 0,{_ass_time(s)},{_ass_time(e)},Sub,,0,0,0,,{tag}{t.replace(chr(10), ' ')}")
     for a, b, text, ex, ey in emphasis or []:

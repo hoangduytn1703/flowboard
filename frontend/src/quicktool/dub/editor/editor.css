@@ -620,3 +620,9 @@
 .dx__speed.is-on b { color: #ff8a52; }
 .dx__speed small { font-size: 11px; }
 .dx__speed input[type="range"] { width: 100%; }
+
+/* "Kiểu phụ đề" → ffmpeg lettering: bold, outline / box thickness, colours */
+.dx-insp__subfont { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.dx-insp__colors { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 13px; }
+.dx-insp__colors label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.dx-insp__colors input[type="color"] { width: 30px; height: 24px; padding: 0; border: 1px solid var(--border); border-radius: 5px; background: none; cursor: pointer; }

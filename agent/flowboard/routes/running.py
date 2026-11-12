@@ -124,8 +124,9 @@ def _addon_items() -> list[dict[str, Any]]:
     """The "gói lồng tiếng" download (several GB — minutes to an hour)."""
     from flowboard.services import dub_addon
 
-    it = dub_addon.running_item()
-    return [it] if it else []
+    from flowboard.services import remotion_addon
+
+    return [it for it in (dub_addon.running_item(), remotion_addon.running_item()) if it]
 
 
 def _clean_items() -> list[dict[str, Any]]:
@@ -270,6 +271,10 @@ def outcome(key: str = Query(..., max_length=80)) -> dict[str, Any]:
         from flowboard.services import dub_addon
 
         return dub_addon.outcome()
+    if kind == "remotionaddon":
+        from flowboard.services import remotion_addon
+
+        return remotion_addon.outcome()
     if kind == "cut":
         from flowboard.services import video_cut
 

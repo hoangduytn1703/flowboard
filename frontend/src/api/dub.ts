@@ -20,6 +20,8 @@ export interface DubStatus {
   remotion?: boolean;
   remotion_reason?: string;
   remotion_styles?: { key: string; label: string }[];
+  /** present when Remotion does not run here: the "Gói Remotion" card shows it */
+  remotion_addon?: RemotionAddon;
   /** sound-effect sets for the key moments: built-in, and the user's CapCut sounds when learned */
   sfx_sets?: { key: "builtin" | "capcut"; label: string; count: number }[];
   /** who translates: free Google / Microsoft (like VieDub) or the AI set in Settings */
@@ -38,6 +40,26 @@ export interface DubAddon {
     gpu?: DubGpu | null };
   dir: string;
   gpu: DubGpu | null;
+  download_mb: number;
+  need_mb: number;
+  free_mb: number;
+  size_mb?: number;
+  running: boolean;
+  phase: string;
+  progress: number;
+  done_mb: number;
+  total_mb: number;
+  error: string;
+  started_at: string | null;
+  last: string;
+}
+
+/** The "Gói Remotion" (services/remotion_addon.py): Node + Remotion + Chrome Headless Shell for the second subtitle engine. */
+export interface RemotionAddon {
+  supported: boolean;
+  installed: boolean;
+  info: { version?: number; node?: string; remotion?: string; installed_at?: string };
+  dir: string;
   download_mb: number;
   need_mb: number;
   free_mb: number;
@@ -107,6 +129,29 @@ export interface DubLayout {
   adjust?: DubAdjust | null;
   /** "Tốc độ": the export plays this much faster / slower than the source (0.8–3, 1 = as it is) */
   speed?: number;
+  /** ffmpeg subtitles' lettering: bold, outline / box thickness, colours (null = the style's own) */
+  subfont?: DubSubFont | null;
+}
+
+/** mirrors services/dub.normalize_subfont: ``border`` × the style's own outline width (or box padding), 0–2.5 */
+export interface DubSubFont {
+  bold: boolean;
+  border: number;
+  border_color: string | null;
+  color: string | null;
+}
+export const SUBFONT_BORDER_MAX = 2.5;
+const HEX = /^#[0-9a-fA-F]{6}$/;
+export function normSubFont(raw: Partial<DubSubFont> | null | undefined): DubSubFont | null {
+  if (!raw || typeof raw !== "object") return null;
+  const b = typeof raw.border === "number" && Number.isFinite(raw.border) ? Math.min(SUBFONT_BORDER_MAX, Math.max(0, raw.border)) : 1;
+  const out: DubSubFont = {
+    bold: raw.bold !== false,
+    border: Math.round(b * 100) / 100,
+    border_color: typeof raw.border_color === "string" && HEX.test(raw.border_color) ? raw.border_color.toLowerCase() : null,
+    color: typeof raw.color === "string" && HEX.test(raw.color) ? raw.color.toLowerCase() : null,
+  };
+  return out.bold && out.border === 1 && !out.border_color && !out.color ? null : out;
 }
 export const SPEED_MIN = 0.8, SPEED_MAX = 3;
 export const SPEED_MARKS = [0.8, 1, 1.5, 2, 2.5, 3];
@@ -310,7 +355,8 @@ export function normLayout(raw: Partial<DubLayout> | null | undefined): DubLayou
   const r = { ...DEFAULT_LAYOUT, ...(raw ?? {}) };
   const blurs = layoutBlurs(r);
   return { x: r.x, y: r.y, scale: r.scale, w: r.w ?? null, blur: blurs[0] ?? null, blurs, canvas: normCanvas(r.canvas),
-           frame: r.frame ?? null, mascot: r.mascot ?? null, texts: normTexts(r.texts), adjust: normAdjust(r.adjust), speed: normSpeed(r.speed) };
+           frame: r.frame ?? null, mascot: r.mascot ?? null, texts: normTexts(r.texts), adjust: normAdjust(r.adjust), speed: normSpeed(r.speed),
+           subfont: normSubFont(r.subfont) };
 }
 
 /** One key moment: the key words are said at ``at`` (line ``line`` of the translation, when known). */
@@ -716,6 +762,22 @@ export function cancelDubAddon(): Promise<DubAddon> {
 
 export function removeDubAddon(): Promise<DubAddon> {
   return post("/api/dub/addon/remove", {});
+}
+
+export function getRemotionAddon(): Promise<RemotionAddon> {
+  return api<RemotionAddon>("/api/dub/remotion-addon");
+}
+
+export function installRemotionAddon(): Promise<RemotionAddon> {
+  return post("/api/dub/remotion-addon/install", {});
+}
+
+export function cancelRemotionAddon(): Promise<RemotionAddon> {
+  return post("/api/dub/remotion-addon/cancel", {});
+}
+
+export function removeRemotionAddon(): Promise<RemotionAddon> {
+  return post("/api/dub/remotion-addon/remove", {});
 }
 
 export function startDub(body: DubStart): Promise<DubJob> {

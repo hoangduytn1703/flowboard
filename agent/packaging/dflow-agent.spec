@@ -31,6 +31,10 @@ datas = [
     # run as scripts by pyvideotrans' Python (dub.RUNNER_PATH, video_clean.RUNNER_PATH): real files next to their modules
     (os.path.join(PKG, "services", "dub_runner.py"), "flowboard/services"),
     (os.path.join(PKG, "services", "video_clean_runner.py"), "flowboard/services"),
+    # the Remotion subtitle engine's sources: the "Gói Remotion" add-on copies them next to its node_modules
+    # (services/remotion_addon.kit_dir)
+    (os.path.join(REPO, "frontend", "remotion", "render.mjs"), "flowboard/remotion_kit/remotion"),
+    (os.path.join(REPO, "frontend", "src", "remotion"), "flowboard/remotion_kit/src/remotion"),
 ]
 binaries = []
 hiddenimports = (

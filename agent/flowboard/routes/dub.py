@@ -95,6 +95,43 @@ def cancel_addon() -> dict[str, Any]:
     return dub_addon.status()
 
 
+@router.get("/remotion-addon")
+def get_remotion_addon() -> dict[str, Any]:
+    """The "Gói Remotion" (services/remotion_addon): Node + Remotion + its browser for the second subtitle engine."""
+    from flowboard.services import remotion_addon
+
+    return remotion_addon.status()
+
+
+@router.post("/remotion-addon/install")
+def install_remotion_addon() -> dict[str, Any]:
+    from flowboard.services import remotion_addon
+
+    try:
+        return remotion_addon.install()
+    except RuntimeError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/remotion-addon/cancel")
+def cancel_remotion_addon() -> dict[str, Any]:
+    from flowboard.services import remotion_addon
+
+    remotion_addon.cancel()
+    return remotion_addon.status()
+
+
+@router.post("/remotion-addon/remove")
+def remove_remotion_addon() -> dict[str, Any]:
+    from flowboard.services import remotion_addon
+
+    try:
+        remotion_addon.remove()
+    except RuntimeError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return remotion_addon.status()
+
+
 @router.post("/addon/remove")
 def remove_addon() -> dict[str, Any]:
     try:

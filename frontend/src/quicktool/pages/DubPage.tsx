@@ -23,6 +23,7 @@ import "../dub.css";
 import { ProgressRing } from "../dub/ProgressRing";
 import { StopButton } from "../../components/StopButton";
 import { DubAddonCard } from "../dub/DubAddonCard";
+import { RemotionAddonCard } from "../dub/RemotionAddonCard";
 
 const POLL_MS = 2000;
 const DEFAULT_VOICE = "vi-VN-HoaiMyNeural";
@@ -594,10 +595,13 @@ export function DubPage() {
                   <select value={engine} onChange={(e) => pickEngine(e.target.value as DubEngine)} disabled={working || lookId !== null}>
                     <option value="ass">ffmpeg · như hiện tại (nhanh)</option>
                     <option value="remotion" disabled={!status.remotion}>
-                      Remotion · mới{status.remotion ? "" : ` — chưa dùng được: ${status.remotion_reason ?? ""}`}
+                      Remotion · mới{status.remotion ? "" : " — chưa cài gói Remotion"}
                     </option>
                   </select>
                 </label>
+                {!status.remotion && (status.remotion_addon?.supported
+                  ? <RemotionAddonCard compact initial={status.remotion_addon} onReady={loadStatus} />
+                  : status.remotion_reason && <p className="qt-card__hint">Remotion chưa dùng được: {status.remotion_reason}</p>)}
                 {lang === "vi" && (
                   <label className="qt-field">
                     <span>Dịch bằng</span>

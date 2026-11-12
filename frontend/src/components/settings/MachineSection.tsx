@@ -4,6 +4,7 @@ import { toast } from "../../store/toast";
 import { AppVersionSection } from "../AppUpdate";
 import { askConfirm } from "../Dialogs";
 import { DubAddonCard } from "../../quicktool/dub/DubAddonCard";
+import { RemotionAddonCard } from "../../quicktool/dub/RemotionAddonCard";
 
 interface MachineInfo {
   gpu: { name: string; driver: string; vram_mb: number; old_driver: boolean } | null;
@@ -269,6 +270,11 @@ export function MachineSection() {
       <div className="settings-panel__section">
         <div className="settings-panel__label">🎙 Gói lồng tiếng (AI nghe tiếng, tách nhạc, giọng VieNeu)</div>
         <DubAddonCard compact />
+      </div>
+
+      <div className="settings-panel__section">
+        <div className="settings-panel__label">🎬 Gói Remotion (phụ đề font Việt, emoji màu, chữ sáng từng từ)</div>
+        <RemotionAddonCard compact />
       </div>
 
       <div className="settings-panel__section">

@@ -54,10 +54,13 @@ export function SubtitleField({ value, onChange, disabled }: { value: string; on
       <select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
         {SUB_CHOICES.map((c) => (
           <option key={c.key} value={c.key} disabled={c.remotion && remotion === false}>
-            {c.label}{c.remotion && remotion === false ? " (máy này chưa có Remotion)" : ""}
+            {c.label}{c.remotion && remotion === false ? " (chưa cài gói Remotion)" : ""}
           </option>
         ))}
       </select>
+      {remotion === false && (
+        <small className="qt-hint">Muốn dùng phụ đề Remotion: cài “Gói Remotion” ở Cài đặt → 🖥 Máy này (một lần).</small>
+      )}
       {value.startsWith("remotion") && (
         <small className="qt-hint">Remotion vẽ phụ đề sau khi ghép (thêm ~1 phút cho clip 30 s); lỗi thì tự in bằng ffmpeg.</small>
       )}

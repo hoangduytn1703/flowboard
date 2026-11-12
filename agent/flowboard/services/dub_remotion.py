@@ -9,7 +9,9 @@ so the CapCut-style positioner drives both; the browser shows the very same
 component through ``<Player>``, so what you see is what gets rendered.
 
 Needs: ``node`` on PATH and the Remotion packages installed in ``frontend/``
-(``npm install`` there — they are in package.json). Chrome Headless Shell is
+(``npm install`` there — they are in package.json), or — the installed app —
+the "Gói Remotion" add-on (``services/remotion_addon``: its own Node + packages
++ browser in ``<DFlowData>/addons/remotion``). Chrome Headless Shell is
 downloaded by Remotion itself on the first render (~150 MB).
 """
 from __future__ import annotations
@@ -50,15 +52,32 @@ def node_path() -> Optional[str]:
     return os.getenv("FLOWBOARD_NODE") or shutil.which("node")
 
 
+def _repo_ready() -> bool:
+    return (FRONTEND / "node_modules" / "@remotion" / "renderer" / "package.json").is_file() and SCRIPT.is_file()
+
+
+def runtime() -> Optional[tuple[str, Path]]:
+    """``(node, project dir)`` render.mjs runs with: the repo's ``frontend/`` when it has the Remotion packages (a
+    checkout), otherwise the "Gói Remotion" add-on (``services/remotion_addon`` — the installed app)."""
+    node = node_path()
+    if node and _repo_ready():
+        return node, FRONTEND
+    from flowboard.services import remotion_addon
+
+    return remotion_addon.runtime()
+
+
 def available() -> tuple[bool, str]:
     """(usable, reason when not)."""
+    if runtime() is not None:
+        return True, ""
+    from flowboard.services import remotion_addon
+
+    if remotion_addon.kit_dir() is not None and remotion_addon.status()["supported"]:
+        return False, "Máy này chưa cài gói Remotion — bấm “Cài gói Remotion” (trang Lồng tiếng hoặc Cài đặt → 🖥 Máy này)."
     if node_path() is None:
         return False, "Không thấy Node.js trên PATH (cần Node 20+)."
-    if not SCRIPT.is_file():
-        return False, f"Thiếu {SCRIPT}."
-    if not (FRONTEND / "node_modules" / "@remotion" / "renderer" / "package.json").is_file():
-        return False, "Chưa cài gói Remotion — chạy `npm install` trong thư mục frontend."
-    return True, ""
+    return False, "Chưa cài gói Remotion — chạy `npm install` trong thư mục frontend."
 
 
 def _cue(c: tuple) -> dict[str, Any]:
@@ -113,10 +132,19 @@ def render(spec: dict[str, Any], *, progress: Optional[Callable[[float, str], No
     out.parent.mkdir(parents=True, exist_ok=True)
     spec_path = out.with_suffix(".remotion.json")
     spec_path.write_text(json.dumps(spec, ensure_ascii=False), encoding="utf-8")
-    cmd = [node_path() or "node", str(SCRIPT), str(spec_path)]
-    env = dict(os.environ)
+    node, project = runtime() or (node_path() or "node", FRONTEND)
+    if project != FRONTEND:
+        from flowboard.services import remotion_addon
+
+        remotion_addon.sync_sources()  # an app update may bring new subtitle styles
+        env = remotion_addon.child_env()
+        script = project / "remotion" / "render.mjs"
+    else:
+        env = dict(os.environ)
+        script = SCRIPT
     env.setdefault("REMOTION_DISABLE_TELEMETRY", "1")
-    proc = subprocess.Popen(cmd, cwd=str(FRONTEND), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    cmd = [node, str(script), str(spec_path)]
+    proc = subprocess.Popen(cmd, cwd=str(project), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                             encoding="utf-8", errors="replace", env=env,
                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0)
     tail: list[str] = []

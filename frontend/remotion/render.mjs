@@ -107,7 +107,16 @@ function serveFile(file, extra = {}) {
   });
 }
 
+/** `node render.mjs --prepare`: download the browser and build the bundle, render nothing (the Remotion add-on's install check). */
+async function prepare() {
+  log("PHASE browser");
+  await ensureBrowser({ onBrowserDownload: () => ({ onProgress: ({ percent }) => log(`BROWSER ${Math.round(percent * 100)}`) }) });
+  await ensureBundle();
+  log("DONE");
+}
+
 async function main() {
+  if (process.argv[2] === "--prepare") return prepare();
   const spec = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
   if (!spec.src || !fs.existsSync(spec.src)) throw new Error(`input video missing: ${spec.src}`);
   log("PHASE browser");

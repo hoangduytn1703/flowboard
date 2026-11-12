@@ -244,9 +244,11 @@ def _client() -> httpx.Client:
 
 
 def download(urls: list[str] | tuple[str, ...], dest: Path, on_bytes: Optional[DownloadHook] = None,
-             expect: int = 0, attempts: int = 4) -> Path:
+             expect: int = 0, attempts: int = 4, stop: Optional[threading.Event] = None) -> Path:
     """Fetch ``dest`` from the first of ``urls`` that works, resuming a ``.part`` left by an earlier try.
-    ``on_bytes(n)`` is told every chunk received (for the progress bar). A file already in place is kept."""
+    ``on_bytes(n)`` is told every chunk received (for the progress bar). A file already in place is kept.
+    ``stop`` = the event "Huỷ" sets (default: this add-on's; the Remotion add-on passes its own)."""
+    halt = stop or _stop
     if dest.is_file() and (not expect or dest.stat().st_size == expect):
         return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -255,7 +257,7 @@ def download(urls: list[str] | tuple[str, ...], dest: Path, on_bytes: Optional[D
     with _client() as client:
         for url in urls:
             for attempt in range(attempts):
-                if _stop.is_set():
+                if halt.is_set():
                     raise _Cancelled()
                 have = part.stat().st_size if part.is_file() else 0
                 headers = {"Range": f"bytes={have}-"} if have else {}
@@ -275,7 +277,7 @@ def download(urls: list[str] | tuple[str, ...], dest: Path, on_bytes: Optional[D
                             total = have + int(r.headers["content-length"])
                         with open(part, "ab" if have else "wb") as fh:
                             for chunk in r.iter_bytes(1 << 20):
-                                if _stop.is_set():
+                                if halt.is_set():
                                     raise _Cancelled()
                                 fh.write(chunk)
                                 if on_bytes:

@@ -3,7 +3,7 @@ import {
   type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent,
 } from "react";
 import { Player, type PlayerRef } from "@remotion/player";
-import { DEFAULT_BLUR, emphasisY, layoutBlurs, withBlurs, type DubBlur, type DubHighlights, type DubLayout, type SubLook } from "../../../api/dub";
+import { DEFAULT_BLUR, emphasisY, layoutBlurs, withBlurs, type DubBlur, type DubHighlights, type DubLayout, type DubSubFont, type SubLook } from "../../../api/dub";
 import { mediaUrl } from "../../../api/client";
 import { DUB_FPS, DubSubtitles, emphasisAt, emphasisFont, zoomAt, type DubLayoutSpec, type DubRemotionStyle } from "../../../remotion/DubSubtitles";
 import { canvasRect, gridCss } from "../../../remotion/canvasGeom";
@@ -45,6 +45,24 @@ function boxStyle(style: string): CSSProperties {
   return { color: "#141414", background: "#ffd814" };
 }
 const hasBox = (style: string) => !["outline", "rm_outline", "rm_karaoke"].includes(style);
+
+/** The ffmpeg lettering choices ("Chữ đậm", "Viền", colours) on top of the style, for the preview (services/dub.write_sub_ass). */
+function subFontStyle(style: string, sf: DubSubFont | null | undefined, fontPx: number): CSSProperties {
+  if (!sf || style.startsWith("rm_")) return {};
+  const out: CSSProperties = { fontWeight: sf.bold ? 700 : 400 };
+  if (sf.color) out.color = sf.color;
+  if (style === "outline") {
+    // libass outline ≈ max(2, font/11) px at the output size; here scaled to the stage's font
+    const w = Math.max(0, (fontPx / 11) * sf.border);
+    const c = sf.border_color ?? "#000";
+    out.textShadow = w > 0.05
+      ? [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, -1], [0, 1], [-1, 0], [1, 0]].map(([x, y]) => `${(x * w).toFixed(1)}px ${(y * w).toFixed(1)}px 0 ${c}`).join(", ")
+      : "none";
+  } else if (sf.border_color) {
+    out.background = sf.border_color;
+  }
+  return out;
+}
 
 type Drag =
   | { kind: "sub"; dx: number; dy: number; x0: number; y0: number; moved: boolean; cue: number | null }
@@ -284,6 +302,7 @@ export const EditorStage = forwardRef<StageHandle, {
   const tone = adjustCss(layout.adjust);
   const fontPx = stageH ? stageH * 0.036 * lay.scale : 16;
   const pad = fontPx * 0.25;
+  const subPad = style.startsWith("rm_") ? 1 : Math.max(0.25, layout.subfont?.border ?? 1);
   // "✨ Nhấn chữ quan trọng": the same curve / timing the render uses (remotion/DubSubtitles)
   const hlOn = highlights.on && highlights.points.length > 0;
   const zoom = hlOn && highlights.zoom ? zoomAt(highlights.points, t) : 1;
@@ -556,7 +575,8 @@ export const EditorStage = forwardRef<StageHandle, {
             title="Kéo để dời · bấm đúp để sửa chữ · kéo hai mép cam để đổi độ rộng"
             style={{ left: pct(lay.x), top: pct(lay.y), fontSize: fontPx,
                      maxWidth: pct(lay.w ?? 0.88), ...(live && lay.w ? { width: pct(lay.w) } : {}),
-                     padding: hasBox(style) ? `${pad * 0.5}px ${pad}px` : 0, ...(live ? {} : boxStyle(style)) }}
+                     padding: hasBox(style) ? `${pad * 0.5 * subPad}px ${pad * subPad}px` : 0,
+                     ...(live ? {} : { ...boxStyle(style), ...subFontStyle(style, layout.subfont, fontPx) }) }}
             onPointerDown={(e) => { const p = pointFrom(e); startDrag(e, { kind: "sub", dx: lay.x - p.x, dy: lay.y - p.y, x0: p.x, y0: p.y, moved: false, cue: shownCue }); }}
             onDoubleClick={(e) => { e.stopPropagation(); if (shownCue !== null) startEdit(shownCue); }}
             onKeyDown={onBoxKey}
