@@ -197,11 +197,17 @@ jobs:
           Pop-Location
           Get-ChildItem desktop/src-tauri/target/release/bundle/nsis | Format-Table Name, Length
 
+      # The installer kept on the run (Artifacts) for builds that are not releases. A release tag skips it — the
+      # installer goes to dflow-releases — and it never stops the build: the private repo's artifact storage is small
+      # (13/11 the quota was full and the v2.0.0 build stopped here, before publishing).
       - uses: actions/upload-artifact@v4
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        continue-on-error: true
         with:
           name: DFlow-Setup
           path: desktop/src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: error
+          retention-days: 3
 
       - name: Publish the update (tags only) → dflow-releases
         if: startsWith(github.ref, 'refs/tags/v')
