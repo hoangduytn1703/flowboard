@@ -244,6 +244,8 @@ function connectToAgent() {
         await handleReadPage(msg);
       } else if (msg.method === 'read_channel') {
         await handleReadChannel(msg);
+      } else if (msg.method === 'list_channel') {
+        await handleListChannel(msg);
       } else if (msg.method === 'scrape_page') {
         await handleScrapePage(msg);
       } else if (msg.method === 'read_account') {
@@ -670,6 +672,135 @@ async function handleReadChannel(msg) {
   } finally {
     if (tab?.id) chrome.tabs.remove(tab.id).catch(() => {});
   }
+}
+
+// "📡 Cào video kênh" → a Douyin account / a Bilibili space. Those sites give the video list only to a real,
+// signed-in browser, so the page is opened in a window of the seller's own Chrome (a visible one: a hidden tab does
+// not load more as it is scrolled) and capture.js keeps what the page's own list requests bring back. The window is
+// scrolled (Douyin) or paged (Bilibili) until enough videos are in, then closed. A captcha or a login the site asks
+// for is the seller's to answer in that window; nothing is signed or solved here.
+const LIST_CHANNEL_HOSTS = /^https:\/\/(www\.douyin\.com\/user\/[\w.-]+|space\.bilibili\.com\/\d+)/i;
+const CAPTURE_SCRIPT_ID = 'dflow-capture';
+let listChannelBusy = false;
+
+async function handleListChannel(msg) {
+  const { id, params } = msg;
+  const { url, limit = 60, timeoutMs = 75000 } = params || {};
+  if (!LIST_CHANNEL_HOSTS.test(url || '')) {
+    sendToAgent({ id, status: 400, error: 'URL_NOT_ALLOWED' });
+    return;
+  }
+  if (listChannelBusy) {
+    sendToAgent({ id, status: 409, error: 'LIST_CHANNEL_BUSY' });
+    return;
+  }
+  listChannelBusy = true;
+  let win = null;
+  let answer = null;
+  try {
+    await chrome.scripting.unregisterContentScripts({ ids: [CAPTURE_SCRIPT_ID] }).catch(() => {});
+    await chrome.scripting.registerContentScripts([{
+      id: CAPTURE_SCRIPT_ID, js: ['capture.js'], world: 'MAIN', runAt: 'document_start',
+      allFrames: true,   // (matchOriginAsFallback is refused by Chrome unless the path is '*')
+      matches: ['https://www.douyin.com/user/*', 'https://space.bilibili.com/*'],
+    }]);
+    win = await chrome.windows.create({ url, focused: true, type: 'normal', width: 1180, height: 860 });
+    const tabId = win.tabs && win.tabs[0] ? win.tabs[0].id : null;
+    if (tabId == null) throw new Error('NO_TAB');
+    const deadline = Date.now() + Math.min(Math.max(timeoutMs, 20000), 30 * 60 * 1000);   // a long list: up to 30 min
+    const started = Date.now();
+    let last = { count: 0 };
+    let grewAt = Date.now();
+    while (Date.now() < deadline) {
+      await sleep(1500);
+      let step = null;
+      try {
+        const [r] = await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: listChannelStepInPage, args: [limit] });
+        step = r?.result || null;
+      } catch (e) {
+        try { await chrome.tabs.get(tabId); } catch { break; }   // the seller closed the window
+        continue;                                                 // the page is between two loads
+      }
+      if (!step) continue;
+      if (step.count > last.count) grewAt = Date.now();
+      last = step;
+      if (step.count >= limit) break;
+      if (step.count > 0 && step.hasMore === false) break;
+      if (step.count > 0 && Date.now() - grewAt > 12000) break;                       // nothing more is coming
+      // no list at all: the site says no (not signed in) — a captcha is left for the seller to answer
+      if (step.count === 0 && !step.captcha && Date.now() - started > (step.refused > 0 ? 15000 : step.login ? 24000 : 32000)) break;
+    }
+    let data = null;
+    try {
+      const [r] = await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: listChannelReadInPage, args: [limit] });
+      data = r?.result || null;
+    } catch (e) { /* the window is gone */ }
+    answer = { id, status: 200, data: JSON.stringify(data || { empty: true, last }) };
+  } catch (e) {
+    answer = { id, status: 500, error: e?.message || 'LIST_CHANNEL_FAILED' };
+  } finally {
+    await chrome.scripting.unregisterContentScripts({ ids: [CAPTURE_SCRIPT_ID] }).catch(() => {});
+    if (win?.id != null) await chrome.windows.remove(win.id).catch(() => {});
+    listChannelBusy = false;   // only now: a scan starting earlier would have its capture script unregistered by this one
+    sendToAgent(answer || { id, status: 500, error: 'LIST_CHANNEL_FAILED' });
+  }
+}
+
+// Runs inside the page (MAIN world): must be self-contained. Says how far the list is and moves it on.
+function listChannelStepInPage(limit) {
+  const s = window.__dflowList;
+  const body = document.body ? document.body.innerText.slice(0, 6000) : '';
+  const out = {
+    ready: !!s, count: s ? s.items.length : 0, hasMore: s ? s.hasMore : null, refused: s ? s.refused : 0,
+    pages: s ? s.pages : 0,
+    captcha: !!document.querySelector('#captcha_container, [id*="captcha"] iframe, .geetest_panel') || /验证码中间页|请完成安全验证/.test(body),
+    login: /扫码登录|验证码登录|密码登录|登录后免费畅享/.test(body) || !!document.querySelector('#login-pannel, .bili-mini-mask'),
+  };
+  if (!s || out.count >= limit) return out;
+  if (s.platform === 'douyin') {
+    // the list loads more when its scroller reaches the bottom: the window, or the page's own scrolling box
+    window.scrollTo(0, document.documentElement.scrollHeight);
+    for (const el of document.querySelectorAll('div')) {
+      if (el.scrollHeight - el.clientHeight > 300 && el.clientHeight > 300) {
+        const flow = getComputedStyle(el).overflowY;
+        if (flow === 'auto' || flow === 'scroll') el.scrollTop = el.scrollHeight;
+      }
+    }
+  } else if (s.hasMore !== false && s.pages > 0 && s.askedPage !== s.pages) {
+    // Bilibili pages its list: the page's own "next page" button, once per page that has arrived
+    const next = [...document.querySelectorAll('button, li, a')].find((el) =>
+      el.textContent.trim() === '下一页' && !el.disabled && !/disabled/.test(el.className || ''));
+    if (next) { s.askedPage = s.pages; next.click(); } else { s.hasMore = false; }
+  }
+  return out;
+}
+
+// Runs inside the page (MAIN world): what was gathered, plus what the page shows when nothing was.
+function listChannelReadInPage(limit) {
+  const s = window.__dflowList;
+  const body = document.body ? document.body.innerText.slice(0, 6000) : '';
+  const out = {
+    platform: s ? s.platform : '', url: location.href, title: document.title,
+    items: s ? s.items.slice(0, limit + 20) : [], user: s ? s.user : null, hasMore: s ? s.hasMore : null,
+    total: s ? s.total : null, refused: s ? s.refused : 0, pages: s ? s.pages : 0,
+    login: /扫码登录|验证码登录|密码登录|登录后免费畅享/.test(body) || !!document.querySelector('#login-pannel, .bili-mini-mask'),
+    captcha: /验证码中间页|请完成安全验证/.test(body) || !!document.querySelector('#captcha_container, .geetest_panel'),
+    dom: [],
+  };
+  if (!out.items.length) {
+    // nothing came through the list requests: the video links the page itself shows (no dates this way)
+    const seen = {};
+    for (const a of document.querySelectorAll('a[href*="/video/"]')) {
+      const m = /\/video\/([\w]+)/.exec(a.getAttribute('href') || '');
+      if (!m || seen[m[1]]) continue;
+      seen[m[1]] = 1;
+      const img = a.querySelector('img');
+      out.dom.push({ id: m[1], title: String((img && img.alt) || a.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 300),
+                     cover: img ? img.currentSrc || img.src || '' : '' });
+      if (out.dom.length >= limit) break;
+    }
+  }
+  return out;
 }
 
 // Runs inside the page: must be self-contained.

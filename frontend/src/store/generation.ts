@@ -717,6 +717,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
           subtitles: node?.data.subtitles !== false,
           sub_engine: node?.data.subEngine ?? "ass",
           sub_style: node?.data.subStyle ?? "",
+          sub_reveal: node?.data.subReveal ?? "",
           original_audio: node?.data.originalAudio ?? "duck",
           // Background music looped under the whole clip (an uploaded audio asset).
           bgm_media_id: node?.data.bgmMediaId || undefined,

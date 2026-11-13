@@ -8,7 +8,7 @@ import { mediaUrl } from "../../../api/client";
 import { DUB_FPS, DubSubtitles, emphasisAt, emphasisFont, zoomAt, type DubLayoutSpec, type DubRemotionStyle } from "../../../remotion/DubSubtitles";
 import { canvasRect, gridCss } from "../../../remotion/canvasGeom";
 import { adjustCss, textLayerCss, textShownAt } from "../../../remotion/textLayer";
-import { chunkAt, effectiveLayout, splitAll, W_MAX, W_MIN, type EditCue } from "./cues";
+import { chunkAt, effectiveLayout, revealAt, splitAll, W_MAX, W_MIN, type EditCue } from "./cues";
 import { DeviceChrome } from "./DeviceChrome";
 import { overlaps, platformOf, type PlatformKey, type Rect } from "./platforms";
 import { setGain } from "../../../lib/audioBoost";
@@ -287,6 +287,8 @@ export const EditorStage = forwardRef<StageHandle, {
   const idleText = selCue !== null ? (chunks.find((c) => c.cue === selCue)?.text ?? cues[selCue]?.text ?? "") : "";
   const shownText = active?.text ?? (idleText || "Phụ đề");
   const shownCue = active?.cue ?? selCue;
+  // "Hiện chữ" (ffmpeg subtitles): the line fills in word by word, or shows one word at a time
+  const reveal = active && layout.reveal && !style.startsWith("rm_") ? revealAt(active, t) : null;
   // the box is drawn with the line's own look on top of the clip-wide layout
   const lay = effectiveLayout(layout, shownCue !== null ? cues[shownCue]?.look : null);
   const subBox = useRef<HTMLDivElement>(null);
@@ -589,7 +591,8 @@ export const EditorStage = forwardRef<StageHandle, {
             onDoubleClick={(e) => { e.stopPropagation(); if (shownCue !== null) startEdit(shownCue); }}
             onKeyDown={onBoxKey}
           >
-            {shownText}
+            {!reveal ? shownText : layout.reveal === "word" ? reveal.word
+              : <>{reveal.said}<span style={{ visibility: "hidden" }}>{reveal.rest}</span></>}
             {!readOnly && ([-1, 1] as const).map((side) => (
               <span key={side} className={`dx-stage__wh dx-stage__wh--${side < 0 ? "l" : "r"}`} title="Kéo để đổi độ rộng phụ đề (cỡ chữ đổi ở thanh Cỡ chữ)"
                     onPointerDown={(e) => {

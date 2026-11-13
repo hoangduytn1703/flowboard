@@ -86,6 +86,8 @@ class NarrationOptions:
     # joined clip by services/dub_remotion in one of its styles (rm_box…) — see :func:`subtitle_choice`.
     sub_engine: str = "ass"
     sub_style: str = "outline"
+    # ffmpeg subtitles shown word by word: "" | "grow" | "word" (tts.SUB_REVEALS)
+    sub_reveal: str = ""
 
     def any_line(self) -> bool:
         return any(line.strip() for line in self.lines)
@@ -400,7 +402,7 @@ def _image_clip(ffmpeg: str, src: Path, text: str, opts: NarrationOptions,
             report.cues, cues = cues, []
         if cues or caption:
             ass = work / f"{dst.stem}.ass"
-            tts.write_ass(cues, ass, width=w, height=h, headline=caption, total_s=length, style=opts.sub_style)
+            tts.write_ass(cues, ass, width=w, height=h, headline=caption, total_s=length, style=opts.sub_style, reveal=opts.sub_reveal)
             vf.append(f"subtitles={_filter_path(ass)}")
     inputs = ["-loop", "1", "-framerate", "24", "-t", f"{length:.3f}", "-i", str(src)]
     chains = ["[0:v]" + ",".join(vf) + "[v]"]
@@ -518,7 +520,7 @@ def _voice_clip(ffmpeg: str, src: Path, text: str, opts: NarrationOptions,
             report.cues, cues = cues, []
         if cues or caption:
             ass = work / f"{dst.stem}.ass"
-            tts.write_ass(cues, ass, width=out_w, height=out_h, headline=caption, total_s=length, style=opts.sub_style)
+            tts.write_ass(cues, ass, width=out_w, height=out_h, headline=caption, total_s=length, style=opts.sub_style, reveal=opts.sub_reveal)
             vf.append(f"subtitles={_filter_path(ass)}")
     video_chain = (vf[0] + ",".join(vf[1:]) if len(vf) > 1 else vf[0] + "null") + "[v]"
 
@@ -732,14 +734,15 @@ def _remotion_subtitles(joined: Path, cues: list[tuple[float, float, str]], styl
         out.with_suffix(".remotion.json").unlink(missing_ok=True)  # the spec render() leaves next to the output
 
 
-def _burn_cues(ffmpeg: str, joined: Path, cues: list[tuple[float, float, str]], style: str, out_dir: Path) -> Optional[Path]:
+def _burn_cues(ffmpeg: str, joined: Path, cues: list[tuple[float, float, str]], style: str, out_dir: Path,
+               reveal: str = "") -> Optional[Path]:
     """The ffmpeg fallback when Remotion fails: the same cues burned onto the joined clip."""
     info = probe_clip(joined)
     if info is None:
         return None
     out = out_dir / f"subs_{uuid.uuid4().hex}.mp4"
     ass = out.with_suffix(".ass")
-    tts.write_ass(cues, ass, width=info.width, height=info.height, style=style)
+    tts.write_ass(cues, ass, width=info.width, height=info.height, style=style, reveal=reveal)
     cmd = [ffmpeg, "-y", "-v", "error", "-i", str(joined), "-vf", f"subtitles={_filter_path(ass)}",
            *_encode_args(ffmpeg), "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(out)]
     proc = subprocess.run(cmd, capture_output=True, timeout=_SMOOTH_TIMEOUT_S, check=False)
@@ -875,7 +878,8 @@ def export_video(
                 logger.warning("video_export: Remotion subtitles failed (%s); burning them with ffmpeg", str(exc)[:200])
                 report.subtitles_error = str(exc)[:200]
                 report.subtitles_engine = "ass"
-                drawn = _burn_cues(ffmpeg, joined_path, cues, REMOTION_TO_ASS.get(narration.sub_style, "box_yellow"), out_dir)
+                drawn = _burn_cues(ffmpeg, joined_path, cues, REMOTION_TO_ASS.get(narration.sub_style, "box_yellow"), out_dir,
+                                   narration.sub_reveal)
             if drawn is not None:
                 joined_path = drawn
                 joined_media = _register(drawn)

@@ -1,0 +1,792 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { announceRunning } from "../../components/BackgroundTasks";
+import { askConfirm, askText } from "../../components/Dialogs";
+import { StopButton } from "../../components/StopButton";
+import {
+  addGrabChannel, agoOf, clockOf, dateOf, deleteGrabChannel, downloadGrabVideos, editGrabChannel, getGrabState, getGrabStatus,
+  grabAvatarUrl, grabThumbUrl, listGrabChannels, listGrabMarks, listGrabVideos, markGrabUsed, pickGrabVideos, scanAllGrabChannels,
+  scanGrabChannel, setGrabMarks, shortCount, stopGrabDownloads, stopGrabScan,
+  type GrabChannel, type GrabMarkTag, type GrabState, type GrabStatus, type GrabVideo,
+} from "../../api/grab";
+import { MarkMenu, markClass } from "../grab/MarkMenu";
+import { useFeature } from "../../lib/features";
+import { PageEmpty, PageLoading } from "../PageState";
+import { toast } from "../../store/toast";
+import "../posts.css";
+import "../grab.css";
+
+const errMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
+/** how many videos one press sends on (the tools' own queues) */
+const MAX_TO = { cut: 10, dub: 5 } as const;
+const TOOL_NAME = { cut: "✂️ Cắt video", dub: "🎙 Lồng tiếng" } as const;
+const PAGE = 60;
+
+type Sort = "new" | "views" | "likes" | "long" | "short";
+const SORTS: { key: Sort; label: string }[] = [
+  { key: "new", label: "Mới đăng nhất" },
+  { key: "views", label: "Nhiều lượt xem nhất" },
+  { key: "likes", label: "Nhiều tim nhất" },
+  { key: "long", label: "Dài nhất" },
+  { key: "short", label: "Ngắn nhất" },
+];
+const VIEW_STEPS = [0, 1_000, 10_000, 50_000, 100_000, 500_000, 1_000_000, 5_000_000];
+const DAY_STEPS: { days: number; label: string }[] = [
+  { days: 0, label: "Mọi lúc" }, { days: 7, label: "7 ngày qua" }, { days: 30, label: "30 ngày qua" },
+  { days: 90, label: "3 tháng qua" }, { days: 365, label: "1 năm qua" },
+];
+type Len = "" | "s1" | "s3" | "s10" | "long";
+const LENS: { key: Len; label: string }[] = [
+  { key: "", label: "Mọi độ dài" }, { key: "s1", label: "Short / tới 1 phút" }, { key: "s3", label: "1 – 3 phút" },
+  { key: "s10", label: "3 – 10 phút" }, { key: "long", label: "Trên 10 phút" },
+];
+type Have = "" | "fresh" | "todo" | "here" | "unused";
+const HAVES: { key: Have; label: string }[] = [
+  { key: "", label: "Tất cả" }, { key: "fresh", label: "Mới từ lần quét cuối" }, { key: "todo", label: "Chưa tải về" },
+  { key: "here", label: "Đã tải về" }, { key: "unused", label: "Chưa cắt / lồng tiếng" },
+];
+const PRESET_LIMITS = [30, 60, 100, 200, 500, 1000];
+const MAX_LIMIT = 3000;
+const PRESET_MARKS = ["Đã xử lý", "Đã đăng", "Để dành", "Bỏ qua"];
+/** "" every video · "__none" no label yet · "__any" has a label · otherwise that label */
+type MarkFilter = string;
+const PROMPT_IDEAS = [
+  "10 video nhiều lượt xem nhất trong 3 tháng gần đây",
+  "Các video về mẹo / hướng dẫn, dưới 3 phút",
+  "Video có tiêu đề gây tò mò, giật gân nhất — tối đa 8 cái",
+];
+
+const plain = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D").toLowerCase();
+function stored<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw === null ? fallback : (JSON.parse(raw) as T);
+  } catch {
+    return fallback;
+  }
+}
+function store(key: string, value: unknown) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* private mode */ }
+}
+
+/** Where a video stands: the download in flight (polled) wins over what the list last said. */
+function downloadOf(v: GrabVideo, state: GrabState | null): "" | "queued" | "running" | "done" {
+  const live = state?.downloads[String(v.id)];
+  if (live) return live.status;
+  return v.media_id ? "done" : "";
+}
+
+function Avatar({ channel, size = 40 }: { channel: GrabChannel; size?: number }) {
+  const [broken, setBroken] = useState(false);
+  const letter = (channel.name || channel.handle || "?").replace(/^@/, "").charAt(0).toUpperCase();
+  return (
+    <span className={`gb-avatar gb-avatar--${channel.platform}`} style={{ width: size, height: size, fontSize: size * 0.42 }} aria-hidden="true">
+      {channel.has_avatar && !broken
+        ? <img src={grabAvatarUrl(channel.id)} alt="" loading="lazy" onError={() => setBroken(true)} />
+        : letter}
+    </span>
+  );
+}
+
+function PlatformChip({ platform, label, beta = false }: { platform: string; label: string; beta?: boolean }) {
+  const icon = platform === "youtube" ? "▶" : platform === "bilibili" ? "📺" : "♪";
+  return (
+    <span className={`gb-plat gb-plat--${platform}`}>
+      {icon} {label}{beta && <b className="gb-beta" title="Đang thử nghiệm — có thể chưa ổn định">BETA</b>}
+    </span>
+  );
+}
+
+/** "Lấy …": the ready-made sizes, every video of the channel (up to the most one scan reads), or any number typed in. */
+function LimitPicker({ limit, presets, max, onChange }: { limit: number; presets: number[]; max: number; onChange: (n: number) => void }) {
+  const known = presets.includes(limit) || limit === max;
+  const [typing, setTyping] = useState(!known);
+  const [draft, setDraft] = useState(String(limit));
+  useEffect(() => { setDraft(String(limit)); }, [limit]);
+  function commit() {
+    const n = Math.round(Number(draft));
+    if (!Number.isFinite(n) || n <= 0) { setDraft(String(limit)); return; }
+    onChange(Math.min(Math.max(n, 5), max));
+  }
+  return (
+    <label className="gb__limit" title={`Mỗi lần quét đọc bấy nhiêu video mới nhất của kênh (YouTube: mỗi mục Video và Shorts). Nhiều nhất ${max} video một lần.`}>
+      <span>Lấy</span>
+      <select value={typing ? "custom" : String(limit)}
+              onChange={(e) => {
+                if (e.target.value === "custom") { setTyping(true); return; }
+                setTyping(false);
+                onChange(Number(e.target.value));
+              }}>
+        {presets.map((n) => <option key={n} value={n}>{n} video mới nhất</option>)}
+        <option value={max}>Tất cả video (tối đa {max})</option>
+        <option value="custom">Tự nhập số…</option>
+      </select>
+      {typing && (
+        <input className="gb__limitnum" type="number" min={5} max={max} step={10} value={draft} aria-label="Số video muốn lấy"
+               onChange={(e) => setDraft(e.target.value)} onBlur={commit}
+               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } }} />
+      )}
+    </label>
+  );
+}
+
+/**
+ * "📡 Cào video kênh": keep source channels (YouTube, TikTok), read their newest videos with views / likes / length /
+ * date, filter or let the AI pick by a request, download the picks and send them on to "✂️ Cắt video" / "🎙 Lồng tiếng".
+ */
+export function GrabPage() {
+  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const canCut = useFeature("cut");
+  const canDub = useFeature("dub");
+  const [status, setStatus] = useState<GrabStatus | null>(null);
+  const [channels, setChannels] = useState<GrabChannel[] | null>(null);
+  const [videos, setVideos] = useState<GrabVideo[]>([]);
+  const [state, setState] = useState<GrabState | null>(null);
+  const [url, setUrl] = useState("");
+  const [limit, setLimit] = useState<number>(() => stored("flowboard.grab.limit", 60));
+  const [markTags, setMarkTags] = useState<GrabMarkTag[]>([]);
+  const [markF, setMarkF] = useState<MarkFilter>(() => stored<MarkFilter>("flowboard.grab.markFilter", ""));
+  // the 🏷 menu: the videos it labels and where its button is
+  const [markMenu, setMarkMenu] = useState<{ ids: number[]; anchor: DOMRect } | null>(null);
+  const [adding, setAdding] = useState(false);
+  // which channel is open (null = every channel) and the label filter of the channel list
+  const [chan, setChan] = useState<number | null>(null);
+  const [tag, setTag] = useState("");
+  // filters of the video grid
+  const [q, setQ] = useState("");
+  const [sort, setSort] = useState<Sort>(() => stored<Sort>("flowboard.grab.sort", "new"));
+  const [minViews, setMinViews] = useState(0);
+  const [days, setDays] = useState(0);
+  const [len, setLen] = useState<Len>("");
+  const [kind, setKind] = useState<"" | "video" | "short">("");
+  const [have, setHave] = useState<Have>("");
+  const [shown, setShown] = useState(PAGE);
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  // the AI's pick
+  const [prompt, setPrompt] = useState<string>(() => stored("flowboard.grab.prompt", ""));
+  const [picking, setPicking] = useState(false);
+  const [why, setWhy] = useState<Map<number, string>>(new Map());
+  const [aiNote, setAiNote] = useState("");
+  const [aiOnly, setAiOnly] = useState(false);
+  // "tải xong thì chuyển sang …": the videos wanted in a tool that are still downloading
+  const [after, setAfter] = useState<{ tool: "cut" | "dub"; ids: number[] } | null>(null);
+  const urlInput = useRef<HTMLInputElement>(null);
+  const busyKey = useRef("");
+
+  async function reload() {
+    try {
+      const [cs, vs, ms] = await Promise.all([listGrabChannels(), listGrabVideos(), listGrabMarks().catch(() => [] as GrabMarkTag[])]);
+      setChannels(cs);
+      setVideos(vs);
+      setMarkTags(ms);
+    } catch (e) {
+      toast.error(errMessage(e));
+      setChannels((c) => c ?? []);
+    }
+  }
+  useEffect(() => {
+    void getGrabStatus().then(setStatus).catch(() => undefined);
+    void reload();
+  }, []);
+
+  // ?channel=<id> (the "việc đang chạy" badge, the assistant)
+  const wantChannel = params.get("channel");
+  useEffect(() => {
+    if (!wantChannel) return;
+    const id = Number(wantChannel);
+    if (id > 0) setChan(id);
+    setParams({}, { replace: true });
+  }, [wantChannel]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // scans and downloads in flight: polled; when one ends the lists are read again
+  const busy = !!state && (Object.keys(state.scans).length > 0 || Object.keys(state.downloads).length > 0);
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => {
+      const s = await getGrabState().catch(() => null);
+      if (!alive || !s) return;
+      const key = `${Object.keys(s.scans).sort().join(",")}|${Object.keys(s.downloads).sort().join(",")}`;
+      if (key !== busyKey.current) {
+        busyKey.current = key;
+        void reload();
+      }
+      setState(s);
+    };
+    void tick();
+    const t = window.setInterval(() => void tick(), busy ? 1500 : 12000);
+    return () => { alive = false; window.clearInterval(t); };
+  }, [busy]);
+
+  const byId = useMemo(() => new Map((channels ?? []).map((c) => [c.id, c])), [channels]);
+  const allTags = useMemo(() => Array.from(new Set((channels ?? []).flatMap((c) => c.tags))).sort((a, b) => a.localeCompare(b, "vi")), [channels]);
+  const listed = useMemo(() => (channels ?? []).filter((c) => !tag || c.tags.includes(tag)), [channels, tag]);
+  useEffect(() => { if (tag && !allTags.includes(tag)) setTag(""); }, [allTags, tag]);
+  useEffect(() => { if (chan !== null && channels && !byId.has(chan)) setChan(null); }, [chan, channels, byId]);
+
+  // ── the grid ─────────────────────────────────────────────────────────────
+  const scope = useMemo(() => {
+    const ids = new Set(listed.map((c) => c.id));
+    return videos.filter((v) => (chan !== null ? v.channel_id === chan : ids.has(v.channel_id)));
+  }, [videos, chan, listed]);
+  const { filtered, undated } = useMemo(() => {
+    const needle = plain(q.trim());
+    const since = days ? Date.now() - days * 86400000 : 0;
+    let undated = 0;
+    const out = scope.filter((v) => {
+      if (needle && !plain(v.title).includes(needle)) return false;
+      if (minViews && (v.views ?? -1) < minViews) return false;
+      if (kind && v.kind !== kind) return false;
+      if (len) {
+        const d = v.duration_s ?? (v.kind === "short" ? 30 : null);
+        if (d === null) return false;
+        if (len === "s1" && d > 60) return false;
+        if (len === "s3" && (d <= 60 || d > 180)) return false;
+        if (len === "s10" && (d <= 180 || d > 600)) return false;
+        if (len === "long" && d <= 600) return false;
+      }
+      const here = downloadOf(v, state) === "done";
+      if (have === "fresh" && !v.fresh) return false;
+      if (have === "todo" && here) return false;
+      if (have === "here" && !here) return false;
+      if (have === "unused" && (v.used.cut || v.used.dub)) return false;
+      if (markF === "__none" && v.marks.length) return false;
+      if (markF === "__any" && !v.marks.length) return false;
+      if (markF && !markF.startsWith("__") && !v.marks.some((m) => m.toLowerCase() === markF.toLowerCase())) return false;
+      if (aiOnly && !why.has(v.id)) return false;
+      if (since) {
+        if (!v.published_at) { undated += 1; return false; }
+        if (new Date(v.published_at).getTime() < since) return false;
+      }
+      return true;
+    });
+    const time = (v: GrabVideo) => (v.published_at ? new Date(v.published_at).getTime() : 0);
+    const dur = (v: GrabVideo) => v.duration_s ?? (v.kind === "short" ? 30 : 0);
+    out.sort((a, b) => {
+      if (sort === "views") return (b.views ?? -1) - (a.views ?? -1);
+      if (sort === "likes") return (b.likes ?? -1) - (a.likes ?? -1);
+      if (sort === "long") return dur(b) - dur(a);
+      if (sort === "short") return (dur(a) || 1e9) - (dur(b) || 1e9);
+      return time(b) - time(a) || a.channel_id - b.channel_id || a.position - b.position;
+    });
+    return { filtered: out, undated };
+  }, [scope, q, minViews, days, len, kind, have, markF, aiOnly, why, sort, state]);
+  useEffect(() => { setShown(PAGE); }, [chan, tag, q, minViews, days, len, kind, have, markF, aiOnly, sort]);
+  const filtersOn = !!(q.trim() || minViews || days || len || kind || have || markF || aiOnly);
+  function clearFilters() { setQ(""); setMinViews(0); setDays(0); setLen(""); setKind(""); setHave(""); pickMarkFilter(""); setAiOnly(false); }
+  function pickMarkFilter(f: MarkFilter) { setMarkF(f); store("flowboard.grab.markFilter", f); }
+
+  // ── video labels ("Đã xử lý", "Đã đăng"…) ───────────────────────────────
+  const presets = status?.mark_presets ?? PRESET_MARKS;
+  const knownMarks = useMemo(() => {
+    const seen = new Set(presets.map((p) => p.toLowerCase()));
+    const own = markTags.map((m) => m.tag).filter((t) => !seen.has(t.toLowerCase()));
+    return [...presets, ...own];
+  }, [presets, markTags]);
+  // how many videos of the current channel(s) carry each label — the filter chips
+  const markCounts = useMemo(() => {
+    const out = new Map<string, number>();
+    let none = 0;
+    for (const v of scope) {
+      if (!v.marks.length) none += 1;
+      for (const m of v.marks) out.set(m, (out.get(m) ?? 0) + 1);
+    }
+    return { per: out, none, any: scope.length - none };
+  }, [scope]);
+  useEffect(() => {
+    if (markF && !markF.startsWith("__") && channels && !knownMarks.some((t) => t.toLowerCase() === markF.toLowerCase())) pickMarkFilter("");
+  }, [knownMarks, markF, channels]); // eslint-disable-line react-hooks/exhaustive-deps
+  function openMarks(ids: number[], el: HTMLElement) {
+    if (!ids.length) return;
+    setMarkMenu({ ids, anchor: el.getBoundingClientRect() });
+  }
+  async function applyMarks(ids: number[], add: string[], remove: string[]) {
+    try {
+      await setGrabMarks(ids, add, remove);
+      const lowAdd = add.map((t) => t.toLowerCase()), lowRemove = remove.map((t) => t.toLowerCase());
+      setVideos((list) => list.map((v) => {
+        if (!ids.includes(v.id)) return v;
+        const kept = v.marks.filter((m) => !lowRemove.includes(m.toLowerCase()) && !lowAdd.includes(m.toLowerCase()));
+        return { ...v, marks: [...kept, ...add] };
+      }));
+      setMarkTags(await listGrabMarks().catch(() => markTags));
+      if (ids.length > 1) toast.success(add.length ? `Đã gắn “${add.join(", ")}” cho ${ids.length} video.` : `Đã gỡ “${remove.join(", ")}” khỏi ${ids.length} video.`);
+    } catch (e) {
+      toast.error(errMessage(e));
+    }
+  }
+
+  const pickedList = useMemo(() => videos.filter((v) => picked.has(v.id)), [videos, picked]);
+  const pickedTodo = pickedList.filter((v) => downloadOf(v, state) === "");
+  function toggle(id: number) {
+    setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  }
+
+  // ── channels ─────────────────────────────────────────────────────────────
+  async function add() {
+    const text = url.trim();
+    if (!text || adding) return;
+    setAdding(true);
+    try {
+      const ch = await addGrabChannel(text, limit);
+      setUrl("");
+      setChan(ch.id);
+      setTag("");
+      announceRunning();
+      toast.success(`Đang đọc danh sách video của “${ch.name}”…`);
+      await reload();
+      setState((s) => ({ scans: { ...(s?.scans ?? {}), [String(ch.id)]: ch.scan ?? { status: "running", phase: "Bắt đầu", found: 0, added: 0, error: "", stopping: false } }, downloads: s?.downloads ?? {} }));
+    } catch (e) {
+      toast.error(errMessage(e));
+    } finally {
+      setAdding(false);
+    }
+  }
+  async function rescan(c: GrabChannel) {
+    try {
+      const ch = await scanGrabChannel(c.id, limit);
+      announceRunning();
+      setState((s) => ({ scans: { ...(s?.scans ?? {}), [String(c.id)]: ch.scan ?? { status: "running", phase: "Bắt đầu", found: 0, added: 0, error: "", stopping: false } }, downloads: s?.downloads ?? {} }));
+    } catch (e) {
+      toast.error(errMessage(e));
+    }
+  }
+  async function rescanAll() {
+    try {
+      const r = await scanAllGrabChannels(limit);
+      announceRunning();
+      toast.info(`Đang quét lại ${r.channels} kênh — video mới sẽ có nhãn MỚI.`);
+      setState(await getGrabState());
+    } catch (e) {
+      toast.error(errMessage(e));
+    }
+  }
+  async function editTags(c: GrabChannel) {
+    const text = await askText(`Nhãn của kênh “${c.name}” — cách nhau bằng dấu phẩy (VD: vũ trụ, đối thủ, hài)`, c.tags.join(", "), { ok: "Lưu nhãn", placeholder: "vũ trụ, khoa học" });
+    if (text === null) return;
+    try {
+      await editGrabChannel(c.id, { tags: text.split(",").map((t) => t.trim()).filter(Boolean) });
+      await reload();
+    } catch (e) {
+      toast.error(errMessage(e));
+    }
+  }
+  async function remove(c: GrabChannel) {
+    if (!(await askConfirm(`Bỏ kênh “${c.name}” khỏi danh sách?\n\nDanh sách ${c.videos} video của kênh sẽ mất. ${c.downloaded ? `${c.downloaded} video đã tải về vẫn còn trên máy — clip đã cắt / lồng tiếng từ chúng không ảnh hưởng. ` : ""}${c.marked ? `Nhãn bạn gắn cho ${c.marked} video vẫn được nhớ — thêm lại kênh là thấy lại.` : ""}`,
+                           { ok: "Bỏ kênh", danger: true }))) return;
+    try {
+      await deleteGrabChannel(c.id);
+      toast.success(`Đã bỏ kênh “${c.name}”.`);
+      await reload();
+    } catch (e) {
+      toast.error(errMessage(e));
+    }
+  }
+
+  // ── downloads and what comes after ───────────────────────────────────────
+  async function download(ids: number[], quiet = false) {
+    if (!ids.length) return;
+    try {
+      const r = await downloadGrabVideos(ids);
+      announceRunning();
+      setState(await getGrabState());
+      if (!quiet) toast.info(r.queued ? `Đang tải ${r.queued} video về (hai video một lúc) — cứ làm việc khác, xong tool sẽ báo.` : "Các video này đã có trên máy rồi.");
+    } catch (e) {
+      toast.error(errMessage(e));
+    }
+  }
+  async function go(tool: "cut" | "dub", ids: number[]) {
+    setAfter(null);
+    try { await markGrabUsed(ids, tool); } catch { /* the mark is a nicety */ }
+    navigate(`/tools/${tool}?grab=${ids.join(",")}`);
+  }
+  async function send(tool: "cut" | "dub", list: GrabVideo[]) {
+    if (!list.length) return;
+    if (list.length > MAX_TO[tool]) {
+      toast.warning(`${TOOL_NAME[tool]} nhận tối đa ${MAX_TO[tool]} video một lượt — bỏ chọn bớt ${list.length - MAX_TO[tool]} video (gửi tiếp ở lượt sau).`);
+      return;
+    }
+    const ids = list.map((v) => v.id);
+    const missing = list.filter((v) => downloadOf(v, state) !== "done");
+    if (!missing.length) { await go(tool, ids); return; }
+    await download(missing.filter((v) => downloadOf(v, state) === "").map((v) => v.id), true);
+    setAfter({ tool, ids });
+    toast.info(`Đang tải ${missing.length} video về trước — tải xong tool tự chuyển sang ${TOOL_NAME[tool]}.`);
+  }
+  // the downloads a tool is waiting for: all here → go on; one failed → stay and say so
+  useEffect(() => {
+    if (!after || !state) return;
+    const list = after.ids.map((id) => videos.find((v) => v.id === id)).filter((v): v is GrabVideo => !!v);
+    if (list.length !== after.ids.length) { setAfter(null); return; }
+    if (list.some((v) => state.downloads[String(v.id)])) return;       // still on their way
+    if (list.every((v) => v.media_id)) { void go(after.tool, after.ids); return; }
+    const failed = list.filter((v) => !v.media_id);
+    if (failed.some((v) => v.download_error)) {
+      setAfter(null);
+      toast.error(`${failed.length} video không tải được nên chưa chuyển sang ${TOOL_NAME[after.tool]} — bỏ chọn video lỗi rồi bấm lại.`);
+      return;
+    }
+    // nothing on its way and not all here: the list may be a moment old (a download that ended between two polls) —
+    // read it once more; still missing then = stopped, so the wait ends
+    let alive = true;
+    const t = window.setTimeout(() => {
+      void listGrabVideos().then((fresh) => {
+        if (!alive) return;
+        setVideos(fresh);
+        if (!after.ids.every((id) => fresh.find((v) => v.id === id)?.media_id)) {
+          setAfter(null);
+          toast.warning(`Chưa tải đủ video nên chưa chuyển sang ${TOOL_NAME[after.tool]}.`);
+        }
+      }).catch(() => undefined);
+    }, 2500);
+    return () => { alive = false; window.clearTimeout(t); };
+  }, [after, videos, state]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── the AI's pick ────────────────────────────────────────────────────────
+  async function aiPick() {
+    const text = prompt.trim();
+    if (!text) { toast.warning("Gõ yêu cầu cho AI trước, ví dụ: 10 video nhiều view nhất về vũ trụ."); return; }
+    const pool = aiOnly ? scope : filtered;
+    const max = status?.pick_max ?? 300;
+    if (!pool.length) { toast.warning("Chưa có video nào trong danh sách để AI chọn."); return; }
+    if (pool.length > max) { toast.warning(`AI xem tối đa ${max} video một lần — lọc bớt (lượt xem, ngày đăng, kênh…) rồi bấm lại. Đang có ${pool.length}.`); return; }
+    setPicking(true);
+    store("flowboard.grab.prompt", text);
+    try {
+      const r = await pickGrabVideos(pool.map((v) => v.id), text);
+      setWhy(new Map(r.picks.map((p) => [p.id, p.why])));
+      setAiNote(r.note);
+      setPicked(new Set(r.picks.map((p) => p.id)));
+      setAiOnly(r.picks.length > 0);
+      if (r.picks.length) toast.success(`AI chọn ${r.picks.length} video — đã tick sẵn, xem lại rồi tải về.`);
+      else toast.warning(r.note || "AI không thấy video nào hợp yêu cầu.");
+    } catch (e) {
+      toast.error(errMessage(e));
+    } finally {
+      setPicking(false);
+    }
+  }
+  function clearAi() { setWhy(new Map()); setAiNote(""); setAiOnly(false); }
+
+  if (channels === null) return <><header className="qt-header"><span className="qt-header__crumb">📡 Cào video kênh</span></header><PageLoading /></>;
+
+  const open = chan !== null ? byId.get(chan) ?? null : null;
+  const downloading = state ? Object.keys(state.downloads).length : 0;
+  const scanning = state ? Object.keys(state.scans).length : 0;
+  const view = filtered.slice(0, shown);
+
+  return (
+    <>
+      <header className="qt-header"><span className="qt-header__crumb">📡 Cào video kênh</span></header>
+      <div className="qt-home gb">
+        <section className="qt-card gb__add">
+          <div className="gb__addrow">
+            <input ref={urlInput} className="gb__input" value={url} placeholder="Dán link kênh YouTube, TikTok, Douyin hoặc Bilibili — vd. https://www.youtube.com/@tenkenh"
+                   aria-label="Link kênh" onChange={(e) => setUrl(e.target.value)}
+                   onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add(); } }} />
+            <LimitPicker limit={limit} presets={status?.limits ?? PRESET_LIMITS} max={status?.max_limit ?? MAX_LIMIT}
+                         onChange={(n) => { setLimit(n); store("flowboard.grab.limit", n); }} />
+            <button type="button" className="qt-btn qt-btn--accent" disabled={!url.trim() || adding} onClick={() => void add()}>
+              {adding ? "Đang thêm…" : "＋ Thêm kênh & quét"}
+            </button>
+          </div>
+          <p className="qt-card__hint">
+            Tool đọc danh sách video của kênh (tiêu đề, lượt xem, tim, độ dài, ngày đăng) — <strong>chưa tải gì về</strong>. Bạn lọc hoặc nhờ AI chọn, rồi mới tải
+            những video muốn làm. Đọc được: <PlatformChip platform="youtube" label="YouTube (kênh, Shorts, playlist)" /> <PlatformChip platform="tiktok" label="TikTok" />
+            {" "}<PlatformChip platform="douyin" label="Douyin" /> <PlatformChip platform="bilibili" label="Bilibili (bilibili.com)" beta />
+            {" "}· Facebook, Instagram không cho đọc danh sách kênh — dán từng link video vào Cắt video / Lồng tiếng.
+          </p>
+          <p className="qt-card__hint">
+            <strong>Douyin và Bilibili</strong> được đọc qua Chrome của bạn: lúc quét, extension DFlow mở trang kênh trong một cửa sổ Chrome, cuộn lấy
+            danh sách rồi tự đóng (đừng đóng tay). Douyin cần bạn <strong>đã đăng nhập douyin.com</strong> trong Chrome đó; trang hỏi mã xác minh thì làm
+            ngay trong cửa sổ ấy. Douyin không công bố lượt xem — tool hiện lượt tim.
+          </p>
+          <p className="gb__bili">
+            <b className="gb-beta">BETA</b> <strong>Bilibili:</strong> chỉ đọc được <strong>bilibili.com</strong> — bản Trung Quốc, link kênh dạng
+            <code>space.bilibili.com/123456</code> (cả dạng có <code>/en/</code> khi vào từ Việt Nam). <strong>Chưa</strong> đọc được <strong>bilibili.tv</strong> (bản quốc
+            tế, giao diện tiếng Việt, link <code>bilibili.tv/vi/space/…</code>) — đó là một trang khác. Chưa đăng nhập thì chỉ đọc được vài chục video mới nhất và
+            hay bị Bilibili chặn tạm khi quét nhiều kênh liền nhau.
+          </p>
+          {limit > 200 && (
+            <p className="gb__note">
+              Lấy {limit === (status?.max_limit ?? MAX_LIMIT) ? "tất cả" : limit} video thì quét lâu hơn: YouTube / TikTok khoảng 1 phút mỗi 1000 video; Douyin / Bilibili cửa sổ Chrome
+              cuộn khoảng 1 phút mỗi 300 video (giữ cửa sổ đó mở). AI chọn tối đa {status?.pick_max ?? 300} video một lần — lọc bớt trước khi nhờ AI.
+            </p>
+          )}
+          {status && !status.ytdlp && <p className="gb__warn">Máy này chưa có công cụ đọc kênh (yt-dlp) — tool sẽ tự tải ở lần quét đầu, cần có mạng.</p>}
+        </section>
+
+        {channels.length === 0 ? (
+          <PageEmpty icon="📡" title="Chưa có kênh nào"
+                     actions={<button type="button" className="qt-btn qt-btn--accent" onClick={() => urlInput.current?.focus()}>Dán link kênh đầu tiên</button>}>
+            Dán link một kênh bạn hay lấy video (kênh nước ngoài cùng ngành, kênh đối thủ…). Tool liệt kê video kèm lượt xem và ngày đăng để bạn chọn
+            video đáng làm lại, tải về rồi đem cắt / lồng tiếng — khỏi mở từng video để dò.
+          </PageEmpty>
+        ) : (
+          <div className="gb__grid">
+            <aside className="gb__side">
+              <div className="gb__sidehead">
+                <strong>Kênh nguồn <small>{channels.length}</small></strong>
+                <button type="button" className="qt-btn qt-btn--small" disabled={scanning > 0} onClick={() => void rescanAll()}
+                        title="Đọc lại video mới của mọi kênh — video chưa thấy lần trước được gắn nhãn MỚI">⟳ Quét tất cả</button>
+              </div>
+              {allTags.length > 0 && (
+                <div className="gb__tags" role="group" aria-label="Lọc kênh theo nhãn">
+                  <button type="button" className={`qt-chip qt-chip--sm${tag === "" ? " qt-chip--on" : ""}`} onClick={() => setTag("")}>Tất cả</button>
+                  {allTags.map((t) => (
+                    <button key={t} type="button" className={`qt-chip qt-chip--sm${tag === t ? " qt-chip--on" : ""}`} onClick={() => { setTag(t); setChan(null); }}>#{t}</button>
+                  ))}
+                </div>
+              )}
+              <button type="button" className={`gb-ch gb-ch--all${chan === null ? " is-on" : ""}`} onClick={() => setChan(null)}>
+                <span className="gb-avatar gb-avatar--all" style={{ width: 40, height: 40, fontSize: 18 }} aria-hidden="true">▦</span>
+                <span className="gb-ch__body">
+                  <strong>{tag ? `Mọi kênh #${tag}` : "Tất cả kênh"}</strong>
+                  <small>{listed.reduce((n, c) => n + c.videos, 0)} video · {listed.length} kênh</small>
+                </span>
+              </button>
+              {listed.map((c) => {
+                const scan = state?.scans[String(c.id)];
+                return (
+                  <div key={c.id} className={`gb-ch${chan === c.id ? " is-on" : ""}`}>
+                    <button type="button" className="gb-ch__main" onClick={() => setChan(c.id)} title={c.description || c.url}>
+                      <Avatar channel={c} />
+                      <span className="gb-ch__body">
+                        <strong>{c.name}</strong>
+                        <small>
+                          <PlatformChip platform={c.platform} label={c.platform_label} beta={c.platform === "bilibili"} />
+                          {c.followers !== null && <span>{shortCount(c.followers)} theo dõi</span>}
+                        </small>
+                        <small>
+                          {c.videos} video{c.fresh > 0 && <b className="gb-new"> · {c.fresh} mới</b>}{c.downloaded > 0 && <span> · {c.downloaded} đã tải</span>}
+                          {c.marked > 0 && <span title="Video bạn đã gắn nhãn (Đã xử lý, Đã đăng…)"> · 🏷 {c.marked}</span>}
+                          {c.scanned_at && <span title={`Quét lần cuối ${new Date(c.scanned_at).toLocaleString("vi-VN")}`}> · quét {agoOf(c.scanned_at)}</span>}
+                        </small>
+                        {c.tags.length > 0 && <span className="gb-ch__tags">{c.tags.map((t) => <i key={t}>#{t}</i>)}</span>}
+                      </span>
+                    </button>
+                    {scan ? (
+                      <div className="gb-ch__scan" role="status">
+                        <span className="gb-spin" aria-hidden="true" /> <span>{scan.phase}{scan.found ? ` · ${scan.found} video` : ""}</span>
+                        <StopButton stopping={scan.stopping} onStop={() => stopGrabScan(c.id)} />
+                      </div>
+                    ) : (
+                      <div className="gb-ch__acts">
+                        {c.scan_error && <span className="gb-ch__err" title={c.scan_error}>⚠ Lần quét cuối lỗi</span>}
+                        <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={() => void rescan(c)} title={`Đọc lại ${limit} video mới nhất của kênh`}>⟳ Quét lại</button>
+                        <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={() => void editTags(c)} title="Gắn nhãn để gom kênh theo chủ đề">🏷 Nhãn</button>
+                        <a className="qt-btn qt-btn--small qt-btn--ghost" href={c.url} target="_blank" rel="noreferrer" title="Mở kênh">↗</a>
+                        <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={() => void remove(c)} title="Bỏ kênh khỏi danh sách">🗑</button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </aside>
+
+            <div className="gb__main">
+              <section className="qt-card gb__tools">
+                <div className="gb__title">
+                  <h3>{open ? open.name : tag ? `Mọi kênh #${tag}` : "Tất cả kênh"}</h3>
+                  <small>{filtered.length === scope.length ? `${scope.length} video` : `${filtered.length} / ${scope.length} video`}</small>
+                  {filtersOn && <button type="button" className="qt-link" onClick={clearFilters}>Bỏ lọc</button>}
+                </div>
+                {open?.scan_error && !state?.scans[String(open.id)] && <p className="gb__warn">⚠ Lần quét cuối lỗi: {open.scan_error}</p>}
+                <div className="gb__filters">
+                  <label className="qt-field gb__search"><span>Tìm theo tiêu đề</span>
+                    <input value={q} placeholder="gõ vài chữ…" onChange={(e) => setQ(e.target.value)} />
+                  </label>
+                  <label className="qt-field"><span>Sắp xếp</span>
+                    <select value={sort} onChange={(e) => { const s = e.target.value as Sort; setSort(s); store("flowboard.grab.sort", s); }}>
+                      {SORTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                    </select>
+                  </label>
+                  <label className="qt-field"><span>Lượt xem</span>
+                    <select value={minViews} onChange={(e) => setMinViews(Number(e.target.value))}>
+                      {VIEW_STEPS.map((n) => <option key={n} value={n}>{n ? `Từ ${shortCount(n)} trở lên` : "Tất cả"}</option>)}
+                    </select>
+                  </label>
+                  <label className="qt-field"><span>Ngày đăng</span>
+                    <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
+                      {DAY_STEPS.map((d) => <option key={d.days} value={d.days}>{d.label}</option>)}
+                    </select>
+                  </label>
+                  <label className="qt-field"><span>Độ dài</span>
+                    <select value={len} onChange={(e) => setLen(e.target.value as Len)}>
+                      {LENS.map((l) => <option key={l.key} value={l.key}>{l.label}</option>)}
+                    </select>
+                  </label>
+                  <label className="qt-field"><span>Loại</span>
+                    <select value={kind} onChange={(e) => setKind(e.target.value as "" | "video" | "short")}>
+                      <option value="">Video & Shorts</option><option value="video">Chỉ video</option><option value="short">Chỉ YouTube Shorts</option>
+                    </select>
+                  </label>
+                  <label className="qt-field"><span>Trạng thái</span>
+                    <select value={have} onChange={(e) => setHave(e.target.value as Have)}>
+                      {HAVES.map((h) => <option key={h.key} value={h.key}>{h.label}</option>)}
+                    </select>
+                  </label>
+                </div>
+                <div className="gb__marks" role="group" aria-label="Lọc theo nhãn video">
+                  <span className="gb__markslabel">🏷 Nhãn video:</span>
+                  <button type="button" className={`qt-chip qt-chip--sm${markF === "" ? " qt-chip--on" : ""}`} onClick={() => pickMarkFilter("")}>Tất cả</button>
+                  <button type="button" className={`qt-chip qt-chip--sm${markF === "__none" ? " qt-chip--on" : ""}`} onClick={() => pickMarkFilter("__none")}
+                          title="Video chưa gắn nhãn nào — ẩn video đã xử lý / đã đăng để khỏi làm lại">Chưa gắn nhãn <small>{markCounts.none}</small></button>
+                  <button type="button" className={`qt-chip qt-chip--sm${markF === "__any" ? " qt-chip--on" : ""}`} onClick={() => pickMarkFilter("__any")}>Đã gắn nhãn <small>{markCounts.any}</small></button>
+                  {knownMarks.map((t) => {
+                    const count = markCounts.per.get(t) ?? 0;
+                    if (!count && !presets.includes(t) && markF !== t) return null;
+                    return (
+                      <button key={t} type="button" className={`qt-chip qt-chip--sm gb__markchip${markF === t ? " qt-chip--on" : ""}`} onClick={() => pickMarkFilter(markF === t ? "" : t)}>
+                        <span className={markClass(t, presets)}>{t}</span> <small>{count}</small>
+                      </button>
+                    );
+                  })}
+                </div>
+                {days > 0 && undated > 0 && (
+                  <p className="gb__note">{undated} video không rõ ngày đăng (YouTube không ghi ngày cho Shorts trong danh sách) nên đang ẩn — chọn “Mọi lúc” để thấy.</p>
+                )}
+
+                <details className="gb__ai" open={why.size > 0 || undefined}>
+                  <summary>✨ Nhờ AI chọn theo yêu cầu <small>AI đọc tiêu đề + lượt xem + ngày đăng của {aiOnly ? scope.length : filtered.length} video đang hiện</small></summary>
+                  <textarea className="qt-textarea" value={prompt} rows={2} maxLength={1500} disabled={picking}
+                            placeholder="VD: 10 video nhiều lượt xem nhất về vũ trụ, dưới 3 phút, đăng trong 3 tháng gần đây"
+                            onChange={(e) => setPrompt(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void aiPick(); } }} />
+                  <div className="gb__airow">
+                    {PROMPT_IDEAS.map((p) => <button key={p} type="button" className="qt-chip qt-chip--sm" disabled={picking} onClick={() => setPrompt(p)}>{p}</button>)}
+                  </div>
+                  <div className="gb__airow">
+                    <button type="button" className="qt-btn qt-btn--accent qt-btn--small" disabled={picking || !prompt.trim()} onClick={() => void aiPick()}>
+                      {picking ? "AI đang chọn…" : "✨ AI chọn video"}
+                    </button>
+                    {why.size > 0 && (
+                      <>
+                        <label className="qt-check"><input type="checkbox" checked={aiOnly} onChange={(e) => setAiOnly(e.target.checked)} /> Chỉ hiện {why.size} video AI chọn</label>
+                        <button type="button" className="qt-link" onClick={clearAi}>Bỏ kết quả AI</button>
+                      </>
+                    )}
+                  </div>
+                  {aiNote && <p className="gb__note">✨ {aiNote}</p>}
+                  <p className="gb__note">AI chỉ biết tiêu đề và con số — không xem nội dung video. Xem lại các video được tick trước khi tải.</p>
+                </details>
+              </section>
+
+              <div className={`gb__bar${picked.size ? " is-on" : ""}`} role="region" aria-label="Video đã chọn">
+                <span className="gb__barcount">{picked.size ? <>Đã chọn <strong>{picked.size}</strong> video</> : "Tick vào ảnh video để chọn"}</span>
+                <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" disabled={!filtered.length} onClick={() => setPicked(new Set(filtered.map((v) => v.id)))}
+                        title="Chọn mọi video đang hiện theo bộ lọc (cả những video ở dưới nút Xem thêm)">
+                  Chọn cả {filtered.length}
+                </button>
+                {picked.size > 0 && <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={() => setPicked(new Set())}>Bỏ chọn</button>}
+                <span className="gb__barspace" />
+                <button type="button" className="qt-btn qt-btn--small" disabled={!picked.size} onClick={(e) => openMarks(pickedList.map((v) => v.id), e.currentTarget)}
+                        title="Gắn / gỡ nhãn (Đã xử lý, Đã đăng…) cho các video đã chọn">🏷 Nhãn {picked.size || ""}</button>
+                <button type="button" className="qt-btn qt-btn--small" disabled={!pickedTodo.length} onClick={() => void download(pickedTodo.map((v) => v.id))}
+                        title="Tải các video đã chọn về máy (video đã có thì bỏ qua)">⬇ Tải {pickedTodo.length || ""} video về</button>
+                {canCut && (
+                  <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={!picked.size || !!after} onClick={() => void send("cut", pickedList)}
+                          title={`Đem video đã chọn đi cắt thành nhiều video ngắn (tối đa ${MAX_TO.cut} video một lượt; video chưa tải thì tool tải trước)`}>✂️ Cắt {picked.size || ""} video</button>
+                )}
+                {canDub && (
+                  <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={!picked.size || !!after} onClick={() => void send("dub", pickedList)}
+                          title={`Đem video đã chọn đi lồng tiếng / chèn phụ đề (tối đa ${MAX_TO.dub} video một lượt; video chưa tải thì tool tải trước)`}>🎙 Lồng tiếng {picked.size || ""} video</button>
+                )}
+              </div>
+
+              {downloading > 0 && (
+                <div className="gb__strip" role="status">
+                  <span className="gb-spin" aria-hidden="true" />
+                  <span>Đang tải {downloading} video về máy (hai video một lúc){after ? ` — xong sẽ chuyển sang ${TOOL_NAME[after.tool]}` : ""}</span>
+                  {after && <button type="button" className="qt-link" onClick={() => setAfter(null)}>Không chuyển nữa</button>}
+                  <StopButton label="Dừng tải" onStop={async () => { setAfter(null); await stopGrabDownloads(); }} />
+                </div>
+              )}
+
+              {filtered.length === 0 ? (
+                <PageEmpty compact icon="🔎" title={scope.length ? "Không video nào khớp bộ lọc" : scanning ? "Đang đọc danh sách video…" : "Kênh này chưa có video nào trong danh sách"}
+                           actions={scope.length ? <button type="button" className="qt-btn" onClick={clearFilters}>Bỏ lọc</button>
+                             : open && !scanning ? <button type="button" className="qt-btn" onClick={() => void rescan(open)}>⟳ Quét lại</button> : undefined}>
+                  {scope.length ? "Nới bộ lọc lượt xem / ngày đăng / độ dài, hoặc bỏ lọc." : scanning ? "Thường mất vài giây mỗi kênh." : "Bấm Quét lại để đọc video của kênh."}
+                </PageEmpty>
+              ) : (
+                <>
+                  <div className="gb__vids">
+                    {view.map((v) => {
+                      const dl = downloadOf(v, state);
+                      const ch = byId.get(v.channel_id);
+                      const on = picked.has(v.id);
+                      const tall = v.kind === "short" || ch?.platform === "tiktok" || ch?.platform === "douyin";
+                      const reason = why.get(v.id);
+                      return (
+                        <article key={v.id} className={`gb-v${on ? " is-on" : ""}`}>
+                          <label className="gb-v__thumb" title={on ? "Bỏ chọn" : "Chọn video này"}>
+                            <input type="checkbox" checked={on} onChange={() => toggle(v.id)} aria-label={`Chọn “${v.title || "video"}”`} />
+                            <img className={tall ? "is-tall" : ""} src={grabThumbUrl(v.id)} alt="" loading="lazy"
+                                 onError={(e) => { (e.target as HTMLImageElement).style.visibility = "hidden"; }} />
+                            <span className="gb-v__tick" aria-hidden="true">{on ? "✓" : ""}</span>
+                            {v.fresh && <span className="gb-v__new">MỚI</span>}
+                            <span className="gb-v__dur">{clockOf(v.duration_s) || (v.kind === "short" ? "Short" : "")}</span>
+                          </label>
+                          <div className="gb-v__body">
+                            <a className="gb-v__title" href={v.url} target="_blank" rel="noreferrer" title={`${v.title}\n\nBấm để mở video gốc`}>{v.title || "(không có tiêu đề)"}</a>
+                            <div className="gb-v__meta">
+                              {(v.views !== null || v.likes === null) && <span title="Lượt xem">👁 {shortCount(v.views)}</span>}
+                              {v.likes !== null && <span title="Lượt tim">❤ {shortCount(v.likes)}</span>}
+                              {v.comments !== null && <span title="Bình luận">💬 {shortCount(v.comments)}</span>}
+                              {v.published_at && <span title={`Đăng khoảng ${dateOf(v.published_at)}`}>{agoOf(v.published_at)}</span>}
+                            </div>
+                            {chan === null && ch && <div className="gb-v__chan"><PlatformChip platform={ch.platform} label={ch.name} /></div>}
+                            {reason !== undefined && <div className="gb-v__why">✨ {reason || "AI chọn"}</div>}
+                            {v.marks.length > 0 && (
+                              <div className="gb-v__marks">
+                                {v.marks.map((m) => <span key={m} className={markClass(m, presets)}>{m}</span>)}
+                              </div>
+                            )}
+                            <div className="gb-v__foot">
+                              {dl === "done" && <span className="gb-st gb-st--ok">✓ Đã tải</span>}
+                              {dl === "running" && <span className="gb-st gb-st--run"><span className="gb-spin" aria-hidden="true" /> Đang tải…</span>}
+                              {dl === "queued" && <span className="gb-st">Chờ tải</span>}
+                              {dl === "" && v.download_error && <span className="gb-st gb-st--err" title={v.download_error}>⚠ Tải lỗi</span>}
+                              {dl === "" && !v.download_error && v.elsewhere && <span className="gb-st" title="Video này đã tải ở máy khác — tải lại để dùng trên máy này">Tải ở máy khác</span>}
+                              {v.used.cut && <span className="gb-st" title={`Đã gửi sang Cắt video ${dateOf(v.used.cut)}`}>✂️ đã cắt</span>}
+                              {v.used.dub && <span className="gb-st" title={`Đã gửi sang Lồng tiếng ${dateOf(v.used.dub)}`}>🎙 đã lồng</span>}
+                              <span className="gb-v__acts">
+                                <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={(e) => openMarks([v.id], e.currentTarget)}
+                                        title="Gắn nhãn: Đã xử lý, Đã đăng… (nhớ theo video, quét lại vẫn còn)">🏷</button>
+                                {dl === "" && <button type="button" className="qt-btn qt-btn--small" onClick={() => void download([v.id])} title="Tải video này về máy">⬇</button>}
+                                {(dl === "running" || dl === "queued") && <StopButton label="×" busyLabel="…" title="Dừng tải video này" onStop={() => stopGrabDownloads([v.id])} />}
+                                {dl === "done" && v.media_id && (
+                                  <>
+                                    <a className="qt-btn qt-btn--small" href={`/media/${v.media_id}`} target="_blank" rel="noreferrer" title="Xem video đã tải">▶</a>
+                                    {canCut && <button type="button" className="qt-btn qt-btn--small" onClick={() => void send("cut", [v])} title="Đem video này đi cắt">✂️</button>}
+                                    {canDub && <button type="button" className="qt-btn qt-btn--small" onClick={() => void send("dub", [v])} title="Đem video này đi lồng tiếng / chèn phụ đề">🎙</button>}
+                                  </>
+                                )}
+                              </span>
+                            </div>
+                            {dl === "" && v.download_error && <p className="gb-v__err">{v.download_error}</p>}
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                  {filtered.length > shown && (
+                    <button type="button" className="qt-btn gb__more" onClick={() => setShown((n) => n + PAGE)}>
+                      Xem thêm {Math.min(PAGE, filtered.length - shown)} video (còn {filtered.length - shown})
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+      {markMenu && (
+        <MarkMenu anchor={markMenu.anchor} known={knownMarks} presets={presets}
+                  marks={markMenu.ids.map((id) => videos.find((v) => v.id === id)?.marks ?? [])}
+                  onApply={(add, remove) => applyMarks(markMenu.ids, add, remove)} onClose={() => setMarkMenu(null)} />
+      )}
+    </>
+  );
+}

@@ -139,7 +139,7 @@ def fetch_video(text: str, media_id: str, out_dir: Path, *, max_duration_s: Opti
     from flowboard.routes.reference_video import _host_allowed, _run_ytdlp
 
     if not _host_allowed(url):
-        raise FetchError("Link phải là TikTok, Douyin, YouTube, Instagram, Facebook hoặc X")
+        raise FetchError("Link phải là TikTok, Douyin, YouTube, Bilibili, Instagram, Facebook hoặc X")
     out_dir.mkdir(parents=True, exist_ok=True)
     errors: list[str] = []
     if is_douyin(url):

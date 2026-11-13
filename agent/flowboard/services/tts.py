@@ -704,8 +704,34 @@ SUB_STYLES: dict[str, str] = {
 }
 
 
+#: "Hiện chữ": "" the whole line at once, "grow" filling in word by word as it is said, "word" one word at a time
+SUB_REVEALS = ("", "grow", "word")
+
+
+def reveal_lines(start: float, end: float, line: str, reveal: str) -> list[tuple[float, float, str]]:
+    """The ASS events of one subtitle line shown word by word: its slot shared out by word length. "grow" lays the
+    whole line out with the words still to come invisible (nothing shifts as it fills in); "word" shows one word."""
+    words = line.split()
+    if reveal not in ("grow", "word") or len(words) < 2:
+        return [(start, end, line)]
+    total = sum(len(w) for w in words) or 1
+    out: list[tuple[float, float, str]] = []
+    t = start
+    for i, w in enumerate(words):
+        e = end if i == len(words) - 1 else t + (end - start) * len(w) / total
+        if reveal == "word":
+            body = w
+        else:
+            rest = " ".join(words[i + 1:])
+            body = " ".join(words[:i + 1]) + (f"{{\\alpha&HFF&}} {rest}" if rest else "")
+        if _ass_time(t) != _ass_time(e):
+            out.append((t, e, body))
+        t = e
+    return out
+
+
 def write_ass(cues: list[tuple[float, float, str]], path: Path, *, width: int, height: int,
-              headline: Optional[str] = None, total_s: float = 0.0, style: str = "outline") -> Path:
+              headline: Optional[str] = None, total_s: float = 0.0, style: str = "outline", reveal: str = "") -> Path:
     """An ASS file for libass: bold white text with a dark outline near the
     bottom of a 9:16 frame, sized relative to the video — or a yellow / white
     box behind dark text (``style``, :data:`SUB_STYLES`). ``headline`` (a
@@ -742,8 +768,9 @@ def write_ass(cues: list[tuple[float, float, str]], path: Path, *, width: int, h
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ])
     events = [
-        f"Dialogue: 0,{_ass_time(s)},{_ass_time(e)},Default,,0,0,0,,{line.replace(chr(10), ' ')}"
+        f"Dialogue: 0,{_ass_time(a)},{_ass_time(b)},Default,,0,0,0,,{body}"
         for s, e, line in cues
+        for a, b, body in reveal_lines(s, e, line.replace(chr(10), " "), reveal)
     ]
     if headline and headline.strip():
         end = max(total_s, max((e for _, e, _ in cues), default=0.0), 0.5)

@@ -109,6 +109,13 @@ def _cut_items() -> list[dict[str, Any]]:
     return [dict(it, started_at=_iso_from_ts(it["started_at"])) for it in video_cut.running_items()]
 
 
+def _grab_items() -> list[dict[str, Any]]:
+    """"📡 Cào video kênh": channels being listed, videos being downloaded."""
+    from flowboard.services import channel_grab
+
+    return [dict(it, started_at=_iso_from_ts(it["started_at"])) for it in channel_grab.running_items()]
+
+
 def _dub_link_items() -> list[dict[str, Any]]:
     """Links waiting in the dubbing link library (they start one by one as the dub queue frees up)."""
     from flowboard.services import dub_links
@@ -227,7 +234,7 @@ def _flow_items() -> list[dict[str, Any]]:
     return out
 
 
-_MEMORY_SOURCES = (_addon_items, _dub_items, _dub_split_items, _cut_items, _clean_items, _capcut_items, _op_items)
+_MEMORY_SOURCES = (_addon_items, _dub_items, _dub_split_items, _cut_items, _grab_items, _clean_items, _capcut_items, _op_items)
 _DB_SOURCES = (_dub_link_items, _assistant_items, _autopilot_items, _flow_items)
 _POOL = ThreadPoolExecutor(max_workers=len(_DB_SOURCES), thread_name_prefix="running")
 
@@ -279,6 +286,10 @@ def outcome(key: str = Query(..., max_length=80)) -> dict[str, Any]:
         from flowboard.services import video_cut
 
         return video_cut.outcome(ident)
+    if kind in ("grabscan", "grabdl"):
+        from flowboard.services import channel_grab
+
+        return channel_grab.outcome(kind, ident)
     if kind == "cuthear":
         from flowboard.services import video_cut
 

@@ -32,6 +32,7 @@ from flowboard.routes import swipes as swipes_route
 from flowboard.routes import dub as dub_route
 from flowboard.routes import capcut as capcut_route
 from flowboard.routes import cut as cut_route
+from flowboard.routes import grab as grab_route
 from flowboard.routes import running as running_route
 from flowboard.routes import assistant as assistant_route
 from flowboard.routes import autopilot as autopilot_route
@@ -154,6 +155,9 @@ async def lifespan(app: FastAPI):
     dub_service.FEEDER = dub_links.feed_quietly
     if dub_links.after_login not in accounts.after_activate:
         accounts.after_activate.append(dub_links.after_login)
+    # "📡 Cào video kênh": its scan threads ask the extension (Douyin / Bilibili) through this loop
+    from flowboard.services import channel_grab
+    channel_grab.LOOP = asyncio.get_running_loop()
     accounts.startup()
     # what this machine can do (NVIDIA card): the first start checks, later starts read machine.json
     import threading
@@ -324,6 +328,7 @@ app.include_router(swipes_route.router)
 app.include_router(dub_route.router)
 app.include_router(capcut_route.router)
 app.include_router(cut_route.router)
+app.include_router(grab_route.router)
 app.include_router(prompt_library_route.router)
 app.include_router(video_clean_route.router)
 app.include_router(activity.router)

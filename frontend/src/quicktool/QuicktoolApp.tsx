@@ -36,6 +36,7 @@ import { AccountsPage } from "./pages/AccountsPage";
 import { AccountPage } from "./pages/AccountPage";
 import { DubPage } from "./pages/DubPage";
 import { CutPage } from "./pages/CutPage";
+import { GrabPage } from "./pages/GrabPage";
 import { ClipChannel } from "./steps/ClipChannel";
 import { ClipPost } from "./steps/ClipPost";
 import { SchedulePage } from "./pages/SchedulePage";
@@ -144,6 +145,7 @@ export function QuicktoolApp() {
           <Route path="/tools/dub" element={<FeatureGate feature="dub" title="Lồng tiếng video"><DubPage /></FeatureGate>} />
           {/* Edit auto CapCut is hidden (lib/features HIDDEN): it will come back inside the video editor; pages/CapcutPage.tsx is kept */}
           <Route path="/tools/capcut" element={<Navigate to="/tools/cut" replace />} />
+          <Route path="/tools/grab" element={<FeatureGate feature="grab" title="Cào video kênh"><GrabPage /></FeatureGate>} />
           <Route path="/tools/cut" element={<FeatureGate feature="cut" title="Cắt video"><CutPage /></FeatureGate>} />
           <Route path="/settings" element={<Library templates={templates} />} />
           <Route path="/clips/:id/:step" element={<Wizard templates={templates} />} />

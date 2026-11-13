@@ -35,6 +35,8 @@ FEATURES: list[dict[str, str]] = [
      "desc": "Lồng tiếng / chèn phụ đề video từ link, thư viện link, cắt thành nhiều clip"},
     {"key": "cut", "icon": "✂️", "label": "Cắt video",
      "desc": "Dán link / file → AI cắt thành nhiều video ngắn theo yêu cầu, chỉnh từng video hoặc cả loạt"},
+    {"key": "grab", "icon": "📡", "label": "Cào video kênh",
+     "desc": "Lấy danh sách video của kênh YouTube / TikTok (lượt xem, ngày đăng), AI chọn theo yêu cầu, tải về để cắt / lồng tiếng"},
     {"key": "capcut", "icon": "🎞", "label": "Edit auto CapCut",
      "desc": "Tạo dự án CapCut có phụ đề, chữ nhấn, hiệu ứng"},
     {"key": "clean", "icon": "🧽", "label": "Xoá chữ / logo",
@@ -96,6 +98,8 @@ _rule(r"^/api/dub/(mascot|background|decor)(/|$)", ("dub", "cut"))
 _rule(r"^/api/dub(/|$)", "dub")
 _rule(r"^/api/cut/clips$", ("cut", "dub"))               # the dubbing page picks videos from "Clip của tôi"
 _rule(r"^/api/cut(/|$)", "cut")
+_rule(r"^/api/grab/media$", ("grab", "cut", "dub"))      # the cut / dubbing pages take the videos picked there
+_rule(r"^/api/grab(/|$)", "grab")
 _rule(r"^/api/capcut(/|$)", "capcut")
 _rule(r"^/api/clean/[^/]+/detect$", ("clean", "dub", "cut"))   # the editor's "find the old captions" (OCR)
 _rule(r"^/api/clean(/|$)", "clean")

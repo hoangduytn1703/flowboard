@@ -464,7 +464,8 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
               </div>
             )}
           </div>
-          {!voiceless && <SubtitleField value={subChoiceOf(exp?.data)} disabled={busy} onChange={(key) => setOption(subChoicePatch(key))} />}
+          {!voiceless && <SubtitleField value={subChoiceOf(exp?.data)} disabled={busy} onChange={(key) => setOption(subChoicePatch(key))}
+                                       reveal={exp?.data.subReveal} onReveal={(r) => setOption({ subReveal: r })} />}
           <Smooth60Field data={exp?.data} disabled={busy} onChange={setOption} />
         </div>
 

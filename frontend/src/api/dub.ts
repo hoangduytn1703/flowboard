@@ -133,7 +133,18 @@ export interface DubLayout {
   volume?: number;
   /** ffmpeg subtitles' lettering: bold, outline / box thickness, colours (null = the style's own) */
   subfont?: DubSubFont | null;
+  /** ffmpeg subtitles: "" the whole line at once, "grow" filling in word by word as it is said, "word" one word at a time */
+  reveal?: SubReveal;
 }
+
+export type SubReveal = "" | "grow" | "word";
+/** mirrors services/dub.REVEALS */
+export const SUB_REVEALS: { key: SubReveal; label: string }[] = [
+  { key: "", label: "Cả câu hiện một lúc" },
+  { key: "grow", label: "Hiện dần từng chữ (nói tới đâu hiện tới đó)" },
+  { key: "word", label: "Từng chữ một" },
+];
+export const normReveal = (v: unknown): SubReveal => (v === "grow" || v === "word" ? v : "");
 
 /** mirrors services/dub.normalize_subfont: ``border`` × the style's own outline width (or box padding), 0–2.5 */
 export interface DubSubFont {
@@ -371,7 +382,7 @@ export function normLayout(raw: Partial<DubLayout> | null | undefined): DubLayou
   const blurs = layoutBlurs(r);
   return { x: r.x, y: r.y, scale: r.scale, w: r.w ?? null, blur: blurs[0] ?? null, blurs, canvas: normCanvas(r.canvas),
            frame: r.frame ?? null, mascot: r.mascot ?? null, texts: normTexts(r.texts), adjust: normAdjust(r.adjust), speed: normSpeed(r.speed),
-           volume: normVolume(r.volume), subfont: normSubFont(r.subfont) };
+           volume: normVolume(r.volume), subfont: normSubFont(r.subfont), reveal: normReveal(r.reveal) };
 }
 
 /** One key moment: the key words are said at ``at`` (line ``line`` of the translation, when known). */

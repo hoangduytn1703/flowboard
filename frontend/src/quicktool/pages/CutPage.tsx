@@ -14,6 +14,7 @@ import {
   listCutPrompts, pipeText, startCut, stopCut, suggestCut,
   type CutHow, type CutPartView, type CutPrompt, type CutSession, type CutToolStatus,
 } from "../../api/cut";
+import { grabMedia } from "../../api/grab";
 import { ChannelPicker } from "../channels/ChannelPicker";
 import { DubEditor, type BatchLook } from "../dub/editor/DubEditor";
 import { fmtClock } from "../dub/editor/CutPane";
@@ -274,6 +275,22 @@ export function CutPage() {
       }
     }
   }
+
+  // /tools/cut?grab=<ids>: videos downloaded on "📡 Cào video kênh" — they join the form as files
+  const wantGrab = params.get("grab");
+  useEffect(() => {
+    if (!wantGrab) return;
+    const ids = wantGrab.split(",").map(Number).filter((n) => n > 0).slice(0, MAX_LINKS);
+    void grabMedia(ids).then((ms) => {
+      if (!ms.length) { toast.warning("Các video này chưa tải về máy — tải ở trang Cào video kênh trước."); return; }
+      setFiles(ms.map((m) => ({ key: `grab-${m.id}`, name: m.name, media_id: m.media_id, busy: false })));
+      setLinks([""]);
+      toast.info(`Đã nhận ${ms.length} video từ Cào video kênh — bấm 🔍 Phân tích để chọn đoạn cắt.`);
+    }).catch((e) => toast.error(errMessage(e)));
+    const next = new URLSearchParams(params);
+    next.delete("grab");
+    setParams(next, { replace: true });
+  }, [wantGrab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** "🔍 Phân tích": download + hear every video; each one then waits on its card for its parts (typed or the AI's). */
   async function start() {

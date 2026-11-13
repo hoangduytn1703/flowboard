@@ -281,6 +281,37 @@ def split_cue(start: float, end: float, text: str, max_chars: int = SUB_MAX_CHAR
     return out
 
 
+#: "Hiện chữ" of the ffmpeg subtitles: the whole line at once, the line filling in word by word as it is said
+#: ("grow"), or one word on screen at a time ("word")
+REVEALS: dict[str, str] = {
+    "": "Cả câu hiện một lúc",
+    "grow": "Hiện dần từng chữ (nói tới đâu hiện tới đó)",
+    "word": "Từng chữ một",
+}
+
+
+def normalize_reveal(raw: Any) -> str:
+    return raw if raw in ("grow", "word") else ""
+
+
+def reveal_steps(start: float, end: float, text: str) -> list[tuple[float, float, str, str, str]]:
+    """``(start, end, said so far, not said yet, the word)`` for each word of a subtitle box, its slot shared out by
+    word width (no voice gives per-word times) — mirrors ``cues.ts revealSteps``."""
+    tokens = _cue_tokens(text)
+    if len(tokens) < 2:
+        return [(start, end, text.strip(), "", text.strip())]
+    total = sum(text_units(tok) for tok, _ in tokens) or 1
+    out: list[tuple[float, float, str, str, str]] = []
+    t, said = start, ""
+    for i, (tok, spaced) in enumerate(tokens):
+        said += (" " if said and spaced else "") + tok
+        rest = "".join((" " if sp else "") + w for w, sp in tokens[i + 1:])
+        e = end if i == len(tokens) - 1 else t + (end - start) * text_units(tok) / total
+        out.append((round(t, 3), round(e, 3), said, rest, tok))
+        t = e
+    return out
+
+
 def _ass_time(t: float) -> str:
     t = max(0.0, t)
     h, rem = divmod(t, 3600)
@@ -578,7 +609,9 @@ def normalize_layout(raw: Any) -> dict[str, Any]:
     out["speed"] = 1.0    # the export plays this much faster / slower (0.8–3)
     out["volume"] = 1.0   # the export's sound this much louder / quieter (0–3)
     out["subfont"] = None # ffmpeg subtitles: bold, outline / box thickness and colours (None = the style's own)
+    out["reveal"] = ""    # ffmpeg subtitles: "" whole line, "grow" word by word as it is said, "word" one word at a time
     if isinstance(raw, dict):
+        out["reveal"] = normalize_reveal(raw.get("reveal"))
         out["speed"] = normalize_speed(raw.get("speed"))
         out["volume"] = normalize_volume(raw.get("volume"))
         out["subfont"] = normalize_subfont(raw.get("subfont"))
@@ -1038,7 +1071,18 @@ def write_sub_ass(cues: list[tuple[float, float, str]], path: Path, *, width: in
             own_font = sub_font_px(height, own["scale"])
             extra = "" if own_font == font else f"\\fs{own_font}\\bord{sub_border_px(own_font, style, sf)}"
             tag = f"{{\\an2\\pos({round(width * own['x'])},{round(height * own['y'])}){extra}}}"
-        events.append(f"Dialogue: 0,{_ass_time(s)},{_ass_time(e)},Sub,,0,0,0,,{tag}{t.replace(chr(10), ' ')}")
+        t = t.replace(chr(10), " ")
+        if not lay["reveal"]:
+            events.append(f"Dialogue: 0,{_ass_time(s)},{_ass_time(e)},Sub,,0,0,0,,{tag}{t}")
+            continue
+        for a, b, said, rest, word in reveal_steps(s, e, t):
+            if _ass_time(a) == _ass_time(b):
+                continue  # a slice under one centisecond
+            if lay["reveal"] == "word":
+                body = word
+            else:  # the whole line laid out, the words still to come invisible — nothing shifts as it fills in
+                body = said + (f"{{\\alpha&HFF&}}{rest}" if rest else "")
+            events.append(f"Dialogue: 0,{_ass_time(a)},{_ass_time(b)},Sub,,0,0,0,,{tag}{body}")
     for a, b, text, ex, ey in emphasis or []:
         cx, cy = round(width * ex), round(height * (ey - 0.03))  # \an5: the anchor is the centre
         pop = "\\fscx70\\fscy70\\t(0,120,\\fscx100\\fscy100)"

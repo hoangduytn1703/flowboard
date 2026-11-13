@@ -106,6 +106,8 @@ export interface FlowboardNodeData extends Record<string, unknown> {
   /** Export node: how the joined clip gets its subtitles — "ass" (ffmpeg) / "remotion", and the look */
   subEngine?: "ass" | "remotion";
   subStyle?: string;
+  /** ffmpeg subtitles shown word by word: "" | "grow" | "word" */
+  subReveal?: string;
   originalAudio?: "duck" | "keep" | "mute";
   /** Export node: background music (an uploaded audio asset) and its level. */
   bgmMediaId?: string;
@@ -391,6 +393,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           subtitles: n.data["subtitles"] as boolean | undefined,
           subEngine: n.data["subEngine"] as "ass" | "remotion" | undefined,
           subStyle: n.data["subStyle"] as string | undefined,
+          subReveal: n.data["subReveal"] as string | undefined,
           originalAudio: n.data["originalAudio"] as "duck" | "keep" | "mute" | undefined,
           bgmMediaId: n.data["bgmMediaId"] as string | undefined,
           bgmName: n.data["bgmName"] as string | undefined,
@@ -485,6 +488,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           subtitles: n.data["subtitles"] as boolean | undefined,
           subEngine: n.data["subEngine"] as "ass" | "remotion" | undefined,
           subStyle: n.data["subStyle"] as string | undefined,
+          subReveal: n.data["subReveal"] as string | undefined,
           originalAudio: n.data["originalAudio"] as "duck" | "keep" | "mute" | undefined,
           bgmMediaId: n.data["bgmMediaId"] as string | undefined,
           bgmName: n.data["bgmName"] as string | undefined,
@@ -621,6 +625,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           subtitles: n.data["subtitles"] as boolean | undefined,
           subEngine: n.data["subEngine"] as "ass" | "remotion" | undefined,
           subStyle: n.data["subStyle"] as string | undefined,
+          subReveal: n.data["subReveal"] as string | undefined,
           originalAudio: n.data["originalAudio"] as "duck" | "keep" | "mute" | undefined,
           bgmMediaId: n.data["bgmMediaId"] as string | undefined,
           bgmName: n.data["bgmName"] as string | undefined,

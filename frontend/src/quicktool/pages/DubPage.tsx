@@ -11,6 +11,7 @@ import { DubJobsDialog, jobTitle } from "../dub/DubJobsDialog";
 import { DubLinksDialog } from "../dub/DubLinksDialog";
 import { ClipPickDialog, type PickedClip } from "../dub/ClipPickDialog";
 import { clipVideos } from "../../api/cut";
+import { grabMedia } from "../../api/grab";
 import { VOICES } from "../../api/client";
 import { SUB_LANGS, subLangName, type DubEngine, type DubMode, type DubTranslator, type SubLang } from "../../api/dub";
 import { toast } from "../../store/toast";
@@ -251,6 +252,22 @@ export function DubPage() {
     next.delete("clips");
     setSearchParams(next, { replace: true });
   }, [wantClips]); // eslint-disable-line react-hooks/exhaustive-deps
+  // /tools/dub?grab=<ids>: videos downloaded on "📡 Cào video kênh" — dubbed as files, like picked clips
+  const wantGrab = searchParams.get("grab");
+  useEffect(() => {
+    if (!wantGrab) return;
+    const ids = wantGrab.split(",").map(Number).filter((n) => n > 0).slice(0, MAX_LINKS);
+    void grabMedia(ids).then((ms) => {
+      if (!ms.length) { toast.warning("Các video này chưa tải về máy — tải ở trang Cào video kênh trước."); return; }
+      setClips(ms.map((m) => ({ board_id: -m.id, name: m.name, media_id: m.media_id })));
+      setLinks([""]);
+      setFile(null);
+      toast.info(`Đã nhận ${ms.length} video từ Cào video kênh — chọn giọng rồi bấm Lồng tiếng.`);
+    }).catch((e) => toast.error(errMessage(e)));
+    const next = new URLSearchParams(searchParams);
+    next.delete("grab");
+    setSearchParams(next, { replace: true });
+  }, [wantGrab]); // eslint-disable-line react-hooks/exhaustive-deps
   const sourceCount = clips.length || (file ? 1 : linkList.length);
 
   async function start() {

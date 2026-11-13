@@ -205,3 +205,15 @@ def _fake_narration(tmp_path: Path, text: str) -> "tts.Narration":
     if not wav.exists():
         subprocess.run([FFMPEG, "-y", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", str(wav)], check=True)
     return tts.Narration(path=wav, duration=1.0, words=[])
+
+
+def test_clip_subtitles_can_fill_in_word_by_word(tmp_path):
+    from flowboard.services import tts
+    events = lambda reveal: [l.rsplit(",,", 1)[1] for l in tts.write_ass(
+        [(0, 3, "Giòn rụm thơm ngon")], tmp_path / f"{reveal or 'all'}.ass", width=720, height=1280,
+        reveal=reveal).read_text(encoding="utf-8").splitlines() if l.startswith("Dialogue: 0")]
+    assert events("") == ["Giòn rụm thơm ngon"]
+    assert events("word") == ["Giòn", "rụm", "thơm", "ngon"]
+    grow = events("grow")
+    assert len(grow) == 4 and grow[0].startswith("Giòn{") and grow[0].endswith("} rụm thơm ngon") and grow[-1] == "Giòn rụm thơm ngon"
+    assert tts.reveal_lines(0, 1, "Một", "grow") == [(0, 1, "Một")]

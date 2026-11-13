@@ -54,6 +54,7 @@ async def _handler(websocket) -> None:
 
 
 async def run_ws_server() -> None:
-    async with websockets.serve(_handler, WS_HOST, EXTENSION_WS_PORT):
+    # a channel's video list (📡 Cào video kênh, thousands of videos) is one message of a few MB
+    async with websockets.serve(_handler, WS_HOST, EXTENSION_WS_PORT, max_size=32 * 2**20):
         logger.info("WebSocket server listening on ws://%s:%d", WS_HOST, EXTENSION_WS_PORT)
         await asyncio.Future()  # run forever

@@ -93,3 +93,6 @@ document.getElementById('btn-toggle').addEventListener('click', () => {
     fetchStatus();
   });
 });
+
+// the version shown in the header comes from the manifest (it was a fixed "v0.0.2")
+try { document.getElementById("ext-version").textContent = "v" + chrome.runtime.getManifest().version; } catch (e) { /* not in the extension */ }

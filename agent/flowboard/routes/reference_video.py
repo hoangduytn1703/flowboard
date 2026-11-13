@@ -209,7 +209,7 @@ def build_from_reference(body: BuildBody) -> dict[str, Any]:
 
 _ALLOWED_HOSTS = (
     "tiktok.com", "youtube.com", "youtu.be", "instagram.com", "facebook.com", "fb.watch",
-    "douyin.com", "iesdouyin.com", "x.com", "twitter.com",
+    "douyin.com", "iesdouyin.com", "x.com", "twitter.com", "bilibili.com", "b23.tv",
 )
 #: a 60-minute video for "Cắt video" at 720p is several hundred MB
 FETCH_TIMEOUT_S = 1800
@@ -297,7 +297,7 @@ async def fetch_reference_video(body: FetchBody) -> dict[str, Any]:
     # A whole Douyin / TikTok "share" blurb may be pasted; the link is dug out of it.
     url = extract_url(body.url) or body.url.strip()
     if not _host_allowed(url):
-        raise HTTPException(400, "Link phải là TikTok, YouTube, Instagram, Facebook, Douyin hoặc X")
+        raise HTTPException(400, "Link phải là TikTok, YouTube, Instagram, Facebook, Douyin, Bilibili hoặc X")
     media_id = uuid.uuid4().hex
     try:
         path, title = await asyncio.to_thread(fetch_video, url, media_id, media_service.MEDIA_CACHE_DIR)

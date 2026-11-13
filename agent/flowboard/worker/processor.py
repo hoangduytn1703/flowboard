@@ -991,6 +991,7 @@ async def _handle_export_video(params: dict) -> tuple[dict, Optional[str]]:
         narration = NarrationOptions(
             sub_engine=sub_engine,
             sub_style=sub_style,
+            sub_reveal=params.get("sub_reveal") if params.get("sub_reveal") in tts.SUB_REVEALS else "",
             lines=[t if isinstance(t, str) else "" for t in raw_lines],
             voice=voice,
             rate=rate,

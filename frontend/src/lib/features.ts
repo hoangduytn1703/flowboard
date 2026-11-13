@@ -7,7 +7,7 @@ import { useAccountStore } from "../store/account";
  * Core clip making (clips, products, models, prompts, history, settings) is never gated.
  */
 export type FeatureKey =
-  | "auto_clip" | "dub" | "cut" | "capcut" | "clean" | "posts" | "facebook" | "autopilot" | "swipes" | "assistant";
+  | "auto_clip" | "dub" | "cut" | "grab" | "capcut" | "clean" | "posts" | "facebook" | "autopilot" | "swipes" | "assistant";
 
 /** Taken out of sight for now (agent: plans.HIDDEN_FEATURES) — no menu, no page, whatever the plan says.
  *  "capcut" is to come back inside the video editor. */

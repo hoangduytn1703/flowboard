@@ -2,7 +2,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { NamesPanel, type NamesCtl } from "./NamesPanel";
 import {
   DEFAULT_BLUR, DEFAULT_LAYOUT, emphasisY, HL_Y_MAX, HL_Y_MIN, layoutBlurs, linesAreVietnamese, MAX_BLURS, SUB_LANGS,
-  normSubFont, subLangName, SUBFONT_BORDER_MAX, withBlurs,
+  normReveal, normSubFont, SUB_REVEALS, subLangName, SUBFONT_BORDER_MAX, withBlurs,
   type DubBlur, type DubEngine, type DubHighlights, type DubLayout, type DubMode, type DubStatus, type DubSubFont, type SubLang,
 } from "../../../api/dub";
 import { ChannelPicker } from "../../channels/ChannelPicker";
@@ -293,6 +293,16 @@ export function Inspector({
               <select className="dx-insp__select" value={style} disabled={readOnly} onChange={(e) => onStyle(e.target.value)} aria-label="Kiểu phụ đề">
                 {styles.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
               </select>
+              {out.engine !== "remotion" && !style.startsWith("rm_") && (
+                <label className="qt-field" style={{ marginTop: 10 }}
+                       title="Kiểu ffmpeg in rất nhanh. Chữ hiện theo giọng: mỗi chữ chiếm phần thời gian theo độ dài của nó trong câu.">
+                  <span>Hiện chữ</span>
+                  <select className="dx-insp__select" value={layout.reveal ?? ""} disabled={readOnly} aria-label="Hiện chữ"
+                          onChange={(e) => onLayout({ ...layout, reveal: normReveal(e.target.value) })}>
+                    {SUB_REVEALS.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+                  </select>
+                </label>
+              )}
               {out.engine !== "remotion" && !style.startsWith("rm_") && (
                 <SubFontControls style={style} value={layout.subfont ?? null} readOnly={readOnly}
                                  onChange={(sf, key) => onLayout({ ...layout, subfont: normSubFont(sf) }, key)} />

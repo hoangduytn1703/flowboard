@@ -126,7 +126,7 @@ def test_timeline_places_pieces_at_their_start_times(tmp_path):
 def test_layout_moves_the_box_and_narrows_lines(tmp_path):
     lay = dub.normalize_layout({"x": 0.2, "y": 1.5, "scale": "1.4", "junk": 1})
     empty = {"blur": None, "blurs": [], "canvas": None, "frame": None, "mascot": None, "w": None, "subfont": None,
-             "texts": [], "adjust": None, "speed": 1.0, "volume": 1.0}
+             "texts": [], "adjust": None, "speed": 1.0, "volume": 1.0, "reveal": ""}
     assert lay == {"x": 0.2, "y": 0.98, "scale": 1.4, **empty}
     assert dub.normalize_layout(None) == {**dub.DEFAULT_LAYOUT, **empty}
     text = dub.write_sub_ass([(0, 1, "A")], tmp_path / "l.ass", width=1000, height=2000, style="box_yellow",
@@ -253,3 +253,18 @@ def test_long_transcript_is_translated_in_batches_with_context(monkeypatch):
 def test_dub_limit_is_thirty_minutes_and_compilation_hint_only_far_past_it(client):
     assert dub.MAX_DURATION_S == 30 * 60
     assert client.get("/api/dub/status").json()["max_minutes"] == 30
+
+
+def test_subtitles_can_fill_in_word_by_word(tmp_path):
+    assert dub.normalize_layout({"reveal": "nope"})["reveal"] == ""
+    steps = dub.reveal_steps(0.0, 4.0, "Nói tới đâu hiện")
+    assert [s[2] for s in steps] == ["Nói", "Nói tới", "Nói tới đâu", "Nói tới đâu hiện"]
+    assert steps[0][3] == " tới đâu hiện" and steps[-1][3] == "" and steps[-1][1] == 4.0
+    assert all(a[1] == b[0] for a, b in zip(steps, steps[1:]))  # no gap between the words
+    lines = lambda reveal: [l.split(",,0,0,0,,", 1)[1].split("}", 1)[1] for l in dub.write_sub_ass(
+        [(0, 4, "Nói tới đâu hiện")], tmp_path / f"{reveal}.ass", width=720, height=1280,
+        layout={"reveal": reveal}).read_text(encoding="utf-8").splitlines() if l.startswith("Dialogue: 0")]
+    assert lines("") == ["Nói tới đâu hiện"]
+    assert lines("word") == ["Nói", "tới", "đâu", "hiện"]
+    grow = lines("grow")
+    assert grow[0] == "Nói{\\alpha&HFF&} tới đâu hiện" and grow[-1] == "Nói tới đâu hiện" and len(grow) == 4

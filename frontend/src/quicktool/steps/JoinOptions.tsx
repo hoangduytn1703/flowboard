@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { DEFAULT_VOICE, getSmooth60, patchNode, VOICES, warmSmooth60, type Smooth60Status } from "../../api/client";
-import { getDubStatus } from "../../api/dub";
+import { getDubStatus, normReveal, SUB_REVEALS } from "../../api/dub";
 import { useBoardStore, type FlowboardNodeData } from "../../store/board";
 import { useQuicktoolStore } from "../../store/quicktool";
 import { useSettingsStore } from "../../store/settings";
@@ -46,9 +46,17 @@ function useRemotionReady(): boolean | null {
 }
 
 /** The subtitle look of the joined clip: none, ffmpeg (burned per clip) or Remotion (drawn on the joined clip). */
-export function SubtitleField({ value, onChange, disabled }: { value: string; onChange: (key: string) => void; disabled?: boolean }) {
+export function SubtitleField({ value, onChange, disabled, reveal, onReveal }: {
+  value: string;
+  onChange: (key: string) => void;
+  disabled?: boolean;
+  /** "Hiện chữ" of the ffmpeg styles (the export node's ``subReveal``) */
+  reveal?: string;
+  onReveal?: (reveal: string) => void;
+}) {
   const remotion = useRemotionReady();
   return (
+    <>
     <label className="qt-field">
       <span>Phụ đề</span>
       <select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
@@ -65,6 +73,15 @@ export function SubtitleField({ value, onChange, disabled }: { value: string; on
         <small className="qt-hint">Remotion vẽ phụ đề sau khi ghép (thêm ~1 phút cho clip 30 s); lỗi thì tự in bằng ffmpeg.</small>
       )}
     </label>
+    {onReveal && value.startsWith("ass:") && (
+      <label className="qt-field" title="Chữ hiện theo giọng đọc — in bằng ffmpeg nên vẫn nhanh">
+        <span>Hiện chữ</span>
+        <select value={normReveal(reveal)} disabled={disabled} onChange={(e) => onReveal(e.target.value)}>
+          {SUB_REVEALS.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+        </select>
+      </label>
+    )}
+    </>
   );
 }
 
@@ -188,7 +205,8 @@ export function JoinOptions({ roles, voiceless = false }: { roles: ClipRoles; vo
             <VoiceOptions groups={groups} />
           </select>
         </label>
-        <SubtitleField value={sub} disabled={busy} onChange={(key) => void save(subChoicePatch(key))} />
+        <SubtitleField value={sub} disabled={busy} onChange={(key) => void save(subChoicePatch(key))}
+                       reveal={exp?.data.subReveal} onReveal={(r) => void save({ subReveal: r })} />
       </div>
       <Smooth60Field data={exp?.data} disabled={busy} onChange={save} />
     </div>

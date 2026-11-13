@@ -571,3 +571,60 @@ class AutoRun(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
     __table_args__ = (UniqueConstraint("plan_id", "slot_at", name="uq_autorun_plan_slot"),)
+
+
+class GrabChannel(SQLModel, table=True):
+    """A source channel on "📡 Cào video kênh" (services/channel_grab): a YouTube channel / playlist or a TikTok
+    account whose videos are listed (title, views, date, length) so the seller picks what to download, cut and dub.
+    ``key`` is the canonical form (``youtube:@handle``, ``tiktok:@user``…) — one row per channel however its link
+    was pasted. ``tags`` are the seller's own labels. ``create_all`` adds the table."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    key: str = Field(index=True)
+    platform: str = ""  # youtube | tiktok
+    url: str = ""
+    handle: str = ""
+    name: str = ""
+    avatar: str = ""  # the picture's source URL (cached on this machine when the channel is scanned)
+    followers: Optional[int] = None
+    description: str = ""
+    tags: list = Field(default_factory=list, sa_column=Column(JSON))
+    note: str = ""
+    scanned_at: Optional[datetime] = None
+    scan_error: str = ""
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class GrabVideo(SQLModel, table=True):
+    """One video listed from a :class:`GrabChannel`. ``media_id`` = downloaded (an Asset of this account);
+    ``fresh`` = first seen in the newest scan; ``used`` = sent on to a tool ({"cut": iso time, "dub": …})."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    channel_id: int = Field(index=True)
+    key: str = Field(index=True)  # <platform>:<video id>
+    url: str = ""
+    title: str = ""
+    kind: str = "video"  # video | short (YouTube Shorts)
+    duration_s: Optional[float] = None
+    views: Optional[int] = None
+    likes: Optional[int] = None
+    comments: Optional[int] = None
+    published_at: Optional[datetime] = None
+    thumb: str = ""
+    position: int = 0  # its place in the channel's own (newest first) list
+    fresh: bool = False
+    media_id: Optional[str] = None
+    downloaded_at: Optional[datetime] = None
+    download_error: str = ""
+    used: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=_utcnow)
+    __table_args__ = (UniqueConstraint("channel_id", "key", name="uq_grabvideo_channel_key"),)
+
+
+class GrabMark(SQLModel, table=True):
+    """What the seller noted on a listed video ("Đã xử lý", "Đã đăng", own labels) and which tools it went to — kept by
+    the video's ``key`` (``<platform>:<video id>``), not by the listing row: rescans, removing and re-adding the channel
+    or the same video showing in two lists all find it again. ``create_all`` adds the table."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    key: str = Field(index=True, unique=True)
+    tags: list = Field(default_factory=list, sa_column=Column(JSON))
+    used: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    updated_at: datetime = Field(default_factory=_utcnow)

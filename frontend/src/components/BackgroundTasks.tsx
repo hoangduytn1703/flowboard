@@ -46,7 +46,7 @@ const DONE_KEEP_MS = 3 * 60 * 1000;
 const OK_KEEP_MS = 4000;
 
 const KIND_ICON: Record<string, string> = {
-  dub: "🎙", clean: "🧽", clip: "🎬", flow: "🖼", capcut: "🎞", cut: "✂️", addon: "⬇",
+  dub: "🎙", clean: "🧽", clip: "🎬", flow: "🖼", capcut: "🎞", cut: "✂️", grab: "📡", addon: "⬇",
   // in-page operations (services/op_tracker.TRACKED)
   post_write: "✍️", post_batch: "✍️", ai: "✨", bundle: "🎁", channel: "📣", product: "🛍", clip_setup: "🎬",
   video: "🎞", publish: "🚀", upload: "⬆", media: "🗂",

@@ -140,6 +140,24 @@ export function splitAll(cues: EditCue[], width: number, height: number, layout:
   return cues.flatMap((c, i) => splitCue(c.start, c.end, c.text, subMaxChars(width, height, effectiveLayout(layout, c.look)), i));
 }
 
+/** "Hiện chữ" at time t of a subtitle box — mirrors services/dub.reveal_steps: the words said so far, the ones still
+ * to come and the word being said, the box's slot shared out by word width. */
+export function revealAt(chunk: Chunk, t: number): { said: string; rest: string; word: string } {
+  const tokens = cueTokens(chunk.text);
+  if (tokens.length < 2) return { said: chunk.text.trim(), rest: "", word: chunk.text.trim() };
+  const total = tokens.reduce((n, [tok]) => n + textUnits(tok), 0) || 1;
+  const join = (list: [string, boolean][]) => list.map(([w, sp]) => (sp ? " " : "") + w).join("");
+  let at = chunk.start;
+  for (let i = 0; i < tokens.length; i++) {
+    const end = i === tokens.length - 1 ? chunk.end : at + ((chunk.end - chunk.start) * textUnits(tokens[i][0])) / total;
+    if (t < end || i === tokens.length - 1) {
+      return { said: join(tokens.slice(0, i + 1)).trimStart(), rest: join(tokens.slice(i + 1)), word: tokens[i][0] };
+    }
+    at = end;
+  }
+  return { said: chunk.text, rest: "", word: "" };
+}
+
 export function chunkAt(chunks: Chunk[], t: number): Chunk | null {
   for (const c of chunks) if (t >= c.start && t < c.end) return c;
   return null;
