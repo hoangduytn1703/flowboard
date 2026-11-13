@@ -183,6 +183,15 @@ class TTSError(RuntimeError):
     pass
 
 
+class UnspeakableError(TTSError):
+    """The voice ran fine but gave nothing for this text (VieNeu given Chinese, only symbols…): asking again will not
+    help — a dub keeps that line silent instead of failing the whole video."""
+
+
+#: cache keys of lines VieNeu gave no audio for (this run): asked again they fail at once, no 20 s model load
+_UNSPEAKABLE: set[str] = set()
+
+
 @dataclass
 class Word:
     start: float  # seconds from the start of the audio
@@ -282,13 +291,18 @@ async def _synth_vieneu_many(items: list[tuple[str, Path]], voice: str) -> None:
         _json.dump([{"text": t, "out": str(p)} for t, p in items], fh, ensure_ascii=False)
         lines_json = Path(fh.name)
     try:
-        await asyncio.to_thread(dub._runner, "vieneu", name, str(lines_json), timeout=max(600, 30 * len(items)))
+        res = await asyncio.to_thread(dub._runner, "vieneu", name, str(lines_json), timeout=max(600, 30 * len(items)))
     except dub.DubError as exc:
         raise TTSError(f"VieNeu: {exc}") from exc
     finally:
         lines_json.unlink(missing_ok=True)
-    for _, p in items:
-        if not p.is_file() or p.stat().st_size < 200:
+    unread = {int(n) - 1 for n in (res or {}).get("missing") or [] if str(n).isdigit()}
+    for k, (text, p) in enumerate(items):
+        if k in unread:
+            _UNSPEAKABLE.add(p.stem)
+            if len(items) == 1:
+                raise UnspeakableError(f"VieNeu không đọc được câu “{text[:50]}”")
+        elif not p.is_file() or p.stat().st_size < 200:
             raise TTSError("VieNeu không trả file giọng")
 
 
@@ -379,7 +393,8 @@ async def synthesize_many(lines: list[str], voice: str = DEFAULT_VOICE, rate: in
         if todo:
             await _synth_vieneu_many(todo, voice)
             for t, p in todo:
-                _finish(p, _cache_key(t, voice, rate, ""))
+                if p.is_file():  # a line VieNeu could not read has none: synthesize() below says which
+                    _finish(p, _cache_key(t, voice, rate, ""))
     return [await synthesize(t, voice, rate, style) for t in texts]
 
 
@@ -412,6 +427,8 @@ async def synthesize(text: str, voice: str = DEFAULT_VOICE, rate: int = 0,
         return cached
 
     if kind == "vieneu":
+        if key in _UNSPEAKABLE:
+            raise UnspeakableError(f"VieNeu không đọc được câu “{text[:50]}”")
         # one line through the runner (a whole video goes through synthesize_many, one model load)
         await _synth_vieneu_many([(text, mp3)], voice)
         return _finish(mp3, key)

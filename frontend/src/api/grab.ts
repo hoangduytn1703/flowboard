@@ -109,14 +109,33 @@ export const listGrabVideos = () => api<GrabVideo[]>("/api/grab/videos");
 export const getGrabState = () => api<GrabState>("/api/grab/state");
 export const downloadGrabVideos = (ids: number[]) => post<{ queued: number; skipped: number }>("/api/grab/download", { ids });
 export const stopGrabDownloads = (ids: number[] = []) => post<{ stopping: number }>("/api/grab/download/stop", { ids });
+/** ``prompts`` = the saved requests afterwards (the one just used goes on top). */
 export const pickGrabVideos = (ids: number[], prompt: string) =>
-  post<{ picks: { id: number; why: string }[]; note: string }>("/api/grab/pick", { ids, prompt });
+  post<{ picks: { id: number; why: string }[]; note: string; prompts?: string[] }>("/api/grab/pick", { ids, prompt });
+/** The account's saved AI requests, newest first — at most 10, the oldest goes when an 11th is saved. */
+export const listGrabPrompts = () => api<string[]>("/api/grab/prompts");
+export const saveGrabPrompt = (text: string) => post<string[]>("/api/grab/prompts", { text });
+export const deleteGrabPrompt = (text: string) => post<string[]>("/api/grab/prompts/delete", { text });
 /** The downloaded ones among ``ids`` — what the cut / dubbing pages take as files (`?grab=<ids>`). */
 export const grabMedia = (ids: number[]) => post<{ id: number; media_id: string; name: string }[]>("/api/grab/media", { ids });
 export const markGrabUsed = (ids: number[], tool: "cut" | "dub") => post<{ marked: number }>("/api/grab/used", { ids, tool });
 export const listGrabMarks = () => api<GrabMarkTag[]>("/api/grab/marks");
 export const setGrabMarks = (ids: number[], add: string[], remove: string[] = []) =>
   post<{ marked: number }>("/api/grab/marks", { ids, add, remove });
+
+/** What became of a downloaded video in a tool (the latest job / cut started from it). */
+export interface GrabToolRun {
+  state: "running" | "review" | "done" | "error" | "stopped";
+  id: string;
+  phase: string;
+  progress: number;
+  error: string;
+  at: number;
+  /** the page of that job: /tools/dub?job=… or /tools/cut?session=… */
+  link: string;
+}
+export type GrabWork = Record<string, { dub?: GrabToolRun; cut?: GrabToolRun }>;
+export const getGrabWork = () => api<GrabWork>("/api/grab/work");
 
 export const grabThumbUrl = (id: number) => `/api/grab/videos/${id}/thumb`;
 export const grabAvatarUrl = (id: number) => `/api/grab/channels/${id}/avatar`;

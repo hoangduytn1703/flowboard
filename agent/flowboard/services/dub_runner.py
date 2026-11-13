@@ -222,6 +222,7 @@ def vieneu(voice: str, lines_json: str) -> None:
     tts = Vieneu(mode="v3turbo", backend="onnx")
     _progress(10)
     done = 0
+    missing: list[int] = []
     for i, item in enumerate(lines):
         text = str(item.get("text") or "").strip()
         out = str(item["out"])
@@ -229,12 +230,15 @@ def vieneu(voice: str, lines_json: str) -> None:
             continue
         wav = tts.infer(text, voice=voice)
         if getattr(wav, "size", 0) == 0:
-            raise SystemExit(f"vieneu returned no audio for line {i + 1}")
+            # a line it cannot read (Chinese left untranslated, only symbols…): the others still get their voice,
+            # the caller decides about this one (14/11: one such line used to end a whole 82-line dub)
+            missing.append(i + 1)
+            continue
         tts.save(wav, out)
         done += 1
         _progress(10 + int(88 * (i + 1) / len(lines)))
     _progress(100)
-    print(json.dumps({"ok": True, "done": done}))
+    print(json.dumps({"ok": True, "done": done, "missing": missing}))
 
 
 def check() -> None:

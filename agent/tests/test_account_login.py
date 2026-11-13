@@ -65,6 +65,38 @@ def test_login_sets_cookie_and_opens_the_account_data(auth_app, tmp_path):
     assert auth_app.get("/api/boards").status_code == 401
 
 
+def test_remember_me_keeps_the_login_and_the_other_kind_ends_with_the_browser(auth_app, monkeypatch):
+    from datetime import timedelta
+
+    # ticked (and what older pages send): a cookie with an age, renewed by /me; 90 days idle before it ends
+    r = auth_app.post("/api/account/login", json={"username": "akiragosho", "password": "Password@123", "remember": True})
+    assert r.status_code == 200
+    head = r.headers["set-cookie"]
+    assert f"Max-Age={accounts.SESSION_TTL_S}" in head and accounts.SESSION_TTL_S == 90 * 24 * 3600
+    me = auth_app.get("/api/account/me")
+    assert me.json()["remembered"] is True and f"Max-Age={accounts.SESSION_TTL_S}" in me.headers["set-cookie"]
+    long_token = auth_app.cookies.get(accounts.SESSION_COOKIE)
+    assert accounts.session_remembered(long_token)
+    auth_app.cookies.clear()
+
+    # not ticked: no Max-Age (the browser / app drops it on close), /me does not renew it, a day idle ends it
+    r = auth_app.post("/api/account/login", json={"username": "akiragosho", "password": "Password@123", "remember": False})
+    assert r.status_code == 200 and "Max-Age" not in r.headers["set-cookie"]
+    short = auth_app.cookies.get(accounts.SESSION_COOKIE)
+    assert not accounts.session_remembered(short) and short.split(".")[1] == "s"
+    me = auth_app.get("/api/account/me")
+    assert me.status_code == 200 and me.json()["remembered"] is False and "set-cookie" not in me.headers
+    # the mark cannot be taken off the cookie: the store keeps a hash of the whole token
+    uid, _, rand = short.split(".", 2)
+    assert accounts.resolve_session(f"{uid}.{rand}") is None
+    # two days without use: the short one has ended, the remembered one still works
+    later = accounts._now() + timedelta(days=2)
+    monkeypatch.setattr(accounts, "_now", lambda: later)
+    accounts._session_cache.clear()
+    assert accounts.resolve_session(short) is None
+    assert accounts.resolve_session(long_token) is not None
+
+
 def test_two_accounts_do_not_see_each_other(auth_app, tmp_path):
     accounts.create_user("ban", "secret123")
     auth_app.post("/api/account/login", json={"username": "akiragosho", "password": "Password@123"})

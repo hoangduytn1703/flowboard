@@ -83,9 +83,20 @@ function CloudConnect({ status, onConnected }: { status: ConnectStatus; onConnec
   );
 }
 
+/** "Ghi nhớ đăng nhập": the choice and, when ticked, the user name (never the password) — this browser / app only. */
+const REMEMBER_KEY = "dflow.login.remember";
+const USER_KEY = "dflow.login.user";
+function readKey(key: string): string | null {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+function writeKey(key: string, value: string | null) {
+  try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); } catch { /* private mode */ }
+}
+
 /** Full-screen login. Shown by the auth gate until a session cookie exists. */
 export function LoginPage({ onLoggedIn }: { onLoggedIn: (me: AccountMe) => void }) {
-  const [username, setUsername] = useState("");
+  const [remember, setRemember] = useState(() => readKey(REMEMBER_KEY) !== "0");
+  const [username, setUsername] = useState(() => (readKey(REMEMBER_KEY) !== "0" ? readKey(USER_KEY) ?? "" : ""));
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -102,7 +113,9 @@ export function LoginPage({ onLoggedIn }: { onLoggedIn: (me: AccountMe) => void 
     setBusy(true);
     setError(null);
     try {
-      const me = await loginWithMessage(username.trim(), password);
+      const me = await loginWithMessage(username.trim(), password, remember);
+      writeKey(REMEMBER_KEY, remember ? "1" : "0");
+      writeKey(USER_KEY, remember ? username.trim() : null);
       onLoggedIn(me);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Đăng nhập thất bại.");
@@ -131,11 +144,18 @@ export function LoginPage({ onLoggedIn }: { onLoggedIn: (me: AccountMe) => void 
         )}
         <label className="login__field">
           <span>Tên đăng nhập</span>
-          <input type="text" autoComplete="username" autoFocus value={username} onChange={(e) => setUsername(e.target.value)} />
+          <input type="text" autoComplete="username" autoFocus={!username} value={username} onChange={(e) => setUsername(e.target.value)} />
         </label>
         <label className="login__field">
           <span>Mật khẩu</span>
-          <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <input type="password" autoComplete="current-password" autoFocus={!!username} value={password} onChange={(e) => setPassword(e.target.value)} />
+        </label>
+        <label className="login__remember" title="Tick: giữ đăng nhập trên máy này 90 ngày (tự gia hạn mỗi lần mở) và nhớ tên đăng nhập. Không tick: đóng app / trình duyệt là phải đăng nhập lại — nên dùng khi ở máy chung.">
+          <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+          <span>
+            Ghi nhớ đăng nhập
+            <small>{remember ? "Giữ đăng nhập 90 ngày trên máy này — mở app là vào luôn." : "Đóng app / trình duyệt là phải đăng nhập lại (máy dùng chung)."}</small>
+          </span>
         </label>
         {error && <div className="login__error" role="alert">{error}</div>}
         <button type="submit" className="qt-btn qt-btn--accent qt-btn--big" disabled={busy || !username.trim() || !password}>

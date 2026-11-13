@@ -1068,6 +1068,132 @@ def mark_used(ids: list[int], tool: str) -> int:
         return len(rows)
 
 
+# ── what became of a downloaded video in the tools ─────────────────────────
+
+#: the job folders whose saved jobs / sessions were read once in this run (a new one lives in memory already)
+_TOOLS_READ: set[str] = set()
+
+
+def _tool_state(status: str, error: Optional[str]) -> str:
+    if status in ("queued", "running", "rendering"):
+        return "running"
+    if status == "error":
+        return "stopped" if (error or "").startswith("Đã dừng") else "error"
+    return status if status in ("review", "done") else "done"
+
+
+def work_of_videos() -> dict[str, dict[str, Any]]:
+    """What happened to the downloaded videos sent on to "🎙 Lồng tiếng" / "✂️ Cắt video": per video id →
+    ``{"dub" | "cut": {state: running | review | done | error | stopped, id, phase, progress, error, at, link}}`` —
+    the latest job of each tool started from that file. The list shows a failure on the card (14/11)."""
+    from flowboard.services import dub, video_cut
+
+    with get_session() as db:
+        rows = db.exec(select(GrabVideo.id, GrabVideo.media_id).where(GrabVideo.media_id.is_not(None))).all()  # type: ignore[union-attr]
+    by_media: dict[str, list[int]] = {}
+    for vid, mid in rows:
+        if mid:
+            by_media.setdefault(str(mid), []).append(int(vid))
+    if not by_media:
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+
+    def put(media_id: Optional[str], tool: str, view: dict[str, Any]) -> None:
+        for vid in by_media.get(str(media_id or ""), []):
+            cur = out.setdefault(str(vid), {})
+            if tool not in cur or view["at"] > cur[tool]["at"]:
+                cur[tool] = view
+
+    jobs_root, cut_root = dub._jobs_root(), video_cut._root()
+    if str(jobs_root) not in _TOOLS_READ:
+        dub.load_jobs()
+        _TOOLS_READ.add(str(jobs_root))
+    if str(cut_root) not in _TOOLS_READ:
+        video_cut.load_sessions()
+        _TOOLS_READ.add(str(cut_root))
+    for j in list(dub.JOBS.values()):
+        if j.kind == "cut" or (j.work is not None and j.work.parent != jobs_root):
+            continue
+        put(j.source_media_id, "dub", {
+            "state": _tool_state(j.status, j.error), "id": j.id, "phase": j.phase, "progress": j.progress,
+            "error": (j.error or "")[:400], "at": j.started_at, "link": f"/tools/dub?job={j.id}"})
+    for s in list(video_cut.SESSIONS.values()):
+        if s.work is not None and s.work.parent != cut_root:
+            continue
+        put(s.source_media_id, "cut", {
+            "state": _tool_state(s.status, s.error), "id": s.id, "phase": s.phase, "progress": s.progress,
+            "error": (s.error or "")[:400], "at": s.started_at, "link": f"/tools/cut?session={s.id}"})
+    return out
+
+
+# ── the AI's pick: the account's saved requests ────────────────────────────
+
+PROMPTS_KEY = "grab_prompts"
+MAX_PROMPTS = 10
+PROMPT_MAX = 1500
+
+
+def clean_prompt(text: Any) -> str:
+    lines = [re.sub(r"[ \t\f\v]+", " ", ln).strip() for ln in str(text or "").replace("\r", "").split("\n")]
+    return re.sub(r"\n{2,}", "\n", "\n".join(lines)).strip()[:PROMPT_MAX]
+
+
+def _prompt_key(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
+def normalize_prompts(raw: Any) -> list[str]:
+    """Newest first, each request once (case / spacing ignored), at most ``MAX_PROMPTS`` — the oldest fall off."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for p in raw if isinstance(raw, list) else []:
+        text = clean_prompt(p)
+        if text and _prompt_key(text) not in seen:
+            seen.add(_prompt_key(text))
+            out.append(text)
+    return out[:MAX_PROMPTS]
+
+
+def saved_prompts() -> list[str]:
+    import json
+
+    from flowboard.db.models import AppSetting
+
+    with get_session() as db:
+        row = db.get(AppSetting, PROMPTS_KEY)
+    try:
+        return normalize_prompts(json.loads(row.value or "[]")) if row is not None else []
+    except (TypeError, ValueError):
+        return []
+
+
+def _save_prompts(prompts: list[str]) -> list[str]:
+    import json
+
+    from flowboard.db.models import AppSetting
+
+    prompts = normalize_prompts(prompts)
+    with get_session() as db:
+        row = db.get(AppSetting, PROMPTS_KEY) or AppSetting(key=PROMPTS_KEY, value="")
+        row.value = json.dumps(prompts, ensure_ascii=False)
+        db.add(row)
+        db.commit()
+    return prompts
+
+
+def remember_prompt(text: Any) -> list[str]:
+    """Keep a request on top of the saved ones (one already there moves up); past ten, the oldest goes."""
+    text = clean_prompt(text)
+    if not text:
+        return saved_prompts()
+    return _save_prompts([text, *saved_prompts()])
+
+
+def forget_prompt(text: Any) -> list[str]:
+    key = _prompt_key(clean_prompt(text))
+    return _save_prompts([p for p in saved_prompts() if _prompt_key(p) != key])
+
+
 # ── the AI's pick ──────────────────────────────────────────────────────────
 
 _PICK_SYSTEM = (

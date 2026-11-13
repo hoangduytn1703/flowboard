@@ -12,6 +12,7 @@ says so.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Callable, Optional
 
@@ -41,6 +42,20 @@ class TranslateError(RuntimeError):
 
 def _clean(text: str) -> str:
     return " ".join((text or "").split())
+
+
+#: Chinese / Japanese / Korean characters — left in a line that should be Vietnamese (or English…), the
+#: translator skipped it (seen 14/11: 6 of 82 lines of a Douyin video came back from Google still in Chinese,
+#: and the VieNeu voice, given Chinese, read nothing — the whole dub failed on that line)
+CJK = re.compile(r"[぀-ヿ㐀-䶿一-鿿가-힯豈-﫿]")
+_CJK_TARGETS = {"zh", "zh-CN", "zh-TW", "zh-Hans", "zh-Hant", "ja", "ko"}
+#: lines asked again one by one when a batch left them untranslated
+RETRY_LINES = 80
+
+
+def left_untranslated(source: str, out: str, target: str = "vi") -> bool:
+    """``out`` still carries the source's Chinese / Japanese / Korean writing though ``target`` is not one of those."""
+    return target not in _CJK_TARGETS and bool(CJK.search(out or "")) and bool(CJK.search(source or ""))
 
 
 def google_batch(lines: list[str], source: Optional[str], target: str = "vi", *,
@@ -113,6 +128,36 @@ def batches(lines: list[str]) -> list[tuple[int, int]]:
     return out
 
 
+def retry_leftovers(lines: list[str], out: list[str], source: Optional[str], target: str = "vi", *,
+                    client: Optional[httpx.Client] = None, sleep: Callable[[float], None] = time.sleep) -> list[int]:
+    """Lines a batch left in their source writing (:func:`left_untranslated`) are asked again, each on its own —
+    Google first, then Microsoft. ``out`` is fixed in place; returns the indexes still untranslated."""
+    stuck = [i for i, (src, got) in enumerate(zip(lines, out)) if left_untranslated(src, got, target)]
+    if not stuck:
+        return []
+    logger.info("free_translate: %d line(s) came back untranslated, asking again one by one", len(stuck))
+    still: list[int] = []
+    for i in stuck[:RETRY_LINES]:
+        src = _clean(lines[i])
+        fixed = ""
+        for fn in (google_batch, microsoft_batch):
+            try:
+                got = _retry(lambda fn=fn: fn([src], source, target, client=client), sleep)[0]
+            except TranslateError:
+                continue
+            if got and not left_untranslated(src, got, target):
+                fixed = got
+                break
+        if fixed:
+            out[i] = fixed
+        else:
+            still.append(i)
+    still.extend(stuck[RETRY_LINES:])
+    if still:
+        logger.warning("free_translate: %d line(s) still untranslated: %s", len(still), [i + 1 for i in still][:20])
+    return still
+
+
 def translate_lines(lines: list[str], source: Optional[str] = None, target: str = "vi", *,
                     progress: Optional[Callable[[int, int], None]] = None,
                     sleep: Callable[[float], None] = time.sleep) -> tuple[list[str], str]:
@@ -141,6 +186,7 @@ def translate_lines(lines: list[str], source: Optional[str] = None, target: str 
                 out[i] = vi
             if progress:
                 progress(n + 1, len(parts))
+        retry_leftovers(lines, out, source, target, client=c, sleep=sleep)
     by = max(used, key=used.get) if used else "google"
     logger.info("free_translate: %d lines (%s)", len(texts), ", ".join(f"{k} {v}" for k, v in used.items()) or "-")
     return out, by

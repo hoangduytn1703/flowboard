@@ -577,6 +577,8 @@ export interface DubJob {
   names?: DubName[];
   /** how the AI name check went after the translation ("" = not run) */
   names_note?: string;
+  /** lines the voice could not read at the last export and left silent ("" = none) */
+  voice_note?: string;
   /** "✂️ Cắt thành nhiều video": the rows being edited and the parts cut so far */
   cuts?: DubCutRow[];
   parts?: DubPart[];

@@ -6383,6 +6383,9 @@ button.chat-dock__presence[aria-expanded="true"] {
   border: 1px solid var(--border);
   border-radius: 8px;
 }
+.login__remember { position: relative; display: flex; align-items: flex-start; gap: 9px; font-size: 14.5px; font-weight: 600; cursor: pointer; user-select: none; }
+.login__remember input { width: 17px; height: 17px; margin: 2px 0 0; flex: 0 0 auto; accent-color: #ff6a2b; cursor: pointer; }
+.login__remember small { display: block; margin-top: 2px; font-size: 12.5px; font-weight: 400; color: var(--muted); line-height: 1.45; }
 .login__error { padding: 8px 10px; font-size: 14px; color: #fecaca; background: rgba(248, 113, 113, 0.12); border-radius: 8px; }
 .login__site { margin: 0; font-size: 13.5px; color: var(--muted); line-height: 1.5; }
 .login__site b { color: var(--text, #e8e8ef); font-weight: 600; }

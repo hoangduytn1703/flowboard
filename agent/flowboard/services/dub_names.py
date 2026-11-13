@@ -119,6 +119,10 @@ def spoken(text: str, names: list[dict[str, str]]) -> str:
 
 def is_name_fix(old: str, new: str) -> bool:
     """``new`` keeps the words of ``old`` except a few (the name and the words around it)."""
+    from flowboard.services.free_translate import CJK
+
+    if CJK.search(new) and not CJK.search(old):  # a "fix" that puts the source's Chinese back in is no fix
+        return False
     a, b = old.lower().split(), new.lower().split()
     kept = sum(m.size for m in difflib.SequenceMatcher(None, a, b).get_matching_blocks())
     return len(a) - kept <= max(MAX_WORDS_CHANGED, len(a) // 3)

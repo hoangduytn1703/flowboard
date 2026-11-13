@@ -71,6 +71,41 @@ def test_google_down_microsoft_takes_over_and_empty_lines_stay_empty(monkeypatch
         free_translate.translate_lines(["a"], None, sleep=lambda s: None)
 
 
+def test_lines_left_in_chinese_are_asked_again_one_by_one(monkeypatch):
+    """14/11: a Google batch came back with 6 of 82 lines still in Chinese."""
+    asked = []
+
+    def google(lines, source, target="vi", *, client=None):
+        asked.append(("g", list(lines)))
+        if len(lines) > 1:  # the batch: the 2nd and 3rd lines left as they were
+            return ["vi một", lines[1], lines[2], "vi bốn"]
+        return [lines[0]] if lines[0] == "风速" else ["tinh vân"]   # alone: one is translated, one still is not
+
+    def microsoft(lines, source, target="vi", *, client=None):
+        asked.append(("m", list(lines)))
+        return ["tốc độ gió" for _ in lines]
+
+    monkeypatch.setattr(free_translate, "google_batch", google)
+    monkeypatch.setattr(free_translate, "microsoft_batch", microsoft)
+    out, by = free_translate.translate_lines(["一", "星云", "风速", "四"], "zh", sleep=lambda s: None)
+    assert out == ["vi một", "tinh vân", "tốc độ gió", "vi bốn"] and by == "google"
+    assert asked[1:] == [("g", ["星云"]), ("g", ["风速"]), ("m", ["风速"])]
+    # nothing better from either: the line is left as it was and reported
+    monkeypatch.setattr(free_translate, "microsoft_batch", lambda lines, *a, **k: list(lines))
+    still = free_translate.retry_leftovers(["风速"], ["风速"], "zh", sleep=lambda s: None)
+    assert still == [0]
+    # a Chinese / Japanese / Korean target keeps its writing: nothing is asked again
+    assert not free_translate.left_untranslated("星云", "星云", "zh") and free_translate.left_untranslated("星云", "星云", "vi")
+    assert not free_translate.left_untranslated("hello", "xin chào", "vi")
+
+
+def test_a_name_fix_never_puts_the_chinese_back():
+    from flowboard.services import dub_names
+
+    assert not dub_names.is_name_fix("Tốc độ gió", "风速")
+    assert dub_names.is_name_fix("Sao Hỏa rất xa", "Sao Hỏa rất xa nhé")
+
+
 def _job(translator: str, n: int = 5) -> dub.Job:
     job = dub.Job(id="tr", url=None, source_media_id="x", language="zh", translator=translator,
                   title="棉花糖星球 #科普 #探索宇宙")

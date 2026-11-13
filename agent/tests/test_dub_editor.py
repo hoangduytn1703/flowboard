@@ -153,6 +153,46 @@ def test_a_line_edge_keeps_refusing_gets_another_round(tmp_path, monkeypatch):
     assert "câu 2/3" in str(err.value) and asked["câu 1"] == 1
 
 
+def test_a_line_the_voice_cannot_read_stays_silent_instead_of_failing_the_video(tmp_path, monkeypatch):
+    """14/11: Google left a line in Chinese, VieNeu read nothing for it and the whole 82-line dub failed."""
+    from flowboard.services import tts
+
+    ffmpeg = _ffmpeg()
+    wav = tmp_path / "line.wav"
+    subprocess.run([ffmpeg, "-y", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=300:duration=0.5", str(wav)], check=True)
+    read: list[str] = []
+
+    async def voice(text, v, rate=0, style=None):
+        read.append(text)
+        if text == "###":
+            raise tts.UnspeakableError("VieNeu không đọc được câu")
+        return tts.Narration(wav, 0.5, [])
+
+    monkeypatch.setattr(tts, "synthesize", voice)
+    job = _job(tmp_path, 4)
+    job.voice = "vi-VN-NamMinhNeural"
+    job.segments[1].text = "风速飙到每秒两千公里以上"          # nothing left to read once the Chinese is dropped
+    job.segments[2].text = "###"                              # the voice gives nothing for it
+    job.segments[3].text = "Sao Wolf-Rayet 沃尔夫 rất nóng"   # the Vietnamese part is still read
+    assert dub.speech(job, job.segments[1].text) == "" and dub.speech(job, job.segments[3].text) == "Sao Wolf-Rayet rất nóng"
+    pieces = dub._voice_pieces(job)
+    assert len(pieces) == 4 and [p[0] for p in pieces] == [0.0, 2.0, 4.0, 6.0]
+    assert 1.45 < pieces[1][2] < 1.55 and 1.45 < pieces[2][2] < 1.55   # a silent slot as long as the line
+    assert all("风" not in t for t in read)
+    assert "2 câu để im lặng" in job.voice_note and "câu 2, 3" in job.voice_note and "chữ gốc" in job.voice_note
+    assert job.public()["voice_note"] == job.voice_note
+    # a Gemini voice reads Chinese itself: nothing is dropped for it
+    job.voice = next(v for v in tts.VOICES if tts.voice_kind(v) == "gemini")
+    assert dub.speech(job, "风速") == "风速"
+
+
+def test_runner_errors_leave_the_library_warnings_out():
+    tail = ["Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate "
+            "limits and faster downloads.", "vieneu returned no audio for line 28"]
+    assert dub.runner_error(tail) == "vieneu returned no audio for line 28"
+    assert dub.runner_error(["Warning: only this"]) == "Warning: only this"
+
+
 def test_music_is_separated_while_the_voice_is_read(client, tmp_path, monkeypatch):
     import threading
 

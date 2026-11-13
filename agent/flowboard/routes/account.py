@@ -40,6 +40,8 @@ PREFS_KEY = "ui_prefs"
 class LoginBody(BaseModel):
     username: str
     password: str
+    #: "Ghi nhớ đăng nhập" — older pages send nothing and keep the long session they always had
+    remember: bool = True
 
 
 class PasswordBody(BaseModel):
@@ -48,7 +50,10 @@ class PasswordBody(BaseModel):
 
 
 def _set_cookie(resp: Response, token: str) -> None:
-    resp.set_cookie(accounts.SESSION_COOKIE, token, max_age=accounts.SESSION_TTL_S, httponly=True,
+    """A remembered session gets a cookie that outlives the browser / app (renewed by /me while it is used); the other
+    kind gets no ``max_age`` — the browser drops it when it closes."""
+    remember = accounts.session_remembered(token)
+    resp.set_cookie(accounts.SESSION_COOKIE, token, max_age=accounts.SESSION_TTL_S if remember else None, httponly=True,
                     samesite="lax", secure=False, path="/")
 
 
@@ -102,7 +107,7 @@ def login(body: LoginBody, request: Request, response: Response) -> dict:
     # only a caller from elsewhere is recorded by address.
     client = request.client.host if request.client else None
     remote = client not in (None, "127.0.0.1", "::1", "localhost", "testclient")
-    token = accounts.create_session(user, host=client if remote else None)
+    token = accounts.create_session(user, host=client if remote else None, remember=body.remember)
     _set_cookie(response, token)
     return _me_payload(user)
 
@@ -115,13 +120,16 @@ def logout(request: Request, response: Response) -> dict:
 
 
 @router.get("/me")
-def me(request: Request) -> dict:
+def me(request: Request, response: Response) -> dict:
     if not accounts.auth_enabled():
         return {"auth": False, "username": "local", "backend": "sqlite", "features": list(plans.FEATURE_KEYS)}
     user = accounts.user_from_request(request)
     if user is None:
         raise HTTPException(401, "Chưa đăng nhập")
-    return _me_payload(user)
+    token = request.cookies.get(accounts.SESSION_COOKIE) or ""
+    if accounts.session_remembered(token):
+        _set_cookie(response, token)  # the app opened again: the remembered login runs another 90 days from now
+    return {**_me_payload(user), "remembered": accounts.session_remembered(token)}
 
 
 @router.post("/password")

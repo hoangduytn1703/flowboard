@@ -36,6 +36,7 @@ from flowboard.db import get_session
 from flowboard.db.models import Asset, Board, Node
 from flowboard.services import media as media_service
 from flowboard.services import dub_addon, dub_decor, dub_names, dub_remotion, key_moments, sfx, tts, ytdlp
+from flowboard.services.free_translate import CJK
 from flowboard.services.llm import run_llm
 from flowboard.services.llm.base import LLMError
 from flowboard.services.video_export import _encode_args, _run, probe_clip
@@ -131,6 +132,18 @@ def status() -> dict[str, Any]:
     return out
 
 
+#: what the runner's libraries print on the side — not the reason it failed (14/11: a VieNeu error read
+#: "Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN… vieneu returned no audio")
+_RUNNER_NOISE = re.compile(r"HF_TOKEN|unauthenticated requests to the HF Hub|^\s*warnings\.warn|"
+                           r"^\s*Warning:|UserWarning|FutureWarning|DeprecationWarning", re.I)
+
+
+def runner_error(tail: list[str]) -> str:
+    """The runner's last stderr lines as an error message, library warnings left out (unless nothing else)."""
+    useful = [line for line in tail if not _RUNNER_NOISE.search(line)]
+    return " ".join(useful or tail)[-500:]
+
+
 def _runner(*args: str, progress: Optional[Callable[[int], None]] = None,
             stop: Optional[Callable[[], bool]] = None, timeout: int = STEP_TIMEOUT_S) -> dict[str, Any]:
     rt = dub_addon.runtime()
@@ -174,7 +187,7 @@ def _runner(*args: str, progress: Optional[Callable[[int], None]] = None,
     t.join(timeout=5)
     out = (proc.stdout.read() if proc.stdout else b"").decode("utf-8", "replace").strip().splitlines()
     if proc.returncode != 0:
-        raise DubError(" ".join(tail)[-500:] or f"runner {args[0]} exited {proc.returncode}")
+        raise DubError(runner_error(tail) or f"runner {args[0]} exited {proc.returncode}")
     try:
         return json.loads(out[-1]) if out else {}
     except ValueError:
@@ -1152,6 +1165,8 @@ class Job:
     #: ``say`` (services/dub_names); ``names_note`` = how the AI name check went ("" = not run)
     names: list[dict] = field(default_factory=list)
     names_note: str = ""
+    #: lines the voice could not read and left silent (silent_note), "" = every line has its voice
+    voice_note: str = ""
     #: "✂️ Cắt thành nhiều video" (services/dub_split): the rows being edited [{start, end, title}] and the parts
     #: cut so far [{index, start, end, title, media_id, board_id, at}]
     cuts: list[dict] = field(default_factory=list)
@@ -1192,7 +1207,7 @@ class Job:
             "translator": self.translator, "translated_by": self.translated_by, "mode": self.mode,
             "sub_lang": self.sub_lang, "cuts": [dict(c) for c in self.cuts], "parts": [dict(p) for p in self.parts],
             "kind": self.kind, "cut": dict(self.cut),
-            "names": [dict(n) for n in self.names], "names_note": self.names_note,
+            "names": [dict(n) for n in self.names], "names_note": self.names_note, "voice_note": self.voice_note,
             "title": self.title, "duration_s": round(self.duration_s, 1),
             "segments": [s.public() for s in self.segments],
         }
@@ -1434,6 +1449,24 @@ async def _translate(job: Job) -> None:
     if title:
         job.title = title
     job.translated_by = "ai"
+    await _fix_untranslated(job)
+
+
+async def _fix_untranslated(job: Job, target: str = "vi") -> None:
+    """Lines still in the source's Chinese / Japanese / Korean after the AI translated them: asked again from
+    Google / Microsoft one by one (the free path does this inside free_translate.translate_lines)."""
+    from flowboard.services import free_translate
+
+    src, out = [s.src for s in job.segments], [s.text for s in job.segments]
+    if not any(free_translate.left_untranslated(a, b, target) for a, b in zip(src, out)):
+        return
+    _set(job, "Đang dịch lại các câu còn sót chữ gốc", 60)
+    try:
+        await asyncio.to_thread(free_translate.retry_leftovers, src, out, job.language or None, target)
+    except Exception as exc:  # noqa: BLE001 — best effort: the voice skips what it cannot read (speech)
+        logger.warning("dub %s: could not translate the leftover lines again: %s", job.id, exc)
+    for seg, line in zip(job.segments, out):
+        seg.text = line
 
 
 def needs_name_check(job: Job) -> bool:
@@ -1535,8 +1568,10 @@ def _prefetch_edge(job: Job, spoken: list[Segment]) -> None:
             async with sem:
                 if job.stop:
                     raise DubError("Đã dừng theo yêu cầu")
+                text = speech(job, seg.text)
                 try:
-                    await tts.synthesize(speech(job, seg.text), job.voice, 0)
+                    if text:
+                        await tts.synthesize(text, job.voice, 0)
                 except tts.TTSError:
                     pass  # the loop below tries it again, with its rounds
             done += 1
@@ -1550,17 +1585,31 @@ def _prefetch_edge(job: Job, spoken: list[Segment]) -> None:
     asyncio.run(run())
 
 
+def silent_note(segs: list[Segment], index: list[int]) -> str:
+    """What the editor says about lines the voice could not read ("" = none)."""
+    if not segs:
+        return ""
+    nums = ", ".join(str(i + 1) for i in index[:12]) + ("…" if len(index) > 12 else "")
+    left = "còn chữ gốc chưa dịch" if any(CJK.search(s.text) for s in segs) else "giọng không đọc được"
+    return (f"{len(segs)} câu để im lặng ({left}): câu {nums} — sửa chữ ở tab 📜 Các câu rồi bấm Xuất lại "
+            "để giọng đọc các câu đó.")
+
+
 def _voice_pieces(job: Job) -> list[tuple[float, Path, float]]:
     """TTS for every line, each converted to 48 kHz mono WAV and sped up to
     fit its slot. Returns ``[(start, wav, duration)]``."""
     ffmpeg = _ffmpeg()
     pieces: list[tuple[float, Path, float]] = []
     spoken = [s for s in job.segments if s.text.strip()]
-    if tts.voice_kind(job.voice) == "vieneu" and spoken:
+    said = [speech(job, s.text) for s in spoken]
+    silent: list[int] = []  # lines the voice cannot read: they keep their subtitle and a silent slot
+    if tts.voice_kind(job.voice) == "vieneu" and any(said):
         # VieNeu loads its model once for every line still missing (then each line below is a cache hit)
         _set(job, f"Đang tạo giọng đọc VieNeu ({len(spoken)} câu, trên máy)", 62)
         try:
-            asyncio.run(tts.synthesize_many([speech(job, s.text) for s in spoken], job.voice, 0))
+            asyncio.run(tts.synthesize_many([t for t in said if t], job.voice, 0))
+        except tts.UnspeakableError:
+            pass  # the loop below finds which line, the others are cached already
         except tts.TTSError as exc:
             raise DubError(f"giọng đọc lỗi: {exc}") from exc
     if tts.voice_kind(job.voice) == "edge" and len(spoken) > 1:
@@ -1569,9 +1618,15 @@ def _voice_pieces(job: Job) -> list[tuple[float, Path, float]]:
     for i, seg in enumerate(spoken):
         _set(job, f"Đang tạo giọng đọc ({i + 1}/{len(spoken)})", 62 + int(18 * i / max(1, len(spoken))))
         narr = None
+        if not said[i]:
+            silent.append(i)
+            narrations.append(None)
+            continue
         for round_no in range(VOICE_ROUNDS):
             try:
-                narr = asyncio.run(tts.synthesize(speech(job, seg.text), job.voice, 0))
+                narr = asyncio.run(tts.synthesize(said[i], job.voice, 0))
+                break
+            except tts.UnspeakableError:
                 break
             except tts.TTSError as exc:
                 # Edge drops requests in streaks: one bad line should not end a long video — wait, then try it again
@@ -1585,11 +1640,24 @@ def _voice_pieces(job: Job) -> list[tuple[float, Path, float]]:
                     _set(job, f"Giọng Edge đang chập chờn — chờ {left}s rồi đọc lại câu {i + 1}/{len(spoken)}",
                          62 + int(18 * i / max(1, len(spoken))))
                     time.sleep(1)
-        assert narr is not None
+        if narr is None:  # the voice read nothing for it (UnspeakableError)
+            silent.append(i)
         narrations.append(narr)
+    where = {id(s): k for k, s in enumerate(job.segments)}
+    job.voice_note = silent_note([spoken[i] for i in silent], [where[id(spoken[i])] for i in silent])
+    if silent:
+        logger.warning("dub %s: %d line(s) left silent: %s", job.id, len(silent), job.voice_note)
 
     def fit(i: int) -> tuple[float, Path, float]:
         seg, narr = spoken[i], narrations[i]
+        if narr is None:  # a silent slot as long as the line, so its subtitle keeps its time
+            span = max(MIN_SLOT_S, seg.end - seg.start)
+            wav = job.work / f"v{i:03d}.wav"
+            err = _run([ffmpeg, "-y", "-v", "error", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono", "-t", f"{span:.3f}",
+                        "-c:a", "pcm_s16le", str(wav)], 60)
+            if err:
+                raise DubError(f"không tạo được khoảng lặng cho câu {i + 1}: {err}")
+            return seg.start, wav, span
         # Edge pads every line with ~0.2 s of silence at both ends: off, so the words start on the line's mark
         trimmed = job.work / f"t{i:03d}.wav"
         err = _run([ffmpeg, "-y", "-v", "error", "-i", str(narr.path), "-af", TRIM_SILENCE + ",aresample=48000,"
@@ -1755,9 +1823,14 @@ def waveform(job: Job) -> Path:
 def speech(job: Job, text: str) -> str:
     """What the voice reads for a subtitle line: the proper names of ``job.names`` in their Vietnamese reading
     (Einstein → "Anh xtanh"). Gemini voices read foreign names well by themselves and get the line as it is."""
-    if not job.names or tts.voice_kind(job.voice) == "gemini":
+    if tts.voice_kind(job.voice) == "gemini":
         return text
-    return dub_names.spoken(text, job.names)
+    # Chinese / Japanese / Korean left untranslated: a Vietnamese voice reads none of it (VieNeu gave no audio
+    # and the whole dub failed, 14/11) — it reads the rest, or nothing ("" = the line stays silent)
+    text = re.sub(r"\s+", " ", CJK.sub(" ", text)).strip()
+    if not re.search(r"\w", text):
+        return ""
+    return dub_names.spoken(text, job.names) if job.names else text
 
 
 def voice_key(job: Job) -> str:
@@ -1853,6 +1926,7 @@ def _render(job: Job) -> None:
     elif quick:
         _set(job, "Dùng lại giọng đã đọc", 2)  # only the subtitles / layout changed
     else:
+        asyncio.run(_fix_untranslated(job))  # lines a translator left in Chinese (a dub made before 14/11 too)
         pieces = _voice_pieces(job)
         _set(job, "Đang xếp giọng theo thời gian", 81)
         placed = _timeline_wav(ffmpeg, pieces, info.duration, voice)
@@ -2312,6 +2386,7 @@ def _job_from_dict(d: dict, work: Path, fallback_time: float) -> Job:
               translator=normalize_translator(d.get("translator")), translated_by=str(d.get("translated_by") or ""),
               mode=normalize_mode(d.get("mode")), sub_lang=normalize_sub_lang(d.get("sub_lang")),
               names=dub_names.normalize_names(d.get("names")), names_note=str(d.get("names_note") or ""),
+              voice_note=str(d.get("voice_note") or ""),
               cuts=[c for c in d.get("cuts") or [] if isinstance(c, dict)],
               parts=[p for p in d.get("parts") or [] if isinstance(p, dict)],
               kind=str(d.get("kind") or ""), cut=dict(d.get("cut")) if isinstance(d.get("cut"), dict) else {},

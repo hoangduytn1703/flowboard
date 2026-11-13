@@ -50,7 +50,10 @@ from flowboard.db import init_db, make_engine, set_engine
 logger = logging.getLogger(__name__)
 
 SESSION_COOKIE = "fb_session"
-SESSION_TTL_S = 30 * 24 * 3600
+#: "Ghi nhớ đăng nhập" ticked: the cookie lasts this long and is renewed while the app is used (idle that long = logged out)
+SESSION_TTL_S = 90 * 24 * 3600
+#: not ticked: a cookie that ends with the browser / app, and a session that dies after a day without use
+SHORT_SESSION_TTL_S = 24 * 3600
 #: The account created on first start (user's request, 22/10).
 SEED_USER = os.getenv("FLOWBOARD_SEED_USER", "akiragosho")
 SEED_PASSWORD = os.getenv("FLOWBOARD_SEED_PASSWORD", "Password@123")
@@ -543,9 +546,15 @@ def _token_key(token: str) -> str:
     return licensing.session_key(token)
 
 
-def create_session(user: dict, host: Optional[str] = None) -> str:
+def session_remembered(token: Optional[str]) -> bool:
+    """``<id>.<random>`` = "Ghi nhớ đăng nhập" (and every session made before it existed); ``<id>.s.<random>`` = this
+    browser / app run only. The mark is inside what the store hashes, so it cannot be changed on a cookie."""
+    return bool(token) and len(str(token).split(".")) != 3
+
+
+def create_session(user: dict, host: Optional[str] = None, remember: bool = True) -> str:
     # the cookie names its account: a session row pointed at another account by hand (user_id edited) stops matching
-    token = f"{user['id']}.{secrets.token_urlsafe(32)}"
+    token = f"{user['id']}.{'' if remember else 's.'}{secrets.token_urlsafe(32)}"
     with central_engine().begin() as c:
         c.execute(sessions.insert().values(token=_token_key(token), user_id=user["id"], created_at=_now(), last_seen=_now(),
                                            host=(host or socket.gethostname())[:128]))
@@ -567,7 +576,7 @@ def resolve_session(token: Optional[str]) -> Optional[dict]:
         if row is None or str(row.user_id) != token.split(".", 1)[0]:
             return None
         age = (_now() - row.last_seen).total_seconds()
-        if age > SESSION_TTL_S:
+        if age > (SESSION_TTL_S if session_remembered(token) else SHORT_SESSION_TTL_S):
             return None
         urow = c.execute(select(users).where(users.c.id == row.user_id)).first()
     if urow is None:

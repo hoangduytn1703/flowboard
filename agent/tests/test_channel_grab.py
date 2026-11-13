@@ -221,7 +221,8 @@ def test_the_ai_picks_by_the_request(client, listed, monkeypatch):
     monkeypatch.setattr("flowboard.services.llm.run_llm", fake_llm)
     r = client.post("/api/grab/pick", json={"ids": ids, "prompt": "2 video nhiều view"})
     assert r.status_code == 200, r.text
-    assert r.json() == {"picks": [{"id": ids[1], "why": "nhiều view"}, {"id": ids[0], "why": ""}], "note": "2 video hợp"}
+    assert r.json() == {"picks": [{"id": ids[1], "why": "nhiều view"}, {"id": ids[0], "why": ""}], "note": "2 video hợp",
+                        "prompts": ["2 video nhiều view"]}
     assert "THE SELLER'S REQUEST: 2 video nhiều view" in seen["prompt"] and "[1] views=1000" in seen["prompt"] and "JSON" in seen["system"]
     assert client.post("/api/grab/pick", json={"ids": ids, "prompt": "  "}).status_code == 400
     assert client.post("/api/grab/pick", json={"ids": [], "prompt": "x"}).status_code == 400
@@ -231,6 +232,56 @@ def test_the_ai_picks_by_the_request(client, listed, monkeypatch):
 
     monkeypatch.setattr("flowboard.services.llm.run_llm", broken)
     assert "AI chưa chọn được" in client.post("/api/grab/pick", json={"ids": ids, "prompt": "x"}).json()["detail"]
+
+
+def test_the_list_says_what_became_of_a_video_sent_on(client, listed, monkeypatch):
+    """A video sent on to dubbing / cutting: the card shows the failure (14/11), the run, or that it is done."""
+    from flowboard.db import get_session
+    from flowboard.db.models import GrabVideo
+    from flowboard.services import dub, video_cut
+
+    cid = client.post("/api/grab/channels", json={"url": "https://www.youtube.com/@KenhMau"}).json()["id"]
+    _scan_done(cid)
+    ids = [v["id"] for v in client.get("/api/grab/videos").json()][:3]
+    with get_session() as db:
+        for k, vid in enumerate(ids):
+            v = db.get(GrabVideo, vid)
+            v.media_id = f"m{k}"
+            db.add(v)
+        db.commit()
+    monkeypatch.setattr(dub, "JOBS", {})
+    monkeypatch.setattr(video_cut, "SESSIONS", {})
+    dub.JOBS["old"] = dub.Job(id="old", url=None, source_media_id="m0", status="done", started_at=100.0)
+    dub.JOBS["new"] = dub.Job(id="new", url=None, source_media_id="m0", status="error", started_at=200.0,
+                              error="giọng đọc lỗi: VieNeu không đọc được câu")
+    dub.JOBS["stopped"] = dub.Job(id="stopped", url=None, source_media_id="m1", status="error", error="Đã dừng theo yêu cầu")
+    dub.JOBS["part"] = dub.Job(id="part", url=None, source_media_id="m2", status="error", kind="cut")  # a cut part, not a dub
+    video_cut.SESSIONS["s1"] = video_cut.Session(id="s1", run_id="r", source_media_id="m2", status="running", progress=40)
+    work = client.get("/api/grab/work").json()
+    v0, v1, v2 = (work.get(str(i), {}) for i in ids)
+    assert v0["dub"]["state"] == "error" and v0["dub"]["id"] == "new" and "VieNeu" in v0["dub"]["error"]
+    assert v0["dub"]["link"] == "/tools/dub?job=new" and "cut" not in v0
+    assert v1["dub"]["state"] == "stopped"
+    assert "dub" not in v2 and v2["cut"] == {**v2["cut"], "state": "running", "progress": 40, "link": "/tools/cut?session=s1"}
+
+
+def test_ai_requests_are_kept_ten_at_most_newest_first(client):
+    assert client.get("/api/grab/prompts").json() == []
+    for i in range(12):
+        r = client.post("/api/grab/prompts", json={"text": f"  yêu cầu   số {i}  "})
+        assert r.status_code == 200, r.text
+    kept = client.get("/api/grab/prompts").json()
+    assert len(kept) == grab.MAX_PROMPTS == 10
+    assert kept[0] == "yêu cầu số 11" and kept[-1] == "yêu cầu số 2"   # the two oldest fell off
+    # the same request again (other case / spacing) moves up instead of being kept twice
+    kept = client.post("/api/grab/prompts", json={"text": "YÊU CẦU  số 5"}).json()
+    assert kept[0] == "YÊU CẦU số 5" and len(kept) == 10 and sum(p.lower() == "yêu cầu số 5" for p in kept) == 1
+    kept = client.post("/api/grab/prompts/delete", json={"text": "yêu cầu số 5"}).json()
+    assert len(kept) == 9 and all("số 5" not in p for p in kept)
+    assert client.post("/api/grab/prompts", json={"text": "   "}).status_code == 400
+    # a long one keeps its lines
+    two = client.post("/api/grab/prompts", json={"text": "dòng 1\n\n\ndòng 2"}).json()[0]
+    assert two == "dòng 1\ndòng 2"
 
 
 def test_the_plan_gates_the_tool():

@@ -871,7 +871,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
           lang={{ value: doc.lang, source: job.language, busy: langBusy, set: (l) => void setSubLang(l) }}
           names={{
             value: doc.names, set: (names, key) => change((d) => ({ ...d, names }), key), check: () => void checkNames(),
-            checking: namesBusy, note: job.names_note ?? "", voiced: !subOnly,
+            checking: namesBusy, note: job.names_note ?? "", voiced: !subOnly, voiceNote: job.voice_note ?? "",
           }}
           cutPart={isCut}
           cutPane={isCut ? null : (
@@ -1006,7 +1006,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
           lang={{ value: doc.lang, source: job.language, busy: langBusy, set: (l) => void setSubLang(l) }}
           names={{
             value: doc.names, set: (names, key) => change((d) => ({ ...d, names }), key), check: () => void checkNames(),
-            checking: namesBusy, note: job.names_note ?? "", voiced: !subOnly,
+            checking: namesBusy, note: job.names_note ?? "", voiced: !subOnly, voiceNote: job.voice_note ?? "",
           }}
           cutPart={isCut}
           cutPane={isCut ? null : (

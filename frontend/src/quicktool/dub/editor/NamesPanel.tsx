@@ -11,6 +11,8 @@ export interface NamesCtl {
   note: string;
   /** a voice-over (the reading is used); subtitles only shows no voice */
   voiced: boolean;
+  /** lines the voice could not read at the last export and left silent ("" = none) */
+  voiceNote?: string;
 }
 
 /**

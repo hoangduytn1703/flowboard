@@ -12,9 +12,14 @@
   GET    /api/grab/videos?channel_id=        the listed videos (all channels when left out)
   GET    /api/grab/videos/{id}/thumb
   GET    /api/grab/state                     scans + downloads in flight (cheap; the page polls it)
+  GET    /api/grab/work                      what became of the videos sent on: {video id: {dub|cut: {state, error, link…}}}
   POST   /api/grab/download                  {ids} — download the picked videos (two at a time)
   POST   /api/grab/download/stop             {ids?}
-  POST   /api/grab/pick                      {ids, prompt} → {picks: [{id, why}], note} — the AI picks by title / numbers
+  POST   /api/grab/pick                      {ids, prompt} → {picks: [{id, why}], note, prompts} — the AI picks by title / numbers
+                                            (the request goes on top of the saved ones)
+  GET    /api/grab/prompts                   the account's saved AI requests, newest first (at most 10)
+  POST   /api/grab/prompts                   {text} — save one on top (past ten, the oldest goes)
+  POST   /api/grab/prompts/delete            {text}
   POST   /api/grab/media                     {ids} → [{id, media_id, name}] the downloaded ones (the cut / dubbing pages)
   POST   /api/grab/used                      {ids, tool: cut | dub} — remember they went on to that tool
   GET    /api/grab/marks                     the video labels in use (+ the ready-made ones) with counts
@@ -58,6 +63,10 @@ class IdsBody(BaseModel):
 class PickBody(BaseModel):
     ids: list[int] = Field(max_length=2000)
     prompt: str = Field(max_length=4000)
+
+
+class PromptBody(BaseModel):
+    text: str = Field(max_length=4000)
 
 
 class MarkBody(BaseModel):
@@ -169,6 +178,11 @@ def state() -> dict[str, Any]:
     return grab.state()
 
 
+@router.get("/work")
+def work() -> dict[str, Any]:
+    return grab.work_of_videos()
+
+
 @router.post("/download")
 def download(body: IdsBody) -> dict[str, Any]:
     if not body.ids:
@@ -184,9 +198,27 @@ def stop_download(body: IdsBody) -> dict[str, Any]:
 @router.post("/pick")
 async def pick(body: PickBody) -> dict[str, Any]:
     try:
-        return await grab.pick(body.ids, body.prompt)
+        out = await grab.pick(body.ids, body.prompt)
     except grab.GrabError as exc:
         raise _bad(exc)
+    return {**out, "prompts": grab.remember_prompt(body.prompt)}
+
+
+@router.get("/prompts")
+def prompts() -> list[str]:
+    return grab.saved_prompts()
+
+
+@router.post("/prompts")
+def save_prompt(body: PromptBody) -> list[str]:
+    if not grab.clean_prompt(body.text):
+        raise HTTPException(400, "Yêu cầu đang trống")
+    return grab.remember_prompt(body.text)
+
+
+@router.post("/prompts/delete")
+def delete_prompt(body: PromptBody) -> list[str]:
+    return grab.forget_prompt(body.text)
 
 
 @router.post("/media")

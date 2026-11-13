@@ -313,6 +313,7 @@ export function Inspector({
 
         {tab === "list" && (
           <>
+            {names.voiced && names.voiceNote && <div className="dx-insp__warn">⚠ {names.voiceNote}</div>}
             <NamesPanel ctl={names} readOnly={readOnly} />
             <CueList cues={cues} origin={origin} selected={i} active={activeCue} readOnly={readOnly}
                      onPick={onPickCue} onText={onCueText} />

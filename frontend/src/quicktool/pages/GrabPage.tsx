@@ -4,12 +4,12 @@ import { announceRunning } from "../../components/BackgroundTasks";
 import { askConfirm, askText } from "../../components/Dialogs";
 import { StopButton } from "../../components/StopButton";
 import {
-  addGrabChannel, agoOf, clockOf, dateOf, deleteGrabChannel, downloadGrabVideos, editGrabChannel, getGrabState, getGrabStatus,
-  grabAvatarUrl, grabThumbUrl, listGrabChannels, listGrabMarks, listGrabVideos, markGrabUsed, pickGrabVideos, scanAllGrabChannels,
-  scanGrabChannel, setGrabMarks, shortCount, stopGrabDownloads, stopGrabScan,
-  type GrabChannel, type GrabMarkTag, type GrabState, type GrabStatus, type GrabVideo,
+  addGrabChannel, agoOf, clockOf, dateOf, deleteGrabChannel, deleteGrabPrompt, downloadGrabVideos, editGrabChannel, getGrabState,
+  getGrabStatus, getGrabWork, grabAvatarUrl, grabThumbUrl, listGrabChannels, listGrabMarks, listGrabPrompts, listGrabVideos, markGrabUsed,
+  pickGrabVideos, saveGrabPrompt, scanAllGrabChannels, scanGrabChannel, setGrabMarks, shortCount, stopGrabDownloads, stopGrabScan,
+  type GrabChannel, type GrabMarkTag, type GrabState, type GrabStatus, type GrabToolRun, type GrabVideo, type GrabWork,
 } from "../../api/grab";
-import { MarkMenu, markClass } from "../grab/MarkMenu";
+import { MarkMenu, mainMark, markClass, markIcon, markTone } from "../grab/MarkMenu";
 import { useFeature } from "../../lib/features";
 import { PageEmpty, PageLoading } from "../PageState";
 import { toast } from "../../store/toast";
@@ -40,21 +40,28 @@ const LENS: { key: Len; label: string }[] = [
   { key: "", label: "Mọi độ dài" }, { key: "s1", label: "Short / tới 1 phút" }, { key: "s3", label: "1 – 3 phút" },
   { key: "s10", label: "3 – 10 phút" }, { key: "long", label: "Trên 10 phút" },
 ];
-type Have = "" | "fresh" | "todo" | "here" | "unused";
+type Have = "" | "fresh" | "todo" | "here" | "unused" | "failed";
 const HAVES: { key: Have; label: string }[] = [
   { key: "", label: "Tất cả" }, { key: "fresh", label: "Mới từ lần quét cuối" }, { key: "todo", label: "Chưa tải về" },
   { key: "here", label: "Đã tải về" }, { key: "unused", label: "Chưa cắt / lồng tiếng" },
+  { key: "failed", label: "Cắt / lồng tiếng bị lỗi" },
 ];
+type Tool = "dub" | "cut";
+const TOOLS: Tool[] = ["dub", "cut"];
+const RUN_TEXT: Record<Tool, { verb: string; done: string; review: string; icon: string }> = {
+  dub: { verb: "lồng tiếng", done: "Đã lồng tiếng", review: "Lồng tiếng chờ sửa", icon: "🎙" },
+  cut: { verb: "cắt", done: "Đã cắt", review: "Chờ chọn đoạn cắt", icon: "✂️" },
+};
+/** the tools whose last run from this video failed */
+const failedTools = (w: GrabWork[string] | undefined): Tool[] => TOOLS.filter((k) => w?.[k]?.state === "error");
 const PRESET_LIMITS = [30, 60, 100, 200, 500, 1000];
 const MAX_LIMIT = 3000;
 const PRESET_MARKS = ["Đã xử lý", "Đã đăng", "Để dành", "Bỏ qua"];
 /** "" every video · "__none" no label yet · "__any" has a label · otherwise that label */
 type MarkFilter = string;
-const PROMPT_IDEAS = [
-  "10 video nhiều lượt xem nhất trong 3 tháng gần đây",
-  "Các video về mẹo / hướng dẫn, dưới 3 phút",
-  "Video có tiêu đề gây tò mò, giật gân nhất — tối đa 8 cái",
-];
+/** how many AI requests the account keeps (the server drops the oldest past this) */
+const MAX_PROMPTS = 10;
+const promptKey = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
 
 const plain = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D").toLowerCase();
 function stored<T>(key: string, fallback: T): T {
@@ -94,6 +101,21 @@ function PlatformChip({ platform, label, beta = false }: { platform: string; lab
     <span className={`gb-plat gb-plat--${platform}`}>
       {icon} {label}{beta && <b className="gb-beta" title="Đang thử nghiệm — có thể chưa ổn định">BETA</b>}
     </span>
+  );
+}
+
+/** Where a video's dubbing / cut stands (a failure is the red strip on the card instead). */
+function RunChip({ tool, run, onOpen }: { tool: Tool; run: GrabToolRun; onOpen: () => void }) {
+  const t = RUN_TEXT[tool];
+  const [cls, text] =
+    run.state === "running" ? ["gb-st--run", `⏳ Đang ${t.verb}${run.progress ? ` ${run.progress}%` : ""}`]
+      : run.state === "review" ? ["gb-st--wait", `✏️ ${t.review}`]
+        : run.state === "stopped" ? ["", `⏹ ${t.icon} đã dừng`]
+          : ["gb-st--ok", `✓ ${t.done}`];
+  return (
+    <button type="button" className={`gb-st gb-st--btn ${cls}`} onClick={onOpen} title={`${run.phase || t.done} — bấm để mở`}>
+      {run.state === "running" && <span className="gb-spin" aria-hidden="true" />}{text}
+    </button>
   );
 }
 
@@ -169,6 +191,10 @@ export function GrabPage() {
   const [why, setWhy] = useState<Map<number, string>>(new Map());
   const [aiNote, setAiNote] = useState("");
   const [aiOnly, setAiOnly] = useState(false);
+  // the account's saved AI requests, newest first
+  const [prompts, setPrompts] = useState<string[]>([]);
+  // what became of the videos sent on to "🎙 Lồng tiếng" / "✂️ Cắt video" (a failure shows on the card)
+  const [work, setWork] = useState<GrabWork>({});
   // "tải xong thì chuyển sang …": the videos wanted in a tool that are still downloading
   const [after, setAfter] = useState<{ tool: "cut" | "dub"; ids: number[] } | null>(null);
   const urlInput = useRef<HTMLInputElement>(null);
@@ -187,6 +213,7 @@ export function GrabPage() {
   }
   useEffect(() => {
     void getGrabStatus().then(setStatus).catch(() => undefined);
+    void listGrabPrompts().then(setPrompts).catch(() => undefined);
     void reload();
   }, []);
 
@@ -217,6 +244,15 @@ export function GrabPage() {
     const t = window.setInterval(() => void tick(), busy ? 1500 : 12000);
     return () => { alive = false; window.clearInterval(t); };
   }, [busy]);
+
+  const workBusy = Object.values(work).some((w) => w.dub?.state === "running" || w.cut?.state === "running");
+  useEffect(() => {
+    let alive = true;
+    const tick = () => void getGrabWork().then((w) => { if (alive) setWork(w); }).catch(() => undefined);
+    tick();
+    const t = window.setInterval(tick, workBusy ? 8000 : 30000);
+    return () => { alive = false; window.clearInterval(t); };
+  }, [workBusy, videos.length]);
 
   const byId = useMemo(() => new Map((channels ?? []).map((c) => [c.id, c])), [channels]);
   const allTags = useMemo(() => Array.from(new Set((channels ?? []).flatMap((c) => c.tags))).sort((a, b) => a.localeCompare(b, "vi")), [channels]);
@@ -250,6 +286,7 @@ export function GrabPage() {
       if (have === "todo" && here) return false;
       if (have === "here" && !here) return false;
       if (have === "unused" && (v.used.cut || v.used.dub)) return false;
+      if (have === "failed" && !failedTools(work[String(v.id)]).length) return false;
       if (markF === "__none" && v.marks.length) return false;
       if (markF === "__any" && !v.marks.length) return false;
       if (markF && !markF.startsWith("__") && !v.marks.some((m) => m.toLowerCase() === markF.toLowerCase())) return false;
@@ -270,7 +307,8 @@ export function GrabPage() {
       return time(b) - time(a) || a.channel_id - b.channel_id || a.position - b.position;
     });
     return { filtered: out, undated };
-  }, [scope, q, minViews, days, len, kind, have, markF, aiOnly, why, sort, state]);
+  }, [scope, q, minViews, days, len, kind, have, markF, aiOnly, why, sort, state, work]);
+  const failedCount = useMemo(() => scope.filter((v) => failedTools(work[String(v.id)]).length).length, [scope, work]);
   useEffect(() => { setShown(PAGE); }, [chan, tag, q, minViews, days, len, kind, have, markF, aiOnly, sort]);
   const filtersOn = !!(q.trim() || minViews || days || len || kind || have || markF || aiOnly);
   function clearFilters() { setQ(""); setMinViews(0); setDays(0); setLen(""); setKind(""); setHave(""); pickMarkFilter(""); setAiOnly(false); }
@@ -454,6 +492,7 @@ export function GrabPage() {
     store("flowboard.grab.prompt", text);
     try {
       const r = await pickGrabVideos(pool.map((v) => v.id), text);
+      if (r.prompts) setPrompts(r.prompts);
       setWhy(new Map(r.picks.map((p) => [p.id, p.why])));
       setAiNote(r.note);
       setPicked(new Set(r.picks.map((p) => p.id)));
@@ -467,6 +506,21 @@ export function GrabPage() {
     }
   }
   function clearAi() { setWhy(new Map()); setAiNote(""); setAiOnly(false); }
+  const promptSaved = prompts.some((p) => promptKey(p) === promptKey(prompt));
+  async function keepPrompt() {
+    const text = prompt.trim();
+    if (!text) return;
+    const full = !promptSaved && prompts.length >= MAX_PROMPTS;
+    try {
+      setPrompts(await saveGrabPrompt(text));
+      toast.success(full ? `Đã lưu yêu cầu — đã bỏ yêu cầu cũ nhất (giữ tối đa ${MAX_PROMPTS}).` : "Đã lưu yêu cầu.");
+    } catch (e) {
+      toast.error(errMessage(e));
+    }
+  }
+  async function dropPrompt(text: string) {
+    try { setPrompts(await deleteGrabPrompt(text)); } catch (e) { toast.error(errMessage(e)); }
+  }
 
   if (channels === null) return <><header className="qt-header"><span className="qt-header__crumb">📡 Cào video kênh</span></header><PageLoading /></>;
 
@@ -623,7 +677,7 @@ export function GrabPage() {
                   </label>
                   <label className="qt-field"><span>Trạng thái</span>
                     <select value={have} onChange={(e) => setHave(e.target.value as Have)}>
-                      {HAVES.map((h) => <option key={h.key} value={h.key}>{h.label}</option>)}
+                      {HAVES.map((h) => <option key={h.key} value={h.key}>{h.label}{h.key === "failed" && failedCount ? ` (${failedCount})` : ""}</option>)}
                     </select>
                   </label>
                 </div>
@@ -654,11 +708,12 @@ export function GrabPage() {
                             onChange={(e) => setPrompt(e.target.value)}
                             onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void aiPick(); } }} />
                   <div className="gb__airow">
-                    {PROMPT_IDEAS.map((p) => <button key={p} type="button" className="qt-chip qt-chip--sm" disabled={picking} onClick={() => setPrompt(p)}>{p}</button>)}
-                  </div>
-                  <div className="gb__airow">
                     <button type="button" className="qt-btn qt-btn--accent qt-btn--small" disabled={picking || !prompt.trim()} onClick={() => void aiPick()}>
                       {picking ? "AI đang chọn…" : "✨ AI chọn video"}
+                    </button>
+                    <button type="button" className="qt-btn qt-btn--small" disabled={picking || !prompt.trim() || promptSaved} onClick={() => void keepPrompt()}
+                            title={`Lưu yêu cầu này để lần sau bấm là dùng lại (giữ ${MAX_PROMPTS} yêu cầu mới nhất)`}>
+                      {promptSaved && prompt.trim() ? "✓ Đã lưu" : "💾 Lưu yêu cầu"}
                     </button>
                     {why.size > 0 && (
                       <>
@@ -668,6 +723,23 @@ export function GrabPage() {
                     )}
                   </div>
                   {aiNote && <p className="gb__note">✨ {aiNote}</p>}
+                  <div className="gb__saved">
+                    <span className="gb__savedhead">
+                      📌 Yêu cầu đã lưu <small>{prompts.length}/{MAX_PROMPTS} · bấm “AI chọn video” là tự lưu · quá {MAX_PROMPTS} thì bỏ cái cũ nhất</small>
+                    </span>
+                    {prompts.length === 0 ? (
+                      <span className="gb__savedempty">Chưa có — gõ yêu cầu rồi bấm “✨ AI chọn video” hoặc “💾 Lưu yêu cầu”.</span>
+                    ) : (
+                      <ul className="gb__savedlist">
+                        {prompts.map((p) => (
+                          <li key={p} className={promptKey(p) === promptKey(prompt) ? "is-on" : ""}>
+                            <button type="button" className="gb__savedtext" disabled={picking} onClick={() => setPrompt(p)} title={`${p}\n\nBấm để dùng lại yêu cầu này`}>{p}</button>
+                            <button type="button" className="gb__savedx" disabled={picking} onClick={() => void dropPrompt(p)} title="Xoá yêu cầu này" aria-label="Xoá yêu cầu này">×</button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                   <p className="gb__note">AI chỉ biết tiêu đề và con số — không xem nội dung video. Xem lại các video được tick trước khi tải.</p>
                 </details>
               </section>
@@ -703,6 +775,12 @@ export function GrabPage() {
                 </div>
               )}
 
+              {failedCount > 0 && have !== "failed" && (
+                <div className="gb__failbar" role="status">
+                  <span>⚠ <strong>{failedCount}</strong> video đem đi cắt / lồng tiếng bị lỗi — thẻ của chúng có dải đỏ, bấm vào để xem lỗi.</span>
+                  <button type="button" className="qt-btn qt-btn--small" onClick={() => setHave("failed")}>Chỉ xem video bị lỗi</button>
+                </div>
+              )}
               {filtered.length === 0 ? (
                 <PageEmpty compact icon="🔎" title={scope.length ? "Không video nào khớp bộ lọc" : scanning ? "Đang đọc danh sách video…" : "Kênh này chưa có video nào trong danh sách"}
                            actions={scope.length ? <button type="button" className="qt-btn" onClick={clearFilters}>Bỏ lọc</button>
@@ -718,8 +796,11 @@ export function GrabPage() {
                       const on = picked.has(v.id);
                       const tall = v.kind === "short" || ch?.platform === "tiktok" || ch?.platform === "douyin";
                       const reason = why.get(v.id);
+                      const tone = markTone(v.marks, presets);
+                      const runs = work[String(v.id)];
+                      const fails = failedTools(runs);
                       return (
-                        <article key={v.id} className={`gb-v${on ? " is-on" : ""}`}>
+                        <article key={v.id} className={`gb-v${on ? " is-on" : ""}${tone ? ` gb-v--marked gb-v--${tone}` : ""}${fails.length ? " gb-v--failed" : ""}`}>
                           <label className="gb-v__thumb" title={on ? "Bỏ chọn" : "Chọn video này"}>
                             <input type="checkbox" checked={on} onChange={() => toggle(v.id)} aria-label={`Chọn “${v.title || "video"}”`} />
                             <img className={tall ? "is-tall" : ""} src={grabThumbUrl(v.id)} alt="" loading="lazy"
@@ -727,6 +808,11 @@ export function GrabPage() {
                             <span className="gb-v__tick" aria-hidden="true">{on ? "✓" : ""}</span>
                             {v.fresh && <span className="gb-v__new">MỚI</span>}
                             <span className="gb-v__dur">{clockOf(v.duration_s) || (v.kind === "short" ? "Short" : "")}</span>
+                            {tone && (
+                              <span className={`gb-v__ribbon gb-v__ribbon--${tone}`} title={v.marks.join(" · ")}>
+                                {markIcon(mainMark(v.marks, presets), presets)} {mainMark(v.marks, presets)}{v.marks.length > 1 && <b> +{v.marks.length - 1}</b>}
+                              </span>
+                            )}
                           </label>
                           <div className="gb-v__body">
                             <a className="gb-v__title" href={v.url} target="_blank" rel="noreferrer" title={`${v.title}\n\nBấm để mở video gốc`}>{v.title || "(không có tiêu đề)"}</a>
@@ -736,11 +822,21 @@ export function GrabPage() {
                               {v.comments !== null && <span title="Bình luận">💬 {shortCount(v.comments)}</span>}
                               {v.published_at && <span title={`Đăng khoảng ${dateOf(v.published_at)}`}>{agoOf(v.published_at)}</span>}
                             </div>
+                            {fails.map((k) => {
+                              const run = runs![k]!;
+                              return (
+                                <a key={k} className="gb-v__fail" href={run.link} title={`${run.error}\n\nBấm để mở và làm lại`}
+                                   onClick={(e) => { e.preventDefault(); navigate(run.link); }}>
+                                  <strong>⚠ {RUN_TEXT[k].icon} {k === "dub" ? "Lồng tiếng" : "Cắt video"} bị lỗi</strong> <span>Xem ›</span>
+                                  {run.error && <small>{run.error}</small>}
+                                </a>
+                              );
+                            })}
                             {chan === null && ch && <div className="gb-v__chan"><PlatformChip platform={ch.platform} label={ch.name} /></div>}
                             {reason !== undefined && <div className="gb-v__why">✨ {reason || "AI chọn"}</div>}
                             {v.marks.length > 0 && (
                               <div className="gb-v__marks">
-                                {v.marks.map((m) => <span key={m} className={markClass(m, presets)}>{m}</span>)}
+                                {v.marks.map((m) => <span key={m} className={markClass(m, presets)}>{markIcon(m, presets)} {m}</span>)}
                               </div>
                             )}
                             <div className="gb-v__foot">
@@ -749,11 +845,24 @@ export function GrabPage() {
                               {dl === "queued" && <span className="gb-st">Chờ tải</span>}
                               {dl === "" && v.download_error && <span className="gb-st gb-st--err" title={v.download_error}>⚠ Tải lỗi</span>}
                               {dl === "" && !v.download_error && v.elsewhere && <span className="gb-st" title="Video này đã tải ở máy khác — tải lại để dùng trên máy này">Tải ở máy khác</span>}
-                              {v.used.cut && <span className="gb-st" title={`Đã gửi sang Cắt video ${dateOf(v.used.cut)}`}>✂️ đã cắt</span>}
-                              {v.used.dub && <span className="gb-st" title={`Đã gửi sang Lồng tiếng ${dateOf(v.used.dub)}`}>🎙 đã lồng</span>}
+                              {TOOLS.map((k) => {
+                                const run = runs?.[k];
+                                const sent = v.used[k];
+                                if (run && run.state !== "error") return <RunChip key={k} tool={k} run={run} onOpen={() => navigate(run.link)} />;
+                                if (!run && sent) {
+                                  return <span key={k} className="gb-st" title={`Đã gửi sang ${k === "dub" ? "Lồng tiếng" : "Cắt video"} ${dateOf(sent)}`}>
+                                    {RUN_TEXT[k].icon} đã {k === "dub" ? "lồng" : "cắt"}</span>;
+                                }
+                                return null;
+                              })}
                               <span className="gb-v__acts">
-                                <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={(e) => openMarks([v.id], e.currentTarget)}
-                                        title="Gắn nhãn: Đã xử lý, Đã đăng… (nhớ theo video, quét lại vẫn còn)">🏷</button>
+                                {on && picked.size > 1 ? (
+                                  <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={(e) => openMarks(pickedList.map((x) => x.id), e.currentTarget)}
+                                          title={`Gắn / gỡ nhãn cho cả ${picked.size} video đang chọn (nhớ theo video, quét lại vẫn còn)`}>🏷 {picked.size}</button>
+                                ) : (
+                                  <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={(e) => openMarks([v.id], e.currentTarget)}
+                                          title="Gắn nhãn: Đã xử lý, Đã đăng… (nhớ theo video, quét lại vẫn còn)">🏷</button>
+                                )}
                                 {dl === "" && <button type="button" className="qt-btn qt-btn--small" onClick={() => void download([v.id])} title="Tải video này về máy">⬇</button>}
                                 {(dl === "running" || dl === "queued") && <StopButton label="×" busyLabel="…" title="Dừng tải video này" onStop={() => stopGrabDownloads([v.id])} />}
                                 {dl === "done" && v.media_id && (

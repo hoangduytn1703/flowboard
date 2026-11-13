@@ -4,6 +4,8 @@ import { api } from "./client";
 export interface AccountMe {
   auth: boolean;
   username: string;
+  /** "Ghi nhớ đăng nhập" was ticked for this session (it outlives the app / browser, 90 days renewed while used) */
+  remembered?: boolean;
   created_at?: string | null;
   backend?: string;
   /** the admin account (the seed account): the only one that manages accounts */
@@ -372,11 +374,11 @@ export function randomPassword(length = 10): string {
 }
 
 /** The agent's error text for a failed call (`api()` only keeps the status). */
-export async function loginWithMessage(username: string, password: string): Promise<AccountMe> {
+export async function loginWithMessage(username: string, password: string, remember = true): Promise<AccountMe> {
   const res = await fetch("/api/account/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ username, password, remember }),
   });
   if (!res.ok) {
     let detail = `${res.status} ${res.statusText}`;

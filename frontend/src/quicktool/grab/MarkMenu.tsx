@@ -3,9 +3,30 @@ import { createPortal } from "react-dom";
 
 /** The colour class of a video label: the ready-made ones each have theirs, the seller's own share one. */
 export function markClass(tag: string, presets: string[]): string {
-  const i = presets.findIndex((p) => p.toLowerCase() === tag.toLowerCase());
-  return i >= 0 && i < 4 ? `gb-mark gb-mark--p${i}` : "gb-mark gb-mark--own";
+  return `gb-mark gb-mark--${toneOf(tag, presets)}`;
 }
+
+type Tone = "p0" | "p1" | "p2" | "p3" | "own";
+const ICONS: Record<Tone, string> = { p0: "✓", p1: "📤", p2: "★", p3: "⊘", own: "🏷" };
+
+function toneOf(tag: string, presets: string[]): Tone {
+  const i = presets.findIndex((p) => p.toLowerCase() === tag.toLowerCase());
+  return i >= 0 && i < 4 ? (`p${i}` as Tone) : "own";
+}
+
+export const markIcon = (tag: string, presets: string[]) => ICONS[toneOf(tag, presets)];
+
+/** The label a video card shows first (and takes its colour from): the earliest ready-made one, else its first own one. */
+export function mainMark(marks: string[], presets: string[]): string {
+  for (const p of presets.slice(0, 4)) {
+    const hit = marks.find((m) => m.toLowerCase() === p.toLowerCase());
+    if (hit) return hit;
+  }
+  return marks[0] ?? "";
+}
+
+/** The colour of a labelled video card ("" when it has no label). */
+export const markTone = (marks: string[], presets: string[]): Tone | "" => (marks.length ? toneOf(mainMark(marks, presets), presets) : "");
 
 interface Props {
   /** where the button that opened it is (the menu sits under it, or above when there is no room) */
@@ -66,7 +87,7 @@ export function MarkMenu({ anchor, marks, known, presets, onApply, onClose }: Pr
 
   return createPortal(
     <div ref={box} className="gb-markmenu" role="dialog" aria-label="Gắn nhãn video" style={{ left: pos.left, top: pos.top }}>
-      <div className="gb-markmenu__head">🏷 Nhãn cho {n > 1 ? `${n} video` : "video này"}</div>
+      <div className="gb-markmenu__head">🏷 Nhãn cho {n > 1 ? <>cả <b>{n} video đang chọn</b></> : "video này"}</div>
       <div className="gb-markmenu__list">
         {known.map((tag) => {
           const k = have(tag);
