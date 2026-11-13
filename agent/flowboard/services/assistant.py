@@ -306,7 +306,48 @@ def catalog() -> dict[str, Any]:
     return {"channels": channels, "series": series, "products": products, "templates": templates, "models": models}
 
 
-def _context(cat: dict[str, Any]) -> str:
+#: what each skill needs in the account's plan — the features the pages behind it ask for (plans._rule); None = never
+#: locked (clips, products, models). The skills call the services directly, past the API's own plan check, so the
+#: assistant checks here: before planning (chat) and before every step (_run).
+TOOL_FEATURE: dict[str, Optional[str]] = {
+    "create_model": None, "add_product": None, "create_clip": None, "write_post": "posts", "schedule_post": "facebook",
+    "auto_post": "autopilot", "cut_video": "cut", "grab_channel": "grab"}
+
+
+def locked_tools() -> dict[str, str]:
+    """The skills the account the agent serves now may not use: ``{tool: feature}`` ({} with no login, or for the admin)."""
+    from flowboard import accounts, plans
+
+    if not accounts.auth_enabled():
+        return {}
+    user = accounts.active_user()
+    full = (accounts.get_user(user["username"]) or user) if user else None  # the cached copy may predate a plan change
+    if full is None:
+        return {t: f for t, f in TOOL_FEATURE.items() if f}
+    return {t: f for t, f in TOOL_FEATURE.items() if f and not plans.allows(full, f)}
+
+
+def plan_refusal(actions: list[dict[str, Any]], locked: Optional[dict[str, str]] = None) -> Optional[str]:
+    """Why a plan cannot run on this account's plan ("" = it can) — the features it needs and the plan lacks."""
+    locked = locked_tools() if locked is None else locked
+    feats: list[str] = []
+    for a in actions:
+        f = locked.get(a.get("tool", ""))
+        if f and f not in feats:
+            feats.append(f)
+    if not feats:
+        return None
+    from flowboard import accounts, plans
+
+    user = accounts.active_user()
+    plan = plans.plan_of(user)["name"] if user else "hiện tại"
+    names = ", ".join(f"“{plans.feature_label(k)}”" for k in feats)
+    return (f"Việc này cần tính năng {names} — gói {plan} của bạn chưa có nên mình không làm được. "
+            "Muốn dùng thì bấm “⬆ Nâng cấp gói” ở trang Tài khoản của tôi.")
+
+
+def _context(cat: dict[str, Any], locked: Optional[dict[str, str]] = None) -> str:
+    from flowboard import plans
     from flowboard.services.flow_client import flow_client
     from flowboard.services.flow_project import effective_project_id
 
@@ -314,9 +355,15 @@ def _context(cat: dict[str, Any]) -> str:
     weekday = ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ nhật"][now.weekday()]
     flow = "connected" if flow_client.connected else "NOT connected (extension / Flow tab not open)"
     project = "pinned" if effective_project_id() else "NOT pinned (Cài đặt → Google Flow)"
+    extra = []
+    if locked:
+        extra.append("NOT IN THIS ACCOUNT'S PLAN (never plan these tools; if asked, say in Vietnamese that the plan lacks the "
+                     "feature and \"⬆ Nâng cấp gói\" unlocks it): "
+                     + ", ".join(f"{t} ({plans.feature_label(f)})" for t, f in locked.items()))
     return "\n".join([
         f"NOW (Vietnam): {weekday} {now.strftime('%Y-%m-%d %H:%M')}",
         f"FLOW: extension {flow}; project {project}",
+        *extra,
         "CATALOG:",
         "channels = " + json.dumps(cat["channels"], ensure_ascii=False),
         "series = " + json.dumps(cat["series"], ensure_ascii=False),
@@ -609,13 +656,18 @@ async def chat(message: str) -> dict[str, Any]:
     if pending is not None:  # a new ask replaces a plan nobody confirmed
         cancel(pending.id)
     cat = catalog()
-    prompt = f"{_context(cat)}\n\nCHAT SO FAR:\n{_history()}\n\nAnswer the SELLER's last message now."
+    locked = locked_tools()
+    prompt = f"{_context(cat, locked)}\n\nCHAT SO FAR:\n{_history()}\n\nAnswer the SELLER's last message now."
     try:
         raw = await run_llm("auto_prompt", prompt, system_prompt=_SYSTEM, timeout=120)
     except LLMError as exc:
         reply = _add_message("assistant", f"⚠ AI đang lỗi, thử lại sau nhé: {exc}", data={"error": True})
         return {"messages": [mine, reply], "task": None}
     answer = parse_answer(raw, cat)
+    refused = plan_refusal(answer["actions"], locked) if answer["actions"] else None
+    if refused:  # the AI planned a skill the plan lacks anyway: nothing runs, the seller hears why
+        reply = _add_message("assistant", refused, data={"locked": True})
+        return {"messages": [mine, reply], "task": None}
     if not answer["actions"]:
         reply = _add_message("assistant", answer["reply"])
         return {"messages": [mine, reply], "task": None}
@@ -734,9 +786,13 @@ async def _run(task_id: int) -> None:
             actions = _actions_of(t) if t else []
         st = _state(task_id)
         done, ctx, results = int(st.get("done") or 0), dict(st.get("ctx") or {}), list(st.get("results") or [])
+        locked = locked_tools()  # the plan may have changed since the task was planned (a confirm later, a restart)
         for i in range(done, len(actions)):
             act = actions[i]
             prefix = f"Bước {i + 1}/{len(actions)} · " if len(actions) > 1 else ""
+            refused = plan_refusal([act], locked)
+            if refused:
+                raise AssistantError(refused)
             handler = _HANDLERS[act["tool"]]
             out = await handler(task_id, i, act["args"], ctx, prefix)
             ctx.update(out.get("ctx") or {})

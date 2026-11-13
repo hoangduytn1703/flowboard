@@ -67,6 +67,46 @@ def test_typos_and_missing_accents_still_land_on_the_right_channel_and_series():
     assert q["actions"] == [] and "kênh nào" in q["reply"]
 
 
+@pytest.mark.asyncio
+async def test_a_skill_the_plan_lacks_is_refused_in_the_chat_and_never_runs(client, monkeypatch):
+    """The skills call the services directly (past the API's plan check): the assistant checks the plan itself."""
+    from flowboard import accounts, plans
+
+    asked = {}
+
+    async def fake_llm(feature, prompt, *, system_prompt=None, timeout=0):
+        asked["prompt"] = prompt
+        return json.dumps({"reply": "Ok, mình đọc kênh đó nhé.", "actions": [
+            {"tool": "grab_channel", "args": {"urls": ["https://www.youtube.com/@KenhMau"]}}]})
+
+    monkeypatch.setattr(assistant, "run_llm", fake_llm)
+    # an account on a plan without "Cào video kênh" and "Cắt video"
+    user = {"username": "ban", "role": "user", "plan": "vip"}
+    monkeypatch.setattr(accounts, "auth_enabled", lambda: True)
+    monkeypatch.setattr(accounts, "active_user", lambda: user)
+    monkeypatch.setattr(accounts, "get_user", lambda name: user)
+    monkeypatch.setattr(plans, "plan_of", lambda u: {"id": "vip", "name": "VIP", "features": ["auto_clip", "dub", "assistant"]})
+    locked = assistant.locked_tools()
+    assert locked == {"write_post": "posts", "schedule_post": "facebook", "auto_post": "autopilot", "cut_video": "cut", "grab_channel": "grab"}
+    out = await assistant.chat("cào giúp mình kênh youtube.com/@KenhMau")
+    assert out["task"] is None and "Cào video kênh" in out["messages"][-1]["text"] and "VIP" in out["messages"][-1]["text"]
+    assert "NOT IN THIS ACCOUNT'S PLAN" in asked["prompt"] and "grab_channel (📡 Cào video kênh)" in asked["prompt"]
+    assert assistant.plan_refusal([{"tool": "create_model", "args": {}}, {"tool": "create_clip", "args": {}}]) is None
+    # a task planned earlier (before the plan changed) stops at the locked step, the steps before it ran
+    ran = []
+
+    async def fake_model(task_id, i, args, ctx, prefix):
+        ran.append("model")
+        return {"line": "✓ người mẫu", "ctx": {}}
+
+    monkeypatch.setitem(assistant._HANDLERS, "create_model", fake_model)
+    task = assistant.start_task([{"tool": "create_model", "args": {"name": "A"}},
+                                 {"tool": "grab_channel", "args": {"urls": ["https://www.youtube.com/@KenhMau"]}}], pending=True)
+    await assistant._run(task["id"])
+    t = assistant.task_outcome(task["id"])
+    assert ran == ["model"] and t["status"] == "error" and "Cào video kênh" in (t.get("error") or "")
+
+
 def test_model_prompt_is_a_front_facing_portrait_of_an_original_person():
     p = assistant.model_prompt({"gender": "female", "country": "kr", "look": "short bob hair, pastel cardigan"}, traits="x and y")
     assert p.startswith("Natural daylight head-and-shoulders portrait photo of a Korean female character")
