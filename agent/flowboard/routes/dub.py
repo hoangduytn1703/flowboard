@@ -31,7 +31,10 @@ class StartBody(BaseModel):
     # "ass" (ffmpeg/libass, default) or "remotion" (HTML/CSS subtitles, live preview)
     engine: str = "ass"
     channel_id: Optional[int] = None
-    name: str = Field(default="", max_length=80)
+    # the clip's name (cut to 80 characters); a longer one used to fail the whole start with a 422
+    name: str = Field(default="", max_length=2000)
+    # a file's own title in its language (a grabbed video's caption) — translated into the clip's name like a link's
+    title: str = Field(default="", max_length=2000)
     auto_render: bool = True
     # several links started together share a batch id (client-made); the editor groups them
     batch_id: str = Field(default="", max_length=40)
@@ -158,7 +161,7 @@ async def start(body: StartBody) -> dict[str, Any]:
         look = _look_preset(body.look_preset_id)
         job = dub.start_job(url=body.url, source_media_id=body.source_media_id, voice=body.voice, keep_bgm=body.keep_bgm,
                             style=look["style"] if look else body.style, engine=look["engine"] if look else body.engine, channel_id=body.channel_id, name=body.name,
-                            auto_render=body.auto_render, batch_id=body.batch_id, translator=body.translator, mode=body.mode,
+                            title=body.title, auto_render=body.auto_render, batch_id=body.batch_id, translator=body.translator, mode=body.mode,
                             sub_lang=body.sub_lang, layout=look["layout"] if look else None, highlights=look["highlights"] if look else None)
     except dub.DubError as exc:
         raise HTTPException(400, str(exc))

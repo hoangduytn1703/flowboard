@@ -16,6 +16,11 @@ live there, not in flowboard's). Called by ``services/dub.py``:
       lines.json = [{"text": …, "out": "<file.wav>"}, …] → {"ok": true, "done": n}
       (VieNeu-TTS v3 Turbo, the ``vieneu`` package of VieDub: 25 Vietnamese
       voices, ONNX on the CPU, the model in the HuggingFace cache ~580 MB)
+      ``<voice>`` = ``@<voice.json>`` for a cloned voice ({"speaker_emb": [192], "codes": [...]})
+  python dub_runner.py vieneu-enroll <ref.wav> <voice.json> [<preview.wav> <preview text>]
+      → {"ok": true, "speech_s": 7.9} — "🧬 Giọng nhân bản": the voice of a short recording (VieNeu Turbo hears at
+      most 8 s of it, silence at the edges trimmed), saved as its speaker embedding + reference codes; with a
+      preview path it also reads the sample sentence in that voice (one model load for both)
 
 Progress goes to stderr as ``PROGRESS <0-100>`` lines; the result JSON is the
 last stdout line. ``FLOWBOARD_ERASE_ROOT`` is pyvideotrans' folder (the
@@ -220,6 +225,7 @@ def vieneu(voice: str, lines_json: str) -> None:
         raise SystemExit(f"vieneu package missing in this venv: {exc}")
     # ONNX / CPU like VieDub: the GPU path wants a newer torch, and the GPU is Whisper's.
     tts = Vieneu(mode="v3turbo", backend="onnx")
+    speaker = _clone_voice(voice[1:]) if voice.startswith("@") else voice
     _progress(10)
     done = 0
     missing: list[int] = []
@@ -228,7 +234,7 @@ def vieneu(voice: str, lines_json: str) -> None:
         out = str(item["out"])
         if not text:
             continue
-        wav = tts.infer(text, voice=voice)
+        wav = tts.infer(text, voice=speaker)
         if getattr(wav, "size", 0) == 0:
             # a line it cannot read (Chinese left untranslated, only symbols…): the others still get their voice,
             # the caller decides about this one (14/11: one such line used to end a whole 82-line dub)
@@ -239,6 +245,61 @@ def vieneu(voice: str, lines_json: str) -> None:
         _progress(10 + int(88 * (i + 1) / len(lines)))
     _progress(100)
     print(json.dumps({"ok": True, "done": done, "missing": missing}))
+
+
+def _clone_voice(path: str) -> dict:
+    """A saved cloned voice as the dict ``Vieneu.infer(voice=…)`` takes (what its own ``add_voice`` stores)."""
+    import numpy as np
+
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    codes = data.get("codes")
+    return {"speaker_emb": np.asarray(data["speaker_emb"], dtype=np.float32),
+            "codes": None if codes is None else np.asarray(codes, dtype=np.int64)}
+
+
+def vieneu_enroll(ref: str, out_json: str, preview: str = "", preview_text: str = "") -> None:
+    """The voice of ``ref`` (a short clean recording) → ``out_json``; plus the sample sentence read with it."""
+    import numpy as np
+    import soundfile as sf
+
+    _progress(2)
+    try:
+        from vieneu import Vieneu
+    except ImportError as exc:
+        raise SystemExit(f"vieneu package missing in this venv: {exc}")
+    wav, sr = sf.read(ref, dtype="float32", always_2d=False)
+    if getattr(wav, "ndim", 1) > 1:
+        wav = wav.mean(axis=1)
+    speech_s = _speech_seconds(np.asarray(wav, dtype=np.float32), int(sr))
+    if speech_s < 2.0:
+        raise SystemExit(f"đoạn ghi âm chỉ có {speech_s:.1f} giây tiếng nói — cần ít nhất 3 giây (nên 8–10 giây nói liền)")
+    tts = Vieneu(mode="v3turbo", backend="onnx")
+    _progress(40)
+    emb, codes = tts.encode_reference(ref)
+    data = {"speaker_emb": [round(float(x), 6) for x in np.asarray(emb).reshape(-1)],
+            # the reference codes are frames × codebooks (2-D): kept as nested lists, never flattened
+            "codes": None if codes is None else np.asarray(codes).astype(int).tolist()}
+    Path(out_json).write_text(json.dumps(data), encoding="utf-8")
+    _progress(75)
+    if preview and preview_text:
+        sample = tts.infer(preview_text, voice=_clone_voice(out_json))
+        if getattr(sample, "size", 0):
+            tts.save(sample, preview)
+    _progress(100)
+    print(json.dumps({"ok": True, "speech_s": round(speech_s, 1)}))
+
+
+def _speech_seconds(wav, sr: int) -> float:
+    """Seconds of 30 ms frames louder than 35 dB under the loudest one — a voice, not the room."""
+    import numpy as np
+
+    hop = max(1, int(0.03 * sr))
+    n = len(wav) // hop
+    if n == 0:
+        return 0.0
+    rms = np.sqrt((wav[: n * hop].reshape(n, hop) ** 2).mean(axis=1) + 1e-12)
+    loud = rms > rms.max() * 10 ** (-35 / 20)
+    return float(loud.sum() * hop / sr)
 
 
 def check() -> None:
@@ -362,6 +423,9 @@ def main(argv: list[str]) -> int:
         return 0
     if len(argv) == 3 and argv[0] == "vieneu":
         vieneu(argv[1], argv[2])
+        return 0
+    if len(argv) in (3, 5) and argv[0] == "vieneu-enroll":
+        vieneu_enroll(*argv[1:])
         return 0
     if len(argv) >= 3 and argv[0] == "transcribe":
         transcribe(argv[1], argv[2], argv[3] if len(argv) > 3 and argv[3] not in ("", "auto") else None,

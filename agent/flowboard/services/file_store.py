@@ -31,6 +31,7 @@ import logging
 import os
 import queue
 import threading
+import time
 from pathlib import Path, PurePosixPath
 from typing import Any, Optional
 
@@ -51,6 +52,33 @@ _stats = {"uploaded": 0, "downloaded": 0, "upload_errors": 0, "download_errors":
           "broken_skipped": 0}
 #: Files up to this size go up from one read of their bytes (size and content always agree); bigger ones stream.
 READ_WHOLE_MAX = 64 * 1024 * 1024
+#: Backblaze B2 refuses every download for the rest of the day once the bucket's daily download-bandwidth / Class B cap is
+#: reached (403 "… cap exceeded"). Until the caps reset (00:00 UTC) downloads are not even tried — each picture on screen
+#: used to ask again, and the Data tab showed a raw signed URL (14/11).
+_downloads_paused_until = 0.0
+DOWNLOAD_CAP_MESSAGE = ("Kho file (Backblaze B2) đã hết hạn mức tải xuống trong ngày — ảnh, video chưa có trên máy này sẽ tải được "
+                        "sau 7 giờ sáng (giờ Việt Nam). Người quản lý DFlow có thể tăng hạn mức ở Backblaze → Caps & Alerts.")
+UPLOAD_CAP_MESSAGE = ("Kho file (Backblaze B2) đã hết hạn mức (dung lượng hoặc lượt gửi) — file mới chưa lên được cloud. Người quản lý "
+                      "DFlow tăng hạn mức ở Backblaze → Caps & Alerts hoặc dọn bớt file.")
+
+
+def _cap_exceeded(exc: BaseException) -> bool:
+    """B2's answer when a cap is reached (botocore puts the message in str(exc); _BucketRefused carries it too)."""
+    return "cap exceeded" in str(exc).lower()
+
+
+def _short_error(exc: BaseException) -> str:
+    """The error without the signed link's query string (long, and nobody needs the signature in the Data tab)."""
+    import re
+
+    return re.sub(r"\?X-Amz-[^'\"\s]*", "", str(exc))
+
+
+def _next_utc_midnight() -> float:
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    return (now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)).timestamp()
 
 
 def config() -> Optional[dict[str, str]]:
@@ -112,6 +140,8 @@ def reset() -> None:
         _client_cfg = None
     _remote_keys.clear()
     _remote_sizes.clear()
+    global _downloads_paused_until
+    _downloads_paused_until = 0.0
 
 
 def make_client(cfg: dict):
@@ -131,6 +161,26 @@ class _NotInBucket(RuntimeError):
     def __init__(self, key: str) -> None:
         super().__init__(f"{key}: not found")
         self.response = {"Error": {"Code": "404"}}
+
+
+class _BucketRefused(RuntimeError):
+    """A signed link the bucket answered with an error: status + the bucket's own <Message> (e.g. "… cap exceeded")."""
+
+
+def _bucket_message(body: str) -> str:
+    import re
+
+    m = re.search(r"<Message>(.*?)</Message>", body or "", re.S)
+    return (m.group(1) if m else (body or "")).strip()[:200]
+
+
+def _raise_for(resp) -> None:  # noqa: ANN001 — httpx.Response
+    if resp.status_code >= 400:
+        try:
+            body = resp.read().decode("utf-8", "replace")
+        except Exception:  # noqa: BLE001
+            body = ""
+        raise _BucketRefused(f"HTTP {resp.status_code}: {_bucket_message(body) or resp.reason_phrase}")
 
 
 class _ApiBucket:
@@ -153,13 +203,13 @@ class _ApiBucket:
     def put_object(self, Bucket: str, Key: str, Body: bytes) -> None:  # noqa: N803 — boto3's names
         import httpx
 
-        httpx.put(self._link("put", Key), content=Body, timeout=httpx.Timeout(300.0, connect=15.0)).raise_for_status()
+        _raise_for(httpx.put(self._link("put", Key), content=Body, timeout=httpx.Timeout(300.0, connect=15.0)))
 
     def upload_file(self, Filename: str, Bucket: str, Key: str) -> None:  # noqa: N803
         import httpx
 
         with open(Filename, "rb") as fh:  # a file object: httpx sends its length (signed links refuse chunked uploads)
-            httpx.put(self._link("put", Key), content=fh, timeout=httpx.Timeout(3600.0, connect=15.0)).raise_for_status()
+            _raise_for(httpx.put(self._link("put", Key), content=fh, timeout=httpx.Timeout(3600.0, connect=15.0)))
 
     def download_file(self, Bucket: str, Key: str, Filename: str) -> None:  # noqa: N803
         import httpx
@@ -167,7 +217,7 @@ class _ApiBucket:
         with httpx.stream("GET", self._link("get", Key), timeout=httpx.Timeout(600.0, connect=15.0)) as resp:
             if resp.status_code == 404:
                 raise _NotInBucket(Key)
-            resp.raise_for_status()
+            _raise_for(resp)
             with open(Filename, "wb") as out:
                 for chunk in resp.iter_bytes(1 << 20):
                     out.write(chunk)
@@ -242,8 +292,8 @@ def upload_now(local_path: str | Path) -> bool:
         return True
     except Exception as exc:  # noqa: BLE001
         _stats["upload_errors"] += 1
-        _stats["last_error"] = f"upload {key}: {exc}"[:300]
-        logger.warning("file_store: upload %s failed: %s", key, exc)
+        _stats["last_error"] = UPLOAD_CAP_MESSAGE if _cap_exceeded(exc) else f"upload {key}: {_short_error(exc)}"[:300]
+        logger.warning("file_store: upload %s failed: %s", key, _short_error(exc))
         return False
 
 
@@ -285,8 +335,6 @@ def _drain() -> None:
 
 
 def wait_idle(timeout: float = 30.0) -> None:
-    import time
-
     end = time.time() + timeout
     while _queue.unfinished_tasks and time.time() < end:
         time.sleep(0.05)
@@ -295,6 +343,9 @@ def wait_idle(timeout: float = 30.0) -> None:
 # ── download ────────────────────────────────────────────────────────────────
 
 def download(key: str, dest: Optional[Path] = None) -> bool:
+    global _downloads_paused_until
+    if time.time() < _downloads_paused_until:
+        return False
     c = client()
     if c is None:
         return False
@@ -315,7 +366,12 @@ def download(key: str, dest: Optional[Path] = None) -> bool:
         code = (err.get("Error") or {}).get("Code") if isinstance(err, dict) else None
         if code not in ("404", "NoSuchKey"):
             _stats["download_errors"] += 1
-            _stats["last_error"] = f"download {key}: {exc}"[:300]
+            if _cap_exceeded(exc):
+                _downloads_paused_until = _next_utc_midnight()
+                _stats["last_error"] = DOWNLOAD_CAP_MESSAGE
+                logger.warning("file_store: the bucket's daily download cap is reached — downloads paused until 00:00 UTC")
+            else:
+                _stats["last_error"] = f"download {key}: {_short_error(exc)}"[:300]
         return False
 
 
@@ -508,6 +564,7 @@ def status() -> dict[str, Any]:
         "bucket": cfg["bucket"] if cfg else None,
         "prefix": prefix() if cfg else None,
         "pending_uploads": _queue.unfinished_tasks,
+        "downloads_paused": _downloads_paused_until > time.time(),
         **_stats,
     }
 

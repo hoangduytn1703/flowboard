@@ -73,6 +73,35 @@ def test_missing_file_is_fetched_from_the_bucket(bucket):
     assert file_store.status()["download_errors"] == before
 
 
+def test_daily_download_cap_pauses_downloads_until_reset(bucket, monkeypatch):
+    """B2's "cap exceeded" refusal (14/11): one try, then no more calls until 00:00 UTC, and a sentence instead of a signed URL."""
+    calls = []
+
+    class Capped:
+        def download_file(self, Bucket, Key, Filename):  # noqa: N803
+            calls.append(Key)
+            raise file_store._BucketRefused("HTTP 403: Cannot download file, download bandwidth or transaction (Class B) cap exceeded.")
+
+    monkeypatch.setattr(file_store, "_stats", dict(file_store._stats))  # the counters are process-wide; leave them as found
+    monkeypatch.setattr(file_store, "client", lambda: Capped())
+    target = Path(config.STORAGE_DIR) / "media" / "capped_a.mp4"
+    assert file_store.ensure_local(str(target)) is None
+    assert file_store.ensure_local(str(Path(config.STORAGE_DIR) / "media" / "capped_b.mp4")) is None
+    assert len(calls) == 1
+    st = file_store.status()
+    assert st["downloads_paused"] and st["last_error"] == file_store.DOWNLOAD_CAP_MESSAGE
+    file_store.reset()
+    assert not file_store.status()["downloads_paused"]
+
+
+def test_bucket_errors_hide_the_signed_query_and_read_the_message():
+    url = "https://s3.us-east-005.backblazeb2.com/b/akira/media/x.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=abc"
+    assert "X-Amz" not in file_store._short_error(RuntimeError(f"Client error '403 ' for url '{url}'"))
+    body = "<Error><Code>AccessDenied</Code><Message>Cannot upload files, storage cap exceeded.</Message></Error>"
+    assert file_store._bucket_message(body) == "Cannot upload files, storage cap exceeded."
+    assert file_store._cap_exceeded(file_store._BucketRefused("HTTP 403: " + file_store._bucket_message(body)))
+
+
 def test_reconcile_pushes_local_and_pulls_remote(bucket):
     local = _media("local_only.png", b"png")
     remote_target = Path(config.STORAGE_DIR) / "media" / "remote_only.png"

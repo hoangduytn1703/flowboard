@@ -37,6 +37,7 @@ from flowboard.routes import running as running_route
 from flowboard.routes import assistant as assistant_route
 from flowboard.routes import autopilot as autopilot_route
 from flowboard.routes import app as app_route
+from flowboard.routes import voices as voices_route
 from flowboard.services import op_tracker
 from flowboard.services.account_pool import account_pool
 from flowboard.routes import history as history_route
@@ -317,6 +318,7 @@ app.include_router(vision.router)
 app.include_router(prompt.router)
 app.include_router(auth.router)
 app.include_router(llm.router)
+app.include_router(voices_route.router)
 app.include_router(image_providers_route.router)
 app.include_router(history_route.router)
 app.include_router(exports_route.router)

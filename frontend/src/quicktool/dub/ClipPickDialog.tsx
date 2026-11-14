@@ -3,7 +3,8 @@ import { createPortal } from "react-dom";
 import { clipThumbUrl, listBoardSummaries, type BoardSummary } from "../../api/client";
 import { PageEmpty, PageLoading } from "../PageState";
 
-export interface PickedClip { board_id: number; name: string; media_id: string }
+/** ``title``: a grabbed video's caption in its own language — the dub translates it into the clip's name. */
+export interface PickedClip { board_id: number; name: string; media_id: string; title?: string }
 
 /**
  * "🎬 Chọn từ Clip của tôi": finished clips (a video to dub) — the videos cut on "✂️ Cắt video" first, newest first.

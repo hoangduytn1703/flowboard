@@ -605,6 +605,8 @@ export interface DubStart {
   engine?: DubEngine;
   channel_id?: number | null;
   name?: string;
+  /** a file's own title in its language (a grabbed video's caption) — translated into the clip's name */
+  title?: string;
   auto_render: boolean;
   batch_id?: string;
   /** "★ Mẫu chỉnh sửa" to start with (layout, style, engine, key-moment settings) */

@@ -29,6 +29,7 @@ import { CleanToolPage } from "./pages/CleanToolPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { TodayPage } from "./pages/TodayPage";
 import { ModelsPage } from "./pages/ModelsPage";
+import { VoicesPage } from "./pages/VoicesPage";
 import { PromptsPage } from "./pages/PromptsPage";
 import { PostsPage } from "./pages/PostsPage";
 import { ChannelsPage } from "./pages/ChannelsPage";
@@ -134,6 +135,7 @@ export function QuicktoolApp() {
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/today" element={<TodayPage />} />
           <Route path="/models" element={<ModelsPage />} />
+          <Route path="/voices" element={<VoicesPage />} />
           <Route path="/prompts" element={<PromptsPage />} />
           <Route path="/tools/clean" element={<FeatureGate feature="clean" title="Xoá chữ / logo"><CleanToolPage /></FeatureGate>} />
           <Route path="/posts" element={<FeatureGate feature="posts" title="Bài viết Facebook"><PostsPage /></FeatureGate>} />

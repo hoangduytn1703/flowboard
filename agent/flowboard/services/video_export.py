@@ -94,7 +94,7 @@ class NarrationOptions:
 
     def voice_for(self, index: int) -> str:
         """The voice clip ``index`` is read with."""
-        if index < len(self.line_voices) and self.line_voices[index] in tts.VOICES:
+        if index < len(self.line_voices) and tts.is_voice(self.line_voices[index]):
             return self.line_voices[index]  # type: ignore[return-value]
         return self.voice
 
@@ -316,7 +316,7 @@ def _synth_line(text: str, opts: NarrationOptions, rate: int, voice: Optional[st
     """``text`` spoken by ``voice`` (default: the export's voice). A line
     with ``[A] … [B] …`` tags goes through the multi-voice path; a plain
     line takes exactly the single-voice path it always did (same cache)."""
-    voice = voice if voice in tts.VOICES else opts.voice
+    voice = voice if tts.is_voice(voice) else opts.voice
     if tts.has_speaker_tags(text):
         return asyncio.run(tts.synthesize_dialogue(text, voice, rate, opts.style, opts.speakers))
     return asyncio.run(tts.synthesize(text, voice, rate, opts.style))
@@ -359,7 +359,7 @@ def _synth_to_fit(text: str, opts: NarrationOptions, clip_s: float,
     rate = opts.rate
     room = clip_s - _TAIL_S
     # VieNeu / FPT.AI ignore the rate: asking again only reloads the model (~20 s) for the same audio
-    rate_works = tts.voice_kind(voice if voice in tts.VOICES else opts.voice) not in ("vieneu", "fpt")
+    rate_works = tts.voice_kind(voice if tts.is_voice(voice) else opts.voice) not in ("vieneu", "fpt")
     if rate_works and room > 1.0 and narration.duration > room + 0.75:
         needed = math.ceil((narration.duration / room - 1.0) * 100)
         rate = opts.rate + min(MAX_AUTO_RATE, needed)

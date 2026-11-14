@@ -29,6 +29,8 @@ import { RemotionAddonCard } from "../dub/RemotionAddonCard";
 const POLL_MS = 2000;
 const DEFAULT_VOICE = "vi-VN-HoaiMyNeural";
 const MAX_LINKS = 5;
+/** videos already on this machine (from "📡 Cào video kênh" or "Clip của tôi") — no download, so more at once */
+const MAX_PICKED = 10;
 const RECENT_SHOWN = 5;
 const WORKING = ["queued", "running", "rendering"];
 const isWorking = (j: DubJob) => WORKING.includes(j.status);
@@ -240,7 +242,7 @@ export function DubPage() {
   const wantClips = searchParams.get("clips");
   useEffect(() => {
     if (!wantClips) return;
-    const ids = wantClips.split(",").map(Number).filter((n) => n > 0).slice(0, MAX_LINKS);
+    const ids = wantClips.split(",").map(Number).filter((n) => n > 0).slice(0, MAX_PICKED);
     void clipVideos(ids).then((cs) => {
       if (!cs.length) { toast.warning("Clip này chưa có video để lồng tiếng."); return; }
       setClips(cs);
@@ -256,10 +258,10 @@ export function DubPage() {
   const wantGrab = searchParams.get("grab");
   useEffect(() => {
     if (!wantGrab) return;
-    const ids = wantGrab.split(",").map(Number).filter((n) => n > 0).slice(0, MAX_LINKS);
+    const ids = wantGrab.split(",").map(Number).filter((n) => n > 0).slice(0, MAX_PICKED);
     void grabMedia(ids).then((ms) => {
       if (!ms.length) { toast.warning("Các video này chưa tải về máy — tải ở trang Cào video kênh trước."); return; }
-      setClips(ms.map((m) => ({ board_id: -m.id, name: m.name, media_id: m.media_id })));
+      setClips(ms.map((m) => ({ board_id: -m.id, name: m.name, media_id: m.media_id, title: m.title || m.name })));
       setLinks([""]);
       setFile(null);
       toast.info(`Đã nhận ${ms.length} video từ Cào video kênh — chọn giọng rồi bấm Lồng tiếng.`);
@@ -280,15 +282,18 @@ export function DubPage() {
         toast.info("Đang tải file lên…");
         sourceMediaId = (await uploadDubVideo(file)).media_id;
       }
-      const sources: { url: string | null; source_media_id: string | null; clipName?: string }[] = clips.length
-        ? clips.map((c) => ({ url: null, source_media_id: c.media_id, clipName: c.name }))
+      // a grabbed video: its caption goes as the title (translated into a Vietnamese clip name), not as the name
+      const sources: { url: string | null; source_media_id: string | null; clipName?: string; title?: string }[] = clips.length
+        ? clips.map((c) => (c.title ? { url: null, source_media_id: c.media_id, title: c.title }
+          : { url: null, source_media_id: c.media_id, clipName: c.name }))
         : file ? [{ url: null, source_media_id: sourceMediaId }] : linkList.map((l) => ({ url: l, source_media_id: null }));
       const batchId = sources.length > 1 ? `b${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}` : "";
       const started: DubJob[] = [];
       for (const src of sources) {
         started.push(await startDub({
           url: src.url, source_media_id: src.source_media_id, voice, keep_bgm: keepBgm, style, engine, channel_id: channelId,
-          name: sources.length > 1 ? (src.clipName ?? "") : (name.trim() || src.clipName || ""), auto_render: !review, batch_id: batchId, look_preset_id: lookId, translator, mode, sub_lang: lang,
+          name: (sources.length > 1 ? (src.clipName ?? "") : (name.trim() || src.clipName || "")).slice(0, 80), title: src.title,
+          auto_render: !review, batch_id: batchId, look_preset_id: lookId, translator, mode, sub_lang: lang,
         }));
       }
       if (batchId) {
@@ -736,7 +741,7 @@ export function DubPage() {
       </div>
       {allOpen && <DubJobsDialog jobs={recent} onOpen={openJobById} onClose={() => setAllOpen(false)} onDelete={removeFromList} />}
       {pickOpen && (
-        <ClipPickDialog max={MAX_LINKS} initial={clips} onClose={() => setPickOpen(false)}
+        <ClipPickDialog max={MAX_PICKED} initial={clips} onClose={() => setPickOpen(false)}
                         onPick={(cs) => { setClips(cs); setPickOpen(false); setLinks([""]); pickNewFile(null); }} />
       )}
       {linksOpen && (

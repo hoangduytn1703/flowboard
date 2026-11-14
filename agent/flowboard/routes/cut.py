@@ -29,7 +29,8 @@ router = APIRouter(prefix="/api/cut", tags=["cut"])
 
 class MediaItem(BaseModel):
     media_id: str = Field(max_length=64)
-    name: str = Field(default="", max_length=200)
+    # cut to 80 characters by the service (a grabbed video's whole caption must not fail the start)
+    name: str = Field(default="", max_length=2000)
 
 
 class Row(BaseModel):

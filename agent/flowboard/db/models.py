@@ -341,6 +341,22 @@ class DecorPreset(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_utcnow)
 
 
+class VoiceClone(SQLModel, table=True):
+    """"🧬 Giọng nhân bản" (services/voice_clone): a voice learnt from the seller's short recording by VieNeu —
+    ``data`` = ``{"speaker_emb": [192 floats], "codes": [...]}`` (~9 KB; the recording itself is not kept). In the
+    account's data, so every machine signed in to it reads with this voice. ``uid`` is its voice id's tail
+    (``vieneu:clone:<uid>``, random so a deleted voice's id never comes back for a new one — the TTS cache keys on it).
+    ``consent_at`` = when the seller ticked "this is my voice / I may use it". ``create_all`` adds the table."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    uid: str = Field(index=True, unique=True)
+    name: str = ""
+    gender: str = ""
+    data: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    speech_s: float = 0.0
+    consent_at: datetime = Field(default_factory=_utcnow)
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
 class DubLink(SQLModel, table=True):
     """A link in the dubbing link library ("📚 Thư viện link"): every link found
     in a .txt / .md file the seller imported (services/dub_links). ``key`` is

@@ -1044,8 +1044,24 @@ def media_of(ids: list[int]) -> list[dict[str, Any]]:
     for vid in ids:
         v = rows.get(vid)
         if v is not None and local_media(v.media_id) is not None:
-            out.append({"id": vid, "media_id": v.media_id, "name": v.title or f"Video {vid}"})
+            out.append({"id": vid, "media_id": v.media_id, "name": short_title(v.title or "") or f"Video {vid}",
+                        "title": (v.title or "")[:TITLE_MAX]})
     return out
+
+
+#: how much of a caption goes on as the source title (the dub translates it into the clip's name)
+TITLE_MAX = 500
+
+
+def short_title(title: str, limit: int = 80) -> str:
+    """A caption as a file name for the tools: hashtags / @mentions dropped (Douyin captions are a whole paragraph
+    ending in a dozen of them), cut at a sentence end when one falls in the second half of ``limit``."""
+    text = re.sub(r"\s+", " ", re.sub(r"[#@]\S+", " ", title or "")).strip(" ，,。.!！|-")
+    if len(text) <= limit:
+        return text
+    head = text[:limit]
+    cut = max(head.rfind(c) for c in "。！？!?；;.")
+    return (head[:cut + 1] if cut >= limit // 2 else head.rstrip() + "…").strip()
 
 
 def mark_used(ids: list[int], tool: str) -> int:

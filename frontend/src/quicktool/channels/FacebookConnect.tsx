@@ -5,6 +5,9 @@ import { invalidateChannels } from "./ChannelPicker";
 import "../schedule.css";
 import { askConfirm } from "../../components/Dialogs";
 
+/** The website's step-by-step page for this (screenshots of Meta for Developers). */
+const FB_GUIDE = "https://dflow.io.vn/huong-dan/facebook-token";
+
 /**
  * "Kết nối Facebook Page": paste an access token, see which pages it can
  * post to, pick one. From then on calendar slots on this channel can be
@@ -96,13 +99,16 @@ export function FacebookConnect({ channel, onUpdated }: { channel: Channel; onUp
           </div>
           <details>
             <summary className="qt-link">Lấy token thế nào? (khoảng 10 phút, miễn phí)</summary>
+            {/* Explorer's tokens live ~1 h; only a Page token taken from an *extended* user token does not expire (the agent
+                never extends anything itself), hence step 3. Same steps, with pictures, at FB_GUIDE (14/11). */}
             <ol>
-              <li>Vào <code>developers.facebook.com</code> → <strong>My Apps</strong> → <strong>Create App</strong> (loại Business / Other, đặt tên tuỳ ý). Không cần gửi duyệt: bạn là admin Page nên app ở chế độ Development vẫn đăng được lên Page của bạn.</li>
-              <li>Mở <strong>Tools → Graph API Explorer</strong>, chọn app vừa tạo. Ở <em>User or Page</em> chọn <strong>Get Page Access Token</strong> → chọn Page.</li>
-              <li>Thêm quyền: <code>pages_show_list</code>, <code>pages_manage_posts</code>, <code>pages_read_engagement</code>, <code>pages_manage_engagement</code> → <strong>Generate Access Token</strong>, đồng ý các bước.</li>
-              <li>Copy chuỗi token dán vào ô trên → <strong>Kiểm tra token</strong> → <strong>Kết nối Page</strong>.</li>
-              <li>Token Page lấy theo cách này thường <strong>không hết hạn</strong>. Nếu một ngày tool báo "token hết hạn", lặp lại bước 2–4 là xong.</li>
+              <li>Vào <code>developers.facebook.com</code> → <strong>Tạo ứng dụng</strong>: đặt tên tuỳ ý, trường hợp sử dụng chọn <strong>Quản lý mọi thứ trên Trang</strong>, màn doanh nghiệp chọn <strong>Tôi chưa muốn kết nối</strong>. Không cần gửi duyệt: bạn là admin Page nên app ở chế độ phát triển vẫn đăng được lên Page của bạn.</li>
+              <li>Mở <strong>Graph API Explorer</strong>, chọn app vừa tạo. Ô <em>Người dùng hoặc Trang</em> chọn <strong>Lấy mã truy cập người dùng</strong> (đừng chọn Page ở đây). Thêm quyền <code>pages_show_list</code>, <code>pages_manage_posts</code>, <code>pages_read_engagement</code>, <code>pages_manage_engagement</code> (muốn xem lượt xem thì thêm <code>read_insights</code>) → <strong>Generate Access Token</strong>, tick đúng Page.</li>
+              <li><strong>Gia hạn token</strong> (token vừa lấy chỉ sống khoảng 1 giờ): mở <code>developers.facebook.com/tools/debug/accesstoken</code>, dán token → <strong>Gỡ lỗi</strong> → kéo xuống bấm <strong>Mã truy cập mở rộng</strong> → chép chuỗi <strong>mới</strong> hiện ra.</li>
+              <li>Dán chuỗi đã gia hạn vào ô trên → <strong>Kiểm tra token</strong> → <strong>Kết nối Page</strong>. DFlow giữ token riêng của Page, loại này không hết hạn.</li>
+              <li>Một ngày tool báo "token hết hạn": làm lại bước 2–4.</li>
             </ol>
+            <a className="qt-link" href={FB_GUIDE} target="_blank" rel="noreferrer">Xem hướng dẫn có ảnh từng bước ↗</a>
           </details>
         </>
       )}

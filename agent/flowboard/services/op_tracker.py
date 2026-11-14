@@ -77,6 +77,7 @@ TRACKED: list[Rule] = [
     _r("POST", r"/api/media/clean-marks/run", "media", "Đang xoá logo Gemini trên ảnh cũ", "/today"),
     _r("POST", r"/api/cloud/(migrate|files/sync)", "media", "Đang đồng bộ dữ liệu lên cloud", "/today"),
     _r("POST", r"/api/llm/voices/preview", "ai", "Đang tạo giọng nghe thử", "/today"),
+    _r("POST", r"/api/voices/clones", "ai", "Đang nhân bản giọng", "/voices"),
 ]
 
 

@@ -1,23 +1,27 @@
 import { useEffect, useRef, useState } from "react";
-import { VOICE_GROUPS, fetchVoiceGroups, isGeminiVoice, previewVoice, type VoiceGroup } from "../api/client";
+import { useNavigate } from "react-router-dom";
+import { VOICE_GROUPS, VOICES_CHANGED, fetchVoiceGroups, isGeminiVoice, previewVoice, type VoiceGroup } from "../api/client";
 import { toast } from "../store/toast";
 
 let cachedGroups: VoiceGroup[] | null = null;
-/** The voice families the agent offers (Edge, VieNeu, Gemini, FPT.AI) — the static Edge + Gemini list until loaded. */
+/** The voice families the agent offers (the account's cloned voices, Edge, VieNeu, Gemini, FPT.AI) — the static
+ * Edge + Gemini list until loaded; reloaded when a voice is cloned / renamed / deleted. */
 export function useVoiceGroups(): VoiceGroup[] {
   const [groups, setGroups] = useState<VoiceGroup[]>(cachedGroups ?? VOICE_GROUPS);
   useEffect(() => {
-    if (cachedGroups) return;
     let live = true;
-    fetchVoiceGroups().then((g) => { cachedGroups = g; if (live) setGroups(g); }).catch(() => undefined);
-    return () => { live = false; };
+    const load = () => fetchVoiceGroups().then((g) => { cachedGroups = g; if (live) setGroups(g); }).catch(() => undefined);
+    if (!cachedGroups) void load();
+    const changed = () => { cachedGroups = null; void load(); };
+    window.addEventListener(VOICES_CHANGED, changed);
+    return () => { live = false; window.removeEventListener(VOICES_CHANGED, changed); };
   }, []);
   return groups;
 }
 
 /** `<optgroup>`s for a voice `<select>`: families the machine cannot use are disabled and say why. */
 export function VoiceOptions({ groups, short = false }: { groups: VoiceGroup[]; short?: boolean }) {
-  const SHORT: Record<string, string> = { edge: "Edge", vieneu: "VieNeu · trên máy", gemini: "Gemini", fpt: "FPT.AI" };
+  const SHORT: Record<string, string> = { clone: "🧬 Giọng nhân bản", edge: "Edge", vieneu: "VieNeu · trên máy", gemini: "Gemini", fpt: "FPT.AI" };
   return (
     <>
       {groups.map((g) => (
@@ -90,7 +94,10 @@ export function VoicePreview({ voice, style, text, iconOnly = true, disabled }: 
   );
 }
 
-/** A voice picker (Edge / Gemini groups) with "▶ Nghe thử". */
+/** The picker's last option: opens "🧬 Giọng nhân bản" instead of choosing a voice. */
+const CLONE_NEW = "__clone_new__";
+
+/** A voice picker (cloned voices, Edge, VieNeu, Gemini, FPT.AI) with "▶ Nghe thử". */
 export function VoiceField({
   value,
   onChange,
@@ -107,10 +114,15 @@ export function VoiceField({
   compact?: boolean;
 }) {
   const groups = useVoiceGroups();
+  const navigate = useNavigate();
   return (
     <div className={`qt-voice-field${compact ? " qt-voice-field--compact" : ""}`}>
-      <select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} aria-label="Giọng đọc">
+      <select value={value} disabled={disabled} aria-label="Giọng đọc"
+              onChange={(e) => (e.target.value === CLONE_NEW ? navigate("/voices") : onChange(e.target.value))}>
         <VoiceOptions groups={groups} />
+        <optgroup label="🧬 Giọng của chính bạn">
+          <option value={CLONE_NEW}>＋ Nhân bản giọng của bạn (thu 10 giây)…</option>
+        </optgroup>
       </select>
       <VoicePreview voice={value} style={style} text={sampleText} iconOnly={!!compact} disabled={disabled} />
     </div>

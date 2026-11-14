@@ -2506,7 +2506,9 @@ def stop_job(job: Job) -> Job:
 def start_job(*, url: Optional[str], source_media_id: Optional[str], voice: str, keep_bgm: bool, style: str,
               channel_id: Optional[int], name: str, auto_render: bool, engine: str = "ass", batch_id: str = "",
               translator: str = DEFAULT_TRANSLATOR, mode: str = "dub", sub_lang: str = "vi",
-              layout: Optional[dict] = None, highlights: Optional[dict] = None) -> Job:
+              layout: Optional[dict] = None, highlights: Optional[dict] = None, title: str = "") -> Job:
+    """``name`` = the clip's name as given (cut to 80 characters); ``title`` = a file's own title in its language
+    (a grabbed video's caption), translated into the clip's name the way a downloaded link's title is."""
     st = status()
     if not st["available"]:
         raise DubError(st.get("reason", "Lồng tiếng chưa dùng được trên máy này"))
@@ -2514,13 +2516,13 @@ def start_job(*, url: Optional[str], source_media_id: Optional[str], voice: str,
         raise DubError(f"Hàng đợi đã có {MAX_QUEUE} video — đợi bớt rồi thêm tiếp.")
     if not url and not source_media_id:
         raise DubError("Cần link video hoặc file video")
-    if voice not in tts.VOICES:
+    if not tts.is_voice(voice):
         raise DubError("Giọng đọc không hợp lệ")
     engine = _check_engine(engine)
     style = _style_for(engine, style)
     job = Job(id=uuid.uuid4().hex[:12], url=url or None, source_media_id=source_media_id or None, voice=voice,
-              keep_bgm=keep_bgm, style=style, engine=engine, channel_id=channel_id, name=(name or "").strip(),
-              auto_render=auto_render, batch_id=(batch_id or "").strip()[:40],
+              keep_bgm=keep_bgm, style=style, engine=engine, channel_id=channel_id, name=(name or "").strip()[:80].strip(),
+              title=(title or "").strip()[:500], auto_render=auto_render, batch_id=(batch_id or "").strip()[:40],
               translator=normalize_translator(translator), mode=normalize_mode(mode))
     job.sub_lang = normalize_sub_lang(sub_lang) if job.mode == "sub" else "vi"
     if layout is not None:  # a look preset: the clip starts with that look (points are picked for this clip when on)
@@ -2537,7 +2539,8 @@ def start_job(*, url: Optional[str], source_media_id: Optional[str], voice: str,
 
 
 # ── queue: one video at a time (Whisper / spleeter share the GPU), up to MAX_QUEUE waiting
-MAX_QUEUE = 5
+#: 10 videos sent at once from "📡 Cào video kênh" / "Clip của tôi" + room for the link library's one waiting
+MAX_QUEUE = 12
 _LOOP: Optional[asyncio.AbstractEventLoop] = None
 #: called when nobody waits in the queue (the link library's feeder, services/dub_links) — it may start a job
 FEEDER: Optional[Callable[[], None]] = None
@@ -2663,7 +2666,7 @@ def render_job(job: Job, *, lines: Optional[list[str]], voice: Optional[str], st
         for seg, line in zip(job.segments, lines):
             seg.text = re.sub(r"\s+", " ", str(line or "")).strip()
     if voice:
-        if voice not in tts.VOICES:
+        if not tts.is_voice(voice):
             raise DubError("Giọng đọc không hợp lệ")
         job.voice = voice
     if engine is not None:

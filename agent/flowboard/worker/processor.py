@@ -968,7 +968,7 @@ async def _handle_export_video(params: dict) -> tuple[dict, Optional[str]]:
     raw_lines = [str(it.get("narration") or "") for it in items_in] if items_in else params.get("narrations")
     narration = None
     if items_in or (isinstance(raw_lines, list) and any(isinstance(t, str) and t.strip() for t in raw_lines)):
-        voice = params.get("voice") if params.get("voice") in tts.VOICES else tts.DEFAULT_VOICE
+        voice = params.get("voice") if tts.is_voice(params.get("voice")) else tts.DEFAULT_VOICE
         try:
             rate = int(params.get("voice_rate") or 0)
         except (TypeError, ValueError):
@@ -980,12 +980,12 @@ async def _handle_export_video(params: dict) -> tuple[dict, Optional[str]]:
         speakers: dict[str, str] = {}
         if isinstance(raw_speakers, dict):
             for tag, v in raw_speakers.items():
-                if isinstance(tag, str) and tts.SPEAKER_TAG.fullmatch(f"[{tag}]") and v in tts.VOICES \
+                if isinstance(tag, str) and tts.SPEAKER_TAG.fullmatch(f"[{tag}]") and tts.is_voice(v) \
                         and len(speakers) < tts.MAX_SPEAKERS:
                     speakers[tag.upper()] = v
         # Per-clip voice, aligned with the clips (null = the export's voice).
         raw_voices = params.get("voices")
-        line_voices = [v if isinstance(v, str) and v in tts.VOICES else None
+        line_voices = [v if isinstance(v, str) and tts.is_voice(v) else None
                        for v in (raw_voices if isinstance(raw_voices, list) else [])]
         sub_engine, sub_style = subtitle_choice(params.get("sub_engine"), params.get("sub_style"))
         narration = NarrationOptions(

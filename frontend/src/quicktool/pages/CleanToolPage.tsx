@@ -459,10 +459,10 @@ export function CleanToolPage() {
                 <span className="qt-card__eyebrow">AI · phụ đề cứng</span>
                 <h2 className="qt-card__title">AI xoá phụ đề cứng</h2>
                 {ai === null ? (
-                  <p className="qt-card__hint"><span className="qt-spinner" /> Đang kiểm tra pyvideotrans…</p>
+                  <p className="qt-card__hint"><span className="qt-spinner" /> Đang kiểm tra máy này…</p>
                 ) : !ai.available ? (
                   <p className="qt-card__hint">
-                    <strong>Cần cài pyvideotrans (xem CLAUDE.md).</strong> {ai.reason}
+                    <strong>Máy này chưa dùng được AI xoá phụ đề.</strong> {ai.reason}
                   </p>
                 ) : (
                   <p className="qt-card__hint">

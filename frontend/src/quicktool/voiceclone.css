@@ -1,0 +1,50 @@
+/* /voices — "🧬 Giọng nhân bản" (pages/VoicesPage.tsx). Prefix vc-. */
+.vc { display: flex; flex-direction: column; gap: 16px; }
+.vc__count { color: var(--muted); font-weight: 600; }
+.vc__h { margin: 0; font-size: 16px; font-weight: 700; }
+.vc__warn {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  padding: 12px 14px; font-size: 14px; line-height: 1.5;
+  background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.45); border-radius: 10px;
+}
+.vc__grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+.vc__rec { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.vc__meter { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text); }
+.vc__dot { width: 10px; height: 10px; border-radius: 50%; background: #ef4444; animation: vc-blink 1s ease-in-out infinite; flex: none; }
+@keyframes vc-blink { 50% { opacity: 0.25; } }
+.vc__bar { flex: 1; min-width: 60px; height: 6px; border-radius: 3px; background: var(--panel-high); overflow: hidden; }
+.vc__bar > span { display: block; height: 100%; background: var(--qt-accent); transition: width 0.2s linear; }
+.vc__sample {
+  margin: 0; padding: 10px 12px; font-size: 14px; line-height: 1.55; color: var(--muted);
+  border-left: 3px solid var(--qt-accent); background: var(--panel-high); border-radius: 0 8px 8px 0;
+}
+.vc__take { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); min-width: 0; }
+.vc__take audio { width: 100%; max-width: 420px; height: 36px; }
+.vc__consent { align-items: flex-start; font-size: 13.5px; line-height: 1.5; color: var(--text); }
+.vc__consent input { margin-top: 3px; flex: none; }
+.vc__need { color: var(--muted); font-size: 12.5px; }
+.vc__tips { font-size: 13.5px; color: var(--muted); }
+.vc__tips summary { cursor: pointer; color: var(--text); font-weight: 600; }
+.vc__tips ul { margin: 8px 0 0; padding-left: 20px; line-height: 1.6; }
+.vc__list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.vc__item { gap: 12px; }
+.vc__itemhead { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.vc__avatar {
+  width: 40px; height: 40px; flex: none; display: grid; place-items: center; font-size: 20px;
+  border-radius: 50%; background: rgba(255, 106, 43, 0.14); border: 1px solid rgba(255, 106, 43, 0.4);
+}
+.vc__meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.vc__meta strong { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vc__meta small { color: var(--muted); font-size: 12.5px; }
+.vc__badge {
+  flex: none; padding: 3px 8px; font-size: 11.5px; font-weight: 700; border-radius: 999px;
+  color: #10b981; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.45);
+}
+.vc__actions { align-items: center; }
+.vc__gender {
+  padding: 5px 8px; font: inherit; font-size: 13px; color: var(--text);
+  background: var(--panel-high); border: 1px solid var(--border); border-radius: 8px;
+}
+@media (max-width: 860px) {
+  .vc__grid { grid-template-columns: minmax(0, 1fr); }
+}

@@ -210,12 +210,26 @@ def test_jobs_queue_one_at_a_time(client, monkeypatch):
             break
         _t.sleep(0.05)
     assert started == [ids[0]["job_id"], ids[1]["job_id"]] and dub.JOBS[ids[1]["job_id"]].status == "running"
-    for i in range(5):
+    for i in range(dub.MAX_QUEUE - 1):  # one is already waiting
         client.post("/api/dub/jobs", json={"url": f"https://www.tiktok.com/@a/video/x{i}"})
+    assert len(dub.queued_jobs()) == dub.MAX_QUEUE >= 10  # ten sent from the grab list fit with room to spare
     r = client.post("/api/dub/jobs", json={"url": "https://www.tiktok.com/@a/video/overflow"})
     assert r.status_code == 400 and "Hàng đợi" in r.json()["detail"]
     for jid in [j["job_id"] for j in ids] + [j.id for j in list(dub.JOBS.values())]:
         dub.JOBS.pop(jid, None)
+
+
+def test_a_long_name_never_fails_the_start_and_a_files_title_is_kept_to_translate(client, monkeypatch):
+    monkeypatch.setattr(dub, "status", lambda: {"available": True, "whisper": True, "separate": False, "ytdlp": True, "root": "x"})
+    monkeypatch.setattr(dub, "_run_job", lambda j, render: None)
+    caption = "这次你终于踩在了月球的土地上。" * 20 + "#AI浪潮计划 #月球"
+    r = client.post("/api/dub/jobs", json={"source_media_id": "abc", "name": caption, "title": caption})
+    assert r.status_code == 201, r.text
+    job = dub.JOBS[r.json()["job_id"]]
+    assert len(job.name) <= 80 and job.title.startswith("这次你终于") and len(job.title) <= 500
+    # the title is what the free translation turns into the clip's Vietnamese name (hashtags dropped first)
+    assert "#" not in dub._title_source(job.title)
+    dub.JOBS.pop(job.id, None)
 
 
 def test_translation_batches_cover_every_line_and_fold_a_short_tail():

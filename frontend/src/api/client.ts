@@ -1614,7 +1614,7 @@ export async function splitStoryboard(nodeId: number): Promise<SplitStoryboardRe
 
 /** Voice-over voices (`services/tts.py::VOICES`): Edge (free, instant) and
  * Gemini prebuilt voices (many, style-steerable, served by the key pool). */
-export type VoiceGroupId = "edge" | "vieneu" | "gemini" | "fpt";
+export type VoiceGroupId = "clone" | "edge" | "vieneu" | "gemini" | "fpt";
 export interface VoiceGroup {
   id: VoiceGroupId;
   label: string;
@@ -1654,7 +1654,7 @@ export const VOICE_GROUPS: VoiceGroup[] = [
     ],
   },
 ];
-export const GROUP_SHORT: Record<VoiceGroupId, string> = { edge: "Edge", vieneu: "VieNeu", gemini: "Gemini", fpt: "FPT.AI" };
+export const GROUP_SHORT: Record<VoiceGroupId, string> = { clone: "Nhân bản", edge: "Edge", vieneu: "VieNeu", gemini: "Gemini", fpt: "FPT.AI" };
 export const VOICES: Record<string, string> = Object.fromEntries(
   VOICE_GROUPS.flatMap((g) => g.voices.map(([id, label]) => [id, `${label} · ${GROUP_SHORT[g.id]}`])),
 );
@@ -1681,6 +1681,13 @@ export function fetchVoiceGroups(force = false): Promise<VoiceGroup[]> {
     })().catch((e) => { voiceGroupsPromise = null; throw e; });
   }
   return voiceGroupsPromise;
+}
+
+/** A voice was cloned / renamed / deleted ("🧬 Giọng nhân bản"): every open voice picker reloads its list. */
+export const VOICES_CHANGED = "dflow:voices";
+export function refreshVoiceGroups(): void {
+  voiceGroupsPromise = null;
+  window.dispatchEvent(new Event(VOICES_CHANGED));
 }
 
 export async function getFptKey(): Promise<{ set: boolean; masked: string }> {

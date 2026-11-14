@@ -403,7 +403,7 @@ export function CutPage() {
                   {lookId !== null && <small className="qt-card__hint">Cắt xong mỗi video được áp mẫu và xuất luôn — mở ✏️ Chỉnh nếu muốn sửa thêm.</small>}
                 </label>
               )}
-              <ChannelPicker value={channelId} onChange={setChannelId} label="Lưu clip vào kênh (không bắt buộc)" />
+              <ChannelPicker value={channelId} onChange={setChannelId} label="Lưu clip vào kênh" />
               <button type="button" className="qt-btn qt-btn--accent qt-btn--big ct__go"
                       disabled={!count || starting || files.some((f) => f.busy)} onClick={() => void start()}>
                 {starting ? "Đang gửi…" : count ? `🔍 Phân tích ${count} video` : "🔍 Phân tích video"}
@@ -549,8 +549,8 @@ function SessionCard({ s, focused, cardRef, onChanged, onEdit, onDub, prompts, o
                 <button type="button" className="qt-btn qt-btn--small qt-btn--accent"
                         onClick={() => onEdit(pickedParts[0], pickedParts.map((p) => p.job_id))}>✏️ Chỉnh {pickedParts.length} video</button>
                 <button type="button" className="qt-btn qt-btn--small" disabled={!pickedParts.some((p) => p.board_id)}
-                        onClick={() => onDub(pickedParts.filter((p) => p.board_id).map((p) => p.board_id!).slice(0, 5))}
-                        title="Mở trang Lồng tiếng với các video này (tối đa 5 một lần)">🎙 Lồng tiếng {Math.min(5, pickedParts.length)}</button>
+                        onClick={() => onDub(pickedParts.filter((p) => p.board_id).map((p) => p.board_id!).slice(0, 10))}
+                        title="Mở trang Lồng tiếng với các video này (tối đa 10 một lần)">🎙 Lồng tiếng {Math.min(10, pickedParts.length)}</button>
                 <a className="qt-btn qt-btn--small" href={exportsZipUrl(pickedParts.filter((p) => p.board_id).map((p) => p.board_id!))}>⬇ Tải {pickedParts.length} (.zip)</a>
               </>
             )}

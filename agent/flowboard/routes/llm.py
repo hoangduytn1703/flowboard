@@ -572,7 +572,7 @@ class _VoicePreviewBody(BaseModel):
 async def preview_voice(body: _VoicePreviewBody) -> dict:
     from flowboard.services import tts
 
-    if body.voice not in tts.VOICES:
+    if not tts.is_voice(body.voice):
         raise HTTPException(400, f"unknown voice {body.voice!r}")
     style = (body.style or "").strip()[:160] or None
     try:

@@ -358,7 +358,7 @@ def queue(ids: list[int], options: dict[str, Any]) -> dict[str, Any]:
     """Mark links to be dubbed with ``options`` (voice, keep_bgm, style, engine, channel_id, auto_render,
     layout, highlights); :func:`feed` starts them one after another. Links already running are skipped."""
     global _maybe_queued
-    if options.get("voice") not in tts.VOICES:
+    if not tts.is_voice(options.get("voice")):
         raise LinkError("Giọng đọc không hợp lệ")
     evidence = _evidence()
     now = datetime.now(timezone.utc)

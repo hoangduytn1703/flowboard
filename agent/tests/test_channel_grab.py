@@ -168,7 +168,7 @@ def test_picked_videos_download_and_go_on_as_files(client, listed, monkeypatch):
     # already here: not downloaded twice; the tools take the downloaded ones as files, in the order asked
     assert client.post("/api/grab/download", json={"ids": [good]}).json() == {"queued": 0, "skipped": 1}
     assert client.post("/api/grab/media", json={"ids": [bad, good, 999]}).json() == [
-        {"id": good, "media_id": by_id[good]["media_id"], "name": by_id[good]["title"]}]
+        {"id": good, "media_id": by_id[good]["media_id"], "name": by_id[good]["title"], "title": by_id[good]["title"]}]
     assert client.post("/api/grab/used", json={"ids": [good], "tool": "cut"}).json() == {"marked": 1}
     assert "cut" in {v["id"]: v for v in client.get("/api/grab/videos").json()}[good]["used"]
     assert client.post("/api/grab/used", json={"ids": [good], "tool": "x"}).status_code == 422
@@ -179,6 +179,18 @@ def test_picked_videos_download_and_go_on_as_files(client, listed, monkeypatch):
     # the channel leaves with its list
     client.delete(f"/api/grab/channels/{cid}")
     assert client.post("/api/grab/media", json={"ids": [good]}).json() == []
+
+
+def test_a_whole_douyin_caption_goes_on_as_a_short_name():
+    caption = ("这次你终于踩在了月球的土地上。没有一丝风，没有一点声音，整个世界只剩下你粗重的呼吸声；低重力让你身轻如燕，"
+               "一步就能跨出三米远；阳光直射的地方烫得能煎熟鸡蛋。全靠运气🔥全程高能#AI浪潮计划 #月球 #沉浸式科普 #青年创作者成长计划")
+    short = grab.short_title(caption)
+    assert len(short) <= 80 and "#" not in short and short.startswith("这次你终于踩在了月球的土地上。")
+    assert short.endswith(("。", "；", "…"))
+    assert grab.short_title("Tên ngắn #fyp #xuhuong") == "Tên ngắn"
+    assert grab.short_title("#a #b") == ""
+    long_latin = "word " * 40
+    assert grab.short_title(long_latin).endswith("…") and len(grab.short_title(long_latin)) <= 81
 
 
 def test_a_download_stops_when_asked(client, listed, monkeypatch):

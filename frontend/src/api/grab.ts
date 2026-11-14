@@ -117,7 +117,9 @@ export const listGrabPrompts = () => api<string[]>("/api/grab/prompts");
 export const saveGrabPrompt = (text: string) => post<string[]>("/api/grab/prompts", { text });
 export const deleteGrabPrompt = (text: string) => post<string[]>("/api/grab/prompts/delete", { text });
 /** The downloaded ones among ``ids`` — what the cut / dubbing pages take as files (`?grab=<ids>`). */
-export const grabMedia = (ids: number[]) => post<{ id: number; media_id: string; name: string }[]>("/api/grab/media", { ids });
+/** ``name`` = the caption made short (no hashtags, ≤ 80 characters); ``title`` = the caption as posted. */
+export const grabMedia = (ids: number[]) =>
+  post<{ id: number; media_id: string; name: string; title?: string }[]>("/api/grab/media", { ids });
 export const markGrabUsed = (ids: number[], tool: "cut" | "dub") => post<{ marked: number }>("/api/grab/used", { ids, tool });
 export const listGrabMarks = () => api<GrabMarkTag[]>("/api/grab/marks");
 export const setGrabMarks = (ids: number[], add: string[], remove: string[] = []) =>

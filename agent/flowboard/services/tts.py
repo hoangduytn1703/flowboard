@@ -107,11 +107,20 @@ def is_gemini_voice(voice: str) -> bool:
 
 
 def voice_kind(voice: str) -> str:
-    """``edge`` | ``gemini`` | ``vieneu`` | ``fpt``."""
+    """``edge`` | ``gemini`` | ``vieneu`` | ``fpt`` (a cloned voice ``vieneu:clone:<uid>`` is a VieNeu voice)."""
     for kind in ("gemini", "vieneu", "fpt"):
         if voice.startswith(kind + ":"):
             return kind
     return "edge"
+
+
+def is_voice(voice: object) -> bool:
+    """A voice this tool can read with: a preset, or one of the account's cloned voices ("🧬 Giọng nhân bản")."""
+    from flowboard.services import voice_clone
+
+    if not isinstance(voice, str):
+        return False
+    return voice in VOICES or (voice_clone.is_clone(voice) and voice_clone.exists(voice))
 
 
 def vieneu_available() -> tuple[bool, str]:
@@ -146,11 +155,15 @@ async def preview(voice: str, style: Optional[str] = None, text: Optional[str] =
 def voice_groups() -> list[dict]:
     """For the voice pickers: Edge (free, instant) and Gemini (many voices,
     needs an API key in the pool)."""
+    from flowboard.services import voice_clone
     from flowboard.services.llm import gemini_api
 
     vn_ok, vn_why = vieneu_available()
     fpt_ok, fpt_why = fpt_available()
-    return [
+    clones = voice_clone.list_clones()
+    mine = [{"id": "clone", "label": "🧬 Giọng nhân bản của bạn — VieNeu, chạy trên máy", "available": vn_ok,
+             "reason": vn_why, "voices": [{"id": c["voice"], "label": c["label"]} for c in clones]}] if clones else []
+    return mine + [
         {"id": "edge", "label": "Microsoft Edge — miễn phí, nhanh", "available": True,
          "voices": [{"id": k, "label": v} for k, v in VOICES.items() if voice_kind(k) == "edge"]},
         {"id": "vieneu", "label": "VieNeu — miễn phí, chạy trên máy, 25 giọng Việt 3 miền (chậm hơn Edge)",
@@ -279,13 +292,20 @@ async def _synth_vieneu_many(items: list[tuple[str, Path]], voice: str) -> None:
     import tempfile
 
     from flowboard.services import dub  # the runner helper lives there (lazy: dub imports this module)
+    from flowboard.services import voice_clone
 
     ok, why = vieneu_available()
     if not ok:
         raise TTSError(f"VieNeu: {why}")
-    name = voice.split(":", 1)[1]
-    if voice not in VIENEU_VOICES:
-        raise TTSError(f"VieNeu không có giọng {name!r}")
+    if voice_clone.is_clone(voice):
+        try:
+            name = "@" + str(voice_clone.voice_file(voice))  # a cloned voice: the runner reads its embedding file
+        except voice_clone.CloneError as exc:
+            raise TTSError(str(exc)) from exc
+    elif voice in VIENEU_VOICES:
+        name = voice.split(":", 1)[1]
+    else:
+        raise TTSError(f"VieNeu không có giọng {voice.split(':', 1)[1]!r}")
     TTS_DIR.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", suffix=".json", prefix="vieneu-", dir=str(TTS_DIR), delete=False, encoding="utf-8") as fh:
         _json.dump([{"text": t, "out": str(p)} for t, p in items], fh, ensure_ascii=False)
@@ -414,7 +434,7 @@ async def synthesize(text: str, voice: str = DEFAULT_VOICE, rate: int = 0,
     text = re.sub(r"\s+", " ", text or "").strip()
     if not text:
         raise TTSError("empty narration")
-    if voice not in VOICES:
+    if not is_voice(voice):
         raise TTSError(f"unknown voice {voice!r}; choose one of {list(VOICES)}")
     gemini = is_gemini_voice(voice)
     kind = voice_kind(voice)
@@ -603,10 +623,10 @@ async def synthesize_dialogue(text: str, default_voice: str = DEFAULT_VOICE, rat
     if not segments:
         raise TTSError("empty narration")
     speakers = {str(k).upper(): v for k, v in (speakers or {}).items()}
-    plan = [(speakers.get(tag) if tag and speakers.get(tag) in VOICES else default_voice, seg)
+    plan = [(speakers.get(tag) if tag and is_voice(speakers.get(tag)) else default_voice, seg)
             for tag, seg in segments]
     for voice, _ in plan:
-        if voice not in VOICES:
+        if not is_voice(voice):
             raise TTSError(f"unknown voice {voice!r}; choose one of {list(VOICES)}")
 
     TTS_DIR.mkdir(parents=True, exist_ok=True)

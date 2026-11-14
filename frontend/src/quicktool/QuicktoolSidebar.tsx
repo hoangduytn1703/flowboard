@@ -92,6 +92,10 @@ export function QuicktoolSidebar() {
                 title="Người mẫu đã lưu ở bước 1 — dùng lại cho sản phẩm khác">
           <span className="qt-nav__icon">👤</span> Người mẫu đã lưu
         </button>
+        <button type="button" className={`qt-nav__item${is("/voices") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/voices")}
+                title="Thu ~10 giây giọng của bạn — giọng đó đọc lời thoại, lồng tiếng… (VieNeu, chạy trên máy)">
+          <span className="qt-nav__icon">🧬</span> Giọng nhân bản
+        </button>
         <button type="button" className={`qt-nav__item${is("/prompts") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/prompts")}
                 title="Prompt ảnh / chuyển động / lời thoại đã lưu ở bước 2 — dùng lại cho clip khác">
           <span className="qt-nav__icon">📚</span> Prompt đã lưu

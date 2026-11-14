@@ -18,7 +18,7 @@ import "../grab.css";
 
 const errMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
 /** how many videos one press sends on (the tools' own queues) */
-const MAX_TO = { cut: 10, dub: 5 } as const;
+const MAX_TO = { cut: 10, dub: 10 } as const;
 const TOOL_NAME = { cut: "✂️ Cắt video", dub: "🎙 Lồng tiếng" } as const;
 const PAGE = 60;
 
