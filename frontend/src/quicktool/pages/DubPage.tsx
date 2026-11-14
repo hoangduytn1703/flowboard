@@ -102,6 +102,8 @@ export function DubPage() {
   const [job, setJob] = useState<DubJob | null>(null);
   // several links started together: their jobs side by side; the editor opens once all of them are done
   const [batch, setBatch] = useState<{ id: string; jobs: DubJob[] } | null>(null);
+  /** a finished clip opened in the editor while the rest of its batch still works */
+  const [peek, setPeek] = useState(false);
   // every saved job, brief (no lines), newest first: the card shows RECENT_SHOWN, "Xem tất cả" the rest in a dialog
   const [recent, setRecent] = useState<DubJob[]>([]);
   const [allOpen, setAllOpen] = useState(false);
@@ -180,7 +182,11 @@ export function DubPage() {
         const jobs = await listDubBatch(batch.id);
         if (stopped) return;
         setBatch((b) => (b && b.id === batch.id ? { ...b, jobs } : b));
-        setJob((j) => (j ? jobs.find((x) => x.job_id === j.job_id) ?? j : j));
+        // the clip open in the editor is only replaced when it really changed (a new object would reload the editor)
+        setJob((j) => {
+          const n = j ? jobs.find((x) => x.job_id === j.job_id) : undefined;
+          return n && j && (n.status !== j.status || n.media_id !== j.media_id || n.progress !== j.progress) ? n : j;
+        });
         if (!jobs.some(isWorking)) {
           const ok = jobs.filter((x) => x.status === "done").length;
           const bad = jobs.filter((x) => x.status === "error").length;
@@ -389,6 +395,8 @@ export function DubPage() {
   }
   function closeJob() {
     setJob(null);
+    setPeek(false);
+    if (batch && batch.jobs.some(isWorking)) return;  // back to the batch's progress: the others still work
     setBatch(null);
     setSearchParams({}, { replace: true });
     refreshRecent();
@@ -450,7 +458,7 @@ export function DubPage() {
   // An opened video with its lines → the CapCut-style editor (full width); a fresh job still
   // transcribing / translating → the progress card next to the form.
   // A batch waits until every clip is done before the editor opens (the links were pasted together: one sitting).
-  const editing = !!job && canEdit(job) && !batchWorking;
+  const editing = !!job && canEdit(job) && (!batchWorking || (peek && !isWorking(job)));
   const batchJobs = batch?.jobs ?? [];
   const batchDone = batchJobs.filter((j) => j.status === "done").length;
   // what a link queued from the library is dubbed with: this form, summed up in one line
@@ -678,7 +686,7 @@ export function DubPage() {
             </div>
 
             <div className="qt-dub__right">
-              {batch && (batchWorking || !job) ? (
+              {batch && (batchWorking || !job) && !editing ? (
                 <section className="qt-card">
                   <div className="qt-card__head">
                     <div>
@@ -702,10 +710,14 @@ export function DubPage() {
                           {isWorking(j) && j.status !== "queued" && <div className="qt-dub__bar"><span style={{ width: `${j.progress}%` }} /></div>}
                         </div>
                         {isWorking(j) && <StopButton stopping={j.stopping} onStop={() => stopDub(j.job_id).catch((e) => { toast.error(errMessage(e)); throw e; })} />}
+                        {batchWorking && !isWorking(j) && canEdit(j) && (
+                          <button type="button" className="qt-btn qt-btn--small" title="Mở video này để xem / chỉnh ngay — các video khác vẫn chạy tiếp"
+                                  onClick={() => { setPeek(true); setJob(j); }}>✏️ Mở</button>
+                        )}
                       </li>
                     ))}
                   </ol>
-                  <p className="qt-card__hint">Xong cả loạt sẽ mở trình chỉnh sửa: chọn clip ở ô trên cùng, chỉnh một clip rồi bấm "⇪ Áp cho cả loạt" để mọi clip cùng kiểu chữ, khung, nhân vật.</p>
+                  <p className="qt-card__hint">Video nào xong bấm "✏️ Mở" để xem / chỉnh ngay. Xong cả loạt sẽ mở trình chỉnh sửa: chọn clip ở ô trên cùng, chỉnh một clip rồi bấm "⇪ Áp cho cả loạt" để mọi clip cùng kiểu chữ, khung, nhân vật.</p>
                 </section>
               ) : !job ? (
                 <div className="qt-empty qt-dub__placeholder">Tiến độ hiện ở đây. Xong là mở trình chỉnh sửa kiểu CapCut: xem video với giọng Việt, sửa chữ ngay trên hình, kéo câu trên timeline.</div>

@@ -183,6 +183,37 @@ def work() -> dict[str, Any]:
     return grab.work_of_videos()
 
 
+class DubNowBody(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=30)
+    mode: str = Field(default="dub", pattern="^(dub|sub)$")
+    voice: str = Field(default="", max_length=120)
+    keep_bgm: bool = True
+    look_preset_id: Optional[int] = None
+    sub_lang: str = Field(default="vi", max_length=8)
+    translator: str = Field(default="google", pattern="^(google|ai)$")
+    channel_id: Optional[int] = None
+
+
+@router.post("/dub")
+async def dub_now(body: DubNowBody) -> dict[str, Any]:
+    """"🎙 Lồng tiếng ngay": the picked videos are downloaded when needed and handed to the dubbing queue — the
+    cards of the list follow them (GET /work). A failed video is sent again the same way."""
+    from flowboard.services import dub, grab_dub
+
+    dub.remember_loop()
+    try:
+        return grab_dub.start(body.ids, body.model_dump(exclude={"ids"}))
+    except grab_dub.GrabDubError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/dub/stop")
+def dub_stop() -> dict[str, Any]:
+    from flowboard.services import grab_dub
+
+    return grab_dub.stop_all()
+
+
 @router.post("/download")
 def download(body: IdsBody) -> dict[str, Any]:
     if not body.ids:

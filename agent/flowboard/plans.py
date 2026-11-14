@@ -99,6 +99,7 @@ _rule(r"^/api/dub(/|$)", "dub")
 _rule(r"^/api/cut/clips$", ("cut", "dub"))               # the dubbing page picks videos from "Clip của tôi"
 _rule(r"^/api/cut(/|$)", "cut")
 _rule(r"^/api/grab/media$", ("grab", "cut", "dub"))      # the cut / dubbing pages take the videos picked there
+_rule(r"^/api/grab/dub(/|$)", "dub")                     # "🎙 Lồng tiếng ngay" on the grab list starts dub jobs
 _rule(r"^/api/grab(/|$)", "grab")
 _rule(r"^/api/capcut(/|$)", "capcut")
 _rule(r"^/api/clean/[^/]+/detect$", ("clean", "dub", "cut"))   # the editor's "find the old captions" (OCR)

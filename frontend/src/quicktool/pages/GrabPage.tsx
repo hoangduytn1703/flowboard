@@ -4,12 +4,15 @@ import { announceRunning } from "../../components/BackgroundTasks";
 import { askConfirm, askText } from "../../components/Dialogs";
 import { StopButton } from "../../components/StopButton";
 import {
+  dubGrabNow, stopGrabDub, type DubNowOptions,
   addGrabChannel, agoOf, clockOf, dateOf, deleteGrabChannel, deleteGrabPrompt, downloadGrabVideos, editGrabChannel, getGrabState,
   getGrabStatus, getGrabWork, grabAvatarUrl, grabThumbUrl, listGrabChannels, listGrabMarks, listGrabPrompts, listGrabVideos, markGrabUsed,
   pickGrabVideos, saveGrabPrompt, scanAllGrabChannels, scanGrabChannel, setGrabMarks, shortCount, stopGrabDownloads, stopGrabScan,
   type GrabChannel, type GrabMarkTag, type GrabState, type GrabStatus, type GrabToolRun, type GrabVideo, type GrabWork,
 } from "../../api/grab";
 import { MarkMenu, mainMark, markClass, markIcon, markTone } from "../grab/MarkMenu";
+import { DubNowDialog, savedDubNow } from "../grab/DubNowDialog";
+import { useSettingsStore } from "../../store/settings";
 import { useFeature } from "../../lib/features";
 import { PageEmpty, PageLoading } from "../PageState";
 import { toast } from "../../store/toast";
@@ -19,6 +22,13 @@ import "../grab.css";
 const errMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
 /** how many videos one press sends on (the tools' own queues) */
 const MAX_TO = { cut: 10, dub: 10 } as const;
+/** "🎙 Lồng tiếng ngay": the agent hands them to the dubbing queue as room appears, so more at once */
+const MAX_DUB_NOW = 30;
+/** a dub run still on its way (downloading, waiting, working) */
+const dubLive = (r: GrabToolRun | undefined) => r?.state === "running" || r?.state === "downloading";
+/** seconds one video still needs, roughly (measured 15/11: a 45 s video dubbed in ~65 s, subtitles only in ~30 s) */
+const dubLeft = (v: GrabVideo, r: GrabToolRun) =>
+  (r.mode === "sub" ? 10 + 0.5 * (v.duration_s || 60) : 25 + 0.9 * (v.duration_s || 60)) * (1 - Math.min(99, r.progress || 0) / 100);
 const TOOL_NAME = { cut: "✂️ Cắt video", dub: "🎙 Lồng tiếng" } as const;
 const PAGE = 60;
 
@@ -101,6 +111,25 @@ function PlatformChip({ platform, label, beta = false }: { platform: string; lab
     <span className={`gb-plat gb-plat--${platform}`}>
       {icon} {label}{beta && <b className="gb-beta" title="Đang thử nghiệm — có thể chưa ổn định">BETA</b>}
     </span>
+  );
+}
+
+/** "🎙 Lồng tiếng ngay" on a card: the step the video is at, a bar, how many wait in front of it. */
+function DubProgress({ run }: { run: GrabToolRun }) {
+  const waiting = run.state === "running" && typeof run.ahead === "number" && run.ahead !== null;
+  const text = run.state === "downloading" ? (run.phase || "Đang tải video về")
+    : waiting ? (run.ahead === 0 ? "Chờ đến lượt — tiếp theo" : run.ahead! >= 99 ? run.phase : `Chờ đến lượt — còn ${run.ahead} video trước`)
+      : (run.phase || "Đang lồng tiếng");
+  const moving = run.state === "running" && !waiting;
+  return (
+    <div className={`gb-v__run${moving ? "" : " is-waiting"}`} role="status">
+      <div className="gb-v__runtext">
+        {moving || run.state === "downloading" ? <span className="gb-spin" aria-hidden="true" /> : <span aria-hidden="true">⏳</span>}
+        <span title={text}>{text}</span>
+        {moving && <b>{Math.round(run.progress)}%</b>}
+      </div>
+      <div className="gb-v__runbar"><span style={{ width: `${moving ? Math.max(3, run.progress) : 0}%` }} /></div>
+    </div>
   );
 }
 
@@ -197,6 +226,10 @@ export function GrabPage() {
   const [work, setWork] = useState<GrabWork>({});
   // "tải xong thì chuyển sang …": the videos wanted in a tool that are still downloading
   const [after, setAfter] = useState<{ tool: "cut" | "dub"; ids: number[] } | null>(null);
+  // "🎙 Lồng tiếng ngay": the videos the dialog is open for; the ones sent in this visit (the bar counts them)
+  const [dubAsk, setDubAsk] = useState<GrabVideo[] | null>(null);
+  const [lot, setLot] = useState<number[]>([]);
+  const dubVoice = useSettingsStore((s) => s.dubVoice);
   const urlInput = useRef<HTMLInputElement>(null);
   const busyKey = useRef("");
 
@@ -245,12 +278,12 @@ export function GrabPage() {
     return () => { alive = false; window.clearInterval(t); };
   }, [busy]);
 
-  const workBusy = Object.values(work).some((w) => w.dub?.state === "running" || w.cut?.state === "running");
+  const workBusy = Object.values(work).some((w) => dubLive(w.dub) || w.cut?.state === "running");
   useEffect(() => {
     let alive = true;
     const tick = () => void getGrabWork().then((w) => { if (alive) setWork(w); }).catch(() => undefined);
     tick();
-    const t = window.setInterval(tick, workBusy ? 8000 : 30000);
+    const t = window.setInterval(tick, workBusy ? 2500 : 30000);
     return () => { alive = false; window.clearInterval(t); };
   }, [workBusy, videos.length]);
 
@@ -309,6 +342,23 @@ export function GrabPage() {
     return { filtered: out, undated };
   }, [scope, q, minViews, days, len, kind, have, markF, aiOnly, why, sort, state, work]);
   const failedCount = useMemo(() => scope.filter((v) => failedTools(work[String(v.id)]).length).length, [scope, work]);
+  // "🎙 Lồng tiếng ngay": what is still on its way, how far this visit's lot is, about how long is left
+  const liveDub = useMemo(() => videos.filter((v) => dubLive(work[String(v.id)]?.dub)), [videos, work]);
+  const lotTotal = lot.length;
+  const lotDone = lot.filter((id) => { const r = work[String(id)]?.dub; return !!r && !dubLive(r); }).length;
+  const etaS = liveDub.reduce((s, v) => s + dubLeft(v, work[String(v.id)]!.dub!), 0);
+  const etaText = etaS < 50 ? "dưới 1 phút" : `${Math.max(1, Math.round(etaS / 60))} phút`;
+  useEffect(() => {  // the lot is over: one line saying how it went, then the bar forgets it
+    if (!lot.length || liveDub.length) return;
+    const runs = lot.map((id) => work[String(id)]?.dub).filter((r): r is GrabToolRun => !!r);
+    if (runs.length < lot.length) return;
+    const ok = runs.filter((r) => r.state === "done" || r.state === "review").length;
+    const quiet = runs.filter((r) => r.state === "nospeech").length;
+    const bad = runs.filter((r) => r.state === "error").length;
+    const parts = [`${ok} video xong`, quiet ? `${quiet} video không có lời` : "", bad ? `${bad} video lỗi (bấm ↻ Thử lại trên thẻ)` : ""].filter(Boolean);
+    (bad ? toast.warning : toast.success)(`Lồng tiếng: ${parts.join(", ")}.`);
+    setLot([]);
+  }, [lot, liveDub.length, work]);
   useEffect(() => { setShown(PAGE); }, [chan, tag, q, minViews, days, len, kind, have, markF, aiOnly, sort]);
   const filtersOn = !!(q.trim() || minViews || days || len || kind || have || markF || aiOnly);
   function clearFilters() { setQ(""); setMinViews(0); setDays(0); setLen(""); setKind(""); setHave(""); pickMarkFilter(""); setAiOnly(false); }
@@ -438,6 +488,34 @@ export function GrabPage() {
     try { await markGrabUsed(ids, tool); } catch { /* the mark is a nicety */ }
     navigate(`/tools/${tool}?grab=${ids.join(",")}`);
   }
+  /** "🎙 Lồng tiếng ngay": the agent downloads what is missing and dubs — this page only watches. */
+  function askDub(list: GrabVideo[]) {
+    if (!list.length) return;
+    if (list.length > MAX_DUB_NOW) {
+      toast.warning(`Lồng tiếng tối đa ${MAX_DUB_NOW} video một lượt — bỏ chọn bớt ${list.length - MAX_DUB_NOW} video (gửi tiếp ở lượt sau).`);
+      return;
+    }
+    setDubAsk(list);
+  }
+  async function startDub(list: GrabVideo[], o: DubNowOptions, quiet = false) {
+    try {
+      const r = await dubGrabNow(list.map((v) => v.id), o);
+      setLot((l) => Array.from(new Set([...l.filter((id) => dubLive(work[String(id)]?.dub)), ...list.map((v) => v.id)])));
+      setDubAsk(null);
+      if (!quiet) setPicked(new Set());  // sent: the cards show the rest
+      announceRunning();
+      setWork(await getGrabWork());
+      setState(await getGrabState());
+      if (!quiet) {
+        toast.success(r.queued ? `Đã gửi ${r.queued} video đi ${o.mode === "sub" ? "chèn phụ đề" : "lồng tiếng"} — theo dõi ngay trên từng thẻ.`
+          : "Các video này đang được xử lý rồi.");
+      }
+    } catch (e) {
+      toast.error(errMessage(e));
+    }
+  }
+  const retryDub = (v: GrabVideo) => startDub([v], savedDubNow(dubVoice), true);
+
   async function send(tool: "cut" | "dub", list: GrabVideo[]) {
     if (!list.length) return;
     if (list.length > MAX_TO[tool]) {
@@ -761,8 +839,8 @@ export function GrabPage() {
                           title={`Đem video đã chọn đi cắt thành nhiều video ngắn (tối đa ${MAX_TO.cut} video một lượt; video chưa tải thì tool tải trước)`}>✂️ Cắt {picked.size || ""} video</button>
                 )}
                 {canDub && (
-                  <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={!picked.size || !!after} onClick={() => void send("dub", pickedList)}
-                          title={`Đem video đã chọn đi lồng tiếng / chèn phụ đề (tối đa ${MAX_TO.dub} video một lượt; video chưa tải thì tool tải trước)`}>🎙 Lồng tiếng {picked.size || ""} video</button>
+                  <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={!picked.size} onClick={() => askDub(pickedList)}
+                          title={`Lồng tiếng / chèn phụ đề các video đã chọn ngay tại đây (tối đa ${MAX_DUB_NOW} video một lượt; video chưa tải thì tool tự tải)`}>🎙 Lồng tiếng {picked.size || ""} video</button>
                 )}
               </div>
 
@@ -772,6 +850,18 @@ export function GrabPage() {
                   <span>Đang tải {downloading} video về máy (hai video một lúc){after ? ` — xong sẽ chuyển sang ${TOOL_NAME[after.tool]}` : ""}</span>
                   {after && <button type="button" className="qt-link" onClick={() => setAfter(null)}>Không chuyển nữa</button>}
                   <StopButton label="Dừng tải" onStop={async () => { setAfter(null); await stopGrabDownloads(); }} />
+                </div>
+              )}
+
+              {liveDub.length > 0 && (
+                <div className="gb__dubbar" role="status">
+                  <span className="gb-spin" aria-hidden="true" />
+                  <span>
+                    🎙 Đang lồng tiếng{lotTotal > 0 ? <> <strong>{lotDone}/{lotTotal}</strong> video xong</> : <> <strong>{liveDub.length}</strong> video</>}
+                    {" · "}còn khoảng <strong>{etaText}</strong>
+                  </span>
+                  <span className="gb__dubbartrack"><span style={{ width: `${lotTotal ? Math.round((lotDone / lotTotal) * 100) : 0}%` }} /></span>
+                  <StopButton label="Dừng tất cả" onStop={async () => { await stopGrabDub(); setWork(await getGrabWork()); }} />
                 </div>
               )}
 
@@ -799,6 +889,7 @@ export function GrabPage() {
                       const tone = markTone(v.marks, presets);
                       const runs = work[String(v.id)];
                       const fails = failedTools(runs);
+                      const dubRun = runs?.dub;
                       return (
                         <article key={v.id} className={`gb-v${on ? " is-on" : ""}${tone ? ` gb-v--marked gb-v--${tone}` : ""}${fails.length ? " gb-v--failed" : ""}`}>
                           <label className="gb-v__thumb" title={on ? "Bỏ chọn" : "Chọn video này"}>
@@ -825,11 +916,17 @@ export function GrabPage() {
                             {fails.map((k) => {
                               const run = runs![k]!;
                               return (
-                                <a key={k} className="gb-v__fail" href={run.link} title={`${run.error}\n\nBấm để mở và làm lại`}
-                                   onClick={(e) => { e.preventDefault(); navigate(run.link); }}>
-                                  <strong>⚠ {RUN_TEXT[k].icon} {k === "dub" ? "Lồng tiếng" : "Cắt video"} bị lỗi</strong> <span>Xem ›</span>
-                                  {run.error && <small>{run.error}</small>}
-                                </a>
+                                <div key={k} className="gb-v__failwrap">
+                                  <a className="gb-v__fail" href={run.link || "#"} title={run.link ? `${run.error}\n\nBấm để mở và xem` : run.error}
+                                     onClick={(e) => { e.preventDefault(); if (run.link) navigate(run.link); }}>
+                                    <strong>⚠ {RUN_TEXT[k].icon} {k === "dub" ? "Lồng tiếng" : "Cắt video"} bị lỗi</strong> {run.link && <span>Xem ›</span>}
+                                    {run.error && <small>{run.error}</small>}
+                                  </a>
+                                  {k === "dub" && canDub && (
+                                    <button type="button" className="qt-btn qt-btn--small" onClick={() => void retryDub(v)}
+                                            title="Lồng tiếng lại video này với lựa chọn lần trước">↻ Thử lại</button>
+                                  )}
+                                </div>
                               );
                             })}
                             {chan === null && ch && <div className="gb-v__chan"><PlatformChip platform={ch.platform} label={ch.name} /></div>}
@@ -837,6 +934,19 @@ export function GrabPage() {
                             {v.marks.length > 0 && (
                               <div className="gb-v__marks">
                                 {v.marks.map((m) => <span key={m} className={markClass(m, presets)}>{markIcon(m, presets)} {m}</span>)}
+                              </div>
+                            )}
+                            {dubRun && dubLive(dubRun) && <DubProgress run={dubRun} />}
+                            {dubRun?.state === "nospeech" && (
+                              <div className="gb-v__quiet" title="Tool không nghe thấy lời nói nào trong video (chỉ có nhạc / tiếng động) nên không có gì để dịch">
+                                🔇 Không có lời để lồng tiếng <small>video chỉ có nhạc — dùng nguyên video</small>
+                              </div>
+                            )}
+                            {dubRun?.state === "done" && dubRun.link && (
+                              <div className="gb-v__ready">
+                                <span title={dubRun.name || ""}>✓ {dubRun.mode === "sub" ? "Đã chèn phụ đề" : "Đã lồng tiếng"}{dubRun.name ? ` · ${dubRun.name}` : ""}</span>
+                                <button type="button" className="qt-btn qt-btn--small qt-btn--accent" onClick={() => navigate(dubRun.link)}>✏️ Mở chỉnh</button>
+                                {dubRun.media_id && <a className="qt-btn qt-btn--small" href={`/media/${dubRun.media_id}`} target="_blank" rel="noreferrer" title="Xem video đã lồng tiếng">▶ Xem</a>}
                               </div>
                             )}
                             <div className="gb-v__foot">
@@ -848,6 +958,8 @@ export function GrabPage() {
                               {TOOLS.map((k) => {
                                 const run = runs?.[k];
                                 const sent = v.used[k];
+                                // the dub's progress / result has its own block above
+                                if (k === "dub" && run && (dubLive(run) || run.state === "nospeech" || (run.state === "done" && run.link))) return null;
                                 if (run && run.state !== "error") return <RunChip key={k} tool={k} run={run} onOpen={() => navigate(run.link)} />;
                                 if (!run && sent) {
                                   return <span key={k} className="gb-st" title={`Đã gửi sang ${k === "dub" ? "Lồng tiếng" : "Cắt video"} ${dateOf(sent)}`}>
@@ -869,8 +981,11 @@ export function GrabPage() {
                                   <>
                                     <a className="qt-btn qt-btn--small" href={`/media/${v.media_id}`} target="_blank" rel="noreferrer" title="Xem video đã tải">▶</a>
                                     {canCut && <button type="button" className="qt-btn qt-btn--small" onClick={() => void send("cut", [v])} title="Đem video này đi cắt">✂️</button>}
-                                    {canDub && <button type="button" className="qt-btn qt-btn--small" onClick={() => void send("dub", [v])} title="Đem video này đi lồng tiếng / chèn phụ đề">🎙</button>}
                                   </>
+                                )}
+                                {canDub && !dubLive(dubRun) && (
+                                  <button type="button" className="qt-btn qt-btn--small" onClick={() => askDub([v])}
+                                          title="Lồng tiếng / chèn phụ đề video này ngay (chưa tải thì tool tự tải)">🎙</button>
                                 )}
                               </span>
                             </div>
@@ -895,6 +1010,11 @@ export function GrabPage() {
         <MarkMenu anchor={markMenu.anchor} known={knownMarks} presets={presets}
                   marks={markMenu.ids.map((id) => videos.find((v) => v.id === id)?.marks ?? [])}
                   onApply={(add, remove) => applyMarks(markMenu.ids, add, remove)} onClose={() => setMarkMenu(null)} />
+      )}
+      {dubAsk && (
+        <DubNowDialog count={dubAsk.length} missing={dubAsk.filter((v) => downloadOf(v, state) !== "done").length}
+                      onStart={(o) => startDub(dubAsk, o)} onClose={() => setDubAsk(null)}
+                      onOpenPage={dubAsk.length <= MAX_TO.dub ? () => { const l = dubAsk; setDubAsk(null); void send("dub", l); } : undefined} />
       )}
     </>
   );

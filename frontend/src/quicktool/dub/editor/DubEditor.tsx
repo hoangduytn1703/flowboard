@@ -152,8 +152,11 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
   const [sel, setSel] = useState<Sel>(null);
   // dragging / sliders change: only the selected line ("cue") or every line ("all")
   const [scope, setScopeState] = useState<"all" | "cue">(() => {
-    try { return window.localStorage.getItem("flowboard.dub.scope") === "all" ? "all" : "cue"; } catch { return "cue"; }
+    // "all" unless the seller chose "Riêng câu này": dragging the subtitle is expected to move every line
+    // (15/11: with "cue" as the default, the next line jumped back to the old place and it read as a bug)
+    try { return window.localStorage.getItem("flowboard.dub.scope") === "cue" ? "cue" : "all"; } catch { return "all"; }
   });
+  const ownLookTold = useRef(false);
   const setScope = (v: "all" | "cue") => { setScopeState(v); try { window.localStorage.setItem("flowboard.dub.scope", v); } catch { /* private mode */ } };
   const [leftTab, setLeftTab] = useState<LeftTab>("format");
   const [rightTab, setRightTab] = useState<RightTab>("sub");
@@ -258,6 +261,10 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
   function subGeom(patch: GeomPatch, cue: number | null, coalesce?: string) {
     // a line that already has its own placement keeps it even in "Tất cả câu" (else dragging it would do nothing)
     if (cue !== null && (scope === "cue" || docRef.current.cues[cue]?.look)) {
+      if (!docRef.current.cues[cue]?.look && !ownLookTold.current) {  // once per editor: say why the other lines stay
+        ownLookTold.current = true;
+        toast.info("Chỉ câu này đổi vị trí (đang chỉnh “Riêng câu này”). Muốn mọi câu theo: tab 💬 Phụ đề → “⇪ Áp cho tất cả câu”.");
+      }
       change((d) => ({ ...d, cues: d.cues.map((c, k) => (k === cue ? { ...c, look: cleanLook({ ...(c.look ?? {}), ...patch } as never) } : c)) }),
              coalesce ? `${coalesce}-${cue}` : undefined);
       if (sel?.kind !== "cue" || sel.i !== cue) setSel({ kind: "cue", i: cue });

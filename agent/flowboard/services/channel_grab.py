@@ -765,6 +765,21 @@ class Download:
     error: str = ""
     stop: bool = False
     started_at: float = field(default_factory=time.time)
+    #: which try is running (1 = the first)
+    tries: int = 1
+
+
+#: a download is tried this many times before it counts as failed (the site's passing refusals)
+DOWNLOAD_TRIES = 3
+DOWNLOAD_RETRY_WAIT_S = 4.0
+_PERMANENT = ("dài hơn", "đổi tài khoản", "bị xoá khỏi danh sách", "riêng tư", "không hỗ trợ")
+
+
+def passing_failure(error: str) -> bool:
+    """A download error worth another try (the site did not answer, the network dropped) — not a video that is
+    too long, gone, or from another account."""
+    low = (error or "").lower()
+    return error != STOPPED and not any(p in low for p in _PERMANENT)
 
 
 DOWNLOADS: dict[tuple[str, int], Download] = {}
@@ -818,7 +833,20 @@ def _download(d: Download) -> None:
         if d.stop:
             raise GrabError(STOPPED)
         d.status = "running"
-        _download_now(d)
+        for attempt in range(DOWNLOAD_TRIES):
+            try:
+                _download_now(d)
+                break
+            except GrabError as exc:
+                # Douyin answers "no data" now and then for a video that downloads a moment later: tried again
+                if d.stop or attempt == DOWNLOAD_TRIES - 1 or not passing_failure(str(exc)):
+                    raise
+                logger.info("channel_grab: download %s failed (%s) — try %d/%d", d.video_id, exc, attempt + 2, DOWNLOAD_TRIES)
+                d.tries = attempt + 2
+                for _ in range(int(DOWNLOAD_RETRY_WAIT_S * (attempt + 1) / 0.2)):
+                    if d.stop:
+                        raise GrabError(STOPPED) from exc
+                    time.sleep(0.2)
         d.status = "done"
         batch["done"] += 1
     except GrabError as exc:
@@ -1094,6 +1122,8 @@ def _tool_state(status: str, error: Optional[str]) -> str:
     if status in ("queued", "running", "rendering"):
         return "running"
     if status == "error":
+        if (error or "").startswith("Whisper không nghe ra"):
+            return "nospeech"  # only music / noise: nothing to dub — not the tool failing
         return "stopped" if (error or "").startswith("Đã dừng") else "error"
     return status if status in ("review", "done") else "done"
 
@@ -1110,9 +1140,11 @@ def work_of_videos() -> dict[str, dict[str, Any]]:
     for vid, mid in rows:
         if mid:
             by_media.setdefault(str(mid), []).append(int(vid))
-    if not by_media:
-        return {}
     out: dict[str, dict[str, Any]] = {}
+    if not by_media:
+        from flowboard.services import grab_dub as _gd
+
+        return {str(vid): {"dub": view} for vid, view in _gd.pending_views().items()}
 
     def put(media_id: Optional[str], tool: str, view: dict[str, Any]) -> None:
         for vid in by_media.get(str(media_id or ""), []):
@@ -1127,18 +1159,29 @@ def work_of_videos() -> dict[str, dict[str, Any]]:
     if str(cut_root) not in _TOOLS_READ:
         video_cut.load_sessions()
         _TOOLS_READ.add(str(cut_root))
+    waiting = {j.id: i + (1 if dub.running_job() is not None else 0) for i, j in enumerate(dub.queued_jobs())}
     for j in list(dub.JOBS.values()):
         if j.kind == "cut" or (j.work is not None and j.work.parent != jobs_root):
             continue
         put(j.source_media_id, "dub", {
-            "state": _tool_state(j.status, j.error), "id": j.id, "phase": j.phase, "progress": j.progress,
-            "error": (j.error or "")[:400], "at": j.started_at, "link": f"/tools/dub?job={j.id}"})
+            "state": _tool_state(j.status, j.error), "id": j.id, "phase": j.phase, "progress": int(round(j.progress or 0)),
+            "error": (j.error or "")[:400], "at": j.started_at, "link": f"/tools/dub?job={j.id}",
+            # for the card: where it waits in the queue (0 = next), the finished video, its Vietnamese name
+            "ahead": waiting.get(j.id), "media_id": j.media_id if j.status == "done" else None,
+            "name": (j.name or j.title or "")[:80], "mode": j.mode})
     for s in list(video_cut.SESSIONS.values()):
         if s.work is not None and s.work.parent != cut_root:
             continue
         put(s.source_media_id, "cut", {
             "state": _tool_state(s.status, s.error), "id": s.id, "phase": s.phase, "progress": s.progress,
             "error": (s.error or "")[:400], "at": s.started_at, "link": f"/tools/cut?session={s.id}"})
+    # "🎙 Lồng tiếng ngay": the videos still on their way to the dubbing queue (downloading, waiting for room)
+    from flowboard.services import grab_dub
+
+    for vid, view in grab_dub.pending_views().items():
+        cur = out.setdefault(str(vid), {})
+        if "dub" not in cur or view["at"] >= cur["dub"]["at"]:
+            cur["dub"] = view
     return out
 
 

@@ -127,7 +127,15 @@ export const setGrabMarks = (ids: number[], add: string[], remove: string[] = []
 
 /** What became of a downloaded video in a tool (the latest job / cut started from it). */
 export interface GrabToolRun {
-  state: "running" | "review" | "done" | "error" | "stopped";
+  /** ``downloading`` = on its way to the dubbing queue ("🎙 Lồng tiếng ngay"); ``nospeech`` = only music, nothing to dub */
+  state: "running" | "review" | "done" | "error" | "stopped" | "downloading" | "nospeech";
+  /** how many videos are in front of it in the dubbing queue (0 = next; null = not waiting) */
+  ahead?: number | null;
+  /** the finished video (done) */
+  media_id?: string | null;
+  /** the clip's Vietnamese name once translated */
+  name?: string;
+  mode?: "dub" | "sub";
   id: string;
   phase: string;
   progress: number;
@@ -138,6 +146,20 @@ export interface GrabToolRun {
 }
 export type GrabWork = Record<string, { dub?: GrabToolRun; cut?: GrabToolRun }>;
 export const getGrabWork = () => api<GrabWork>("/api/grab/work");
+
+/** "🎙 Lồng tiếng ngay": what the picked videos are dubbed with (remembered on this machine). */
+export interface DubNowOptions {
+  mode: "dub" | "sub";
+  voice: string;
+  keep_bgm: boolean;
+  look_preset_id: number | null;
+  sub_lang: string;
+  translator: "google" | "ai";
+}
+/** Download what is missing and hand the videos to the dubbing queue — the cards follow them (`getGrabWork`). */
+export const dubGrabNow = (ids: number[], o: DubNowOptions) =>
+  post<{ queued: number; skipped: number }>("/api/grab/dub", { ids, ...o });
+export const stopGrabDub = () => post<{ dropped: number; stopped: number }>("/api/grab/dub/stop", {});
 
 export const grabThumbUrl = (id: number) => `/api/grab/videos/${id}/thumb`;
 export const grabAvatarUrl = (id: number) => `/api/grab/channels/${id}/avatar`;

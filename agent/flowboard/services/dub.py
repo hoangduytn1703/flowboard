@@ -1343,18 +1343,27 @@ def _title_source(title: str) -> str:
     return re.sub(r"[#@]\S+", " ", title or "").strip(" ，,。.!！|-")
 
 
+def _title_lang(job: Job, title: str) -> Optional[str]:
+    """The language to translate a title from: its own when it is plainly Chinese / Japanese / Korean (a Douyin
+    caption over a video with only music is heard as "en" by Whisper — 15/11 that left the clip named in Chinese),
+    else what was heard; None = let the translator detect it."""
+    if CJK.search(title or ""):
+        return job.language if _base_lang(job.language) in ("zh", "ja", "ko", "yue") else None
+    return job.language or None
+
+
 async def _vi_title(job: Job) -> None:
     """The clip's name in Vietnamese (the person reads the clip list in Vietnamese) — one free call, best effort."""
     from flowboard.services import free_translate
 
     title_src = _title_source(job.title)
-    if not title_src or _base_lang(job.language) == "vi":
+    if not title_src or (_base_lang(job.language) == "vi" and not CJK.search(title_src)):
         return
     try:
-        title = (await asyncio.to_thread(free_translate.translate_lines, [title_src], job.language or None))[0][0]
+        title = (await asyncio.to_thread(free_translate.translate_lines, [title_src], _title_lang(job, title_src)))[0][0]
     except free_translate.TranslateError:
         return
-    if title:
+    if title and not CJK.search(title):
         job.title = title[:60].rstrip(" ,.;:")
 
 
@@ -1388,8 +1397,10 @@ async def _translate_free(job: Job, start: int = 0, note: str = "", target: str 
         title = ""
         if title_src:
             try:
-                title = (await asyncio.to_thread(free_translate.translate_lines, [title_src], job.language or None))[0][0]
+                title = (await asyncio.to_thread(free_translate.translate_lines, [title_src], _title_lang(job, title_src)))[0][0]
             except free_translate.TranslateError:
+                title = ""
+            if CJK.search(title):  # came back untranslated: the first line names the clip instead
                 title = ""
         title = title or next((s.text for s in job.segments if s.text.strip()), "")
         if title:
@@ -1469,6 +1480,13 @@ async def _fix_untranslated(job: Job, target: str = "vi") -> None:
         seg.text = line
 
 
+#: how long the automatic name check may hold a video (15/11: it took 41 of the 75 s of a 45-second video); the
+#: editor's own "✨ AI rà tên riêng" button is not limited
+NAMES_TIMEOUT_S = 20
+#: what a video with only music / noise ends with — not a failure of the tool (the grab list shows it in grey)
+NO_SPEECH = "Whisper không nghe ra câu nào trong video"
+
+
 def needs_name_check(job: Job) -> bool:
     """The free translator wrote the Vietnamese lines (the AI translator handles names itself)."""
     target = job.sub_lang if job.mode == "sub" else "vi"
@@ -1485,8 +1503,15 @@ async def _check_names(job: Job, title: str = "") -> None:
             _set(job, f"Đang rà tên riêng (AI Gemini) {k}/{n}", 60)
 
     try:
-        fixes, names = await dub_names.check([s.src for s in job.segments], [s.text for s in job.segments],
-                                             title=title or job.title, language=job.language, progress=progress)
+        fixes, names = await asyncio.wait_for(
+            dub_names.check([s.src for s in job.segments], [s.text for s in job.segments],
+                            title=title or job.title, language=job.language, progress=progress),
+            timeout=NAMES_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        job.names_note = (f"chưa rà tên riêng: AI trả lời chậm quá {NAMES_TIMEOUT_S} giây nên giữ bản dịch Google — "
+                          "bấm “✨ AI rà tên riêng” ở tab 📜 Các câu nếu thấy tên bị dịch sai")
+        logger.info("dub %s: name check timed out after %ss", job.id, NAMES_TIMEOUT_S)
+        return
     except dub_names.NamesError as exc:
         job.names_note = f"chưa rà tên riêng: {exc}"
         logger.info("dub %s: name check skipped: %s", job.id, exc)
@@ -1532,7 +1557,7 @@ def _prepare(job: Job) -> None:
     job.language = str(data.get("language") or "")
     job.segments = [Segment(float(s["start"]), float(s["end"]), str(s["text"])) for s in data.get("segments") or []]
     if not job.segments:
-        raise DubError("Whisper không nghe ra câu nào trong video")
+        raise DubError(NO_SPEECH)
     _set(job, "Đang dịch sang tiếng Việt", 52)
     title_src = job.title
     asyncio.run(_translate(job))
@@ -2554,6 +2579,15 @@ def running_job() -> Optional[Job]:
     return next((j for j in JOBS.values() if j.status in ("running", "rendering")), None)
 
 
+def remember_loop() -> None:
+    """Called from a request: jobs started later from a plain thread ("🎙 Lồng tiếng ngay") run on this loop's pool."""
+    global _LOOP
+    try:
+        _LOOP = asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+
+
 def _pump() -> None:
     """Start the oldest queued job when nothing is running. Called from the
     event loop (start / render) and from the worker thread when a job ends."""
@@ -2581,11 +2615,14 @@ def _pump() -> None:
         nxt.phase = "Bắt đầu"
     persist(nxt)
     if _LOOP is not None and not _LOOP.is_closed():
-        _LOOP.run_in_executor(None, _run_job, nxt, render)
-    else:  # no live loop (tests, or the request loop is gone): a plain thread
-        import threading
+        try:
+            _LOOP.run_in_executor(None, _run_job, nxt, render)
+            return
+        except RuntimeError:  # the remembered loop's pool is shut down (a job started from a plain thread): a thread then
+            pass
+    import threading  # no live loop (tests, or the request loop is gone): a plain thread
 
-        threading.Thread(target=_run_job, args=(nxt, render), daemon=True).start()
+    threading.Thread(target=_run_job, args=(nxt, render), daemon=True).start()
 
 
 _UNSET: Any = object()

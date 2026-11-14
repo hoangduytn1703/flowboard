@@ -128,7 +128,8 @@ def test_a_new_dub_translates_with_google_by_default_and_never_calls_the_ai(monk
     asyncio.run(dub._translate(job))
     assert [s.text for s in job.segments] == [f"vi src{i}" for i in range(5)]
     assert job.translated_by == "google"
-    assert job.title == "vi 棉花糖星球"  # hashtags dropped before translating the title
+    # the fake "translation" still has Chinese in it → counted as not translated: the first line names the clip (15/11)
+    assert job.title == "vi src0"
     assert job.public()["translator"] == "google"
 
 
