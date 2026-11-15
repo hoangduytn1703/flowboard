@@ -38,6 +38,7 @@ import { AccountPage } from "./pages/AccountPage";
 import { DubPage } from "./pages/DubPage";
 import { CutPage } from "./pages/CutPage";
 import { GrabPage } from "./pages/GrabPage";
+import { EditPage } from "./pages/EditPage";
 import { ClipChannel } from "./steps/ClipChannel";
 import { ClipPost } from "./steps/ClipPost";
 import { SchedulePage } from "./pages/SchedulePage";
@@ -49,16 +50,18 @@ import { SetupDialog } from "../components/SetupGuide";
 import { useSetupStore } from "../store/setup";
 import { AssistantWidget } from "../components/AssistantWidget";
 import { useFeature } from "../lib/features";
+import { editPath, MAX_EDIT_TOGETHER } from "../api/edit";
 import { FeatureGate } from "./FeatureGate";
 import { toast, useToastOn } from "../store/toast";
 import { PageEmpty, PageLoading } from "./PageState";
 import { askConfirm, askText } from "../components/Dialogs";
 
 /** A part of "✂️ Cắt video" (board template "cut_part"): its project, run and place among the parts. */
-function cutPartOf(qt: object, boardId: number | null): { job_id: string; run_id: string; index: number; total: number; board_id: number | null } | null {
-  const q = qt as { dub?: { job_id?: string }; cut?: { run_id?: string; index?: number; total?: number } };
+function cutPartOf(qt: object, boardId: number | null): { job_id: string; run_id: string; index: number; total: number; board_id: number | null; imported: boolean } | null {
+  const q = qt as { dub?: { job_id?: string }; cut?: { run_id?: string; index?: number; total?: number; origin?: string } };
   if (!q.dub?.job_id) return null;
-  return { job_id: q.dub.job_id, run_id: q.cut?.run_id ?? "", index: q.cut?.index ?? 1, total: q.cut?.total ?? 1, board_id: boardId };
+  // origin "edit": a video brought into "🎞 Chỉnh sửa video" (a file, another clip), not a part of a cut
+  return { job_id: q.dub.job_id, run_id: q.cut?.run_id ?? "", index: q.cut?.index ?? 1, total: q.cut?.total ?? 1, board_id: boardId, imported: q.cut?.origin === "edit" };
 }
 
 /** Wizard steps and their URL slugs: /clips/:id/<slug>. */
@@ -111,6 +114,8 @@ function useCloseOverlay() {
 export function QuicktoolApp() {
   const setUiMode = useSettingsStore((s) => s.setUiMode);
   const assistantOn = useFeature("assistant");
+  const dubOn = useFeature("dub");
+  const cutOn = useFeature("cut");
   const [templates, setTemplates] = useState<BoardTemplate[]>([]);
 
   useEffect(() => {
@@ -146,6 +151,7 @@ export function QuicktoolApp() {
           <Route path="/swipes" element={<FeatureGate feature="swipes" title="Mẫu đang hot"><SwipesPage /></FeatureGate>} />
           <Route path="/tools/dub" element={<FeatureGate feature="dub" title="Lồng tiếng video"><DubPage /></FeatureGate>} />
           {/* Edit auto CapCut is hidden (lib/features HIDDEN): it will come back inside the video editor; pages/CapcutPage.tsx is kept */}
+          <Route path="/tools/edit" element={dubOn || cutOn ? <EditPage /> : <FeatureGate feature="cut" title="Chỉnh sửa video"><EditPage /></FeatureGate>} />
           <Route path="/tools/capcut" element={<Navigate to="/tools/cut" replace />} />
           <Route path="/tools/grab" element={<FeatureGate feature="grab" title="Cào video kênh"><GrabPage /></FeatureGate>} />
           <Route path="/tools/cut" element={<FeatureGate feature="cut" title="Cắt video"><CutPage /></FeatureGate>} />
@@ -198,6 +204,12 @@ function useGridColumns(ref: React.RefObject<HTMLElement>): number {
 /** "Clip của tôi": at most this many rows of cards a page ("Clip mới" counts as one card). */
 const LIBRARY_ROWS = 3;
 
+/** A clip made by "🎙 Lồng tiếng" / "✂️ Cắt video": the editor project behind it (several open together with "✏️ Chỉnh N video"). */
+function dubJobOf(b: BoardSummary): string | null {
+  const qt = (b.data as { quicktool?: { template_id?: string; dub?: { job_id?: string } } } | undefined)?.quicktool;
+  return qt && (qt.template_id === "dub" || qt.template_id === "cut_part") ? qt.dub?.job_id ?? null : null;
+}
+
 function Library({ templates }: { templates: BoardTemplate[] }) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
@@ -248,6 +260,12 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
   const perClip = creditsPerClip(videoModel, videoQuality);
   // Only the unfinished ones among the ticked clips can be run; any ticked clip can be downloaded / deleted.
   const pickedRunnable = pickedList.filter((b) => !b.summary.exported);
+  // the ticked clips made by the dubbing / cutting tools: open in the editor side by side, one look for all
+  const pickedJobs = pickedList.map(dubJobOf).filter((id): id is string => !!id);
+  function editPicked() {
+    if (pickedJobs.length > MAX_EDIT_TOGETHER) toast.warning(`Mở ${MAX_EDIT_TOGETHER} video đầu — trình chỉnh sửa nhận tối đa ${MAX_EDIT_TOGETHER} video một lượt.`);
+    navigate(editPath(pickedJobs), { state: { back: "/clips" } });
+  }
   const allPicked = list.length > 0 && pickedList.length === list.length;
   const deleteBoardById = useBoardStore((s) => s.deleteBoardById);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -334,6 +352,12 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
                      title="Một file .zip chứa các clip đã ghép, tên file theo sản phẩm + ngày">
                     ⬇ Tải {pickedList.filter((b) => b.summary.exported).length} clip đã ghép
                   </a>
+                )}
+                {pickedJobs.length > 0 && (
+                  <button type="button" className="qt-btn qt-btn--accent" disabled={deleting} onClick={editPicked}
+                          title="Mở trình chỉnh sửa với các clip lồng tiếng / cắt video trong số đã chọn: chỉnh một clip rồi bấm “⇪ Áp cho cả loạt” để mọi clip cùng kiểu (khung, nền, phụ đề, chữ, nhân vật)">
+                    ✏️ Chỉnh {pickedJobs.length} video
+                  </button>
                 )}
                 {autoClip && pickedRunnable.length > 0 && (
                   <button type="button" className="qt-btn qt-btn--accent" disabled={deleting} onClick={() => startQueue(pickedRunnable)}

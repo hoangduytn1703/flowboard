@@ -56,7 +56,8 @@ FEATURE_KEYS = [f["key"] for f in FEATURES]
 #: Features taken out of sight for now: no menu, not listed in the plans table or the upgrade screen. Their keys
 #: stay valid (signed plans may carry them) and their routes keep working. "capcut": to come back inside the video
 #: editor instead of as a page of its own.
-HIDDEN_FEATURES = {"capcut"}
+#: "assistant" (15/11): parked until it is tested through again — the chat button is gone for every account.
+HIDDEN_FEATURES = {"capcut", "assistant"}
 
 
 def shown_features() -> list[dict[str, str]]:
@@ -98,6 +99,7 @@ _rule(r"^/api/dub/(mascot|background|decor)(/|$)", ("dub", "cut"))
 _rule(r"^/api/dub(/|$)", "dub")
 _rule(r"^/api/cut/clips$", ("cut", "dub"))               # the dubbing page picks videos from "Clip của tôi"
 _rule(r"^/api/cut(/|$)", "cut")
+_rule(r"^/api/edit(/|$)", ("dub", "cut"))                 # "🎞 Chỉnh sửa video": whoever can dub or cut can edit
 _rule(r"^/api/grab/media$", ("grab", "cut", "dub"))      # the cut / dubbing pages take the videos picked there
 _rule(r"^/api/grab/dub(/|$)", "dub")                     # "🎙 Lồng tiếng ngay" on the grab list starts dub jobs
 _rule(r"^/api/grab(/|$)", "grab")

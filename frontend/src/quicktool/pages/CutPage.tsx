@@ -4,8 +4,8 @@ import { announceRunning } from "../../components/BackgroundTasks";
 import { askConfirm } from "../../components/Dialogs";
 import { exportsZipUrl } from "../../api/client";
 import {
-  dubSubtitleLines, getDefaultLook, getDubJob, getDubStatus, linksIn, listLookPresets, normAdjust, normSpeed, normVolume, renderDub, SPEED_MARKS, SPEED_MAX, SPEED_MIN, speedLabel, VOLUME_MARKS, VOLUME_MAX, volumeLabel, subLangName, uploadDubVideo,
-  type DecorPreset, type DubCutRow, type DubJob, type DubRender, type DubStatus,
+  getDefaultLook, getDubJob, linksIn, listLookPresets, normAdjust, normSpeed, normVolume, SPEED_MARKS, SPEED_MAX, SPEED_MIN, speedLabel, VOLUME_MARKS, VOLUME_MAX, volumeLabel, subLangName, uploadDubVideo,
+  type DecorPreset, type DubCutRow,
 } from "../../api/dub";
 import { TickRange } from "../../components/TickRange";
 import { StopButton } from "../../components/StopButton";
@@ -16,7 +16,7 @@ import {
 } from "../../api/cut";
 import { grabMedia } from "../../api/grab";
 import { ChannelPicker } from "../channels/ChannelPicker";
-import { DubEditor, type BatchLook } from "../dub/editor/DubEditor";
+import { editPath, MAX_EDIT_TOGETHER } from "../../api/edit";
 import { fmtClock } from "../dub/editor/CutPane";
 import { PageEmpty, PageLoading } from "../PageState";
 import { PromptBox } from "../cut/PromptBox";
@@ -31,7 +31,6 @@ import "../cut.css";
 const MAX_LINKS = 10;
 const FORM_KEY = "flowboard.cut.form";
 const WORKING = ["queued", "running", "rendering"];
-const isWorking = (j: DubJob) => WORKING.includes(j.status);
 const MAX_PARTS_CHOICES = [0, 3, 5, 8, 10, 15, 20, 30];
 const DEFAULT_LANGS = ["Việt", "Tây Ban Nha", "Anh"];
 const errMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -92,7 +91,6 @@ export function CutPage() {
   useEffect(() => { document.title = "Cắt video · DFlow"; }, []);
   const [params, setParams] = useSearchParams();
   const [status, setStatus] = useState<CutToolStatus | null>(null);
-  const [dubStatus, setDubStatus] = useState<DubStatus | null>(null);
   const [sessions, setSessions] = useState<CutSession[] | null>(null);
   const [links, setLinks] = useState<string[]>([""]);
   const [files, setFiles] = useState<UpFile[]>([]);
@@ -104,10 +102,13 @@ export function CutPage() {
   const [looks, setLooks] = useState<DecorPreset[]>([]);
   const [lookId, setLookId] = useState<number | null>(null);
   const [starting, setStarting] = useState(false);
-  const [job, setJob] = useState<DubJob | null>(null);
-  const [siblings, setSiblings] = useState<DubJob[]>([]);
-  const jobRef = useRef<DubJob | null>(null);
-  jobRef.current = job;
+  // videos ticked on any card of the page (their editing jobs): "✏️ Chỉnh N video" opens them all side by side
+  const [picked, setPicked] = useState<Set<string>>(() => new Set());
+  const pickParts = (ids: string[], on: boolean) => setPicked((cur) => {
+    const n = new Set(cur);
+    for (const id of ids) { if (on) n.add(id); else n.delete(id); }
+    return n;
+  });
   const fileInput = useRef<HTMLInputElement>(null);
   const linkInputs = useRef<(HTMLInputElement | null)[]>([]);
   const cardRefs = useRef<Record<string, HTMLElement | null>>({});
@@ -115,7 +116,6 @@ export function CutPage() {
   useEffect(() => {
     void getCutStatus().then(setStatus).catch(() => setStatus({ whisper: false, whisper_reason: "", remotion: false, max_minutes: 60,
       max_links: MAX_LINKS, max_parts: 30, prompt_max: 4000, default_min: 30, default_max: 60 }));
-    void getDubStatus().then(setDubStatus).catch(() => undefined);
     void listLookPresets().then(setLooks).catch(() => setLooks([]));
     void listCutPrompts().then(setPrompts).catch(() => undefined);
     void getDefaultLook().then((d) => setLookId(d.id)).catch(() => undefined);
@@ -130,27 +130,23 @@ export function CutPage() {
     return () => window.clearInterval(t);
   }, [anyBusy]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── the editor: /tools/cut?job=<part>&run=<run>[&parts=<job ids>] ───────
+  // ── editing happens in "🎞 Chỉnh sửa video" ─────────────────────────────
+  const BACK = { state: { back: "/tools/cut" } };
+  // an old link /tools/cut?job=<part>[&run=<run>][&parts=<job ids>]: sent on to the editor with the same videos
   const wantJob = params.get("job");
   const wantRun = params.get("run");
   const wantParts = params.get("parts");
   useEffect(() => {
-    if (!wantJob) { setJob(null); setSiblings([]); return; }
-    if (job?.job_id === wantJob) return;
+    if (!wantJob) return;
     let gone = false;
     void (async () => {
       try {
-        const j = await getDubJob(wantJob);
-        const run = wantRun || j.cut?.run_id || j.batch_id || "";
-        let sibs = run ? await listCutParts({ run }) : [j];
-        if (wantParts) {
-          const only = wantParts.split(",");
-          sibs = sibs.filter((x) => only.includes(x.job_id));
+        let ids = wantParts ? wantParts.split(",") : [];
+        if (!ids.length) {
+          const run = wantRun || (await getDubJob(wantJob)).cut?.run_id || "";
+          ids = run ? (await listCutParts({ run })).map((x) => x.job_id) : [wantJob];
         }
-        if (gone) return;
-        setSiblings(sibs.length ? sibs : [j]);
-        setJob(j);
-        window.scrollTo({ top: 0 });
+        if (!gone) navigate(editPath(ids.length ? ids : [wantJob], wantJob), { replace: true, ...BACK });
       } catch (e) {
         if (!gone) { toast.error(errMessage(e)); setParams({}, { replace: true }); }
       }
@@ -158,82 +154,16 @@ export function CutPage() {
     return () => { gone = true; };
   }, [wantJob, wantRun, wantParts]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // the part being exported: poll it; the editor reloads the agent's copy when it is done
-  useEffect(() => {
-    if (!job || !isWorking(job)) return;
-    let stopped = false;
-    const tick = async () => {
-      try {
-        const j = await getDubJob(job.job_id);
-        if (stopped) return;
-        setJob(j);
-        setSiblings((ss) => ss.map((x) => (x.job_id === j.job_id ? j : x)));
-        if (j.status === "done") { toast.success("Đã xuất xong — clip trong “Clip của tôi” dùng bản mới."); refresh(); }
-        if (j.status === "error") toast.error(j.error ?? "Xuất video lỗi.");
-      } catch { /* the next tick tries again */ }
-    };
-    const timer = window.setInterval(tick, 2000);
-    return () => { stopped = true; window.clearInterval(timer); };
-  }, [job?.job_id, job?.status]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // the other parts being exported ("⇪ Áp cho cả loạt"): their state and percent, for the editor's progress cover
-  const othersWorking = !!job && siblings.some((x) => x.job_id !== job.job_id && isWorking(x));
-  useEffect(() => {
-    const run = wantRun || jobRef.current?.cut?.run_id;
-    if (!othersWorking || !run) return;
-    let stopped = false;
-    const tick = async () => {
-      try {
-        const all = await listCutParts({ run });
-        if (!stopped) setSiblings((ss) => ss.map((x) => all.find((y) => y.job_id === x.job_id) ?? x));
-      } catch { /* the next tick tries again */ }
-    };
-    const timer = window.setInterval(tick, 1500);
-    return () => { stopped = true; window.clearInterval(timer); refresh(); };
-  }, [othersWorking, wantRun]); // eslint-disable-line react-hooks/exhaustive-deps
-
+  /** "✏️ Chỉnh": this part with the other parts of its video (or only the ticked ones) in the editor. */
   function openEditor(part: { job_id: string }, s: CutSession, only?: string[]) {
-    const q: Record<string, string> = { job: part.job_id, run: s.run_id };
-    if (only && only.length > 1) q.parts = only.join(",");
-    setParams(q);
+    const ids = only && only.length > 1 ? only : s.parts.filter((p) => p.job_id && p.status !== "missing").map((p) => p.job_id);
+    navigate(editPath(ids.includes(part.job_id) ? ids : [part.job_id, ...ids], part.job_id), BACK);
   }
-  function closeEditor() {
-    setParams({});
-    refresh();
-  }
-  function switchJob(id: string) {
-    const q: Record<string, string> = { job: id };
-    if (wantRun) q.run = wantRun;
-    if (wantParts) q.parts = wantParts;
-    const j = siblings.find((x) => x.job_id === id);
-    if (j) setJob(j);
-    setParams(q, { replace: true });
-  }
-  /** "⇪ Áp cho cả loạt": this part's look (+ its subtitle language) → every other part open in the editor. */
-  async function applyToOthers(look: BatchLook): Promise<number> {
-    const cur = jobRef.current;
-    if (!cur) return 0;
-    const targets = siblings.filter((j) => j.job_id !== cur.job_id && !isWorking(j));
-    const skipped = siblings.length - 1 - targets.length;
-    let sent = 0;
-    for (const t of targets) {
-      try {
-        const body: DubRender = { layout: look.layout, style: look.style, engine: look.engine, highlights: look.highlights, carried: true };
-        if (look.lang && look.lang !== (t.sub_lang ?? "none")) {
-          body.sub_lang = look.lang;
-          if (look.lang !== "none" && t.segments.length) body.lines = (await dubSubtitleLines(t.job_id, look.lang)).lines;
-        }
-        await renderDub(t.job_id, body);
-        sent++;
-      } catch (e) {
-        toast.error(`${t.name || t.job_id}: ${errMessage(e)}`);
-      }
-    }
-    if (skipped) toast.warning(`${skipped} video đang xuất — bỏ qua, áp lại sau.`);
-    announceRunning();
-    const run = wantRun || cur.cut?.run_id;
-    if (run) void listCutParts({ run }).then((all) => setSiblings((ss) => all.filter((x) => ss.some((y) => y.job_id === x.job_id)))).catch(() => undefined);
-    return sent;
+  /** "✏️ Chỉnh N video" with videos ticked on several cards. */
+  function openEditorMany(ids: string[]) {
+    if (!ids.length) return;
+    if (ids.length > MAX_EDIT_TOGETHER) toast.warning(`Mở ${MAX_EDIT_TOGETHER} video đầu — trình chỉnh sửa nhận tối đa ${MAX_EDIT_TOGETHER} video một lượt.`);
+    navigate(editPath(ids), BACK);
   }
 
   // ── the form ─────────────────────────────────────────────────────────────
@@ -324,25 +254,13 @@ export function CutPage() {
   }, [focusRun, focusSession, !!sessions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!status || !sessions) return <PageLoading text="Đang mở công cụ cắt video…" />;
+  // every cut video on the page that can open in the editor, card by card; the ticked ones among them
+  const allParts = sessions.flatMap((s) => s.parts.filter((p) => p.job_id && p.status !== "missing"));
+  const pickedAll = allParts.filter((p) => picked.has(p.job_id));
+  const allPartsPicked = allParts.length > 0 && pickedAll.length === allParts.length;
+  const pickedFrom = sessions.filter((s) => s.parts.some((p) => picked.has(p.job_id))).length;
 
-  if (wantJob) {
-    return (
-      <>
-        <header className="qt-header">
-          <span className="qt-header__crumb">✂️ Cắt video{job ? ` › ${job.name || "chỉnh sửa"}` : ""}</span>
-        </header>
-        <div className="qt-home qt-dub">
-          {job && dubStatus ? (
-            <DubEditor key={job.job_id} job={job} status={dubStatus} onClose={closeEditor}
-                       onJob={(j) => { setJob(j); setSiblings((ss) => ss.map((x) => (x.job_id === j.job_id ? j : x))); }}
-                       onSibling={(j) => setSiblings((ss) => ss.map((x) => (x.job_id === j.job_id ? j : x)))}
-                       siblings={siblings} onSwitch={siblings.length > 1 ? switchJob : undefined}
-                       onApplyAll={siblings.length > 1 ? applyToOthers : undefined} />
-          ) : <PageLoading text="Đang mở video…" />}
-        </div>
-      </>
-    );
-  }
+  if (wantJob) return <PageLoading text="Đang mở trình chỉnh sửa…" />;
 
   return (
     <>
@@ -420,13 +338,31 @@ export function CutPage() {
             <div className="ct__listhead">
               <h3>Video đã cắt</h3>
               <small>{sessions.length ? `${sessions.length} video gốc` : ""}</small>
+              {allParts.length > 1 && (
+                <div className="ct__pickall" role="group" aria-label="Chọn video ở mọi thẻ">
+                  <label className="qt-check" title="Tick mọi video đã cắt của mọi link trên trang">
+                    <input type="checkbox" checked={allPartsPicked} onChange={() => pickParts(allParts.map((p) => p.job_id), !allPartsPicked)} />
+                    Chọn mọi video ({allParts.length})
+                  </label>
+                  {pickedAll.length > 0 && (
+                    <>
+                      <span className="ct__pickcount">đã chọn <strong>{pickedAll.length}</strong>{pickedFrom > 1 ? ` · từ ${pickedFrom} video gốc` : ""}</span>
+                      <button type="button" className="qt-btn qt-btn--small qt-btn--accent" onClick={() => openEditorMany(pickedAll.map((p) => p.job_id))}
+                              title="Mở trình chỉnh sửa với mọi video đã chọn (ở mọi thẻ): chỉnh một video rồi bấm “⇪ Áp cho cả loạt”">
+                        ✏️ Chỉnh {pickedAll.length} video
+                      </button>
+                      <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={() => setPicked(new Set())}>Bỏ chọn</button>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
             {!sessions.length ? (
               <PageEmpty icon="✂️" title="Chưa cắt video nào" compact>
                 Dán link video dài bên trái rồi bấm 🔍 Phân tích — video hiện ở đây để chọn đoạn cắt.
               </PageEmpty>
             ) : sessions.map((s) => (
-              <SessionCard key={s.id} s={s} focused={s.id === focusSession || (!focusSession && s.run_id === focusRun)}
+              <SessionCard key={s.id} s={s} picked={picked} onPick={pickParts} focused={s.id === focusSession || (!focusSession && s.run_id === focusRun)}
                            cardRef={(el) => { cardRefs.current[s.id] = el; }} onChanged={refresh}
                            prompts={prompts} onPrompts={setPrompts} langs={status.title_langs ?? DEFAULT_LANGS} promptMax={status.prompt_max}
                            canHear={status.whisper}
@@ -441,7 +377,10 @@ export function CutPage() {
   );
 }
 
-function SessionCard({ s, focused, cardRef, onChanged, onEdit, onDub, prompts, onPrompts, langs, promptMax, waiting, canHear }: {
+function SessionCard({ s, picked, onPick, focused, cardRef, onChanged, onEdit, onDub, prompts, onPrompts, langs, promptMax, waiting, canHear }: {
+  /** the videos ticked on the page (editing job ids) — shared by every card, so a pick can span several */
+  picked: Set<string>;
+  onPick: (jobIds: string[], on: boolean) => void;
   /** this machine can hear the words (Whisper) */
   canHear: boolean;
   /** the other analysed videos still waiting for their parts ("AI chọn đoạn cho cả N video") */
@@ -458,12 +397,11 @@ function SessionCard({ s, focused, cardRef, onChanged, onEdit, onDub, prompts, o
   onDub: (boardIds: number[]) => void;
 }) {
   const [editingRows, setEditingRows] = useState(false);
-  const [picked, setPicked] = useState<Set<number>>(new Set());
   const busy = isBusy(s);
   const showRows = s.status === "review" || editingRows;
   const parts = s.parts;
-  const pickedParts = parts.filter((p) => picked.has(p.index));
-  const toggle = (i: number) => setPicked((cur) => { const n = new Set(cur); if (n.has(i)) n.delete(i); else n.add(i); return n; });
+  const pickedParts = parts.filter((p) => picked.has(p.job_id));
+  const toggle = (p: CutPartView) => onPick([p.job_id], !picked.has(p.job_id));
   const allPicked = parts.length > 0 && pickedParts.length === parts.length;
   const planning = s.status === "review" && !s.rows.length && !parts.length;
   const hearing = isHearing(s);
@@ -543,7 +481,7 @@ function SessionCard({ s, focused, cardRef, onChanged, onEdit, onDub, prompts, o
         <>
           <div className="ct-s__bar">
             <label className="qt-check"><input type="checkbox" checked={allPicked}
-              onChange={() => setPicked(allPicked ? new Set() : new Set(parts.map((p) => p.index)))} /> Chọn tất cả ({parts.length})</label>
+              onChange={() => onPick(parts.map((p) => p.job_id), !allPicked)} /> Chọn tất cả ({parts.length})</label>
             {pickedParts.length > 0 && (
               <>
                 <button type="button" className="qt-btn qt-btn--small qt-btn--accent"
@@ -560,7 +498,7 @@ function SessionCard({ s, focused, cardRef, onChanged, onEdit, onDub, prompts, o
           </div>
           <div className="ct-parts">
             {parts.map((p) => (
-              <PartCard key={p.index} p={p} picked={picked.has(p.index)} onPick={() => toggle(p.index)}
+              <PartCard key={p.index} p={p} picked={picked.has(p.job_id)} onPick={() => toggle(p)}
                         onEdit={() => onEdit(p)} onDub={() => p.board_id && onDub([p.board_id])} />
             ))}
           </div>

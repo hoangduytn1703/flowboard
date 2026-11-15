@@ -850,6 +850,15 @@ export function listDubBatch(batchId: string): Promise<DubJob[]> {
   return api<DubJob[]>(`/api/dub/jobs?batch=${encodeURIComponent(batchId)}`);
 }
 
+/** "✏️ Chỉnh N video": how many finished videos one editor session takes (the agent's cap too). */
+export const MAX_EDIT_TOGETHER = 60;
+
+/** Exactly these jobs (full, with lines), in this order — videos picked anywhere to be edited together. */
+export function listDubJobsByIds(ids: string[]): Promise<DubJob[]> {
+  return api<DubJob[]>(`/api/edit/jobs?ids=${encodeURIComponent(ids.slice(0, MAX_EDIT_TOGETHER).join(","))}`);
+}
+
+
 /** Every http(s) link in a pasted text, in order (a Douyin share is "<title> <link>"; several shares = several links). */
 export function linksIn(text: string): string[] {
   return Array.from(text.matchAll(/https?:\/\/[^\s<>"'）)]+/g), (m) => m[0].replace(/[.,;:!?]+$/, ""));

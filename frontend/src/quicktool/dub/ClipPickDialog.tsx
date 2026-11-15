@@ -10,7 +10,9 @@ export interface PickedClip { board_id: number; name: string; media_id: string; 
  * "🎬 Chọn từ Clip của tôi": finished clips (a video to dub) — the videos cut on "✂️ Cắt video" first, newest first.
  * Up to ``max`` at once (the dubbing queue's room).
  */
-export function ClipPickDialog({ max, initial, onPick, onClose }: {
+export function ClipPickDialog({ max, initial, onPick, onClose, everyClip = false }: {
+  /** list every clip with a video from the start ("🎞 Chỉnh sửa video"), not only the cut ones */
+  everyClip?: boolean;
   max: number;
   initial: PickedClip[];
   onPick: (clips: PickedClip[]) => void;
@@ -18,7 +20,7 @@ export function ClipPickDialog({ max, initial, onPick, onClose }: {
 }) {
   const [boards, setBoards] = useState<BoardSummary[] | null>(null);
   const [query, setQuery] = useState("");
-  const [onlyCut, setOnlyCut] = useState(true);
+  const [onlyCut, setOnlyCut] = useState(!everyClip);
   const [picked, setPicked] = useState<Map<number, PickedClip>>(() => new Map(initial.map((c) => [c.board_id, c])));
   const search = useRef<HTMLInputElement>(null);
 

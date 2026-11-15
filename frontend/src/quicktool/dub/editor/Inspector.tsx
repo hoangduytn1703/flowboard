@@ -104,7 +104,9 @@ export function Inspector({
   /** "✂️ Cắt": cut the exported video into several clips */
   cutPane: ReactNode;
   /** "Ngôn ngữ phụ đề": the lines' language now, the video's own (Whisper), switching (rewrites every line) */
-  lang: { value: SubLang; source: string; busy: boolean; set: (l: SubLang) => void };
+  lang: { value: SubLang; source: string; busy: boolean; set: (l: SubLang) => void;
+          /** a video brought in without its words heard: hear them now ("🎞 Chỉnh sửa video") */
+          hear?: { state: string; progress: number; error: string; start: () => void; stop: () => void } };
   /** "🔤 Tên riêng" (top of "📜 Các câu") */
   names: NamesCtl;
   /** a part of "✂️ Cắt video": no voice-over, subtitles optional ("Không có phụ đề"), no "✂️ Cắt" tab */
@@ -181,8 +183,24 @@ export function Inspector({
             {lang.value === "none" && (
               <p className="dx-insp__tip">
                 {cues.length ? `Video đang tắt phụ đề — chọn ngôn ngữ để bật (${cues.length} câu lấy từ lời trong video).`
+                  : lang.hear ? "Video này chưa được nghe lời nên chưa có phụ đề. Cần phụ đề thì bấm nút dưới — không cần thì cứ chỉnh khung, nền, chữ, tốc độ… rồi xuất."
                   : "Không nghe được lời nào trong video này nên không có phụ đề — vẫn chỉnh khung xuất, vùng mờ, trang trí, nhấn chữ được."}
               </p>
+            )}
+            {!cues.length && lang.hear && (
+              lang.hear.state === "wait" || lang.hear.state === "run" ? (
+                <div className="dx-insp__hear" role="status">
+                  <span>🎧 {lang.hear.state === "wait" ? "Chờ đến lượt nghe lời…" : `Đang nghe lời… ${lang.hear.progress}%`}</span>
+                  <div className="qt-dub__bar"><span style={{ width: `${lang.hear.state === "run" ? lang.hear.progress : 0}%` }} /></div>
+                  <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={lang.hear.stop}>Dừng</button>
+                </div>
+              ) : (
+                <>
+                  <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={readOnly} onClick={lang.hear.start}
+                          title="AI nghe lời trong video (Whisper) để có phụ đề; chạy ngầm, vẫn chỉnh tiếp được">🎧 Nghe lời để có phụ đề</button>
+                  {lang.hear.error && <p className="dx-insp__tip dx-insp__tip--warn">⚠ {lang.hear.error}</p>}
+                </>
+              )
             )}
           </section>
         )}

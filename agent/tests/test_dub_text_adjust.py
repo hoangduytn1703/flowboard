@@ -63,10 +63,21 @@ def test_text_layers_become_ass_styles_and_events():
         {"role": "text", "text": "chữ viền", "x": 0.25, "y": 0.5, "color": "#141414", "bg": "", "bold": False, "secs": 3},
     ])
     styles, events = dub.text_ass(texts, 720, 1280, 10.0)
-    assert len(styles) == 2 and len(events) == 2
-    box, outline = styles
-    # a filled box: BorderStyle 3 in the box colour (ASS is BGR), bold
-    assert box.startswith("Style: T0,Arial,") and ",&H00FFFFFF," in box and "&H002D32E5,&H002D32E5,-1," in box and ",3," in box
+    assert len(styles) == 3 and len(events) == 3
+    box, shape, outline = styles
+    # a box: bold text with no border of its own, over ONE rectangle in the box colour (ASS is BGR) — libass's
+    # BorderStyle 3 would box every line to its own width, the editor shows one block
+    assert box.startswith("Style: T0,Arial,") and ",&H00FFFFFF," in box and "&H002D32E5,&H002D32E5,-1," in box and ",1,0,0,5," in box
+    assert shape.startswith("Style: T0b,Arial,") and shape.split(",")[3] == "&H002D32E5"
+    rect = events.pop(0)
+    assert rect.startswith("Dialogue: 1,0:00:00.00,0:00:10.00,T0b,") and "{\\an5\\pos(360,128)\\p1}m 0 0 l " in rect
+    corners = rect.split(" l ")[1].split(" ")          # bw 0 bw bh 0 bh
+    bw, bh = int(corners[0]), int(corners[3])
+    n_lines = events[0].count("\\N") + 1
+    font = dub.text_font_px(1280, texts[0]["size"])
+    assert n_lines >= 2 and bh == round(n_lines * font + 2 * font * 0.2)      # as tall as all its lines
+    widest = max(dub.text_line_px(x, font, bold=True) for x in events[0].split("}", 1)[1].split("\\N"))
+    assert bw == round(widest + 2 * font * 0.3) and bw <= 720                   # as wide as its longest line
     # no box: outlined text — a light edge round dark text, not bold
     assert ",&H00141414," in outline and ",&H00FFFFFF,&H80000000,0," in outline and ",1," in outline
     assert "{\\an5\\pos(360,128)}" in events[0] and "\\N" in events[0] and "{x}" not in events[0] and "(x)" in events[0]
@@ -341,6 +352,7 @@ def test_bold_can_be_lighter_or_heavier():
     assert dub.text_weight(mk(), 40) == (True, 0.0) and dub.text_weight(mk(bold=False, weight=2), 40) == (False, 0.0)
     assert dub.text_weight(mk(weight=0.5), 40) == (False, 0.44) and dub.text_weight(mk(weight=2), 40) == (True, 1.2)
     styles, events = dub.text_ass([mk(weight=2)], 720, 1280, 5.0)
-    assert len(styles) == 2 and styles[1].startswith("Style: T0s,") and len(events) == 2 and ",T0s," in events[1]
+    assert [s.split(",")[0] for s in styles] == ["Style: T0", "Style: T0b", "Style: T0s"]
+    assert [e.split(",")[3] for e in events] == ["T0b", "T0", "T0s"]      # the box, the words, the heavier stroke on top
     styles, events = dub.text_ass([mk()], 720, 1280, 5.0)
-    assert len(styles) == 1 and len(events) == 1
+    assert len(styles) == 2 and len(events) == 2

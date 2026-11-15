@@ -11,7 +11,8 @@ export type FeatureKey =
 
 /** Taken out of sight for now (agent: plans.HIDDEN_FEATURES) — no menu, no page, whatever the plan says.
  *  "capcut" is to come back inside the video editor. */
-const HIDDEN: FeatureKey[] = ["capcut"];
+// "assistant": parked until it is tested through again (15/11).
+const HIDDEN: FeatureKey[] = ["capcut", "assistant"];
 
 export function hasFeature(me: AccountMe | null, key: FeatureKey): boolean {
   if (HIDDEN.includes(key)) return false;

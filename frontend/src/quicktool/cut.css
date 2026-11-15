@@ -46,7 +46,11 @@
 .ct__tip { margin: 10px 0 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
 .ct__err { margin: 4px 0 0; color: #fca5a5; font-size: 13.5px; }
 
-.ct__listhead { display: flex; align-items: baseline; gap: 10px; }
+.ct__listhead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+/* ticks across every card: "Chọn mọi video" + "✏️ Chỉnh N video" */
+.ct__pickall { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ct__pickcount { font-size: 13px; color: var(--muted); }
+.ct__pickcount strong { color: var(--qt-accent, #ff6a2b); }
 .ct__listhead h3 { margin: 0; font-size: 17px; }
 .ct__listhead small { color: var(--muted); }
 

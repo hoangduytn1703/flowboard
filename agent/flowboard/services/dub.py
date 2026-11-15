@@ -998,9 +998,45 @@ def text_font_px(height: int, size: float) -> int:
     return max(14, round(height * 0.036 * size))
 
 
+#: libass sizes a font by its line height (ascent + descent); Arial's is this many em
+ASS_LINE_EM = 1.117
+_TEXT_FONTS: dict[tuple[bool, bool, int], Any] = {}
+
+
+def _measure_font(bold: bool, italic: bool, em_px: int) -> Any:
+    """Arial (or the nearest face this machine has) at ``em_px``, to measure a line the way libass will draw it."""
+    key = (bold, italic, em_px)
+    if key not in _TEXT_FONTS:
+        from PIL import ImageFont
+
+        names = {(False, False): ("arial.ttf", "LiberationSans-Regular.ttf", "DejaVuSans.ttf"),
+                 (True, False): ("arialbd.ttf", "LiberationSans-Bold.ttf", "DejaVuSans-Bold.ttf"),
+                 (False, True): ("ariali.ttf", "LiberationSans-Italic.ttf", "DejaVuSans-Oblique.ttf"),
+                 (True, True): ("arialbi.ttf", "LiberationSans-BoldItalic.ttf", "DejaVuSans-BoldOblique.ttf")}[(bold, italic)]
+        font = None
+        for name in names:
+            try:
+                font = ImageFont.truetype(name, em_px)
+                break
+            except OSError:
+                continue
+        _TEXT_FONTS[key] = font
+    return _TEXT_FONTS[key]
+
+
+def text_line_px(line: str, font_px: int, *, bold: bool = False, italic: bool = False) -> float:
+    """How wide libass draws ``line`` in Arial at ASS size ``font_px`` (an estimate when no font file is found)."""
+    em = max(4, round(font_px / ASS_LINE_EM))
+    font = _measure_font(bold, italic, em)
+    if font is None:
+        return text_units(line) * em * (0.6 if bold else 0.56)
+    return float(font.getlength(line))
+
+
 def text_ass(texts: list[dict[str, Any]], width: int, height: int, total_s: float) -> tuple[list[str], list[str]]:
-    """``(style lines, events)`` of the text layers — each its own style ``T<i>``: a filled box (BorderStyle 3) when
-    it has a background colour, else outlined text; centred on (x, y), over the subtitles."""
+    """``(style lines, events)`` of the text layers — each its own style ``T<i>``: with a background colour, ONE
+    rectangle behind all its lines (drawn as a shape, style ``T<i>b`` — what the editor shows; libass's own
+    BorderStyle 3 boxes every line to its own width), else outlined text; centred on (x, y), over the subtitles."""
     styles, events = [], []
     for i, t in enumerate(texts):
         font = text_font_px(height, t["size"])
@@ -1009,8 +1045,8 @@ def text_ass(texts: list[dict[str, Any]], width: int, height: int, total_s: floa
         bold = f'{-1 if face else 0},{-1 if t.get("italic") else 0},{-1 if t.get("underline") else 0}'  # B, I, U
         if t["bg"]:
             box = _ass_colour(t["bg"])
-            styles.append(f"Style: T{i},Arial,{font},{primary},&H000000FF,{box},{box},{bold},0,100,100,0,0,3,"
-                          f"{max(6, font // 4)},0,5,0,0,0,1")
+            styles.append(f"Style: T{i},Arial,{font},{primary},&H000000FF,{box},{box},{bold},0,100,100,0,0,1,0,0,5,0,0,0,1")
+            styles.append(f"Style: T{i}b,Arial,{font},{box},&H000000FF,{box},{box},0,0,0,0,100,100,0,0,1,0,0,5,0,0,0,1")
         else:
             edge = "&H00000000" if _is_light(t["color"]) else "&H00FFFFFF"
             styles.append(f"Style: T{i},Arial,{font},{primary},&H000000FF,{edge},&H80000000,{bold},0,100,100,0,0,1,"
@@ -1019,13 +1055,21 @@ def text_ass(texts: list[dict[str, Any]], width: int, height: int, total_s: floa
             styles.append(f"Style: T{i}s,Arial,{font},{primary},&H000000FF,{primary},&HFF000000,{bold},0,100,100,0,0,1,"
                           f"{stroke:g},0,5,0,0,0,1")
         chars = max(4, int(width * t["w"] / (font * 0.52)))
-        body = "\\N".join(x.replace("{", "(").replace("}", ")") for x in wrap_text(t["text"], chars))
+        lines = [x.replace("{", "(").replace("}", ")") for x in wrap_text(t["text"], chars)]
+        body = "\\N".join(lines)
         end = min(total_s, t["secs"]) if t["secs"] > 0 and total_s > 0 else (total_s or t["secs"] or 36000.0)
         if not body or end <= 0.05:
             continue
+        cx, cy = round(width * t["x"]), round(height * t["y"])
+        if t["bg"]:  # the one box: as wide as the longest line, as tall as all of them, padded like the editor's
+            widest = max(text_line_px(x, font, bold=bool(face), italic=bool(t.get("italic"))) for x in lines) + 2 * stroke
+            bw = min(width, round(widest + 2 * font * 0.3))
+            bh = round(len(lines) * font + 2 * font * 0.2)
+            events.append(f"Dialogue: 1,{_ass_time(0)},{_ass_time(end)},T{i}b,,0,0,0,,"
+                          f"{{\\an5\\pos({cx},{cy})\\p1}}m 0 0 l {bw} 0 {bw} {bh} 0 {bh}{{\\p0}}")
         for layer, name in ((2, f"T{i}"), (3, f"T{i}s")) if stroke > 0 else ((2, f"T{i}"),):
             events.append(f"Dialogue: {layer},{_ass_time(0)},{_ass_time(end)},{name},,0,0,0,,"
-                          f"{{\\an5\\pos({round(width * t['x'])},{round(height * t['y'])})}}{body}")
+                          f"{{\\an5\\pos({cx},{cy})}}{body}")
     return styles, events
 
 

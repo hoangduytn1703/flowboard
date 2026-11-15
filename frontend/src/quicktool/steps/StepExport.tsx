@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import { editPath } from "../../api/edit";
 import { useEffect, useRef, useState } from "react";
 import {
   BGM_DEFAULT_VOLUME, BGM_VOLUMES, COVER_STYLES, MAX_MUSIC_BYTES, MAX_SPEAKERS, VOICES,
@@ -119,7 +120,7 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
   /** a part cut out of a dubbed video ("✂️ Cắt thành nhiều video") */
   dubPart?: { index: number; total: number } | null;
   /** a part of a long video cut on the "✂️ Cắt video" page: edited there, dubbed on the dubbing page */
-  cutPart?: { job_id: string; run_id: string; index: number; total: number; board_id: number | null } | null;
+  cutPart?: { job_id: string; run_id: string; index: number; total: number; board_id: number | null; imported?: boolean } | null;
 }) {
   const voiceGroups = useVoiceGroups();
   const navigate = useNavigate();
@@ -271,15 +272,18 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
     <div className="qt-step qt-step--two">
       {cutPart ? (
         <section className="qt-card qt-dubclip">
-          <div className="qt-card__eyebrow">Video {cutPart.index}/{cutPart.total} cắt từ video dài</div>
-          <h3 className="qt-card__title">Chỉnh ở trang Cắt video</h3>
+          <div className="qt-card__eyebrow">{cutPart.imported ? "Video đã chỉnh sửa" : `Video ${cutPart.index}/${cutPart.total} cắt từ video dài`}</div>
+          <h3 className="qt-card__title">Chỉnh ở trang Chỉnh sửa video</h3>
           <p className="qt-card__hint">
-            Video này được <strong>cắt</strong> ra từ một video dài, giữ nguyên tiếng gốc. Chỉnh phụ đề (đúng lời trong video hoặc dịch), khung
+            {cutPart.imported ? <>Video này làm ở menu <strong>Chỉnh sửa video</strong>, giữ nguyên tiếng gốc.</>
+              : <>Video này được <strong>cắt</strong> ra từ một video dài, giữ nguyên tiếng gốc.</>} Chỉnh phụ đề (đúng lời trong video hoặc dịch), khung
             9:16 + nền, vùng mờ che chữ / logo, nhân vật, nhấn chữ — từng video hoặc cả loạt; xuất xong clip này tự dùng bản mới.
           </p>
           <div className="qt-dubclip__acts">
-            {cutOn && <button type="button" className="qt-btn qt-btn--accent qt-btn--big"
-                              onClick={() => navigate(`/tools/cut?job=${cutPart.job_id}${cutPart.run_id ? `&run=${cutPart.run_id}` : ""}`)}>✏️ Mở trình chỉnh sửa</button>}
+            {(cutOn || dubOn) && <button type="button" className="qt-btn qt-btn--accent qt-btn--big"
+                              onClick={() => navigate(cutPart.imported || !cutOn ? editPath([cutPart.job_id])
+                                : `/tools/cut?job=${cutPart.job_id}${cutPart.run_id ? `&run=${cutPart.run_id}` : ""}`,
+                                cutPart.board_id ? { state: { back: `/clips/${cutPart.board_id}/export` } } : undefined)}>✏️ Mở trình chỉnh sửa</button>}
             {dubOn && cutPart.board_id && <button type="button" className="qt-btn qt-btn--big"
                               onClick={() => navigate(`/tools/dub?clips=${cutPart.board_id}`)}>🎙 Lồng tiếng video này</button>}
           </div>

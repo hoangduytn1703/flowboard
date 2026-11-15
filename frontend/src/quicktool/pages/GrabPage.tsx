@@ -10,6 +10,7 @@ import {
   pickGrabVideos, saveGrabPrompt, scanAllGrabChannels, scanGrabChannel, setGrabMarks, shortCount, stopGrabDownloads, stopGrabScan,
   type GrabChannel, type GrabMarkTag, type GrabState, type GrabStatus, type GrabToolRun, type GrabVideo, type GrabWork,
 } from "../../api/grab";
+import { editPath, MAX_EDIT_TOGETHER } from "../../api/edit";
 import { MarkMenu, mainMark, markClass, markIcon, markTone } from "../grab/MarkMenu";
 import { DubNowDialog, savedDubNow } from "../grab/DubNowDialog";
 import { useSettingsStore } from "../../store/settings";
@@ -433,6 +434,16 @@ export function GrabPage() {
   const pickedList = useMemo(() => videos.filter((v) => picked.has(v.id)), [videos, picked]);
   const pickedTodo = pickedList.filter((v) => downloadOf(v, state) === "");
   const pickedHere = pickedList.filter((v) => downloadOf(v, state) === "done" && v.media_id);
+  // the picked videos already dubbed / subtitled here: "✏️ Chỉnh N video" opens them side by side in the editor
+  // (the select "Video n/N"; edit one, "⇪ Áp cho cả loạt" gives every other one the same look)
+  const pickedEditable = pickedList.map((v) => work[String(v.id)]?.dub)
+    .filter((r): r is GrabToolRun => !!r && !!r.id && (r.state === "done" || r.state === "review"));
+  function editPicked() {
+    const ids = pickedEditable.map((r) => r.id);
+    if (!ids.length) return;
+    if (ids.length > MAX_EDIT_TOGETHER) toast.warning(`Mở ${MAX_EDIT_TOGETHER} video đầu — trình chỉnh sửa nhận tối đa ${MAX_EDIT_TOGETHER} video một lượt.`);
+    navigate(editPath(ids), { state: { back: "/tools/grab" } });
+  }
   function toggle(id: number) {
     setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   }
@@ -900,6 +911,12 @@ export function GrabPage() {
                   <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={!picked.size || !!after} onClick={() => void send("cut", pickedList)}
                           title={`Đem video đã chọn đi cắt thành nhiều video ngắn (tối đa ${MAX_TO.cut} video một lượt; video chưa tải thì tool tải trước)`}>✂️ Cắt {picked.size || ""} video</button>
                 )}
+                {canDub && pickedEditable.length > 0 && (
+                  <button type="button" className="qt-btn qt-btn--small qt-btn--accent" onClick={editPicked}
+                          title="Mở trình chỉnh sửa với các video đã lồng tiếng / chèn phụ đề trong số đã chọn: chỉnh một video rồi bấm “⇪ Áp cho cả loạt” để mọi video cùng kiểu (khung, nền, phụ đề, chữ, nhân vật)">
+                    ✏️ Chỉnh {pickedEditable.length} video đã lồng
+                  </button>
+                )}
                 {canDub && (
                   <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={!picked.size} onClick={() => askDub(pickedList)}
                           title={`Lồng tiếng / chèn phụ đề các video đã chọn ngay tại đây (tối đa ${MAX_DUB_NOW} video một lượt; video chưa tải thì tool tự tải)`}>🎙 Lồng tiếng {picked.size || ""} video</button>
@@ -1013,7 +1030,7 @@ export function GrabPage() {
                             {dubRun?.state === "done" && dubRun.link && (
                               <div className="gb-v__ready">
                                 <span title={dubRun.name || ""}>✓ {dubRun.mode === "sub" ? "Đã chèn phụ đề" : "Đã lồng tiếng"}{dubRun.name ? ` · ${dubRun.name}` : ""}</span>
-                                <button type="button" className="qt-btn qt-btn--small qt-btn--accent" onClick={() => navigate(dubRun.link)}>✏️ Mở chỉnh</button>
+                                <button type="button" className="qt-btn qt-btn--small qt-btn--accent" onClick={() => navigate(editPath([dubRun.id]), { state: { back: "/tools/grab" } })}>✏️ Mở chỉnh</button>
                                 {dubRun.media_id && <a className="qt-btn qt-btn--small" href={`/media/${dubRun.media_id}`} target="_blank" rel="noreferrer" title="Xem video đã lồng tiếng">▶ Xem</a>}
                               </div>
                             )}

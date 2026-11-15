@@ -143,6 +143,10 @@
 .dx-insp__row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
 .dx-insp__row2 input[type="range"], .dx-insp__sec input[type="range"] { width: 100%; }
 .dx-insp__tip { margin: 0; font-size: 12px; color: var(--muted); line-height: 1.45; }
+.dx-insp__tip--warn { color: #ffb48f; }
+/* "🎧 Nghe lời": a video brought in without its words */
+.dx-insp__hear { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 6px 8px; font-size: 13px; }
+.dx-insp__hear .qt-dub__bar { grid-column: 1 / -1; }
 .dx-insp__empty { margin: 0; padding: 12px; border: 1px dashed var(--border); border-radius: 10px; color: var(--muted); font-size: 13.5px; line-height: 1.5; }
 .dx-insp__decor { border: 0; margin: 0; padding: 0; min-width: 0; }
 .dx-insp__decor .qt-decor { margin-top: 0; }

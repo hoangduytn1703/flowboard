@@ -49,6 +49,10 @@ export function QuicktoolSidebar() {
                 title="Dán link video nước ngoài → bỏ tiếng gốc, đọc lại bằng giọng Việt, in phụ đề hộp vàng, lưu thành clip">
           <span className="qt-nav__icon">🎙</span> Lồng tiếng video
         </button>}
+        {(on("dub") || on("cut")) && <button type="button" className={`qt-nav__item${is("/tools/edit") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/tools/edit")}
+                title="Chỉnh nhiều video một lúc: thả video từ máy hoặc lấy từ Clip của tôi, chỉnh một video (khung, nền, chữ, phụ đề, tốc độ…) rồi áp cho cả loạt">
+          <span className="qt-nav__icon">🎞</span> Chỉnh sửa video
+        </button>}
         {on("cut") && <button type="button" className={`qt-nav__item${is("/tools/cut") ? " qt-nav__item--active" : ""}`} onClick={() => navigate("/tools/cut")}
                 title="Dán link video dài → AI cắt thành nhiều video ngắn theo yêu cầu, chỉnh từng video hoặc cả loạt (không lồng tiếng)">
           <span className="qt-nav__icon">✂️</span> Cắt video

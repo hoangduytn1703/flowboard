@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { announceRunning } from "../../../components/BackgroundTasks";
 import { detectBands } from "../../../api/clean";
 import {
-  canvasSize, carryTexts, checkDubNames, DEFAULT_BLUR, dubFilmstripUrl, dubSubtitleLines, dubWaveUrl, layoutBlurs, linesAreVietnamese, MAX_BLURS,
+  canvasSize, carryTexts, checkDubNames, DEFAULT_BLUR, dubFilmstripUrl, getDubJob, dubSubtitleLines, dubWaveUrl, layoutBlurs, linesAreVietnamese, MAX_BLURS,
   normHighlights, normLayout, normNames, normSpeed, normVolume, pickDubHighlights, renderDub, SPEED_MARKS, SPEED_MAX, SPEED_MIN, speedLabel, VOLUME_MARKS, VOLUME_MAX, volumeLabel, stopDub, subLangName,
   withBlurs, withTextSlots,
   type DubEngine, type DubHighlights, type DubJob, type DubLayout, type DubName, type DubRender, type DubStatus, type DubText, type SubLang,
@@ -24,6 +24,7 @@ import { CutPane } from "./CutPane";
 import "./editor.css";
 import { askConfirm } from "../../../components/Dialogs";
 import { StopButton } from "../../../components/StopButton";
+import { getEditHear, hearEditJob, stopEditHear, type HearState } from "../../../api/edit";
 
 const MIN_SLOT = 0.3;
 const COALESCE_MS = 900;
@@ -186,6 +187,42 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
   const [picking, setPicking] = useState(false);
   const [langBusy, setLangBusy] = useState(false);
   const [namesBusy, setNamesBusy] = useState(false);
+  // "🎧 Nghe lời": a video brought in without its words ("🎞 Chỉnh sửa video") gets them when subtitles are wanted
+  const [hear, setHear] = useState<HearState>({ state: "", progress: 0, error: "" });
+  const canHear = job.kind === "cut" && job.segments.length === 0;
+  useEffect(() => {
+    if (!canHear) return;
+    let gone = false;
+    void getEditHear(job.job_id).then((h) => { if (!gone) setHear(h); }).catch(() => undefined);
+    return () => { gone = true; };
+  }, [job.job_id, canHear]);
+  useEffect(() => {
+    if (hear.state !== "wait" && hear.state !== "run") return;
+    let gone = false;
+    const timer = window.setInterval(async () => {
+      try {
+        const h = await getEditHear(job.job_id);
+        if (gone) return;
+        if (h.state === "done") {
+          // the words are in: the lines join this document (what was edited meanwhile stays), subtitles on.
+          // (the state is set last: setting it first would end this effect before the job is read)
+          const fresh = await getDubJob(job.job_id);
+          if (gone) return;
+          const heard = docFrom(fresh);
+          change((d) => ({ ...d, cues: heard.cues, lang: heard.lang }));
+          onJob(fresh);
+          toast.success(`Đã nghe xong ${heard.cues.length} câu — phụ đề đã bật, chỉnh kiểu chữ ở tab 💬 Phụ đề.`);
+        }
+        setHear(h);
+      } catch { /* the next tick tries again */ }
+    }, 1500);
+    return () => { gone = true; window.clearInterval(timer); };
+  }, [hear.state, job.job_id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const hearCtl = canHear ? {
+    ...hear,
+    start: () => void hearEditJob(job.job_id).then(setHear).catch((e) => toast.error(errMessage(e))),
+    stop: () => void stopEditHear(job.job_id).then(setHear).catch(() => undefined),
+  } : undefined;
   const [showResult, setShowResult] = useState(false);
   const stage = useRef<StageHandle>(null);
   const timeline = useRef<TimelineHandle>(null);
@@ -875,7 +912,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
             value: doc.highlights, set: setHl, pick: () => void pickHl(), picking, addAtNow: addPointAtNow, setPoint, removePoint, now: time,
             onPickPoint: (i) => { setSel({ kind: "hl", i }); const p = doc.highlights.points[i]; if (p) stage.current?.seek(p.at + 0.01); },
           }}
-          lang={{ value: doc.lang, source: job.language, busy: langBusy, set: (l) => void setSubLang(l) }}
+          lang={{ value: doc.lang, source: job.language, busy: langBusy, set: (l) => void setSubLang(l), hear: hearCtl }}
           names={{
             value: doc.names, set: (names, key) => change((d) => ({ ...d, names }), key), check: () => void checkNames(),
             checking: namesBusy, note: job.names_note ?? "", voiced: !subOnly, voiceNote: job.voice_note ?? "",
@@ -1010,7 +1047,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
             value: doc.highlights, set: setHl, pick: () => void pickHl(), picking, addAtNow: addPointAtNow, setPoint, removePoint, now: time,
             onPickPoint: (i) => { setSel({ kind: "hl", i }); const p = doc.highlights.points[i]; if (p) stage.current?.seek(p.at + 0.01); },
           }}
-          lang={{ value: doc.lang, source: job.language, busy: langBusy, set: (l) => void setSubLang(l) }}
+          lang={{ value: doc.lang, source: job.language, busy: langBusy, set: (l) => void setSubLang(l), hear: hearCtl }}
           names={{
             value: doc.names, set: (names, key) => change((d) => ({ ...d, names }), key), check: () => void checkNames(),
             checking: namesBusy, note: job.names_note ?? "", voiced: !subOnly, voiceNote: job.voice_note ?? "",

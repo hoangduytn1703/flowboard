@@ -3,10 +3,10 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { announceRunning } from "../../components/BackgroundTasks";
 import {
   getDefaultLook, listLookPresets, type DecorPreset,
-  deleteDubJobs, getDubJob, getDubStatus, identifyVideo, isTextFile, linksIn, listDubBatch, listDubJobsBrief, listDubLinks, renderDub, startDub, stopDub,
+  deleteDubJobs, getDubJob, getDubStatus, identifyVideo, isTextFile, linksIn, listDubBatch, listDubJobsBrief, listDubLinks, startDub, stopDub,
   uploadDubVideo, type DubJob, type DubStatus, type IdentifyResult,
 } from "../../api/dub";
-import { DubEditor, type BatchLook } from "../dub/editor/DubEditor";
+import { editPath } from "../../api/edit";
 import { DubJobsDialog, jobTitle } from "../dub/DubJobsDialog";
 import { DubLinksDialog } from "../dub/DubLinksDialog";
 import { ClipPickDialog, type PickedClip } from "../dub/ClipPickDialog";
@@ -18,7 +18,6 @@ import { toast } from "../../store/toast";
 import { useSettingsStore } from "../../store/settings";
 import { ChannelPicker } from "../channels/ChannelPicker";
 import { PageEmpty, PageLoading } from "../PageState";
-import { ClipPost } from "../steps/ClipPost";
 import { VoiceField } from "../VoiceField";
 import "../dub.css";
 import { ProgressRing } from "../dub/ProgressRing";
@@ -36,7 +35,7 @@ const RECENT_SHOWN = 5;
 const WORKING = ["queued", "running", "rendering"];
 const isWorking = (j: DubJob) => WORKING.includes(j.status);
 /** a job the editor can open: it has lines, and is not mid-transcription */
-const canEdit = (j: DubJob) => j.segments.length > 0 && (["review", "done", "error"].includes(j.status) || !!j.media_id);
+const canEdit = (j: DubJob) => (j.segments.length > 0 || (j.kind === "cut" && !!j.media_id)) && (["review", "done", "error"].includes(j.status) || !!j.media_id);
 
 function errMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -394,38 +393,11 @@ export function DubPage() {
     }
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
-  function closeJob() {
-    setJob(null);
-    setPeek(false);
-    if (batch && batch.jobs.some(isWorking)) return;  // back to the batch's progress: the others still work
-    setBatch(null);
-    setSearchParams({}, { replace: true });
-    refreshRecent();
-  }
-  /** The editor's select: another clip of the batch. */
-  function switchJob(id: string) {
-    const j = batch?.jobs.find((x) => x.job_id === id);
-    if (j) setJob(j);
-  }
-  /** "⇪ Áp cho cả loạt": the current clip's look → every other clip (each one re-rendered, voice kept). */
-  async function applyLookToBatch(look: BatchLook): Promise<number> {
-    if (!batch || !job) return 0;
-    const jobs = await listDubBatch(batch.id);
-    const targets = jobs.filter((j) => j.job_id !== job.job_id && j.segments.length > 0 && !isWorking(j));
-    const skipped = jobs.length - 1 - targets.length;
-    let sent = 0;
-    for (const t of targets) {
-      try {
-        await renderDub(t.job_id, { layout: look.layout, style: look.style, engine: look.engine, highlights: look.highlights, carried: true });
-        sent++;
-      } catch (e) {
-        toast.error(`${t.name || t.title || t.job_id}: ${errMessage(e)}`);
-      }
-    }
-    if (skipped) toast.warning(`${skipped} clip đang chạy hoặc chưa có bản dịch — bỏ qua, áp lại sau.`);
-    announceRunning();
-    void listDubBatch(batch.id).then((js) => setBatch((b) => (b ? { ...b, jobs: js } : b))).catch(() => undefined);
-    return sent;
+  /** A video with its lines is edited in "🎞 Chỉnh sửa video": alone, or with the other finished clips of its batch
+   *  (the select "Clip n/N", "⇪ Áp cho cả loạt"). */
+  function editorPath(j: DubJob): string {
+    const ids = batch ? batch.jobs.filter(canEdit).map((x) => x.job_id) : [j.job_id];
+    return editPath(ids.includes(j.job_id) ? ids : [j.job_id], j.job_id);
   }
 
   // /tools/dub?job=<id>[&batch=<id>] (the "đang chạy" badge links here) opens that job / batch.
@@ -435,7 +407,7 @@ export function DubPage() {
     if (wantedJob && job?.job_id !== wantedJob) {
       void getDubJob(wantedJob).then(openJob).catch(() => toast.warning("Không thấy video lồng tiếng này nữa (agent đã khởi động lại?)."));
     } else if (!wantedJob && wantedBatch && batch?.id !== wantedBatch) {
-      void listDubBatch(wantedBatch).then((jobs) => { if (jobs.length) { setBatch({ id: wantedBatch, jobs }); setJob(jobs.some(isWorking) ? null : jobs.find(canEdit) ?? null); } })
+      void listDubBatch(wantedBatch).then((jobs) => { if (jobs.length) { setBatch({ id: wantedBatch, jobs }); setJob(null); } })
         .catch(() => undefined);
     }
   }, [wantedJob, wantedBatch]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -448,6 +420,15 @@ export function DubPage() {
     if (searchParams.get("job") !== (want.job ?? null) || searchParams.get("batch") !== (want.batch ?? null)) setSearchParams(want, { replace: true });
   }, [job?.job_id, batch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // An opened video with its lines goes to the editor page; a batch waits until every clip is done (the links were
+  // pasted together: one sitting) unless a finished clip was opened on purpose ("✏️ Mở").
+  const editing = !!job && canEdit(job) && (!batchWorking || (peek && !isWorking(job)));
+  useEffect(() => {
+    if (!editing || !job) return;
+    // "← Danh sách" there comes back to the batch's progress while the others still work, else to the form
+    navigate(editorPath(job), { replace: true, state: { back: batchWorking && batch ? `/tools/dub?batch=${batch.id}` : "/tools/dub" } });
+  }, [editing, job?.job_id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (status === null) return <PageLoading text="Đang kiểm tra công cụ lồng tiếng…" />;
   const working = (!!job && isWorking(job)) || batchWorking;
   const styleOptions = engine === "remotion" ? status.remotion_styles ?? [] : status.styles;
@@ -456,10 +437,6 @@ export function DubPage() {
     const opts = next === "remotion" ? status?.remotion_styles ?? [] : status?.styles ?? [];
     if (!opts.some((o) => o.key === style)) setStyle(opts[0]?.key ?? (next === "remotion" ? "rm_box" : "box_yellow"));
   }
-  // An opened video with its lines → the CapCut-style editor (full width); a fresh job still
-  // transcribing / translating → the progress card next to the form.
-  // A batch waits until every clip is done before the editor opens (the links were pasted together: one sitting).
-  const editing = !!job && canEdit(job) && (!batchWorking || (peek && !isWorking(job)));
   const batchJobs = batch?.jobs ?? [];
   const batchDone = batchJobs.filter((j) => j.status === "done").length;
   // what a link queued from the library is dubbed with: this form, summed up in one line
@@ -487,16 +464,8 @@ export function DubPage() {
         {dragOver && !editing && (
           <div className="qt-dub__dropmask"><div>📂 Thả video vào để mở lại và chỉnh tiếp<small>hoặc file .txt / .md để lấy link vào thư viện</small></div></div>
         )}
-        {editing && job ? (
-          <>
-            <DubEditor key={job.job_id} job={job} status={status} onClose={closeJob}
-                       onJob={(j) => { setJob(j); setBatch((b) => (b ? { ...b, jobs: b.jobs.map((x) => (x.job_id === j.job_id ? j : x)) } : b)); }}
-                       onSibling={(j) => setBatch((b) => (b ? { ...b, jobs: b.jobs.map((x) => (x.job_id === j.job_id ? j : x)) } : b))}
-                       siblings={batch ? batchJobs : undefined} onSwitch={batch ? switchJob : undefined} onApplyAll={batch ? applyLookToBatch : undefined} />
-            {job.status === "done" && job.board_id && (
-              <ClipPost boardId={job.board_id} productId={null} channelId={job.channel_id} />
-            )}
-          </>
+        {editing ? (
+          <PageLoading text="Đang mở trình chỉnh sửa…" />
         ) : !status.available && status.addon ? (
           <div className="qt-dub__addon"><DubAddonCard initial={status.addon} onReady={loadStatus} /></div>
         ) : !status.available ? (

@@ -411,6 +411,10 @@ của người dùng (console.neon.tech, secure.backblaze.com).
 - **Heredoc của Bash (Git Bash trong Claude Code) nuốt một lớp `\\`** (10/11): script Python dán qua `python - <<'EOF'` có `\\n` / `\\s` bị đổi thành xuống dòng thật / `\s` → vá sai hoặc assert không khớp; file CRLF (nhiều file `.tsx` / `CLAUDE.md`) cũng làm chuỗi nhiều dòng không khớp. Cách làm: ghi script bằng Write vào scratchpad rồi chạy, script tự đổi CRLF → LF trước khi so và trả lại khi ghi; sửa nhỏ thì dùng Edit.
 - **`yt-dlp --match-filter` từ chối video mà vẫn thoát mã 0, có lúc không in gì** (10/11, Windows, khi kèm `--print`): "thoát 0 mà không có file" + đang có giới hạn thời lượng = video dài quá (`reference_video._run_ytdlp`), đừng chỉ dò chữ "does not pass filter".
 - **Hook `XMLHttpRequest` trong trang Douyin có lúc không nhận được sự kiện nào** (13/11, `extension/capture.js`): `open()` đi qua Proxy của mình (đếm được), XHR là thật, nhưng listener `load` / `readystatechange` gắn vào nó không chạy lần nào ở vài lượt (lượt khác lại chạy) — lớp secsdk của Douyin bọc lại request. Đừng dựa vào một đường: lấy thêm ở `JSON.parse` (trang luôn phải parse câu trả lời). Script chạy bằng `addInitScript` của Playwright thì bắt được nên **test bằng init script không chứng minh content script của extension chạy được** — thử bằng extension thật (`--load-extension`). Cùng đợt: trả lời agent trước khi gỡ content script → lượt quét kế đăng ký script rồi bị lượt cũ gỡ mất (kênh thứ hai luôn 0 video); Bilibili trả **HTTP 412** trang HTML cho máy quét nhiều lượt liền (không phải lỗi code). **`registerContentScripts` với `matchOriginAsFallback: true` bị Chrome thật từ chối** ("The path component for scripts with 'match_origin_as_fallback' must be '*'") khi `matches` có đường dẫn như `/user/*` — Chromium của Playwright không báo, người dùng dính ngay ở bản 0.7.0 → bỏ tuỳ chọn đó (0.7.1).
+- **Chữ có nền (tiêu đề…) trong trình chỉnh sửa là MỘT hình chữ nhật, xuất ra lại là nền bo theo từng dòng** (15/11, người dùng chụp màn hình): libass
+  `BorderStyle 3` vẽ hộp riêng cho từng dòng theo bề rộng dòng đó. Giờ `dub.text_ass` vẽ **một hình chữ nhật** (`\p1`, style `T<i>b`, layer 1) rộng theo dòng dài
+  nhất (`text_line_px`: đo bằng Pillow + Arial ở cỡ em = cỡ ASS / `ASS_LINE_EM` 1,117; máy không có font thì ước theo số ký tự), cao = số dòng × cỡ chữ + đệm, chữ đè
+  lên không viền. Phụ đề kiểu hộp (`box_yellow` / `box_white`) vẫn là BorderStyle 3 — mỗi dòng một hộp, chưa đổi. Đổi cách vẽ chữ: in thử ra khung hình rồi xem ảnh.
 - **Whisper nghe nhạc ra "en" → tiêu đề chữ Trung không được dịch** (15/11, video Douyin ít lời: tên clip vẫn "冷冰冰的雪山…"): tiêu đề dịch bằng `job.language`
   (tiếng Whisper nghe được), nguồn sai thì Google trả nguyên văn. Giờ `dub._title_lang`: tiêu đề có chữ Hán / Kana / Hangul mà tiếng nghe được không phải zh / ja / ko
   → để translator tự nhận (None); kết quả còn chữ Hán thì lấy câu đầu làm tên. Cùng lượt đo: bước "AI rà tên riêng" chiếm 41 / 75 s của video 45 s → `NAMES_TIMEOUT_S`
@@ -2088,6 +2092,29 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   B2, bỏ `media_id`; **giữ** video đang tải / đang gửi đi, còn clip làm từ nó, còn job lồng tiếng / session cắt dùng nó — trả `kept [{id, title, why}]`). (4) **Bộ lọc +
   kết quả AI chọn + video đã tick giữ suốt phiên** (sessionStorage `dflow.grab.view`: kênh, nhãn kênh, tìm, lượt xem, ngày, độ dài, loại, trạng thái, AI chọn + lý do,
   "Chỉ hiện video AI chọn", tick) — sang trang khác quay lại vẫn còn; "Bỏ lọc" / "Bỏ kết quả AI" hoặc tắt app mới mất. Test `test_channel_grab.py` (+3).
+- **🎞 Chỉnh sửa video — menu riêng, nơi chỉnh duy nhất** (15/11, việc `company` `docs/company/video-editor-menu/`, hướng B; người dùng: "có 1 menu riêng là
+  chỉnh sửa video, import hàng loạt video local hoặc từ video của tôi"): trang **`/tools/edit`** (`pages/EditPage.tsx` + `edit.css`, tiền tố `ed-`; menu Công cụ, hiện
+  khi gói có `dub` hoặc `cut`). **Danh sách video đang chỉnh** theo tài khoản = AppSetting **`edit_list`** (id job, mới nhất trước, ≤ 300). Một video trên danh
+  sách = một `dub.Job`: job sẵn có của clip lồng tiếng / phần cắt, hoặc job mới cho file từ máy / clip ghép — **`kind "cut"` + `cut.origin == "edit"`** (đi chung mọi
+  nhánh code của phần cắt: `mode sub`, `sub_lang none`, không câu nào, xuất được khi không có lời; **chưa có clip** — lần xuất đầu mới tạo clip `cut_part` trong Clip
+  của tôi, để thả 30 file không làm đầy thư viện). `services/video_edit.py`: `import_media` (file đã tải lên qua `/api/reference-video/upload`), `import_clips`
+  (clip `dub` / `cut_part` → job của nó; clip khác → job mới cho video cuối, `cut.from_board`, xin lại thì dùng lại job cũ), `add`, `remove` (chỉ gỡ khỏi danh sách;
+  import chưa xuất lần nào thì xoá luôn thư mục job; clip + file gốc giữ), `items` / `view`. **Nghe lời khi cần** (`hear` / `hear_state` / `hear_stop`, luồng nền,
+  một video một lúc, chung khoá Whisper với Cắt video, **không gợi ý tên file cho Whisper** — gợi ý "Áo khoác — bản 3" làm Whisper nghe 25 s ra 1 câu, bỏ gợi ý ra 7
+  câu): nghe xong `sub_lang = "orig"`. Routes `routes/edit.py`: `GET /api/edit/items`, **`GET /api/edit/jobs?ids=`** (đúng các job đó, đủ câu, theo thứ tự gửi —
+  ô "Video n/N" của trình chỉnh sửa; tối đa `MAX_EDIT_TOGETHER` 60), `POST /import {media}`, `/clips {board_ids}`, `/add {job_ids}`, `/remove {job_ids}`,
+  `POST|GET /jobs/{id}/hear`, `POST …/hear/stop`; luật gói `/api/edit/*` → dub hoặc cut. Frontend `api/edit.ts` (`editPath(jobIds, first?)` =
+  `/tools/edit?jobs=a,b,c&job=b`). `EditPage`: thả nhiều file (≤ 30 một lượt, tải lên lần lượt, xong tự tick sẵn) / "🎬 Chọn từ Clip của tôi" (`ClipPickDialog`) →
+  lưới thẻ (ảnh = poster, trạng thái chưa chỉnh / đang xuất x% / ✓ đã xuất / lỗi / 🎧 nghe lời) → tick → "✏️ Chỉnh N video" → `DubEditor` với `siblings` = các job đó
+  (ô "Video n/N", "⇪ Áp cho cả loạt" = `applyToOthers`, "Xuất cả N đã sửa") → "← Danh sách" về trang đã gửi video sang (`location.state.back`) hoặc về danh sách.
+  Tab 💬 Phụ đề của video chưa có lời: nút **"🎧 Nghe lời để có phụ đề"** (`Inspector` `lang.hear`, `DubEditor` poll 1,5 s; nghe xong câu nhập vào tài liệu đang sửa,
+  phần đã chỉnh giữ). **Trang Lồng tiếng và Cắt video không nhúng trình chỉnh sửa nữa**: `DubPage` thấy job mở được thì `navigate(editPath…)` (cả loạt đã xong đi
+  cùng; quay về `?batch=` khi loạt còn lồng), `CutPage` `openEditor` / `openEditorMany` (thanh **"Chọn mọi video (N)"** ở đầu danh sách — tick xuyên mọi thẻ / mọi link)
+  đi thẳng sang `/tools/edit`; link cũ `/tools/dub?job=`, `/tools/cut?job=&run=&parts=` tự chuyển. Nút "✏️ Chỉnh N video đã lồng" ở thanh chọn Cào video kênh,
+  "✏️ Chỉnh N video" ở Clip của tôi (clip `dub` / `cut_part`). **Chưa dạy trợ lý AI** (trợ lý đang ẩn). Test `test_video_edit.py` (4, ffmpeg thật).
+- **🤖 Trợ lý AI ĐANG ẨN (15/11, người dùng: "tạm thời pending, cho nó ẩn đi… chức năng này cần test kỹ lại")**: `plans.HIDDEN_FEATURES` + `lib/features.ts HIDDEN`
+  thêm `assistant` (nút chat mất với mọi tài khoản kể cả quản trị; route `/api/assistant/*` + code giữ nguyên); gói Premium đã bỏ `assistant` trong bảng gói đã ký
+  (`plans.save` trên máy nhà, chữ ký ok). Mở lại: bỏ `assistant` khỏi hai danh sách đó + tick lại ở 📦 Gói & tính năng. Web `dflow-web` catalog vẫn liệt kê — chưa sửa.
 - **Ô "Làm gì với video" (15/11)**: `quicktool/dub/ModePicker.tsx` + `dub/modepicker.css` (thẻ có ô icon SVG, dấu ✓, tiêu đề + một dòng mô tả; radio ẩn nằm trong thẻ
   `position: relative`; container query xếp dọc khi hẹp) dùng ở trang Lồng tiếng và hộp "🎙 Lồng tiếng ngay"; bỏ CSS `.qt-dub__mode*`, `.gb-now__modes*`.
 - **Lưu tạm khi đổi clip trong trình chỉnh sửa (12/11)**: `DubEditor.tsx` giữ `DRAFTS` (Map cấp module, chỉ trong RAM của tab: `{doc, out, basis}` theo job id; `basis` = `started_at|media_id|số câu` — job được xuất / render lại thì bản nháp tự bỏ). Rời một clip (đổi clip ở ô chọn, sang trang khác) mà còn thay đổi → cất vào `DRAFTS` lúc unmount, **không hỏi**; mở lại clip thì nạp lại (mất lịch sử hoàn tác). Ô chọn ghi "— ● chưa xuất"; nút **"✓ Xuất cả N đã sửa"** (`exportDrafts`, `renderBodyOf(job, doc, out)` dùng chung với `exportNow`; hiện màn tiến độ loạt; prop `onSibling` để trang cha cập nhật clip khác). Chỉ cảnh báo khi bấm "← Danh sách" (kể cả các clip đang lưu tạm; đồng ý = bỏ hết nháp của loạt) và khi đóng / tải lại tab (`beforeunload`). "Áp cho cả loạt" nói rõ sẽ thay các nháp. F5 là mất nháp (chưa lưu localStorage).
@@ -2145,6 +2172,11 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
   Chrome Web Store từ chối → giữ cách cài tay kèm video.
 
 ## Việc đang dở / chưa kiểm chứng
+- **🎞 Chỉnh sửa video (15/11)**: chưa commit, chưa phát hành; người dùng chưa bấm thử (bản chạy thử cổng 8534, dữ liệu `D:\dflow-qc`). **Để sau theo lời người dùng**:
+  rút gọn form Lồng tiếng / Cắt video / Cào video kênh (xem xong menu mới rồi quyết). Chưa làm: clip `cut_part` của video import vẫn ghi "Video 1/1 cắt từ video dài"
+  ở Bước 5 (đã sửa 15/11: ghi "Video đã chỉnh sửa", nút mở thẳng menu mới; hộp chọn clip của menu mới liệt kê mọi clip — `everyClip`); kéo thả sắp thứ tự / thư mục trong danh sách; nút "việc đang chạy" cho lượt nghe lời; trang Lồng tiếng
+  mất khối "Bài đăng Facebook" dưới trình chỉnh sửa (vẫn có ở Bước 5 của clip); chưa thử 30 file lớn thật, chưa thử trong app cài, chưa thử máy không có Whisper
+  (nút nghe lời báo lỗi chỉ sang Cài đặt). Trợ lý AI ẩn — khi mở lại nhớ dạy kỹ năng cho menu này.
 - **Tự đổi gương mặt khi Flow chặn (15/11)**: chưa chạy thật qua Flow (tốn credit — chờ người dùng); chưa có cách tự đổi cho người mẫu chọn từ thư viện;
   chưa biết vì sao Flow chặn gương mặt #134 (người lớn, trông như ảnh thật — đoán bộ lọc "người thật / người nổi tiếng" bắt nhầm), nên prompt chân dung chưa đổi.
 - **VieNeu chạy nền (15/11)**: chưa chạy trong app cài (bản Nuitka + gói lồng tiếng: runtime là `addons/dub`), chưa thử máy yếu (1 tiến trình) / máy hết RAM;
@@ -2575,3 +2607,14 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
   (`settleFace`, `generateScene`, `generateVideo`), `store/board.ts`, `store/generation.ts`, `StepMedia.tsx`. Test flow_sdk / account_pool / requests 114 pass, `tsc`
   sạch. Chưa chạy thật qua Flow. Người dùng đồng ý phát hành → bản **2.1.5** (số phiên bản ở 8 file, tag `v2.1.5`).
 - **15/11** — **Phát hành 2.1.5 xong**: commit `bb4185f`, run 43695521690 thành công, release v2.1.5 trên dflow-releases (bộ cài 183 MB + `latest.json` 2.1.5), `dflow.io.vn/tai-app` → 2.1.5. Build trùng của `main` đã huỷ.
+- **15/11** — Menu mới **🎞 Chỉnh sửa video** (`/tools/edit`): thả nhiều video từ máy / chọn từ Clip của tôi → tick → một trình chỉnh sửa cho cả nhóm → "⇪ Áp cho cả
+  loạt" → mỗi video thành một clip; video từ máy chỉ nghe lời khi bấm "🎧 Nghe lời để có phụ đề"; Lồng tiếng / Cắt video / Cào video kênh / Clip của tôi gửi video
+  sang đây (bỏ trình chỉnh sửa nhúng, link cũ tự chuyển; Cắt video có "Chọn mọi video" xuyên mọi link). **Ẩn Trợ lý AI** + bỏ khỏi gói Premium. `services/video_edit.py`,
+  `routes/edit.py`, `plans.py`, `main.py`, `api/edit.ts`, `api/dub.ts`, `pages/EditPage.tsx`, `edit.css`, `DubPage.tsx`, `CutPage.tsx`, `GrabPage.tsx`, `QuicktoolApp.tsx`,
+  `QuicktoolSidebar.tsx`, `DubEditor.tsx`, `Inspector.tsx`, `lib/features.ts`, CSS. Test `test_video_edit.py` 4 + các bộ liên quan pass, `tsc` sạch. Thử thật Playwright
+  trên agent thử 8534: 3 file vào danh sách 1,4 s → Chỉnh 3 → 9:16 → Áp cho cả loạt → cả 3 xuất xong sau ~12 s, 3 clip mới; nghe lời 15 s ra 7 câu; link cũ chuyển
+  đúng; từ Clip của tôi (11 video), Cào video kênh (3), Cắt video (6 video từ 3 link) mở đúng nhóm; 760 px không tràn. Tài liệu `docs/company/video-editor-menu/`.
+  Chưa commit.
+- **15/11** — Sửa chữ có nền xuất ra bị bo theo từng dòng (giờ một hình chữ nhật như trong trình chỉnh sửa; `dub.text_ass`, `text_line_px`; in thử 3 lớp chữ ra khung
+  hình và xem ảnh; test `test_dub_text_adjust.py` 13 pass). Bước 5 của clip từ video import ghi đúng tên + mở menu mới; hộp "Chọn từ Clip của tôi" của menu mới liệt kê
+  mọi clip. Cả bộ test 1304 pass / 2 skip (chạy trước sửa chữ; sau đó chạy lại bộ chữ + cắt + lồng tiếng). Phát hành **2.2.0** (số phiên bản ở 8 file, tag `v2.2.0`).
