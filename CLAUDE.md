@@ -2574,3 +2574,4 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
   khi đang kiểm tra gương mặt, "Tạo video tự động" tự đổi gương mặt (≤ 2 lần) + vẽ lại ảnh cảnh của gương mặt cũ (`drawnFace`). `flow_sdk.py`, `store/quicktool.ts`
   (`settleFace`, `generateScene`, `generateVideo`), `store/board.ts`, `store/generation.ts`, `StepMedia.tsx`. Test flow_sdk / account_pool / requests 114 pass, `tsc`
   sạch. Chưa chạy thật qua Flow. Người dùng đồng ý phát hành → bản **2.1.5** (số phiên bản ở 8 file, tag `v2.1.5`).
+- **15/11** — **Phát hành 2.1.5 xong**: commit `bb4185f`, run 43695521690 thành công, release v2.1.5 trên dflow-releases (bộ cài 183 MB + `latest.json` 2.1.5), `dflow.io.vn/tai-app` → 2.1.5. Build trùng của `main` đã huỷ.
