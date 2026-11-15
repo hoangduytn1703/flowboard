@@ -421,12 +421,16 @@ DROP_DETECT_ROUNDS = 3
 #: empty, it is dropped — retry now instead of waiting out the 5-minute budget.
 NOT_LISTED_DROP_S = float(os.getenv("FLOWBOARD_NOT_LISTED_DROP_S", "90"))
 NOT_LISTED_MIN_LOOKUPS = 2
+# Shown to the seller as is (toast, Lịch sử) — Vietnamese. The prefix is what
+# the worker and the frontend match on; keep it. The old text blamed "bare
+# shoulders, a short dress": a seller of ordinary dresses read it as Flow
+# refusing the clothes (15/11), while the face alone had been refused (the
+# model check — a head-and-shoulders portrait in a T-shirt — dropped twice).
 FLOW_DROPPED_JOB = (
-    "FLOW_DROPPED_JOB: Flow accepted the video, then cancelled it and refunded "
-    "the credits. Flow gives no reason; this is what Veo's safety filter on the "
-    "start frame looks like (a person who reads as young, bare shoulders, a short "
-    "dress, a full-body shot). Try another image or outfit, a closer product "
-    "shot, or a different model."
+    "FLOW_DROPPED_JOB: Flow nhận lệnh rồi tự huỷ video này (đã hoàn credit), không nói lý do. "
+    "Hay gặp nhất là gương mặt người mẫu: Flow coi khuôn mặt đó như người thật / người nổi tiếng "
+    "và bỏ mọi video có mặt đó — quần áo thường ngày (hở vai, váy ngắn) thường không phải lý do. "
+    "Ở Bước 1 bấm \"🎬 Kiểm tra với Flow\" để biết chắc; bị chặn thì tạo người mẫu khác rồi vẽ lại ảnh cảnh."
 )
 
 

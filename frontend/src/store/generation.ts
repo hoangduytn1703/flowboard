@@ -607,7 +607,7 @@ function attachSidecarPoll(rfId: string, requestId: number, type: SidecarType) {
  * public figures" — so the safety filter, not a slow queue. StepMedia keys
  * its hint box on this prefix. */
 export const FLOW_DROPPED_VIDEO =
-  "Flow nhận rồi bỏ video này (credit được hoàn), không nói lý do. Thường là bộ lọc an toàn của Flow: người mẫu trông như người thật / người nổi tiếng.";
+  "Flow nhận rồi bỏ video này (credit được hoàn), không nói lý do. Hay gặp nhất là gương mặt người mẫu: Flow coi như người thật / người nổi tiếng — quần áo thường ngày (hở vai, váy ngắn) thường không phải lý do.";
 
 export const useGenerationStore = create<GenerationState>((set, get) => ({
   active: {},

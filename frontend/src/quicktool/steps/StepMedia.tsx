@@ -186,7 +186,11 @@ export function StepMedia({ roles, kind, productName = "", boardName = "", voice
 
   async function startAll() {
     if (kind === "video" && roles.model && modelCheck?.status === "blocked") {
-      toast.warning("Flow chặn video có gương mặt người mẫu của clip này — đổi người mẫu ở Bước 1 trước khi tạo video.");
+      toast.warning("Flow không nhận gương mặt người mẫu của clip này (bỏ mọi video có mặt đó) — đổi người mẫu ở Bước 1, vẽ lại ảnh cảnh rồi mới tạo video.");
+      return;
+    }
+    if (kind === "video" && roles.model && modelCheck?.status === "running") {
+      toast.info("Đang kiểm tra gương mặt người mẫu với Flow (1–4 phút) — đợi có kết quả rồi tạo video, để khỏi tạo video sẽ bị Flow bỏ.");
       return;
     }
     if (kind === "video") {

@@ -46,6 +46,7 @@ import { useSettingsStore } from "./settings";
 import type { CountryKey, GenderKey, VibeKey } from "../constants/character";
 import { toast } from "./toast";
 import { checkModelNode, knownFlowCheck } from "../quicktool/flowModelCheck";
+import type { FlowCheck } from "../api/characters";
 
 /**
  * The Quicktool wizard's driver. It owns no media state of its own: every
@@ -185,6 +186,63 @@ function stillRunning(get: () => QuicktoolStore): boolean {
   return a !== "stopped" && a !== "failed" && a !== "idle";
 }
 
+/** Fresh faces the auto run may draw when Flow refuses the one it made. */
+const FACE_SWAPS = 2;
+const FACE_REFUSED =
+  "Flow không nhận gương mặt người mẫu này (bỏ mọi video có mặt đó, quần áo không phải lý do) — "
+  + "ở Bước 1 bấm \"Tạo lại người mẫu\" hoặc chọn mẫu khác trong thư viện, rồi chạy lại.";
+
+/**
+ * Settle the model's face before any clip is sent. Flow refusing a face drops
+ * every clip that shows it (15/11: the check of a plain portrait in a T-shirt
+ * dropped twice, then all 4 clips of a dress were dropped). A face this run
+ * drew itself is redrawn (up to {@link FACE_SWAPS} times) and checked again,
+ * then the stills — drawn with the refused face as their reference — are
+ * redrawn too. Returns those stills with the picture they had, so the caller
+ * waits for the new one before sending its clip.
+ */
+async function settleFace(
+  get: () => QuicktoolStore,
+  set: (s: Partial<QuicktoolStore>) => void,
+  verdict: FlowCheck["status"],
+  mayRedraw: boolean,
+): Promise<Map<string, unknown>> {
+  const redrawn = new Map<string, unknown>();
+  if (verdict === "blocked" && !mayRedraw) throw new Error(FACE_REFUSED);
+  for (let tries = 1; verdict === "blocked"; tries++) {
+    if (tries > FACE_SWAPS) {
+      throw new Error(`Flow đã từ chối ${FACE_SWAPS + 1} gương mặt người mẫu liền — ở Bước 1 chọn người mẫu có dấu `
+        + "\"✓ Flow làm video được\" trong thư viện, hoặc đổi quốc gia / phong cách rồi tạo lại người mẫu.");
+    }
+    const model = get().roles().model;
+    if (!model) throw new Error(FACE_REFUSED);
+    set({ auto: "model", autoMessage: `Flow không nhận gương mặt người mẫu này — đang tạo gương mặt khác (lần ${tries}/${FACE_SWAPS})…` });
+    const old = model.data.mediaId;
+    if (!(await get().generateModel(true))) throw new Error(get().error ?? "không tạo lại được người mẫu");
+    await waitForNode(model.id, (n) => hasMedia(n) && !isBusy(n) && n.data.mediaId !== old);
+    if (!stillRunning(get)) return redrawn;
+    set({ autoMessage: "Kiểm tra gương mặt mới với Flow (1–4 phút)…" });
+    const fresh = get().roles().model;
+    verdict = fresh ? (await checkModelNode(fresh)).status : "ok";
+    if (!stillRunning(get)) return redrawn;
+  }
+  // Stills drawn with another face (the refused one, or the face before the
+  // seller pressed "Tạo lại người mẫu") show someone else: redraw them.
+  const face = get().roles().model;
+  const faceId = face && hasMedia(face) ? face.data.mediaId : undefined;
+  if (!faceId) return redrawn;
+  for (const s0 of get().roles().scenes) {
+    await waitForNode(s0.image.id, (n) => !isBusy(n)).catch(() => undefined);
+    const image = get().roles().scenes.find((x) => x.index === s0.index)?.image ?? s0.image;
+    const drawn = image.data.drawnFace;
+    if (typeof drawn !== "string" || drawn === faceId || !hasMedia(image)) continue;
+    if (redrawn.size === 0) set({ auto: "scenes", autoMessage: "Vẽ lại ảnh các cảnh với gương mặt người mẫu mới…" });
+    redrawn.set(image.id, image.data.mediaId);
+    if (!(await get().generateScene(s0.index))) throw new Error(get().error ?? `Cảnh ${s0.index}: không vẽ lại được ảnh`);
+  }
+  return redrawn;
+}
+
 /** The node's prompt rewritten by the LLM to honour the user's change
  * request, saved on the node (the previous one kept as `prevPrompt` so it
  * can be restored). `null` = failed, already reported with a toast. */
@@ -267,10 +325,18 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
         return false;
       }
     }
+    const face = get().roles().model;
+    const faceId = face && hasMedia(face) ? (face.data.mediaId as string) : undefined;
     const ok = await useGenerationStore.getState().dispatchGeneration(scene.image.id, {
       prompt, aspectRatio: IMAGE_AR, kind: "image", variantCount: 1,
     });
     if (!ok) set({ error: useGenerationStore.getState().error ?? `Cảnh ${sceneIndex}: không gửi được` });
+    else if (faceId && scene.image.data.drawnFace !== faceId) {
+      // Which face this still shows: the auto run redraws stills of a face
+      // that has since been replaced (see settleFace).
+      useBoardStore.getState().updateNodeData(scene.image.id, { drawnFace: faceId });
+      if (!isNaN(dbId)) patchNode(dbId, { data: { drawnFace: faceId } }).catch(() => {});
+    }
     return ok;
   },
 
@@ -283,6 +349,13 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
   async generateVideo(sceneIndex, request) {
     const scene = get().roles().scenes.find((s) => s.index === sceneIndex);
     if (!scene?.video || !hasMedia(scene.image) || isBusy(scene.video)) return false;
+    // A clip sent while the face check is still out comes back dropped 4–8
+    // minutes later if the face is refused (15/11: 4 clips sent 6 s after the
+    // check's first drop, all dropped). Wait for the verdict.
+    if (knownFlowCheck(get().roles().model)?.status === "running") {
+      set({ error: "Đang kiểm tra gương mặt người mẫu với Flow (1–4 phút) — đợi có kết quả rồi tạo video, để khỏi tạo video sẽ bị Flow bỏ." });
+      return false;
+    }
     const video = scene.video;
     let prompt = typeof video.data.prompt === "string" ? video.data.prompt.trim() : "";
     const dbId = parseInt(video.id, 10);
@@ -646,6 +719,10 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
     set({ auto: "model", autoMessage: "Tạo người mẫu…", error: null });
     try {
       const r0 = get().roles();
+      // A face this run draws itself may be swapped for another one when Flow
+      // refuses it; a model the seller picked (library, upload) is never
+      // replaced behind their back.
+      const madeModel = !!(r0.model && !hasMedia(r0.model));
       if (r0.model && !hasMedia(r0.model)) {
         if (!(await get().generateModel())) throw new Error(get().error ?? "người mẫu");
         await waitForNode(r0.model.id, hasMedia);
@@ -656,14 +733,10 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
       // The check (~1 min) and the scene stills don't depend on each other, so
       // they run side by side; the verdict is settled before any clip is sent.
       const drama = get().isDrama();
-      let check: Promise<void> = Promise.resolve();
+      let check: Promise<FlowCheck["status"]> = Promise.resolve("ok");
       const model = get().roles().model;
       if (!drama && model && hasMedia(model) && knownFlowCheck(model)?.status !== "ok") {
-        check = checkModelNode(model).then((verdict) => {
-          if (verdict.status === "blocked") {
-            throw new Error("Flow chặn video có gương mặt người mẫu này — ở Bước 1 bấm \"Tạo lại người mẫu\" hoặc chọn mẫu khác rồi chạy lại.");
-          }
-        });
+        check = checkModelNode(model).then((v) => v.status);
         check.catch(() => undefined); // awaited below; no unhandled rejection meanwhile
       }
 
@@ -677,13 +750,21 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
         // Each clip starts as soon as its own still is ready — it used to wait
         // for every still first, so clip 1 idled while stills 2–4 were drawn.
         let first = true;
+        // Stills being redrawn after a face swap: wait for the new picture.
+        let redrawn = new Map<string, unknown>();
         for (const s0 of get().roles().scenes) {
           await waitForNode(s0.image.id, hasMedia);
           if (!stillRunning(get)) return;
           if (first) {
-            await check;
+            redrawn = await settleFace(get, set, await check, madeModel);
+            if (!stillRunning(get)) return;
             first = false;
             set({ auto: "videos", autoMessage: "Tạo video từng cảnh — cảnh nào có ảnh là làm video ngay (~1 phút mỗi clip)…" });
+          }
+          if (redrawn.has(s0.image.id)) {
+            const old = redrawn.get(s0.image.id);
+            await waitForNode(s0.image.id, (n) => hasMedia(n) && !isBusy(n) && n.data.mediaId !== old);
+            if (!stillRunning(get)) return;
           }
           const s = get().roles().scenes.find((x) => x.index === s0.index);
           if (s?.video && hasMedia(s.image) && !hasMedia(s.video) && !isBusy(s.video)) await get().generateVideo(s.index);

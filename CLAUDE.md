@@ -319,6 +319,11 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   blackpink" — chắc chắn bị chặn.
   **Omni 4 s bị Flow bỏ** (cùng ảnh/prompt: 4 s bỏ sau 52 s, 8 s ra sau 68 s; mới thử 1 lần) — dùng 8 s. Thăm dò: `GET /api/flow/operations/{op}/lookup`, `/inflight`, `/listing` (`routes/flow_debug.py`).
   Tab Claude in Chrome là profile khác (akiragosho2000); project của extension mở được bằng `flow.google.com/u/5/project/<id>`.
+- **"Flow bỏ video váy hở vai" thật ra là Flow không nhận GƯƠNG MẶT người mẫu** (15/11, clip #134 đầm hồng sát nách, 4/4 video bị bỏ; người dùng tưởng Flow
+  chặn quần áo vì câu lỗi cũ ghi "bare shoulders, a short dress"): lượt kiểm tra gương mặt (chân dung áo thun đen, không có váy) cũng bị bỏ 2 lần → thủ phạm
+  là khuôn mặt (người lớn bình thường, không trông trẻ). Thêm: 4 video gửi lúc 14:37:37 khi lượt kiểm tra **còn đang chạy** (bị bỏ lần 1 lúc 14:37:31, worker
+  đang thử lại, kết luận 14:39:30) — nên tốn thêm 4–8 phút chờ video chết. Giờ: câu lỗi tiếng Việt chỉ đúng chỗ, không gửi video khi đang kiểm tra, chạy tự
+  động tự đổi gương mặt (xem "Kiểm tra với Flow"). Đọc log app: `D:\DFlowData\logs\agent.log` ("dropped by Flow … retrying once").
 - **Ảnh sản phẩm lấy từ shop có mặt người mẫu thật → Flow bỏ video** (đo thật 26/10): ảnh shop Đầm Bầu (2 mặt người mẫu Hàn +
   logo + chữ "OOTD") làm nguyên liệu Omni → lần 1 bị bỏ (42 s), lần 2 cùng ảnh/prompt lại ra (33 s) — chặn **không đều**. Ảnh mẹ bầu AI
   vẽ (có mặt) ra ngay 33 s. Tệ hơn: ảnh sản phẩm là tham chiếu của **mọi ảnh cảnh**, mặt người mẫu shop lọt vào cảnh → video cảnh nào
@@ -685,6 +690,13 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   "✓ Flow làm video được" / "✕ Flow chặn video" ở `/models` + picker). Bước 1: nút + dòng kết luận (`FlowCheckButton`/`FlowCheckNote`
   trong `StepSetup.tsx`). Bước 4: hộp "Flow bỏ lượt này" nói nguyên nhân là người mẫu + nút "Sang Bước 1 · người mẫu".
   (Đã thử thêm câu "original fictional person, natural everyday look…" vào `buildCharacterPrompt` rồi gỡ: mặt ra giống ảnh thật hơn.)
+  **15/11**: (1) `generateVideo` (store) từ chối khi gương mặt đang được kiểm tra (`flowCheck.status === "running"`), nút "Tạo N video" ở Bước 4 cũng báo;
+  (2) "⚡ Tạo video tự động": `settleFace` (store/quicktool.ts) chờ kết luận trước video đầu — bị chặn mà người mẫu do **chính lượt chạy này vẽ** (`madeModel`)
+  thì tự tạo gương mặt khác + kiểm tra lại, tối đa `FACE_SWAPS` 2 lần (mẫu người bán chọn từ thư viện / upload thì không thay, báo lỗi như cũ); (3) mỗi ảnh
+  cảnh ghi **`drawnFace`** = mediaId gương mặt lúc vẽ (`generateScene`, đã thêm whitelist `store/board.ts` cả 3 chỗ) → chạy tự động vẽ lại ảnh cảnh có
+  `drawnFace` khác gương mặt hiện tại (sau khi tự đổi, hoặc sau khi người bán bấm "Tạo lại người mẫu") rồi mới làm video cảnh đó; ảnh cũ không có
+  `drawnFace` thì để nguyên; (4) `flow_sdk.FLOW_DROPPED_JOB` viết lại tiếng Việt (giữ tiền tố `FLOW_DROPPED_JOB:` — worker / frontend dò theo nó), không còn đổ
+  cho "hở vai, váy ngắn". Lượt kiểm tra vẫn được worker thử lại 1 lần (Flow bỏ không đều — không muốn kết luận oan một gương mặt).
 
 - **Kịch bản viết theo sản phẩm** (22/10, `services/script_tailor.py`): `POST /api/boards/from-template` có `product_id` →
   `tailor_spec()` gửi một lượt `run_llm("auto_prompt")` (tên, ngành, giá, mô tả, điểm bán, ghi chú + các cảnh của mẫu) → mỗi cảnh
@@ -2133,6 +2145,8 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
   Chrome Web Store từ chối → giữ cách cài tay kèm video.
 
 ## Việc đang dở / chưa kiểm chứng
+- **Tự đổi gương mặt khi Flow chặn (15/11)**: chưa chạy thật qua Flow (tốn credit — chờ người dùng); chưa có cách tự đổi cho người mẫu chọn từ thư viện;
+  chưa biết vì sao Flow chặn gương mặt #134 (người lớn, trông như ảnh thật — đoán bộ lọc "người thật / người nổi tiếng" bắt nhầm), nên prompt chân dung chưa đổi.
 - **VieNeu chạy nền (15/11)**: chưa chạy trong app cài (bản Nuitka + gói lồng tiếng: runtime là `addons/dub`), chưa thử máy yếu (1 tiến trình) / máy hết RAM;
   VieNeu vẫn đọc trên CPU (~1,5–3 s mỗi câu) — muốn nhanh hơn nữa phải cho VieNeu chạy GPU (onnxruntime-gpu / DirectML trong gói lồng tiếng, chưa thử);
   "Xoá file đã tải" chưa thử với B2 thật (Phase C xoá qua link ký sẵn).
@@ -2555,3 +2569,8 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
   VieNeu thật (lần đầu 18,8 s, sau 1,3 s), 4 lượt lồng tiếng Short YouTube thật (70–88 s, 16–22 câu), Playwright: thẻ chế độ, bộ lọc giữ khi đổi trang, bỏ lỗi, xoá
   file. Truy vấn nhãn theo clip đã chạy thử (chỉ đọc) trên Neon. Cả bộ test 1438 pass / 2 skip / 9 lỗi môi trường Windows đã biết. Người dùng bảo phát hành ngay (không test lại) → bản **2.1.4** (số phiên bản ở 8 file, tag `v2.1.4`).
 - **15/11** — **Phát hành 2.1.4 xong**: commit `4500e4b`, run 43683371858 thành công, release v2.1.4 trên dflow-releases (bộ cài 183 MB + `latest.json` 2.1.4), `dflow.io.vn/tai-app` → 2.1.4. Build trùng của `main` đã huỷ.
+- **15/11** — Người dùng hỏi sao Flow bỏ hết video đầm hồng sát nách ("đồ nữ mặc bình thường mà"): truy request trên Neon + log app → lượt kiểm tra gương mặt
+  người mẫu (chỉ có mặt, áo thun) cũng bị bỏ 2 lần, 4 video gửi trước khi có kết luận. Sửa: câu lỗi `FLOW_DROPPED_JOB` tiếng Việt đúng nguyên nhân, không gửi video
+  khi đang kiểm tra gương mặt, "Tạo video tự động" tự đổi gương mặt (≤ 2 lần) + vẽ lại ảnh cảnh của gương mặt cũ (`drawnFace`). `flow_sdk.py`, `store/quicktool.ts`
+  (`settleFace`, `generateScene`, `generateVideo`), `store/board.ts`, `store/generation.ts`, `StepMedia.tsx`. Test flow_sdk / account_pool / requests 114 pass, `tsc`
+  sạch. Chưa chạy thật qua Flow. Người dùng đồng ý phát hành → bản **2.1.5** (số phiên bản ở 8 file, tag `v2.1.5`).

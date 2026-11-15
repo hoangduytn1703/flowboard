@@ -127,6 +127,8 @@ export interface FlowboardNodeData extends Record<string, unknown> {
   uploadedFrom?: "own" | "muse";
   /** Character node: verdict of "Kiểm tra với Flow" (flowModelCheck.ts). */
   flowCheck?: { status: "ok" | "blocked" | "running"; at: number; requestId?: number; mediaId?: string };
+  /** Scene still: the model photo it was drawn with — a still of a face Flow refused is redrawn. */
+  drawnFace?: string;
   /** Export node (step 5): clip order / clips left out (video node ids), cuts (seconds) and text overlays. */
   clipOrder?: string[];
   clipSkip?: string[];
@@ -406,6 +408,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           uploaded: n.data["uploaded"] as boolean | undefined,
           uploadedFrom: n.data["uploadedFrom"] as "own" | "muse" | undefined,
           flowCheck: n.data["flowCheck"] as FlowboardNodeData["flowCheck"],
+          drawnFace: n.data["drawnFace"] as string | undefined,
           clipOrder: n.data["clipOrder"] as string[] | undefined,
           clipSkip: n.data["clipSkip"] as string[] | undefined,
           clipTrims: n.data["clipTrims"] as FlowboardNodeData["clipTrims"],
@@ -501,6 +504,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           uploaded: n.data["uploaded"] as boolean | undefined,
           uploadedFrom: n.data["uploadedFrom"] as "own" | "muse" | undefined,
           flowCheck: n.data["flowCheck"] as FlowboardNodeData["flowCheck"],
+          drawnFace: n.data["drawnFace"] as string | undefined,
           clipOrder: n.data["clipOrder"] as string[] | undefined,
           clipSkip: n.data["clipSkip"] as string[] | undefined,
           clipTrims: n.data["clipTrims"] as FlowboardNodeData["clipTrims"],
@@ -638,6 +642,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           uploaded: n.data["uploaded"] as boolean | undefined,
           uploadedFrom: n.data["uploadedFrom"] as "own" | "muse" | undefined,
           flowCheck: n.data["flowCheck"] as FlowboardNodeData["flowCheck"],
+          drawnFace: n.data["drawnFace"] as string | undefined,
           clipOrder: n.data["clipOrder"] as string[] | undefined,
           clipSkip: n.data["clipSkip"] as string[] | undefined,
           clipTrims: n.data["clipTrims"] as FlowboardNodeData["clipTrims"],
