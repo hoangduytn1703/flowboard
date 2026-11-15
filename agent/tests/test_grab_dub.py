@@ -72,7 +72,8 @@ def test_one_click_downloads_then_dubs_and_a_bad_video_holds_nobody(ready, monke
     # the queue position is on the waiting one's card
     aheads = sorted(w[str(v["id"])]["dub"]["ahead"] or 0 for v in (a, c))
     assert aheads == [0, 1] and len(started) == 1
-    assert "dub" in {v["id"]: v for v in client.get("/api/grab/videos").json()}[c["id"]]["used"]
+    # no clip yet (the job runs): the card shows the run, "🎙 đã lồng" waits for the clip
+    assert {v["id"]: v for v in client.get("/api/grab/videos").json()}[c["id"]]["used"] == {}
     # "Dừng tất cả"
     ours = [w[str(v["id"])]["dub"]["id"] for v in (a, c)]
     out = client.post("/api/grab/dub/stop").json()

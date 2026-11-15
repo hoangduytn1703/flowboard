@@ -21,6 +21,8 @@ live there, not in flowboard's). Called by ``services/dub.py``:
       → {"ok": true, "speech_s": 7.9} — "🧬 Giọng nhân bản": the voice of a short recording (VieNeu Turbo hears at
       most 8 s of it, silence at the edges trimmed), saved as its speaker embedding + reference codes; with a
       preview path it also reads the sample sentence in that voice (one model load for both)
+  python dub_runner.py serve
+      a resident VieNeu for services/voice_server.py: requests on stdin, answers on stdout (see ``serve``)
 
 Progress goes to stderr as ``PROGRESS <0-100>`` lines; the result JSON is the
 last stdout line. ``FLOWBOARD_ERASE_ROOT`` is pyvideotrans' folder (the
@@ -247,6 +249,82 @@ def vieneu(voice: str, lines_json: str) -> None:
     print(json.dumps({"ok": True, "done": done, "missing": missing}))
 
 
+#: an answer line of ``serve`` (anything else a library prints on stdout is not one)
+SERVE_MARK = "@@DFLOW "
+
+
+def serve() -> None:
+    """A resident VieNeu (15/11): the model loads once, then the agent sends requests as JSON lines on stdin and reads
+    the answers as ``SERVE_MARK`` + JSON lines on stdout — "▶ Nghe thử" and a dub's voice step no longer pay the
+    20–30 s model load every time. Requests: ``{"op": "load", "id"}`` (load the model now: warm-up),
+    ``{"op": "speak", "id", "voice", "lines": [{"text", "out"}], "cancel_file"?}`` (like the ``vieneu`` mode; the
+    request stops between two lines once ``cancel_file`` exists), ``{"op": "quit"}``. Progress of a request goes to
+    stderr as ``SPROGRESS <id> <k> <n>``. Ends when stdin closes (the agent is gone) or on ``quit``.
+
+    Requests are read by the main thread between requests only: on Windows a thread blocked reading this stdin pipe
+    stalls every subprocess the model's libraries start meanwhile (the handle is duplicated for the child) — a reader
+    thread hung the first try at loading the model."""
+    answers = sys.stdout
+    sys.stdout = sys.stderr  # whatever the libraries print never mixes with the answers
+
+    def answer(obj: dict) -> None:
+        answers.write(SERVE_MARK + json.dumps(obj) + "\n")
+        answers.flush()
+
+    model = None
+
+    def loaded():
+        nonlocal model
+        if model is None:
+            from vieneu import Vieneu
+
+            model = Vieneu(mode="v3turbo", backend="onnx")
+        return model
+
+    for raw in sys.stdin:
+        try:
+            req = json.loads(raw)
+        except ValueError:
+            continue
+        if req.get("op") == "quit":
+            return
+        rid = str(req.get("id") or "")
+        try:
+            if req.get("op") == "load":
+                loaded()
+                answer({"id": rid, "ok": True})
+                continue
+            if req.get("op") != "speak":
+                answer({"id": rid, "ok": False, "error": f"unknown op {req.get('op')!r}"})
+                continue
+            tts = loaded()
+            voice = str(req.get("voice") or "")
+            speaker = _clone_voice(voice[1:]) if voice.startswith("@") else voice
+            cancel = Path(str(req["cancel_file"])) if req.get("cancel_file") else None
+            lines = req.get("lines") or []
+            done, missing, cancelled = 0, [], False
+            for i, item in enumerate(lines):
+                if cancel is not None and cancel.exists():
+                    cancelled = True
+                    break
+                text = str(item.get("text") or "").strip()
+                if text:
+                    wav = tts.infer(text, voice=speaker)
+                    if getattr(wav, "size", 0) == 0:
+                        missing.append(i + 1)
+                    else:
+                        tts.save(wav, str(item["out"]))
+                        done += 1
+                sys.stderr.write(f"SPROGRESS {rid} {i + 1} {len(lines)}\n")
+                sys.stderr.flush()
+            if cancelled:
+                answer({"id": rid, "ok": False, "cancelled": True, "done": done})
+            else:
+                answer({"id": rid, "ok": True, "done": done, "missing": missing})
+        except BaseException as exc:  # noqa: BLE001 — a bad request never ends the server
+            answer({"id": rid, "ok": False, "error": f"{type(exc).__name__}: {exc}"[:600]})
+
+
 def _clone_voice(path: str) -> dict:
     """A saved cloned voice as the dict ``Vieneu.infer(voice=…)`` takes (what its own ``add_voice`` stores)."""
     import numpy as np
@@ -417,6 +495,9 @@ def detect(src: str) -> None:
 def main(argv: list[str]) -> int:
     if argv == ["check"]:
         check()
+        return 0
+    if argv == ["serve"]:
+        serve()
         return 0
     if len(argv) == 2 and argv[0] == "detect":
         detect(argv[1])

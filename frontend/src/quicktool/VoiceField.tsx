@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { VOICE_GROUPS, VOICES_CHANGED, fetchVoiceGroups, isGeminiVoice, previewVoice, type VoiceGroup } from "../api/client";
+import { VOICE_GROUPS, VOICES_CHANGED, fetchVoiceGroups, isGeminiVoice, previewVoice, warmVoice, type VoiceGroup } from "../api/client";
 import { toast } from "../store/toast";
 
 let cachedGroups: VoiceGroup[] | null = null;
@@ -115,6 +115,8 @@ export function VoiceField({
 }) {
   const groups = useVoiceGroups();
   const navigate = useNavigate();
+  // a VieNeu voice on show: its model loads in the background now, so hearing it / dubbing with it starts at once
+  useEffect(() => { if (!disabled) warmVoice(value); }, [value, disabled]);
   return (
     <div className={`qt-voice-field${compact ? " qt-voice-field--compact" : ""}`}>
       <select value={value} disabled={disabled} aria-label="Giọng đọc"

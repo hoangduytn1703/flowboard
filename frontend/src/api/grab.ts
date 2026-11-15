@@ -121,6 +121,11 @@ export const deleteGrabPrompt = (text: string) => post<string[]>("/api/grab/prom
 export const grabMedia = (ids: number[]) =>
   post<{ id: number; media_id: string; name: string; title?: string }[]>("/api/grab/media", { ids });
 export const markGrabUsed = (ids: number[], tool: "cut" | "dub") => post<{ marked: number }>("/api/grab/used", { ids, tool });
+/** "× Bỏ lỗi": the videos' failures (download, dub, cut) stop showing — a new failure shows again */
+export const dismissGrabErrors = (ids: number[]) => post<{ dismissed: number }>("/api/grab/errors/dismiss", { ids });
+/** "🗑 Xoá file đã tải": the downloads leave this machine + the cloud; videos still in use are kept, with why */
+export const deleteGrabFiles = (ids: number[]) =>
+  post<{ deleted: number; kept: { id: number; title: string; why: string }[] }>("/api/grab/files/delete", { ids });
 export const listGrabMarks = () => api<GrabMarkTag[]>("/api/grab/marks");
 export const setGrabMarks = (ids: number[], add: string[], remove: string[] = []) =>
   post<{ marked: number }>("/api/grab/marks", { ids, add, remove });

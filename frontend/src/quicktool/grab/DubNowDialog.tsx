@@ -3,6 +3,7 @@ import { getDefaultLook, getDubStatus, listLookPresets, type DecorPreset, type D
 import type { DubNowOptions } from "../../api/grab";
 import { useSettingsStore } from "../../store/settings";
 import { VoiceField } from "../VoiceField";
+import { ModePicker } from "../dub/ModePicker";
 
 const KEY = "dflow.grab.dubnow";
 const DEFAULT_VOICE = "vi-VN-HoaiMyNeural";
@@ -81,16 +82,7 @@ export function DubNowDialog({ count, missing, onStart, onClose, onOpenPage }: {
           <h3>🎙 Lồng tiếng {count} video</h3>
           <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={onClose} disabled={busy} aria-label="Đóng">×</button>
         </header>
-        <div className="gb-now__modes" role="radiogroup" aria-label="Làm gì với video">
-          <label className={o.mode === "dub" ? "is-on" : ""}>
-            <input type="radio" name="gb-now-mode" checked={o.mode === "dub"} onChange={() => setO({ ...o, mode: "dub" })} />
-            <strong>🎙 Lồng tiếng Việt</strong><small>Giọng Việt thay tiếng gốc + phụ đề</small>
-          </label>
-          <label className={o.mode === "sub" ? "is-on" : ""}>
-            <input type="radio" name="gb-now-mode" checked={o.mode === "sub"} onChange={() => setO({ ...o, mode: "sub" })} />
-            <strong>💬 Chỉ chèn phụ đề</strong><small>Giữ tiếng gốc — nhanh hơn nhiều</small>
-          </label>
-        </div>
+        <ModePicker name="gb-now-mode" value={o.mode === "sub" ? "sub" : "dub"} onChange={(mode) => setO({ ...o, mode })} disabled={busy} />
         {o.mode === "dub" ? (
           <>
             <label className="qt-field"><span>Giọng đọc</span></label>

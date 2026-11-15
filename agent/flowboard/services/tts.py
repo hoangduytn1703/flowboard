@@ -16,7 +16,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from flowboard import config
 
@@ -285,9 +285,12 @@ async def _synth_gemini(text: str, voice: str, rate: int, style: Optional[str], 
     out.write_bytes(wav)
 
 
-async def _synth_vieneu_many(items: list[tuple[str, Path]], voice: str) -> None:
-    """VieNeu for several lines in one runner process (the model loads once).
-    ``items`` = ``[(text, out.wav)]``."""
+async def _synth_vieneu_many(items: list[tuple[str, Path]], voice: str,
+                             progress: Optional[Callable[[int, int], None]] = None,
+                             stop: Optional[Callable[[], bool]] = None, run_lines: Optional[int] = None) -> None:
+    """VieNeu for several lines with one model load: the resident server (services/voice_server, the model stays
+    loaded between calls) or, when it is busy / off, a one-shot runner. ``items`` = ``[(text, out.wav)]``;
+    ``progress(k, n)`` after each line (server only), ``stop()`` ends it between two lines."""
     import json as _json
     import tempfile
 
@@ -307,15 +310,31 @@ async def _synth_vieneu_many(items: list[tuple[str, Path]], voice: str) -> None:
     else:
         raise TTSError(f"VieNeu không có giọng {voice.split(':', 1)[1]!r}")
     TTS_DIR.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile("w", suffix=".json", prefix="vieneu-", dir=str(TTS_DIR), delete=False, encoding="utf-8") as fh:
-        _json.dump([{"text": t, "out": str(p)} for t, p in items], fh, ensure_ascii=False)
-        lines_json = Path(fh.name)
-    try:
-        res = await asyncio.to_thread(dub._runner, "vieneu", name, str(lines_json), timeout=max(600, 30 * len(items)))
-    except dub.DubError as exc:
-        raise TTSError(f"VieNeu: {exc}") from exc
-    finally:
-        lines_json.unlink(missing_ok=True)
+    from flowboard.services import voice_server
+
+    res: Optional[dict] = None
+    if voice_server.enabled():
+        try:
+            res = await asyncio.to_thread(voice_server.speak, name, [{"text": t, "out": str(p)} for t, p in items],
+                                          progress=progress, stop=stop, run_lines=run_lines)
+        except voice_server.Stopped as exc:
+            raise TTSError("Đã dừng theo yêu cầu") from exc
+        except voice_server.Busy:
+            res = None  # another dub / preview is being read: this one goes the old way, in parallel
+        except voice_server.VoiceServerError as exc:
+            logger.warning("tts: VieNeu server failed (%s) — reading with a one-shot runner", exc)
+            res = None
+    if res is None:
+        with tempfile.NamedTemporaryFile("w", suffix=".json", prefix="vieneu-", dir=str(TTS_DIR), delete=False, encoding="utf-8") as fh:
+            _json.dump([{"text": t, "out": str(p)} for t, p in items], fh, ensure_ascii=False)
+            lines_json = Path(fh.name)
+        try:
+            res = await asyncio.to_thread(dub._runner, "vieneu", name, str(lines_json), timeout=max(600, 30 * len(items)),
+                                          stop=stop)
+        except dub.DubError as exc:
+            raise TTSError(f"VieNeu: {exc}") from exc
+        finally:
+            lines_json.unlink(missing_ok=True)
     unread = {int(n) - 1 for n in (res or {}).get("missing") or [] if str(n).isdigit()}
     for k, (text, p) in enumerate(items):
         if k in unread:
@@ -396,7 +415,8 @@ def _finish(audio: Path, key: str, words: Optional[list[Word]] = None) -> Narrat
 
 
 async def synthesize_many(lines: list[str], voice: str = DEFAULT_VOICE, rate: int = 0,
-                          style: Optional[str] = None) -> list[Narration]:
+                          style: Optional[str] = None, progress: Optional[Callable[[int, int], None]] = None,
+                          stop: Optional[Callable[[], bool]] = None, run_lines: Optional[int] = None) -> list[Narration]:
     """Every line spoken, in order. Local voices (VieNeu) do all the uncached
     lines in one model load; the others go line by line. Lines are cached
     one by one, so a later :func:`synthesize` of any of them is a cache hit."""
@@ -411,7 +431,7 @@ async def synthesize_many(lines: list[str], voice: str = DEFAULT_VOICE, rate: in
                 seen.add(key)
                 todo.append((t, TTS_DIR / _audio_name(voice, key)))
         if todo:
-            await _synth_vieneu_many(todo, voice)
+            await _synth_vieneu_many(todo, voice, progress=progress, stop=stop, run_lines=run_lines)
             for t, p in todo:
                 if p.is_file():  # a line VieNeu could not read has none: synthesize() below says which
                     _finish(p, _cache_key(t, voice, rate, ""))

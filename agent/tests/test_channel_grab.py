@@ -170,7 +170,8 @@ def test_picked_videos_download_and_go_on_as_files(client, listed, monkeypatch):
     assert client.post("/api/grab/media", json={"ids": [bad, good, 999]}).json() == [
         {"id": good, "media_id": by_id[good]["media_id"], "name": by_id[good]["title"], "title": by_id[good]["title"]}]
     assert client.post("/api/grab/used", json={"ids": [good], "tool": "cut"}).json() == {"marked": 1}
-    assert "cut" in {v["id"]: v for v in client.get("/api/grab/videos").json()}[good]["used"]
+    # sending is not a clip: "✂️ đã cắt" comes from the clips that exist (15/11, test_the_tags_follow_the_clips)
+    assert {v["id"]: v for v in client.get("/api/grab/videos").json()}[good]["used"] == {}
     assert client.post("/api/grab/used", json={"ids": [good], "tool": "x"}).status_code == 422
     # the file gone from this machine (downloaded on the other one): it reads as not here
     (media_service.MEDIA_CACHE_DIR / f"{by_id[good]['media_id']}.mp4").unlink()
@@ -463,7 +464,7 @@ def test_video_labels_survive_a_rescan_and_the_channel_coming_back(client, liste
     cid = client.post("/api/grab/channels", json={"url": "youtube.com/@kenhmau"}).json()["id"]
     assert _scan_done(cid).status == "done"
     again = {v["title"]: v for v in client.get("/api/grab/videos").json()}
-    assert again["Video videos 0"]["marks"] == ["Đã xử lý", "kênh A"] and again["Video videos 0"]["used"].get("cut")
+    assert again["Video videos 0"]["marks"] == ["Đã xử lý", "kênh A"]  # (đã cắt follows the clips now: test_the_tags_follow…)
     assert again["Video videos 1"]["marks"] == ["kênh A", "Đã đăng"] and again["Video videos 2"]["marks"] == []
     assert client.post("/api/grab/marks", json={"ids": [], "add": ["x"]}).status_code == 400
 
@@ -477,3 +478,113 @@ def test_a_scan_may_read_every_video_of_a_channel(client, listed):
     cid = client.post("/api/grab/channels", json={"url": "https://www.youtube.com/@KenhMau", "limit": 2500}).json()["id"]
     assert _scan_done(cid).status == "done"
     assert {limit for _, limit in listed} == {2500}
+
+
+def _downloaded(client, n=3):
+    """A channel whose first ``n`` videos are downloaded (a file + an Asset each)."""
+    from flowboard.db import get_session
+    from flowboard.db.models import Asset, GrabVideo
+
+    cid = client.post("/api/grab/channels", json={"url": "https://www.tiktok.com/@kenh"}).json()["id"]
+    _scan_done(cid)
+    ids = [v["id"] for v in client.get("/api/grab/videos").json()][:n]
+    media_service.MEDIA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    with get_session() as db:
+        for k, vid in enumerate(ids):
+            mid = f"dl{k}{vid:04d}"
+            path = media_service.MEDIA_CACHE_DIR / f"{mid}.mp4"
+            path.write_bytes(b"video")
+            db.add(Asset(kind="video", uuid_media_id=mid, local_path=str(path), mime="video/mp4"))
+            v = db.get(GrabVideo, vid)
+            v.media_id = mid
+            db.add(v)
+        db.commit()
+    return ids
+
+
+def _clip(template, **qt):
+    from flowboard.db import get_session
+    from flowboard.db.models import Board
+
+    with get_session() as db:
+        b = Board(name="clip", data={"quicktool": {"template_id": template, **qt}})
+        db.add(b)
+        db.commit()
+        db.refresh(b)
+        return b.id
+
+
+def test_the_tags_follow_the_clips_that_exist(client, listed, monkeypatch):
+    """"🎙 đã lồng / ✂️ đã cắt" = a clip in "Clip của tôi" made from the video now; deleting the clip takes the tag off."""
+    from flowboard.services import video_cut
+
+    monkeypatch.setattr(grab, "USES_TTL_S", 0.0)
+    a, b, c = _downloaded(client)
+    by = {v["id"]: v for v in client.get("/api/grab/videos").json()}
+    dub_board = _clip("dub", dub={"job_id": "j", "source_media_id": by[a]["media_id"], "snapshot": {"segments": ["…" * 50]}})
+    _clip("cut_part", cut={"session_id": "s", "from_media_id": by[b]["media_id"]})
+    # a part cut before 15/11: no from_media_id, its session knows the source
+    monkeypatch.setattr(video_cut, "SESSIONS", {"old": video_cut.Session(id="old", run_id="r", source_media_id=by[c]["media_id"])})
+    monkeypatch.setattr(video_cut, "load_sessions", lambda: None)
+    _clip("cut_part", cut={"session_id": "old"})
+    _clip("fashion_ad")
+    vids = {v["id"]: v for v in client.get("/api/grab/videos").json()}
+    assert set(vids[a]["used"]) == {"dub"} and set(vids[b]["used"]) == {"cut"} and set(vids[c]["used"]) == {"cut"}
+    client.delete(f"/api/boards/{dub_board}")
+    assert client.get("/api/grab/videos").json()[0]["used"] == {} or {v["id"]: v for v in client.get("/api/grab/videos").json()}[a]["used"] == {}
+
+
+def test_failures_can_be_put_away(client, listed, monkeypatch):
+    from flowboard.db import get_session
+    from flowboard.db.models import GrabVideo
+    from flowboard.services import dub, grab_dub
+
+    a, b = _downloaded(client, 2)
+    vids = client.get("/api/grab/videos").json()
+    bad = vids[-1]["id"]  # never downloaded: its download failed
+    with get_session() as db:
+        v = db.get(GrabVideo, bad)
+        v.download_error = "Không tải được: Douyin không trả dữ liệu"
+        db.add(v)
+        db.commit()
+    by = {v["id"]: v for v in client.get("/api/grab/videos").json()}
+    monkeypatch.setattr(dub, "JOBS", {"j1": dub.Job(id="j1", url=None, source_media_id=by[a]["media_id"], status="error",
+                                                    error="giọng đọc lỗi", started_at=100.0)})
+    grab_dub.ITEMS[(grab._owner(), b)] = grab_dub.Item(video_id=b, owner=grab._owner(), options={}, status="failed", error="x")
+    work = client.get("/api/grab/work").json()
+    assert work[str(a)]["dub"]["state"] == "error" and work[str(b)]["dub"]["state"] == "error"
+    assert by[bad]["download_error"]
+    r = client.post("/api/grab/errors/dismiss", json={"ids": [a, b, bad]}).json()
+    assert r["dismissed"] == 3
+    work = client.get("/api/grab/work").json()
+    assert "dub" not in work.get(str(a), {}) and "dub" not in work.get(str(b), {})
+    assert {v["id"]: v for v in client.get("/api/grab/videos").json()}[bad]["download_error"] == ""
+    # a new failure of the same video shows again
+    dub.JOBS["j2"] = dub.Job(id="j2", url=None, source_media_id=by[a]["media_id"], status="error", error="lỗi mới", started_at=200.0)
+    assert client.get("/api/grab/work").json()[str(a)]["dub"]["id"] == "j2"
+    grab_dub.ITEMS.clear()
+
+
+def test_downloaded_files_can_be_removed_unless_still_used(client, listed, monkeypatch):
+    from flowboard.db import get_session
+    from flowboard.db.models import Asset
+    from flowboard.services import dub, video_cut
+
+    monkeypatch.setattr(dub, "JOBS", {})
+    monkeypatch.setattr(dub, "load_jobs", lambda: None)
+    monkeypatch.setattr(video_cut, "SESSIONS", {})
+    monkeypatch.setattr(video_cut, "load_sessions", lambda: None)
+    a, b, c = _downloaded(client)
+    by = {v["id"]: v for v in client.get("/api/grab/videos").json()}
+    _clip("dub", dub={"source_media_id": by[b]["media_id"]})                         # b: a clip still made from it
+    dub.JOBS["j"] = dub.Job(id="j", url=None, source_media_id=by[c]["media_id"], status="review")  # c: a dub in the list
+    assert client.post("/api/grab/files/delete", json={"ids": []}).status_code == 400
+    r = client.post("/api/grab/files/delete", json={"ids": [a, b, c]}).json()
+    assert r["deleted"] == 1 and {k["id"]: k["why"] for k in r["kept"]} == {
+        b: "còn clip làm từ video này trong Clip của tôi", c: "còn trong danh sách Lồng tiếng / Cắt video"}
+    vids = {v["id"]: v for v in client.get("/api/grab/videos").json()}
+    assert vids[a]["media_id"] is None and vids[a]["download"] == "" and not vids[a]["elsewhere"]
+    assert not (media_service.MEDIA_CACHE_DIR / f"{by[a]['media_id']}.mp4").exists()
+    with get_session() as db:
+        assert db.exec(grab.select(Asset).where(Asset.uuid_media_id == by[a]["media_id"])).first() is None
+    assert vids[b]["media_id"] and vids[c]["media_id"]

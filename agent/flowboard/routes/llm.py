@@ -584,6 +584,21 @@ async def preview_voice(body: _VoicePreviewBody) -> dict:
     return {"url": f"/api/llm/voices/preview/{path.name}", "voice": body.voice, "cached": True}
 
 
+class _VoiceWarmBody(BaseModel):
+    voice: str
+
+
+@router.post("/voices/warm")
+def warm_voice(body: _VoiceWarmBody) -> dict:
+    """A VieNeu voice was picked: load the model in the background now (services/voice_server), so "▶ Nghe thử" and
+    the dub's voice step read at once instead of paying the 20–30 s load. Other voices: nothing to do."""
+    from flowboard.services import tts, voice_server
+
+    if not tts.is_voice(body.voice) or tts.voice_kind(body.voice) != "vieneu" or not tts.vieneu_available()[0]:
+        return {"warming": False}
+    return {"warming": voice_server.warm(), "ready": voice_server.running()}
+
+
 @router.get("/voices/preview/{file}")
 def preview_voice_file(file: str):
     from fastapi.responses import FileResponse

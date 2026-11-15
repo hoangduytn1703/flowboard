@@ -24,6 +24,8 @@
   POST   /api/grab/used                      {ids, tool: cut | dub} — remember they went on to that tool
   GET    /api/grab/marks                     the video labels in use (+ the ready-made ones) with counts
   POST   /api/grab/marks                     {ids, add?, remove?} — label videos ("Đã xử lý", "Đã đăng"…), kept by video
+  POST   /api/grab/errors/dismiss            {ids} — "× Bỏ lỗi": the videos' failures stop showing
+  POST   /api/grab/files/delete              {ids} — "🗑 Xoá file đã tải" (ones still in use kept) → {deleted, kept: [{id, title, why}]}
 """
 from __future__ import annotations
 
@@ -275,3 +277,17 @@ def used(body: UsedBody) -> dict[str, Any]:
         return {"marked": grab.mark_used(body.ids, body.tool)}
     except grab.GrabError as exc:
         raise _bad(exc)
+
+
+@router.post("/errors/dismiss")
+def dismiss_errors(body: IdsBody) -> dict[str, Any]:
+    """"× Bỏ lỗi" on a card / the red bar: the videos' failures stop showing (a new failure shows again)."""
+    return {"dismissed": grab.dismiss_errors(body.ids)}
+
+
+@router.post("/files/delete")
+def delete_files(body: IdsBody) -> dict[str, Any]:
+    """"🗑 Xoá file đã tải": the downloads leave the machine and the cloud; ones still in use are kept and said why."""
+    if not body.ids:
+        raise HTTPException(400, "Chọn ít nhất một video")
+    return grab.forget_files(body.ids)

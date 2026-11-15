@@ -330,16 +330,6 @@
   .qt-dublinks .qt-dubjobs__table th:nth-child(3), .qt-dublinks .qt-dubjobs__table td:nth-child(3) { display: table-cell; }
 }
 
-/* "Làm gì với video": voice-over or subtitles only */
-.qt-dub__mode { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.qt-dub__modeopt { display: flex; gap: 8px; align-items: flex-start; padding: 9px 10px; border: 1px solid #333a48; border-radius: 10px;
-  background: rgba(255, 255, 255, 0.02); cursor: pointer; }
-.qt-dub__modeopt.is-on { border-color: var(--qt-accent, #ff6a2b); background: rgba(255, 106, 43, 0.08); }
-.qt-dub__modeopt input { margin-top: 3px; accent-color: var(--qt-accent, #ff6a2b); }
-.qt-dub__modeopt span { display: flex; flex-direction: column; gap: 2px; }
-.qt-dub__modeopt strong { font-size: 14px; }
-.qt-dub__modeopt small { font-size: 12px; color: var(--muted); line-height: 1.35; }
-@media (max-width: 760px) { .qt-dub__mode { grid-template-columns: 1fr; } }
 
 /* the link library: the voice for the links queued from here (remembered as the default) */
 .qt-dublinks__voice { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; margin-top: 8px;

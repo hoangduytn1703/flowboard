@@ -4,7 +4,7 @@ import { announceRunning } from "../../components/BackgroundTasks";
 import { askConfirm, askText } from "../../components/Dialogs";
 import { StopButton } from "../../components/StopButton";
 import {
-  dubGrabNow, stopGrabDub, type DubNowOptions,
+  dubGrabNow, stopGrabDub, dismissGrabErrors, deleteGrabFiles, type DubNowOptions,
   addGrabChannel, agoOf, clockOf, dateOf, deleteGrabChannel, deleteGrabPrompt, downloadGrabVideos, editGrabChannel, getGrabState,
   getGrabStatus, getGrabWork, grabAvatarUrl, grabThumbUrl, listGrabChannels, listGrabMarks, listGrabPrompts, listGrabVideos, markGrabUsed,
   pickGrabVideos, saveGrabPrompt, scanAllGrabChannels, scanGrabChannel, setGrabMarks, shortCount, stopGrabDownloads, stopGrabScan,
@@ -54,7 +54,7 @@ type Have = "" | "fresh" | "todo" | "here" | "unused" | "failed";
 const HAVES: { key: Have; label: string }[] = [
   { key: "", label: "Tất cả" }, { key: "fresh", label: "Mới từ lần quét cuối" }, { key: "todo", label: "Chưa tải về" },
   { key: "here", label: "Đã tải về" }, { key: "unused", label: "Chưa cắt / lồng tiếng" },
-  { key: "failed", label: "Cắt / lồng tiếng bị lỗi" },
+  { key: "failed", label: "Bị lỗi (tải / cắt / lồng tiếng)" },
 ];
 type Tool = "dub" | "cut";
 const TOOLS: Tool[] = ["dub", "cut"];
@@ -64,6 +64,8 @@ const RUN_TEXT: Record<Tool, { verb: string; done: string; review: string; icon:
 };
 /** the tools whose last run from this video failed */
 const failedTools = (w: GrabWork[string] | undefined): Tool[] => TOOLS.filter((k) => w?.[k]?.state === "error");
+/** something on the card says it failed: a tool's run, or the download itself */
+const hasFailure = (v: GrabVideo, w: GrabWork[string] | undefined, dl: string) => failedTools(w).length > 0 || (dl === "" && !!v.download_error);
 const PRESET_LIMITS = [30, 60, 100, 200, 500, 1000];
 const MAX_LIMIT = 3000;
 const PRESET_MARKS = ["Đã xử lý", "Đã đăng", "Để dành", "Bỏ qua"];
@@ -84,6 +86,25 @@ function stored<T>(key: string, fallback: T): T {
 }
 function store(key: string, value: unknown) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* private mode */ }
+}
+
+/** The grid's filters, the AI's pick and the ticked videos, kept for this app session (sessionStorage, 15/11):
+ *  going to another page and back finds them as they were; "Bỏ lọc" / "Bỏ kết quả AI" or closing the app clears them. */
+const VIEW_KEY = "dflow.grab.view";
+interface GridView {
+  chan: number | null; tag: string; q: string; minViews: number; days: number; len: Len; kind: "" | "video" | "short"; have: Have;
+  aiOnly: boolean; why: [number, string][]; aiNote: string; picked: number[];
+}
+function savedView(): Partial<GridView> {
+  try {
+    const raw = window.sessionStorage.getItem(VIEW_KEY);
+    return raw ? (JSON.parse(raw) as Partial<GridView>) : {};
+  } catch {
+    return {};
+  }
+}
+function keepView(v: GridView) {
+  try { window.sessionStorage.setItem(VIEW_KEY, JSON.stringify(v)); } catch { /* private mode / full */ }
 }
 
 /** Where a video stands: the download in flight (polled) wins over what the list last said. */
@@ -201,25 +222,29 @@ export function GrabPage() {
   // the 🏷 menu: the videos it labels and where its button is
   const [markMenu, setMarkMenu] = useState<{ ids: number[]; anchor: DOMRect } | null>(null);
   const [adding, setAdding] = useState(false);
+  const [view0] = useState(savedView);  // what this session left here (see VIEW_KEY)
   // which channel is open (null = every channel) and the label filter of the channel list
-  const [chan, setChan] = useState<number | null>(null);
-  const [tag, setTag] = useState("");
+  const [chan, setChan] = useState<number | null>(view0.chan ?? null);
+  const [tag, setTag] = useState(view0.tag ?? "");
   // filters of the video grid
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState(view0.q ?? "");
   const [sort, setSort] = useState<Sort>(() => stored<Sort>("flowboard.grab.sort", "new"));
-  const [minViews, setMinViews] = useState(0);
-  const [days, setDays] = useState(0);
-  const [len, setLen] = useState<Len>("");
-  const [kind, setKind] = useState<"" | "video" | "short">("");
-  const [have, setHave] = useState<Have>("");
+  const [minViews, setMinViews] = useState(view0.minViews ?? 0);
+  const [days, setDays] = useState(view0.days ?? 0);
+  const [len, setLen] = useState<Len>(view0.len ?? "");
+  const [kind, setKind] = useState<"" | "video" | "short">(view0.kind ?? "");
+  const [have, setHave] = useState<Have>(view0.have ?? "");
   const [shown, setShown] = useState(PAGE);
-  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [picked, setPicked] = useState<Set<number>>(() => new Set(view0.picked ?? []));
   // the AI's pick
   const [prompt, setPrompt] = useState<string>(() => stored("flowboard.grab.prompt", ""));
   const [picking, setPicking] = useState(false);
-  const [why, setWhy] = useState<Map<number, string>>(new Map());
-  const [aiNote, setAiNote] = useState("");
-  const [aiOnly, setAiOnly] = useState(false);
+  const [why, setWhy] = useState<Map<number, string>>(() => new Map(view0.why ?? []));
+  const [aiNote, setAiNote] = useState(view0.aiNote ?? "");
+  const [aiOnly, setAiOnly] = useState(view0.aiOnly ?? false);
+  useEffect(() => {
+    keepView({ chan, tag, q, minViews, days, len, kind, have, aiOnly, why: Array.from(why.entries()), aiNote, picked: Array.from(picked) });
+  }, [chan, tag, q, minViews, days, len, kind, have, aiOnly, why, aiNote, picked]);
   // the account's saved AI requests, newest first
   const [prompts, setPrompts] = useState<string[]>([]);
   // what became of the videos sent on to "🎙 Lồng tiếng" / "✂️ Cắt video" (a failure shows on the card)
@@ -319,7 +344,7 @@ export function GrabPage() {
       if (have === "todo" && here) return false;
       if (have === "here" && !here) return false;
       if (have === "unused" && (v.used.cut || v.used.dub)) return false;
-      if (have === "failed" && !failedTools(work[String(v.id)]).length) return false;
+      if (have === "failed" && !hasFailure(v, work[String(v.id)], downloadOf(v, state))) return false;
       if (markF === "__none" && v.marks.length) return false;
       if (markF === "__any" && !v.marks.length) return false;
       if (markF && !markF.startsWith("__") && !v.marks.some((m) => m.toLowerCase() === markF.toLowerCase())) return false;
@@ -341,7 +366,8 @@ export function GrabPage() {
     });
     return { filtered: out, undated };
   }, [scope, q, minViews, days, len, kind, have, markF, aiOnly, why, sort, state, work]);
-  const failedCount = useMemo(() => scope.filter((v) => failedTools(work[String(v.id)]).length).length, [scope, work]);
+  const failedList = useMemo(() => scope.filter((v) => hasFailure(v, work[String(v.id)], downloadOf(v, state))), [scope, work, state]);
+  const failedCount = failedList.length;
   // "🎙 Lồng tiếng ngay": what is still on its way, how far this visit's lot is, about how long is left
   const liveDub = useMemo(() => videos.filter((v) => dubLive(work[String(v.id)]?.dub)), [videos, work]);
   const lotTotal = lot.length;
@@ -406,6 +432,7 @@ export function GrabPage() {
 
   const pickedList = useMemo(() => videos.filter((v) => picked.has(v.id)), [videos, picked]);
   const pickedTodo = pickedList.filter((v) => downloadOf(v, state) === "");
+  const pickedHere = pickedList.filter((v) => downloadOf(v, state) === "done" && v.media_id);
   function toggle(id: number) {
     setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   }
@@ -479,6 +506,35 @@ export function GrabPage() {
       announceRunning();
       setState(await getGrabState());
       if (!quiet) toast.info(r.queued ? `Đang tải ${r.queued} video về (hai video một lúc) — cứ làm việc khác, xong tool sẽ báo.` : "Các video này đã có trên máy rồi.");
+    } catch (e) {
+      toast.error(errMessage(e));
+    }
+  }
+  /** "× Bỏ lỗi": the failures stop showing (the red strip, "⚠ Tải lỗi"); trying again later is still possible */
+  async function dismiss(ids: number[]) {
+    if (!ids.length) return;
+    try {
+      await dismissGrabErrors(ids);
+      setVideos((list) => list.map((v) => (ids.includes(v.id) ? { ...v, download_error: "" } : v)));
+      setWork(await getGrabWork());
+      setState(await getGrabState());
+      if (ids.length > 1) toast.success(`Đã bỏ lỗi của ${ids.length} video.`);
+    } catch (e) {
+      toast.error(errMessage(e));
+    }
+  }
+  /** "🗑 Xoá file đã tải": "✓ Đã tải" goes; a video still used by a clip / a dub / a cut is kept and the toast says so */
+  async function removeFiles(list: GrabVideo[]) {
+    if (!list.length) return;
+    if (!(await askConfirm(`Xoá file của ${list.length} video đã tải khỏi máy này (và bản trên cloud)?\n\n`
+      + "Danh sách video, nhãn của bạn vẫn còn — cần dùng lại thì bấm tải lại. Video còn clip trong “Clip của tôi” "
+      + "hoặc còn trong danh sách Lồng tiếng / Cắt video thì tool giữ lại (cần file để xuất lại).", { ok: "Xoá file", danger: true }))) return;
+    try {
+      const r = await deleteGrabFiles(list.map((v) => v.id));
+      await reload();
+      setState(await getGrabState());
+      const kept = r.kept.length ? ` Giữ lại ${r.kept.length} video: ${Array.from(new Set(r.kept.map((k) => k.why))).join("; ")}.` : "";
+      (r.deleted ? toast.success : toast.warning)(`${r.deleted ? `Đã xoá file của ${r.deleted} video.` : "Không xoá file nào."}${kept}`);
     } catch (e) {
       toast.error(errMessage(e));
     }
@@ -834,6 +890,12 @@ export function GrabPage() {
                         title="Gắn / gỡ nhãn (Đã xử lý, Đã đăng…) cho các video đã chọn">🏷 Nhãn {picked.size || ""}</button>
                 <button type="button" className="qt-btn qt-btn--small" disabled={!pickedTodo.length} onClick={() => void download(pickedTodo.map((v) => v.id))}
                         title="Tải các video đã chọn về máy (video đã có thì bỏ qua)">⬇ Tải {pickedTodo.length || ""} video về</button>
+                {pickedHere.length > 0 && (
+                  <button type="button" className="qt-btn qt-btn--small qt-btn--danger" onClick={() => void removeFiles(pickedHere)}
+                          title="Xoá file video đã tải khỏi máy (nhãn “✓ Đã tải” mất; video còn dùng cho clip / lồng tiếng / cắt thì giữ lại)">
+                    🗑 Xoá {pickedHere.length} file đã tải
+                  </button>
+                )}
                 {canCut && (
                   <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={!picked.size || !!after} onClick={() => void send("cut", pickedList)}
                           title={`Đem video đã chọn đi cắt thành nhiều video ngắn (tối đa ${MAX_TO.cut} video một lượt; video chưa tải thì tool tải trước)`}>✂️ Cắt {picked.size || ""} video</button>
@@ -867,8 +929,10 @@ export function GrabPage() {
 
               {failedCount > 0 && have !== "failed" && (
                 <div className="gb__failbar" role="status">
-                  <span>⚠ <strong>{failedCount}</strong> video đem đi cắt / lồng tiếng bị lỗi — thẻ của chúng có dải đỏ, bấm vào để xem lỗi.</span>
+                  <span>⚠ <strong>{failedCount}</strong> video tải / cắt / lồng tiếng bị lỗi — thẻ của chúng có dải đỏ, bấm vào để xem lỗi.</span>
                   <button type="button" className="qt-btn qt-btn--small" onClick={() => setHave("failed")}>Chỉ xem video bị lỗi</button>
+                  <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={() => void dismiss(failedList.map((v) => v.id))}
+                          title="Thôi hiện các lỗi này (video vẫn còn trong danh sách, thử lại được bất cứ lúc nào)">× Bỏ hết lỗi</button>
                 </div>
               )}
               {filtered.length === 0 ? (
@@ -922,10 +986,14 @@ export function GrabPage() {
                                     <strong>⚠ {RUN_TEXT[k].icon} {k === "dub" ? "Lồng tiếng" : "Cắt video"} bị lỗi</strong> {run.link && <span>Xem ›</span>}
                                     {run.error && <small>{run.error}</small>}
                                   </a>
-                                  {k === "dub" && canDub && (
-                                    <button type="button" className="qt-btn qt-btn--small" onClick={() => void retryDub(v)}
-                                            title="Lồng tiếng lại video này với lựa chọn lần trước">↻ Thử lại</button>
-                                  )}
+                                  <span className="gb-v__failacts">
+                                    {k === "dub" && canDub && (
+                                      <button type="button" className="qt-btn qt-btn--small" onClick={() => void retryDub(v)}
+                                              title="Lồng tiếng lại video này với lựa chọn lần trước">↻ Thử lại</button>
+                                    )}
+                                    <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={() => void dismiss([v.id])}
+                                            title="Thôi hiện lỗi này trên thẻ (thử lại vẫn được)">× Bỏ lỗi</button>
+                                  </span>
                                 </div>
                               );
                             })}
@@ -962,7 +1030,7 @@ export function GrabPage() {
                                 if (k === "dub" && run && (dubLive(run) || run.state === "nospeech" || (run.state === "done" && run.link))) return null;
                                 if (run && run.state !== "error") return <RunChip key={k} tool={k} run={run} onOpen={() => navigate(run.link)} />;
                                 if (!run && sent) {
-                                  return <span key={k} className="gb-st" title={`Đã gửi sang ${k === "dub" ? "Lồng tiếng" : "Cắt video"} ${dateOf(sent)}`}>
+                                  return <span key={k} className="gb-st" title={`Có clip ${k === "dub" ? "lồng tiếng" : "cắt"} từ video này trong “Clip của tôi” (${dateOf(sent)}) — xoá clip đó thì nhãn này mất`}>
                                     {RUN_TEXT[k].icon} đã {k === "dub" ? "lồng" : "cắt"}</span>;
                                 }
                                 return null;
@@ -989,7 +1057,12 @@ export function GrabPage() {
                                 )}
                               </span>
                             </div>
-                            {dl === "" && v.download_error && <p className="gb-v__err">{v.download_error}</p>}
+                            {dl === "" && v.download_error && (
+                              <p className="gb-v__err">
+                                <span>{v.download_error}</span>
+                                <button type="button" className="qt-link" onClick={() => void dismiss([v.id])} title="Thôi hiện lỗi tải này (bấm ⬇ để tải lại)">× Bỏ lỗi</button>
+                              </p>
+                            )}
                           </div>
                         </article>
                       );

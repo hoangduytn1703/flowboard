@@ -131,7 +131,9 @@ button.gb-ch--all { flex-direction: row; align-items: center; gap: 10px; cursor:
 .gb-v__foot { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: auto; padding-top: 2px; }
 .gb-v__acts { margin-left: auto; display: flex; gap: 5px; }
 .gb-v__acts .qt-btn { padding: 4px 9px; font-size: 13.5px; text-decoration: none; }
-.gb-v__err { margin: 0; font-size: 12.5px; line-height: 1.4; color: #fca5a5; overflow-wrap: anywhere; }
+.gb-v__err { margin: 0; display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; line-height: 1.4; color: #fca5a5; overflow-wrap: anywhere; }
+.gb-v__err > span { flex: 1; min-width: 0; }
+.gb-v__err .qt-link { flex: none; font-size: 12.5px; color: var(--muted); }
 .gb-st { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border-radius: 999px; font-size: 12px; line-height: 1.6; color: #cbd5e1; background: rgba(148, 163, 184, 0.14); border: 1px solid rgba(148, 163, 184, 0.3); white-space: nowrap; }
 .gb-st--ok { color: #bbf7d0; background: rgba(34, 197, 94, 0.14); border-color: rgba(34, 197, 94, 0.4); }
 .gb-st--run { color: #fed7aa; background: rgba(255, 106, 43, 0.12); border-color: rgba(255, 106, 43, 0.4); }
@@ -277,16 +279,6 @@ button.gb-ch--all { flex-direction: row; align-items: center; gap: 10px; cursor:
 }
 .gb-now__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .gb-now__head h3 { margin: 0; font-size: 18px; }
-.gb-now__modes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.gb-now__modes label {
-  display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; cursor: pointer;
-  border: 1px solid var(--border); border-radius: 10px; background: var(--panel-high);
-}
-.gb-now__modes label.is-on { border-color: var(--qt-accent); background: rgba(255, 106, 43, 0.1); }
-.gb-now__modes input { position: absolute; opacity: 0; pointer-events: none; }
-.gb-now__modes label:focus-within { box-shadow: 0 0 0 2px rgba(255, 106, 43, 0.45); }
-.gb-now__modes strong { font-size: 14.5px; }
-.gb-now__modes small { color: var(--muted); font-size: 12.5px; line-height: 1.4; }
 .gb-now .qt-field { margin: 0; }
 .gb-now__note { margin: 0; font-size: 13px; line-height: 1.55; color: var(--muted); }
 .gb-now__warn { margin: 0; padding: 8px 10px; font-size: 13.5px; border-radius: 8px; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.45); }
@@ -312,3 +304,4 @@ button.gb-ch--all { flex-direction: row; align-items: center; gap: 10px; cursor:
 .gb-v__ready > span { flex: 1 1 120px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #34d399; font-weight: 600; }
 .gb-v__failwrap { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .gb-v__failwrap .gb-v__fail { align-self: stretch; }
+.gb-v__failacts { display: flex; gap: 6px; flex-wrap: wrap; }

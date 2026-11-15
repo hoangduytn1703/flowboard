@@ -192,6 +192,8 @@ async def lifespan(app: FastAPI):
         for t in (ws_task, worker_task, schedule_task, fb_sync_task, autopilot_task):
             t.cancel()
         await asyncio.gather(ws_task, worker_task, schedule_task, fb_sync_task, autopilot_task, return_exceptions=True)
+        from flowboard.services import voice_server
+        voice_server.shutdown()  # the resident VieNeu goes with the agent
         logger.info("flowboard agent stopped")
 
 

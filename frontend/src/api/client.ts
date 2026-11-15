@@ -1960,6 +1960,19 @@ export async function previewVoice(voice: string, style?: string, text?: string)
   return res.json();
 }
 
+/** A VieNeu voice was picked: the agent loads the model in the background (services/voice_server), so "▶ Nghe thử"
+ *  and the dub's voice step read at once. Asked at most once a minute; other voices need nothing. */
+let lastWarm = 0;
+export function warmVoice(voice: string): void {
+  if (!voice.startsWith("vieneu:") || Date.now() - lastWarm < 60_000) return;
+  lastWarm = Date.now();
+  void fetch("/api/llm/voices/warm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ voice }),
+  }).catch(() => undefined);
+}
+
 /** Background-music levels offered in the export step (volume factor). */
 export const BGM_VOLUMES: [number, string][] = [[0.08, "Nhỏ"], [0.15, "Vừa"], [0.25, "To"]];
 export const BGM_DEFAULT_VOLUME = 0.15;

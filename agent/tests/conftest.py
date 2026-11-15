@@ -33,6 +33,8 @@ os.environ["FLOWBOARD_DUB_ADDON_DIR"] = str(Path(_TMPDIR) / "addons" / "dub")
 os.environ["FLOWBOARD_REMOTION_ADDON_DIR"] = str(Path(_TMPDIR) / "addons" / "remotion")  # same for the "Gói Remotion"
 os.environ["FLOWBOARD_MACHINE_FILE"] = str(Path(_TMPDIR) / "machine.json")  # the card check's answer (services/machine.py)
 os.environ["FLOWBOARD_TOOLS_DIR"] = str(Path(_TMPDIR) / "tools")  # the own yt-dlp copy never lands in the repo
+# no resident VieNeu (services/voice_server.py) under test: VieNeu goes through dub._runner, which the tests fake
+os.environ["FLOWBOARD_VOICE_SERVER"] = "0"
 os.environ.pop("FLOWBOARD_LICENSE_STRICT", None)
 
 from fastapi.testclient import TestClient  # noqa: E402

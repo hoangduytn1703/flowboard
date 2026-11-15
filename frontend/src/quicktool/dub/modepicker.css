@@ -1,0 +1,36 @@
+/* "Làm gì với video" (dub/ModePicker.tsx): two cards — an icon tile, a tick, a title and one line of what it does. */
+.qt-modes { container-type: inline-size; }
+.qt-modes__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@container (max-width: 330px) { .qt-modes__grid { grid-template-columns: 1fr; } }
+
+.qt-modes .qt-mode {
+  position: relative; /* the hidden radio stays inside the card (an absolute input outside scrolls the page) */
+  display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 12px 13px 13px; cursor: pointer; text-align: left;
+  border: 1px solid #3a4050; border-radius: 12px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.01));
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+.qt-mode:hover { border-color: #566078; }
+.qt-modes .qt-mode input { position: absolute; padding: 0; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.qt-mode:focus-within { box-shadow: 0 0 0 2px rgba(255, 106, 43, 0.45); }
+.qt-mode.is-on {
+  border-color: var(--qt-accent, #ff6a2b);
+  background: linear-gradient(180deg, rgba(255, 106, 43, 0.14), rgba(255, 106, 43, 0.05));
+}
+.qt-mode.is-off { opacity: 0.55; cursor: not-allowed; }
+.qt-mode.is-off input { cursor: not-allowed; }
+
+.qt-modes .qt-mode__top { display: flex; width: 100%; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.qt-modes .qt-mode__icon {
+  display: grid; place-items: center; width: 34px; height: 34px; color: #c9cfdb;
+  border-radius: 10px; background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.qt-mode.is-on .qt-mode__icon { color: var(--qt-accent, #ff6a2b); background: rgba(255, 106, 43, 0.16); border-color: rgba(255, 106, 43, 0.45); }
+.qt-mode__icon svg { width: 18px; height: 18px; }
+.qt-mode__dot {
+  display: grid; place-items: center; width: 20px; height: 20px; font-size: 12px; font-weight: 800; line-height: 1;
+  color: #fff; border-radius: 50%; border: 2px solid #4a5163;
+}
+.qt-mode.is-on .qt-mode__dot { background: var(--qt-accent, #ff6a2b); border-color: var(--qt-accent, #ff6a2b); }
+.qt-mode strong { font-size: 14.5px; font-weight: 700; line-height: 1.35; color: var(--text, #f3f4f6); }
+.qt-mode small { font-size: 12.5px; line-height: 1.45; color: var(--muted, #9aa3b2); }

@@ -25,6 +25,7 @@ import { ProgressRing } from "../dub/ProgressRing";
 import { StopButton } from "../../components/StopButton";
 import { DubAddonCard } from "../dub/DubAddonCard";
 import { RemotionAddonCard } from "../dub/RemotionAddonCard";
+import { ModePicker } from "../dub/ModePicker";
 
 const POLL_MS = 2000;
 const DEFAULT_VOICE = "vi-VN-HoaiMyNeural";
@@ -589,16 +590,7 @@ export function DubPage() {
               <section className="qt-card">
                 <div className="qt-card__eyebrow">2 · Giọng & phụ đề</div>
                 <div className="qt-field"><span>Làm gì với video</span>
-                  <div className="qt-dub__mode" role="radiogroup" aria-label="Làm gì với video">
-                    <label className={`qt-dub__modeopt${!subOnly ? " is-on" : ""}`}>
-                      <input type="radio" name="dub-mode" checked={!subOnly} disabled={working} onChange={() => setMode("dub")} />
-                      <span><strong>🎙 Lồng tiếng Việt</strong><small>Đọc giọng Việt thay tiếng gốc + phụ đề</small></span>
-                    </label>
-                    <label className={`qt-dub__modeopt${subOnly ? " is-on" : ""}`}>
-                      <input type="radio" name="dub-mode" checked={subOnly} disabled={working} onChange={() => setMode("sub")} />
-                      <span><strong>💬 Chỉ chèn phụ đề</strong><small>Giữ nguyên tiếng gốc, chỉ thêm phụ đề (tiếng Việt, đúng lời gốc hoặc ngôn ngữ khác) — nhanh hơn nhiều</small></span>
-                    </label>
-                  </div>
+                  <ModePicker name="dub-mode" value={subOnly ? "sub" : "dub"} onChange={setMode} disabled={working} />
                 </div>
                 {subOnly && (
                   <label className="qt-field">

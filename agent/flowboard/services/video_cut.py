@@ -945,7 +945,8 @@ def _part_job(s: Session, index: int, total: int, row: dict[str, Any], title: st
     job.kind, job.mode = "cut", "sub"
     job.source_media_id = job.media_id = media_id
     job.cut = {"session_id": s.id, "run_id": s.run_id, "index": index, "total": total, "start": row["start"],
-               "end": row["end"], "source_url": s.url, "source_title": s.title, "subtitle": row.get("subtitle", "")}
+               "end": row["end"], "source_url": s.url, "source_title": s.title, "subtitle": row.get("subtitle", ""),
+               "from_media_id": s.source_media_id}  # the video it was cut from: "✂️ đã cắt" on the grab list
     job.batch_id = s.run_id
     job.name = job.title = title[:80]
     if prev is None:

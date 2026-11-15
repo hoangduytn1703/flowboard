@@ -1558,13 +1558,126 @@ def _prepare(job: Job) -> None:
     job.segments = [Segment(float(s["start"]), float(s["end"]), str(s["text"])) for s in data.get("segments") or []]
     if not job.segments:
         raise DubError(NO_SPEECH)
+    early = job.auto_render and job.mode != "sub"  # the render follows at once: its slow parts can start now
+    if early:
+        _start_early_bgm(job, ffmpeg, src)
     _set(job, "Đang dịch sang tiếng Việt", 52)
     title_src = job.title
     asyncio.run(_translate(job))
+    if early:
+        _start_early_voice(job)
     if needs_name_check(job):
         asyncio.run(_check_names(job, title_src))
     _set(job, "Đã dịch xong", 60)
     persist(job)  # the translation survives an agent restart from here on (see _job_from_dict)
+
+
+# ── started early (15/11): while the AI checks the names (network, up to NAMES_TIMEOUT_S) and the text is translated,
+# the music is separated and the voice read — the render then finds them done. A line the name check changes is read
+# again (the voice cache is keyed by the words spoken), the others are cache hits.
+
+def _start_early_bgm(job: Job, ffmpeg: str, src: Path) -> None:
+    if not (job.keep_bgm and status().get("separate")) or job.work is None or (job.work / "bgm.wav").is_file():
+        return
+    import threading
+
+    errors: list[BaseException] = []
+
+    def separate() -> None:
+        try:
+            _separate_bgm(job, ffmpeg, src, job.work / "bgm.wav", progress=None)  # type: ignore[operator]
+        except BaseException as exc:  # noqa: BLE001 — reported by the render, like its own separation
+            errors.append(exc)
+
+    th = threading.Thread(target=separate, name=f"dub-bgm-early-{job.id}", daemon=True)
+    th.start()
+    job._early_bgm = (th, errors)  # type: ignore[attr-defined]
+
+
+#: voices read ahead (local or free); Gemini / FPT are left to the render (per-day quota, paid)
+EARLY_VOICES = ("vieneu", "edge")
+#: VieNeu lines read ahead per request: few, so a line the name check changes is rarely read before it (a second
+#: server already loaded shares a batch this size — voice_server.POOL_FROM_LINES)
+EARLY_BATCH = 6
+
+
+def _start_early_voice(job: Job) -> None:
+    kind = tts.voice_kind(job.voice)
+    if kind not in EARLY_VOICES:
+        return
+    said = [t for t in (speech(job, s.text) for s in job.segments if s.text.strip()) if t]
+    if not said:
+        return
+    import threading
+
+    job._early_voice_done = (0, len(said))  # type: ignore[attr-defined]
+
+    def note(k: int, n: int) -> None:
+        job._early_voice_done = (k, n)  # type: ignore[attr-defined]
+
+    def read() -> None:
+        try:
+            if kind == "vieneu":
+                # a few lines at a time, each batch with the words as they are NOW: once the name check has fixed the
+                # lines / added how to say a name, the next batches read the final words — nothing read twice
+                # (15/11: one request for every line wasted 7 of 16 lines the check changed, ~17 s)
+                spoken = [s for s in job.segments if s.text.strip()]
+                done = 0
+                for i in range(0, len(spoken), EARLY_BATCH):
+                    if job.stop:
+                        return
+                    batch = [t for t in (speech(job, s.text) for s in spoken[i:i + EARLY_BATCH]) if t]
+                    asyncio.run(tts.synthesize_many(batch, job.voice, 0, stop=lambda: job.stop, run_lines=len(said),
+                                                    progress=lambda k, _n, base=done: note(base + k, len(said))))
+                    done += len(batch)
+                    note(done, len(said))
+            else:
+                _read_edge(said, job.voice, lambda: job.stop, note)
+        except Exception as exc:  # noqa: BLE001 — the render reads whatever is missing, and says why if it fails
+            logger.info("dub %s: early voice stopped: %s", job.id, exc)
+
+    th = threading.Thread(target=read, name=f"dub-voice-early-{job.id}", daemon=True)
+    th.start()
+    job._early_voice = th  # type: ignore[attr-defined]
+
+
+def _read_edge(texts: list[str], voice: str, stop: Callable[[], bool], note: Callable[[int, int], None]) -> None:
+    """Edge lines EDGE_PARALLEL at a time into the TTS cache (a refused one is left to the render's rounds)."""
+    done = 0
+
+    async def run() -> None:
+        nonlocal done
+        sem = asyncio.Semaphore(EDGE_PARALLEL)
+
+        async def one(text: str) -> None:
+            nonlocal done
+            async with sem:
+                if stop():
+                    return
+                try:
+                    await tts.synthesize(text, voice, 0)
+                except tts.TTSError:
+                    pass
+            done += 1
+            note(done, len(texts))
+
+        await asyncio.gather(*(one(t) for t in texts))
+
+    asyncio.run(run())
+
+
+def _wait_early_voice(job: Job) -> None:
+    """The render's voice step: let the reading started early finish first (it fills the cache the step reads)."""
+    th = getattr(job, "_early_voice", None)
+    if th is None:
+        return
+    job._early_voice = None  # type: ignore[attr-defined]
+    while th.is_alive():
+        if job.stop:
+            raise DubError("Đã dừng theo yêu cầu")
+        k, n = getattr(job, "_early_voice_done", (0, 0))
+        _set(job, f"Đang tạo giọng đọc ({k}/{n} câu)", 62 + int(16 * k / max(1, n)))
+        th.join(0.3)
 
 
 #: a line Edge keeps refusing gets this many rounds (each = tts.ATTEMPTS tries), VOICE_ROUND_WAIT_S apart
@@ -1628,14 +1741,22 @@ def _voice_pieces(job: Job) -> list[tuple[float, Path, float]]:
     spoken = [s for s in job.segments if s.text.strip()]
     said = [speech(job, s.text) for s in spoken]
     silent: list[int] = []  # lines the voice cannot read: they keep their subtitle and a silent slot
+    _wait_early_voice(job)  # read while the names were checked: what is left below is only the changed lines
     if tts.voice_kind(job.voice) == "vieneu" and any(said):
-        # VieNeu loads its model once for every line still missing (then each line below is a cache hit)
-        _set(job, f"Đang tạo giọng đọc VieNeu ({len(spoken)} câu, trên máy)", 62)
+        # VieNeu reads every line still missing in one go (then each line below is a cache hit)
+        todo = [t for t in said if t]
+        _set(job, f"Đang tạo giọng đọc VieNeu ({len(todo)} câu, trên máy)", 62)
+
+        def note(k: int, n: int) -> None:
+            _set(job, f"Đang tạo giọng đọc VieNeu ({k}/{n} câu, trên máy)", 62 + int(16 * k / max(1, n)))
+
         try:
-            asyncio.run(tts.synthesize_many([t for t in said if t], job.voice, 0))
+            asyncio.run(tts.synthesize_many(todo, job.voice, 0, progress=note, stop=lambda: job.stop))
         except tts.UnspeakableError:
             pass  # the loop below finds which line, the others are cached already
         except tts.TTSError as exc:
+            if job.stop:
+                raise DubError("Đã dừng theo yêu cầu") from exc
             raise DubError(f"giọng đọc lỗi: {exc}") from exc
     if tts.voice_kind(job.voice) == "edge" and len(spoken) > 1:
         _prefetch_edge(job, spoken)
@@ -1929,7 +2050,11 @@ def _render(job: Job) -> None:
     bgm_path = job.work / "bgm.wav"
     bgm_thread: Optional[Any] = None
     bgm_errors: list[BaseException] = []
-    if (not sub_only and job.keep_bgm and status().get("separate") and not bgm_path.is_file()
+    early_bgm = getattr(job, "_early_bgm", None)
+    job._early_bgm = None  # type: ignore[attr-defined]
+    if early_bgm is not None and not sub_only:
+        bgm_thread, bgm_errors = early_bgm  # started right after Whisper (_start_early_bgm)
+    elif (not sub_only and job.keep_bgm and status().get("separate") and not bgm_path.is_file()
             and not (voice.is_file() and job.voice_key == key)):
         # Separate the music while the voice is being read (that step waits on the network): saves its whole run.
         import threading

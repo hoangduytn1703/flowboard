@@ -952,7 +952,7 @@ def channel(channel_id: int) -> dict[str, Any]:
     return found
 
 
-def video_view(v: GrabVideo, mark: Optional[GrabMark] = None) -> dict[str, Any]:
+def video_view(v: GrabVideo, mark: Optional[GrabMark] = None, uses: Optional[dict[str, dict[str, str]]] = None) -> dict[str, Any]:
     vid = int(v.id)  # type: ignore[arg-type]
     here = local_media(v.media_id) is not None
     d = download_of(vid)
@@ -965,7 +965,8 @@ def video_view(v: GrabVideo, mark: Optional[GrabMark] = None) -> dict[str, Any]:
         # downloaded on the other machine: the row says so, the file is not here
         "elsewhere": bool(v.media_id) and not here,
         "download": state, "download_error": (d.error if d is not None and d.status == "error" and d.error != STOPPED else v.download_error) if not here else "",
-        "used": {**dict(v.used or {}), **dict((mark.used if mark else None) or {})},
+        # "🎙 đã lồng / ✂️ đã cắt": the clips in "Clip của tôi" made from this video now (a deleted clip no longer counts)
+        "used": dict((uses or {}).get(str(v.media_id), {})) if v.media_id else {},
         "marks": list((mark.tags if mark else None) or []),
     }
 
@@ -985,7 +986,8 @@ def videos(channel_id: Optional[int] = None, limit: int = 20000) -> list[dict[st
             q = q.where(GrabVideo.channel_id == channel_id)
         rows = db.exec(q.order_by(GrabVideo.channel_id, GrabVideo.position).limit(limit)).all()
         marks = _marks_for(db, sorted({v.key for v in rows}))
-        return [video_view(v, marks.get(v.key)) for v in rows]
+    uses = live_uses()
+    return [video_view(v, marks.get(v.key), uses) for v in rows]
 
 
 def mark_tags() -> list[dict[str, Any]]:
@@ -1145,8 +1147,11 @@ def work_of_videos() -> dict[str, dict[str, Any]]:
         from flowboard.services import grab_dub as _gd
 
         return {str(vid): {"dub": view} for vid, view in _gd.pending_views().items()}
+    put_away = dismissed_runs()
 
     def put(media_id: Optional[str], tool: str, view: dict[str, Any]) -> None:
+        if view["state"] == "error" and view["id"] in put_away:
+            return  # "× Bỏ lỗi": this failure was put away
         for vid in by_media.get(str(media_id or ""), []):
             cur = out.setdefault(str(vid), {})
             if tool not in cur or view["at"] > cur[tool]["at"]:
@@ -1183,6 +1188,181 @@ def work_of_videos() -> dict[str, dict[str, Any]]:
         if "dub" not in cur or view["at"] >= cur["dub"]["at"]:
             cur["dub"] = view
     return out
+
+
+# ── what is made of a video now, errors put away, downloads removed (15/11) ──
+
+#: seconds the clip lookup is reused (the list polls; a clip made or deleted shows within this)
+USES_TTL_S = 10.0
+_USES: dict[str, Any] = {"at": 0.0, "owner": "", "map": {}}
+
+
+def _clip_rows() -> list[tuple[Any, ...]]:
+    """``(created_at, template_id, dub source, cut source, cut session)`` of the dub / cut clips — read as JSON paths, so
+    a dub clip's whole saved project (its snapshot) never travels; a database without JSON paths reads the rows."""
+    from flowboard.db.models import Board
+
+    try:
+        with get_session() as db:
+            tid = Board.data[("quicktool", "template_id")].as_string()  # type: ignore[index]
+            q = select(Board.created_at, tid, Board.data[("quicktool", "dub", "source_media_id")].as_string(),  # type: ignore[index]
+                       Board.data[("quicktool", "cut", "from_media_id")].as_string(),  # type: ignore[index]
+                       Board.data[("quicktool", "cut", "session_id")].as_string()).where(tid.in_(["dub", "cut_part"]))  # type: ignore[index]
+            return [tuple(r) for r in db.exec(q).all()]
+    except Exception:  # noqa: BLE001
+        logger.info("channel_grab: clip lookup by JSON path failed — reading the boards", exc_info=True)
+    out = []
+    with get_session() as db:
+        for created, data in db.exec(select(Board.created_at, Board.data)).all():
+            qt = (data or {}).get("quicktool") or {}
+            if qt.get("template_id") in ("dub", "cut_part"):
+                out.append((created, qt.get("template_id"), (qt.get("dub") or {}).get("source_media_id"),
+                            (qt.get("cut") or {}).get("from_media_id"), (qt.get("cut") or {}).get("session_id")))
+    return out
+
+
+def live_uses(fresh: bool = False) -> dict[str, dict[str, str]]:
+    """Media id of a downloaded video → ``{"dub" | "cut": when}`` for the clips in "Clip của tôi" made from it — what the
+    "🎙 đã lồng / ✂️ đã cắt" tags say. They used to remember every send, so a clip deleted since still showed (15/11)."""
+    owner = _owner()
+    if not fresh and _USES["owner"] == owner and time.time() - _USES["at"] < USES_TTL_S:
+        return _USES["map"]
+    sessions: Optional[dict[str, str]] = None
+    out: dict[str, dict[str, str]] = {}
+    for created, tid, dub_src, cut_src, sid in _clip_rows():
+        if tid == "dub":
+            tool, mid = "dub", dub_src
+        else:
+            tool, mid = "cut", cut_src
+            if not mid and sid:  # a part cut before 15/11: its session knows the video it was cut from
+                if sessions is None:
+                    from flowboard.services import video_cut
+
+                    video_cut.load_sessions()
+                    sessions = {s.id: s.source_media_id or "" for s in video_cut.SESSIONS.values()}
+                mid = sessions.get(str(sid))
+        if mid:
+            out.setdefault(str(mid), {}).setdefault(tool, utc_iso(created) or "")
+    _USES.update(at=time.time(), owner=owner, map=out)
+    return out
+
+
+#: the failed dub / cut runs whose red strip the seller put away ("× Bỏ lỗi")
+DISMISSED_KEY = "grab_dismissed"
+MAX_DISMISSED = 500
+
+
+def dismissed_runs() -> set[str]:
+    import json
+
+    from flowboard.db.models import AppSetting
+
+    with get_session() as db:
+        row = db.get(AppSetting, DISMISSED_KEY)
+    try:
+        return {str(x) for x in json.loads(row.value or "[]")} if row is not None else set()
+    except (TypeError, ValueError):
+        return set()
+
+
+def dismiss_errors(ids: list[int]) -> int:
+    """"× Bỏ lỗi": a video's failure stops showing — its download error, a "🎙 Lồng tiếng ngay" that never got to
+    the dub queue, the failed dub / cut run (that run only: a new failure shows again). → how many were put away."""
+    import json
+
+    from flowboard.db.models import AppSetting
+    from flowboard.services import grab_dub
+
+    owner, n = _owner(), 0
+    ids = [int(i) for i in ids]
+    runs: list[str] = []
+    work = work_of_videos()
+    for vid in ids:
+        for run in (work.get(str(vid)) or {}).values():
+            if run.get("state") == "error" and run.get("id"):
+                runs.append(str(run["id"]))
+    with _LOCK:
+        for vid in ids:
+            d = DOWNLOADS.get((owner, vid))
+            if d is not None and d.status == "error":
+                DOWNLOADS.pop((owner, vid), None)
+    with grab_dub._LOCK:
+        for vid in ids:
+            it = grab_dub.ITEMS.get((owner, vid))
+            if it is not None and it.status == "failed":
+                grab_dub.ITEMS.pop((owner, vid), None)
+                n += 1
+    with get_session() as db:
+        for v in db.exec(select(GrabVideo).where(GrabVideo.id.in_(ids))).all() if ids else []:  # type: ignore[union-attr]
+            if v.download_error:
+                v.download_error = ""
+                db.add(v)
+                n += 1
+        if runs:
+            row = db.get(AppSetting, DISMISSED_KEY) or AppSetting(key=DISMISSED_KEY, value="[]")
+            try:
+                have = [str(x) for x in json.loads(row.value or "[]")]
+            except (TypeError, ValueError):
+                have = []
+            row.value = json.dumps((have + [r for r in runs if r not in have])[-MAX_DISMISSED:])
+            db.add(row)
+            n += len(runs)
+        db.commit()
+    return n
+
+
+def forget_files(ids: list[int]) -> dict[str, Any]:
+    """"🗑 Xoá file đã tải": the downloaded videos leave this machine and the cloud copy — "✓ Đã tải" goes, the next
+    send downloads again. Kept (and said why): a video still downloading or on its way to the dub queue, still the
+    source of a clip in "Clip của tôi", or of a dub / cut still in those lists (its "Xuất lại" reads the file)."""
+    from flowboard.services import dub, file_store, grab_dub, video_cut
+
+    owner = _owner()
+    uses = live_uses(fresh=True)
+    dub.load_jobs()
+    video_cut.load_sessions()
+    in_tools = {j.source_media_id for j in list(dub.JOBS.values()) if j.kind != "cut" and j.source_media_id}
+    in_tools |= {s.source_media_id for s in list(video_cut.SESSIONS.values()) if s.source_media_id}
+    busy = {vid for (o, vid), d in list(DOWNLOADS.items()) if o == owner and d.status in ("queued", "running")}
+    busy |= {vid for (o, vid), it in list(grab_dub.ITEMS.items()) if o == owner and it.status in ("download", "wait")}
+    kept: list[dict[str, Any]] = []
+    gone: list[tuple[Optional[Path], Optional[str]]] = []
+    with get_session() as db:
+        rows = db.exec(select(GrabVideo).where(GrabVideo.id.in_(ids))).all() if ids else []  # type: ignore[union-attr]
+        for v in rows:
+            mid = v.media_id
+            path = local_media(mid)
+            if not mid or path is None:
+                continue  # not on this machine (never downloaded, or downloaded on the other one)
+            why = ("đang tải / đang gửi đi lồng tiếng" if v.id in busy
+                   else "còn clip làm từ video này trong Clip của tôi" if mid in uses
+                   else "còn trong danh sách Lồng tiếng / Cắt video" if mid in in_tools else "")
+            if why:
+                kept.append({"id": v.id, "title": (v.title or "")[:80], "why": why})
+                continue
+            keys = []
+            for a in db.exec(select(Asset).where(Asset.uuid_media_id == mid)).all():
+                if a.local_path:
+                    keys.append(file_store.key_for(a.local_path))
+                db.delete(a)
+            v.media_id, v.downloaded_at, v.download_error = None, None, ""
+            db.add(v)
+            gone.append((path, next((k for k in keys if k), None)))
+        db.commit()
+    for path, key in gone:
+        try:
+            if path is not None:
+                path.unlink(missing_ok=True)
+        except OSError:
+            from flowboard.services.proc import remove_soon
+
+            remove_soon(path)  # a player still had it open: goes a moment later
+        if key and file_store.enabled():
+            try:
+                file_store.client().delete_object(Bucket=file_store._bucket(), Key=key)
+            except Exception as exc:  # noqa: BLE001 — the cloud copy is a nicety; the row is gone already
+                logger.info("channel_grab: could not delete %s from the bucket: %s", key, exc)
+    return {"deleted": len(gone), "kept": kept}
 
 
 # ── the AI's pick: the account's saved requests ────────────────────────────

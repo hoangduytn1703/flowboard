@@ -685,5 +685,8 @@ def remove() -> None:
         return
     if root.name != "dub" or root.parent.name != "addons":
         raise AddonError(f"Không gỡ thư mục lạ: {root}")
+    from flowboard.services import voice_server
+
+    voice_server.shutdown()  # its Python runs from this folder: Windows would keep the files locked
     shutil.rmtree(root, ignore_errors=True)
     _set(error="", phase="", done_mb=0, total_mb=0)
