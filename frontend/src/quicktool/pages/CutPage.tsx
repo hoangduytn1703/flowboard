@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { announceRunning } from "../../components/BackgroundTasks";
 import { askConfirm } from "../../components/Dialogs";
-import { exportsZipUrl } from "../../api/client";
+import { ZipSaveButton } from "../../components/ZipSaveButton";
 import {
   getDefaultLook, getDubJob, linksIn, listLookPresets, normAdjust, normSpeed, normVolume, SPEED_MARKS, SPEED_MAX, SPEED_MIN, speedLabel, VOLUME_MARKS, VOLUME_MAX, volumeLabel, subLangName, uploadDubVideo,
   type DecorPreset, type DubCutRow,
@@ -489,7 +489,8 @@ function SessionCard({ s, picked, onPick, focused, cardRef, onChanged, onEdit, o
                 <button type="button" className="qt-btn qt-btn--small" disabled={!pickedParts.some((p) => p.board_id)}
                         onClick={() => onDub(pickedParts.filter((p) => p.board_id).map((p) => p.board_id!).slice(0, 10))}
                         title="Mở trang Lồng tiếng với các video này (tối đa 10 một lần)">🎙 Lồng tiếng {Math.min(10, pickedParts.length)}</button>
-                <a className="qt-btn qt-btn--small" href={exportsZipUrl(pickedParts.filter((p) => p.board_id).map((p) => p.board_id!))}>⬇ Tải {pickedParts.length} (.zip)</a>
+                <ZipSaveButton className="qt-btn qt-btn--small" ids={pickedParts.filter((p) => p.board_id).map((p) => p.board_id!)}
+                               label={`⬇ Tải ${pickedParts.length} (.zip)`} />
               </>
             )}
             {!pickedParts.length && parts.length > 1 && (

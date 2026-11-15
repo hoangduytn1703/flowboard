@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
-  exportsZipUrl,
   getTemplates,
   clipThumbUrl,
   listBoardSummaries,
@@ -13,6 +12,7 @@ import {
   type ProductGender,
 } from "../api/client";
 import { ProductsPanel } from "../components/ProductsPanel";
+import { ZipSaveButton } from "../components/ZipSaveButton";
 import { SettingsPanel } from "../components/SettingsPanel";
 import { useBoardStore } from "../store/board";
 import { useQuicktoolStore } from "../store/quicktool";
@@ -348,10 +348,9 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
             ) : pickedList.length > 0 ? (
               <>
                 {pickedList.some((b) => b.summary.exported) && (
-                  <a className="qt-btn" href={exportsZipUrl(pickedList.filter((b) => b.summary.exported).map((b) => b.id))}
-                     title="Một file .zip chứa các clip đã ghép, tên file theo sản phẩm + ngày">
-                    ⬇ Tải {pickedList.filter((b) => b.summary.exported).length} clip đã ghép
-                  </a>
+                  <ZipSaveButton ids={pickedList.filter((b) => b.summary.exported).map((b) => b.id)}
+                                 label={`⬇ Tải ${pickedList.filter((b) => b.summary.exported).length} clip đã ghép`}
+                                 title="Lưu một file .zip các clip đã ghép (tên theo sản phẩm + ngày) vào thư mục Tải về của máy này" />
                 )}
                 {pickedJobs.length > 0 && (
                   <button type="button" className="qt-btn qt-btn--accent" disabled={deleting} onClick={editPicked}

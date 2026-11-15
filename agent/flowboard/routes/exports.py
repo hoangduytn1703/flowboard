@@ -4,6 +4,14 @@
 named after its product (or clip name) and the day, e.g.
 ``com-chay-sieu-cha-bong_2026-10-24_5.mp4``. The clips are marked as
 downloaded (``quicktool.downloaded_at``), which "Hôm nay" reads.
+
+The app's buttons use the save path instead (``services/zip_save``): the agent writes the .zip into
+this machine's Downloads folder and the page follows its progress —
+
+  POST /api/exports/zip/save {ids, page}   → the job (the running one again for the same clips)
+  GET  /api/exports/zip/jobs/{id}          → {status, phase, progress, done_bytes, total_bytes, name, folder, …}
+  POST /api/exports/zip/jobs/{id}/stop
+  POST /api/exports/zip/jobs/{id}/reveal   → shows the file in Explorer
 """
 from __future__ import annotations
 
@@ -19,12 +27,14 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 from sqlmodel import select
 from starlette.background import BackgroundTask
 
 from flowboard.db import get_session
 from flowboard.db.models import Board, Node
 from flowboard.services import media as media_service
+from flowboard.services import zip_save
 
 logger = logging.getLogger(__name__)
 
@@ -103,3 +113,42 @@ def download_zip(ids: str = Query(..., description="comma-separated clip (board)
     return FileResponse(tmp, media_type="application/zip", filename=f"flowboard_{today}_{len(added)}clip.zip",
                         headers={"X-Skipped-Clips": ",".join(map(str, missing))},
                         background=BackgroundTask(lambda: Path(tmp).unlink(missing_ok=True)))
+
+
+class SaveBody(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=200)
+    page: str = Field("", max_length=200)
+
+
+def _job_or_404(job_id: str) -> zip_save.ZipJob:
+    job = zip_save.get(job_id)
+    if job is None:
+        raise HTTPException(404, "Không thấy việc lưu này (agent đã khởi động lại?)")
+    return job
+
+
+@router.post("/zip/save")
+def save_zip(body: SaveBody) -> dict:
+    try:
+        return zip_save.start(body.ids, body.page).view()
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.get("/zip/jobs/{job_id}")
+def save_job(job_id: str) -> dict:
+    return _job_or_404(job_id).view()
+
+
+@router.post("/zip/jobs/{job_id}/stop")
+def stop_save(job_id: str) -> dict:
+    _job_or_404(job_id)
+    return zip_save.stop(job_id).view()
+
+
+@router.post("/zip/jobs/{job_id}/reveal")
+def reveal_save(job_id: str) -> dict:
+    _job_or_404(job_id)
+    if not zip_save.reveal(job_id):
+        raise HTTPException(404, "File .zip không còn ở chỗ cũ (đã bị dời hoặc xoá).")
+    return {"ok": True}

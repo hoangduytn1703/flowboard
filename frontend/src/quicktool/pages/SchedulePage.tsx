@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { clipThumbUrl, exportsZipUrl, listBoardSummaries, mediaUrl, type BoardSummary } from "../../api/client";
+import { clipThumbUrl, listBoardSummaries, mediaUrl, type BoardSummary } from "../../api/client";
+import { ZipSaveButton } from "../../components/ZipSaveButton";
 import { listPosts, splitTags, type SavedPost } from "../../api/posts";
 import {
   deleteSlot, listFacebookPosts, listSchedule, publishSlot, slotLabel, syncFacebook, updateSlot,
@@ -378,7 +379,7 @@ export function SchedulePage() {
                       <button type="button" className="qt-btn" onClick={() => void copyFor(open)}>📋 Copy bài</button>
                     ) : (
                       <>
-                        <a className="qt-btn" href={exportsZipUrl([open.board_id ?? 0])}>⬇ Tải clip</a>
+                        <ZipSaveButton ids={open.board_id ? [open.board_id] : []} label="⬇ Tải clip" />
                         <button type="button" className="qt-btn" onClick={() => void copyFor(open)}>📋 Copy caption</button>
                       </>
                     )}
@@ -427,7 +428,7 @@ export function DueList({ items, busy, onOpen, onCopy, onPublish, onPosted, onSk
           <span className="qt-today__what">{s.kind === "clip" ? "🎬 " : "📝 "}{s.title}</span>
           <span className="qt-today__meta">{s.channel} · {slotLabel(s.scheduled_at)}{s.auto ? " · ⚡ đang chờ agent đăng" : ""}</span>
           {s.fb_connected && !s.auto && <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={busy} onClick={() => void onPublish(s)}>⚡ Đăng ngay</button>}
-          {s.kind === "clip" && <a className="qt-btn qt-btn--small" href={exportsZipUrl([s.board_id ?? 0])}>⬇ Clip</a>}
+          {s.kind === "clip" && <ZipSaveButton className="qt-btn qt-btn--small" ids={s.board_id ? [s.board_id] : []} label="⬇ Clip" />}
           <button type="button" className="qt-btn qt-btn--small" onClick={() => void onCopy(s)}>📋 Copy</button>
           <a className="qt-btn qt-btn--small qt-btn--ghost" href={openLink(s)} target="_blank" rel="noreferrer">Mở ↗</a>
           <button type="button" className="qt-btn qt-btn--small" disabled={busy} onClick={() => onPosted(s)} title="Đã đăng tay xong">✓ Đã đăng</button>

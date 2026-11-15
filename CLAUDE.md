@@ -415,6 +415,10 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   `BorderStyle 3` vẽ hộp riêng cho từng dòng theo bề rộng dòng đó. Giờ `dub.text_ass` vẽ **một hình chữ nhật** (`\p1`, style `T<i>b`, layer 1) rộng theo dòng dài
   nhất (`text_line_px`: đo bằng Pillow + Arial ở cỡ em = cỡ ASS / `ASS_LINE_EM` 1,117; máy không có font thì ước theo số ký tự), cao = số dòng × cỡ chữ + đệm, chữ đè
   lên không viền. Phụ đề kiểu hộp (`box_yellow` / `box_white`) vẫn là BorderStyle 3 — mỗi dòng một hộp, chưa đổi. Đổi cách vẽ chữ: in thử ra khung hình rồi xem ảnh.
+- **Nút "⬇ Tải N clip đã ghép" trông như đơ** (15/11, app 2.2.0, 10 clip ~793 MB): nút cũ là link tới `GET /api/exports/zip` — agent gom XONG cả file .zip rồi
+  mới gửi byte đầu, app (WebView2) không hiện gì trong lúc đó và tự lưu vào Downloads không báo → người dùng bấm 4 lần, Downloads có 4 bản giống nhau
+  (`flowboard_…_10clip (4)…(7).zip`). Tải không hỏng. Giờ mọi nút tải .zip là `ZipSaveButton` (xem "Chỗ cần biết" → "Lưu .zip vào thư mục Tải về").
+  **Việc nặng bấm từ app: luôn có trạng thái đang chạy + chặn bấm lại; đừng dùng link tải file lớn cần dựng trước.**
 - **Whisper nghe nhạc ra "en" → tiêu đề chữ Trung không được dịch** (15/11, video Douyin ít lời: tên clip vẫn "冷冰冰的雪山…"): tiêu đề dịch bằng `job.language`
   (tiếng Whisper nghe được), nguồn sai thì Google trả nguyên văn. Giờ `dub._title_lang`: tiêu đề có chữ Hán / Kana / Hangul mà tiếng nghe được không phải zh / ja / ko
   → để translator tự nhận (None); kết quả còn chữ Hán thì lấy câu đầu làm tên. Cùng lượt đo: bước "AI rà tên riêng" chiếm 41 / 75 s của video 45 s → `NAMES_TIMEOUT_S`
@@ -2117,6 +2121,15 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   (`plans.save` trên máy nhà, chữ ký ok). Mở lại: bỏ `assistant` khỏi hai danh sách đó + tick lại ở 📦 Gói & tính năng. Web `dflow-web` cũng đã bỏ khỏi danh sách tính năng + trang hướng dẫn (commit `ff69152`, đã push = deploy).
 - **Ô "Làm gì với video" (15/11)**: `quicktool/dub/ModePicker.tsx` + `dub/modepicker.css` (thẻ có ô icon SVG, dấu ✓, tiêu đề + một dòng mô tả; radio ẩn nằm trong thẻ
   `position: relative`; container query xếp dọc khi hẹp) dùng ở trang Lồng tiếng và hộp "🎙 Lồng tiếng ngay"; bỏ CSS `.qt-dub__mode*`, `.gb-now__modes*`.
+- **Lưu .zip vào thư mục Tải về** (15/11, thay link `GET /api/exports/zip` ở mọi nút tải nhiều clip): `services/zip_save.py` — `start(ids, page)` tạo việc
+  trong RAM (cùng bộ clip đang lưu → trả lại việc đó, bấm 2 lần không làm 2 lần), luồng riêng: lấy video cuối của từng clip (`final_media`, một truy vấn;
+  thiếu trên máy thì `cached_path` tải từ kho cloud), kiểm ổ còn chỗ, ghi `DFlow_<ngày>_<N>clip.zip` (trùng tên → " (2)") qua `.part` rồi `os.replace`,
+  ZIP_STORED từng 4 MB (tiến độ theo byte, dừng được), đánh dấu `downloaded_at` (chỉ khi tài khoản đang mở vẫn là tài khoản lúc bắt đầu). Thư mục:
+  `FLOWBOARD_DOWNLOADS_DIR` (test) → thư mục Downloads thật của Windows (`SHGetKnownFolderPath`, kể cả khi đã dời sang ổ khác) → `xdg-user-dir` → `~/Downloads`
+  → `<data>/exports`. `reveal` mở Explorer chọn sẵn file. Routes `POST /api/exports/zip/save {ids, page}`, `GET /api/exports/zip/jobs/{id}`, `POST …/stop`,
+  `POST …/reveal`; nút "việc đang chạy" `zip:<id>` (📦). `GET /api/exports/zip` cũ vẫn còn (tải qua trình duyệt). Frontend `components/ZipSaveButton.tsx`
+  (trạng thái giữ ngoài component — rời trang quay lại vẫn thấy; "Đang lưu clip 7/11 · 56%" + Dừng → toast "Đã lưu … vào thư mục …" + nút "📂 Mở thư mục"
+  3 phút) ở Clip của tôi, Chỉnh sửa video, Cắt video, Hôm nay (cả loạt + từng clip), Lịch đăng. Test `test_the_app_saves_the_zip_into_downloads_and_follows_it`.
 - **Lưu tạm khi đổi clip trong trình chỉnh sửa (12/11)**: `DubEditor.tsx` giữ `DRAFTS` (Map cấp module, chỉ trong RAM của tab: `{doc, out, basis}` theo job id; `basis` = `started_at|media_id|số câu` — job được xuất / render lại thì bản nháp tự bỏ). Rời một clip (đổi clip ở ô chọn, sang trang khác) mà còn thay đổi → cất vào `DRAFTS` lúc unmount, **không hỏi**; mở lại clip thì nạp lại (mất lịch sử hoàn tác). Ô chọn ghi "— ● chưa xuất"; nút **"✓ Xuất cả N đã sửa"** (`exportDrafts`, `renderBodyOf(job, doc, out)` dùng chung với `exportNow`; hiện màn tiến độ loạt; prop `onSibling` để trang cha cập nhật clip khác). Chỉ cảnh báo khi bấm "← Danh sách" (kể cả các clip đang lưu tạm; đồng ý = bỏ hết nháp của loạt) và khi đóng / tải lại tab (`beforeunload`). "Áp cho cả loạt" nói rõ sẽ thay các nháp. F5 là mất nháp (chưa lưu localStorage).
 ## Lộ trình (chốt với người dùng 30/10) — làm theo thứ tự A → B, C chạy song song khi cần
 Mục tiêu cuối: **bán DFlow** cho người làm affiliate (2 gói **Pro** / **Premium**), dạng **app desktop Tauri 2** — mọi thao tác trong app,
@@ -2619,3 +2632,8 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
   hình và xem ảnh; test `test_dub_text_adjust.py` 13 pass). Bước 5 của clip từ video import ghi đúng tên + mở menu mới; hộp "Chọn từ Clip của tôi" của menu mới liệt kê
   mọi clip. Cả bộ test 1304 pass / 2 skip (chạy trước sửa chữ; sau đó chạy lại bộ chữ + cắt + lồng tiếng). Phát hành **2.2.0** (số phiên bản ở 8 file, tag `v2.2.0`).
 - **15/11** — **Phát hành 2.2.0 xong**: commit `606c227`, run 43725673655 thành công, release v2.2.0 trên dflow-releases (bộ cài 183 MB + `latest.json` 2.2.0), `dflow.io.vn/tai-app` → 2.2.0. Web `dflow-web` `ff69152` (bỏ Trợ lý AI khỏi danh sách tính năng + hướng dẫn) đã push. Bản thử cổng 8534 đã tắt.
+- **15/11** — Người dùng báo bấm "⬇ Tải 10 clip đã ghép" là đơ: thật ra đã tải xong 4 lần (4 bản ~793 MB trong Downloads) — agent dựng cả file .zip trước
+  rồi mới gửi, app không báo gì. Giờ agent tự ghi .zip vào thư mục Tải về, nút báo tiến độ / Dừng / "📂 Mở thư mục", bấm lại không làm lần 2. `services/zip_save.py`
+  (mới), `routes/exports.py`, `routes/running.py`, `conftest.py`, `components/ZipSaveButton.tsx` (mới), `api/client.ts`, `QuicktoolApp.tsx`, `EditPage.tsx`,
+  `CutPage.tsx`, `TodayPage.tsx`, `SchedulePage.tsx`, `BackgroundTasks.tsx`. Test exports / running / boards / plans 29 pass, `tsc` sạch; Playwright trên agent thử
+  8534 (đã tắt): 11 clip 611 MB lưu trong ~1,5 s, bấm 2 lần chỉ 1 lượt, toast + nút mở thư mục hiện. Chưa bấm "📂 Mở thư mục" thật (mở Explorer). Bản trùng trong Downloads chuyển vào Thùng rác (giữ một bản mỗi bộ: `10clip.zip`, `10clip (4).zip`, `1clip.zip`). Phát hành **2.2.1** (số phiên bản ở 8 file, tag `v2.2.1`).

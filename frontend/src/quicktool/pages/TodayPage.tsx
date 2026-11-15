@@ -1,7 +1,8 @@
 import { SetupCard } from "../../components/SetupGuide";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { clipThumbUrl, exportsZipUrl, listBoardSummaries, type BoardSummary } from "../../api/client";
+import { clipThumbUrl, listBoardSummaries, type BoardSummary } from "../../api/client";
+import { ZipSaveButton } from "../../components/ZipSaveButton";
 import { getHistorySummary, listHistory, type HistoryRow, type HistorySummary } from "../../api/history";
 import { useFlowCredits } from "../../components/credits";
 import { PageLoading } from "../PageState";
@@ -171,13 +172,6 @@ export function TodayPage() {
 
   if (boards === null) return <PageLoading text="Đang tải bảng hôm nay…" />;
 
-  function downloadAll() {
-    if (!toDownload.length) return;
-    window.location.href = exportsZipUrl(toDownload.map((b) => b.id));
-    // The agent marks them downloaded while it builds the zip.
-    setTimeout(() => void load(), 4000);
-  }
-
   const errorsToday = summary?.today.error ?? 0;
   const attention = due.length + failed.length;
 
@@ -285,14 +279,15 @@ export function TodayPage() {
 
             <Section icon="download" title="Đã ghép xong, chưa tải về" count={toDownload.length} tone="good" empty="Không còn clip nào chờ tải."
                      action={toDownload.length > 1
-                       ? <button type="button" className="qt-btn qt-btn--small qt-btn--accent td-btn-icon" onClick={downloadAll}><Icon name="download" size={14} /> Tải cả {toDownload.length} (.zip)</button>
+                       ? <ZipSaveButton className="qt-btn qt-btn--small qt-btn--accent td-btn-icon" ids={toDownload.map((b) => b.id)}
+                                        label={`⬇ Tải cả ${toDownload.length} (.zip)`} onDone={() => void load()} />
                        : undefined}>
               <ul className="qt-today__list">
                 {toDownload.map((b) => (
                   <li key={b.id}>
                     {clipThumbUrl(b.summary) && <img className="qt-today__thumb" src={clipThumbUrl(b.summary)!} alt="" loading="lazy" />}
                     <div className="td-row__main"><span className="qt-today__what">{b.name}</span></div>
-                    <a className="qt-btn qt-btn--small td-btn-icon" href={exportsZipUrl([b.id])} onClick={() => setTimeout(() => void load(), 3000)}><Icon name="download" size={14} /> Tải</a>
+                    <ZipSaveButton className="qt-btn qt-btn--small td-btn-icon" ids={[b.id]} label="⬇ Tải" onDone={() => void load()} />
                     <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={() => navigate(`/clips/${b.id}/export`)}>Mở</button>
                   </li>
                 ))}

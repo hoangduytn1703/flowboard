@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { announceRunning } from "../../components/BackgroundTasks";
 import { askConfirm } from "../../components/Dialogs";
-import { exportsZipUrl } from "../../api/client";
+import { ZipSaveButton } from "../../components/ZipSaveButton";
 import {
   dubSubtitleLines, getDubStatus, listDubJobsByIds, renderDub, uploadDubVideo,
   type DubJob, type DubRender, type DubStatus,
@@ -329,7 +329,8 @@ export function EditPage() {
                           title="Mở trình chỉnh sửa với các video đã chọn: chỉnh một video rồi “⇪ Áp cho cả loạt”">
                     ✏️ Chỉnh {pickedItems.length} video
                   </button>
-                  {zipBoards.length > 0 && <a className="qt-btn" href={exportsZipUrl(zipBoards)} title="Các video đã xuất trong số đã chọn, một file .zip">⬇ Tải {zipBoards.length} (.zip)</a>}
+                  {zipBoards.length > 0 && <ZipSaveButton ids={zipBoards} label={`⬇ Tải ${zipBoards.length} (.zip)`}
+                                                          title="Lưu các video đã xuất trong số đã chọn thành một file .zip vào thư mục Tải về của máy này" />}
                   <button type="button" className="qt-btn qt-btn--danger" onClick={() => void removePicked(pickedItems.map((i) => i.job_id))}
                           title="Chỉ bỏ khỏi danh sách này — clip và file gốc vẫn còn">🗑 Bỏ {pickedItems.length}</button>
                 </>

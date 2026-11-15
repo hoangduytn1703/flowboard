@@ -186,6 +186,12 @@ def _autopilot_items() -> list[dict[str, Any]]:
             for r in autopilot.active_runs()]
 
 
+def _zip_items() -> list[dict[str, Any]]:
+    from flowboard.services import zip_save
+
+    return [dict(it, started_at=_iso_from_ts(it["started_at"])) for it in zip_save.running_items()]
+
+
 def _op_items() -> list[dict[str, Any]]:
     from flowboard.services import op_tracker
 
@@ -234,7 +240,7 @@ def _flow_items() -> list[dict[str, Any]]:
     return out
 
 
-_MEMORY_SOURCES = (_addon_items, _dub_items, _dub_split_items, _cut_items, _grab_items, _clean_items, _capcut_items, _op_items)
+_MEMORY_SOURCES = (_addon_items, _dub_items, _dub_split_items, _cut_items, _grab_items, _clean_items, _capcut_items, _zip_items, _op_items)
 _DB_SOURCES = (_dub_link_items, _assistant_items, _autopilot_items, _flow_items)
 _POOL = ThreadPoolExecutor(max_workers=len(_DB_SOURCES), thread_name_prefix="running")
 
@@ -274,6 +280,10 @@ def outcome(key: str = Query(..., max_length=80)) -> dict[str, Any]:
         from flowboard.services import op_tracker
 
         return op_tracker.outcome(ident) or {"ok": True, "message": "Đã xong"}
+    if kind == "zip":
+        from flowboard.services import zip_save
+
+        return zip_save.outcome(ident)
     if kind == "dubaddon":
         from flowboard.services import dub_addon
 

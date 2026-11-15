@@ -206,6 +206,40 @@ export function exportsZipUrl(boardIds: number[]): string {
   return `/api/exports/zip?ids=${boardIds.join(",")}`;
 }
 
+/** The agent writing a .zip of finished clips into this machine's Downloads folder (services/zip_save). */
+export interface ZipSaveJob {
+  id: string;
+  ids: number[];
+  status: "running" | "done" | "error" | "stopped";
+  phase: string;
+  progress: number;
+  done_bytes: number;
+  total_bytes: number;
+  clips: number;
+  name: string;
+  folder: string;
+  skipped: number[];
+  error: string;
+  stopping: boolean;
+  finished_at: number | null;
+}
+
+export function startZipSave(ids: number[], page: string): Promise<ZipSaveJob> {
+  return api<ZipSaveJob>("/api/exports/zip/save", { method: "POST", body: JSON.stringify({ ids, page }) });
+}
+
+export function getZipSave(id: string): Promise<ZipSaveJob> {
+  return api<ZipSaveJob>(`/api/exports/zip/jobs/${encodeURIComponent(id)}`);
+}
+
+export function stopZipSave(id: string): Promise<ZipSaveJob> {
+  return api<ZipSaveJob>(`/api/exports/zip/jobs/${encodeURIComponent(id)}/stop`, { method: "POST" });
+}
+
+export function revealZipSave(id: string): Promise<{ ok: boolean }> {
+  return api<{ ok: boolean }>(`/api/exports/zip/jobs/${encodeURIComponent(id)}/reveal`, { method: "POST" });
+}
+
 export function listBoardSummaries(): Promise<BoardSummary[]> {
   return api<BoardSummary[]>("/api/boards?summary=true");
 }
