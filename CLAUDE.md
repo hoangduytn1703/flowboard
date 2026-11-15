@@ -2554,3 +2554,4 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
   `DubNowDialog.tsx`, `VoiceField.tsx`, `dub.css`, `conftest.py`. Test mới `test_voice_server.py` 8 + `test_channel_grab.py` +3, `tsc` sạch. Thử thật trên agent thử 8534:
   VieNeu thật (lần đầu 18,8 s, sau 1,3 s), 4 lượt lồng tiếng Short YouTube thật (70–88 s, 16–22 câu), Playwright: thẻ chế độ, bộ lọc giữ khi đổi trang, bỏ lỗi, xoá
   file. Truy vấn nhãn theo clip đã chạy thử (chỉ đọc) trên Neon. Cả bộ test 1438 pass / 2 skip / 9 lỗi môi trường Windows đã biết. Người dùng bảo phát hành ngay (không test lại) → bản **2.1.4** (số phiên bản ở 8 file, tag `v2.1.4`).
+- **15/11** — **Phát hành 2.1.4 xong**: commit `4500e4b`, run 43683371858 thành công, release v2.1.4 trên dflow-releases (bộ cài 183 MB + `latest.json` 2.1.4), `dflow.io.vn/tai-app` → 2.1.4. Build trùng của `main` đã huỷ.
