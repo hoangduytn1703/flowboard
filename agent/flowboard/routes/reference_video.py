@@ -213,6 +213,8 @@ _ALLOWED_HOSTS = (
 )
 #: a 60-minute video for "Cắt video" at 720p is several hundred MB
 FETCH_TIMEOUT_S = 1800
+#: what _run_ytdlp says when the page offers no format with a picture (TikTok Shop / ad videos on the web)
+NO_PICTURE = "trang chỉ có tiếng, không có hình (video TikTok Shop / quảng cáo chỉ xem được trong app)"
 
 
 class FetchBody(BaseModel):
@@ -249,7 +251,11 @@ def _run_ytdlp(url: str, media_id: str, max_duration_s: Optional[float] = None,
         # YouTube / Facebook serve the video in pieces: four at a time instead of one after another
         "--concurrent-fragments", "4",
         "--encoding", "utf-8", *ytdlp_tool.js_args(), *limit,
-        "-f", "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b",
+        # Never the sound alone: a plain "b" falls back to an audio-only format when a page has no picture
+        # (TikTok Shop / ad videos: the web page gives the music, the video only plays in the app) and the seller
+        # got an .mp3 that looked like "no file". Without a picture yt-dlp now says "Requested format is not
+        # available" and video_fetch tries the app's feed instead.
+        "-f", "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b[vcodec!=?none]/b*[vcodec!=?none]",
         "--merge-output-format", "mp4",
         "--print", "after_move:title::%(title)s",
         "-o", str(out_dir / f"{media_id}.%(ext)s"),
@@ -281,6 +287,8 @@ def _run_ytdlp(url: str, media_id: str, max_duration_s: Optional[float] = None,
     if path is None and max_duration_s and ("does not pass filter" in stdout + stderr or proc.returncode == 0):
         return None, title, f"video dài hơn {max_duration_s / 60:.0f} phút — chọn video ngắn hơn"
     if proc.returncode != 0 or path is None:
+        if "Requested format is not available" in stderr:
+            return None, title, NO_PICTURE
         tail = [l for l in stderr.splitlines() if l.startswith("ERROR")] or stderr.splitlines()[-3:]
         return None, title, " ".join(tail)[-400:] or f"yt-dlp exited {proc.returncode}"
     return path, title, ""

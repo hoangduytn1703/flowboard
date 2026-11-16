@@ -419,6 +419,13 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   mới gửi byte đầu, app (WebView2) không hiện gì trong lúc đó và tự lưu vào Downloads không báo → người dùng bấm 4 lần, Downloads có 4 bản giống nhau
   (`flowboard_…_10clip (4)…(7).zip`). Tải không hỏng. Giờ mọi nút tải .zip là `ZipSaveButton` (xem "Chỗ cần biết" → "Lưu .zip vào thư mục Tải về").
   **Việc nặng bấm từ app: luôn có trạng thái đang chạy + chặn bấm lại; đừng dùng link tải file lớn cần dựng trước.**
+- **Video TikTok Shop / quảng cáo không tải được — app báo nhầm "video dài hơn 60 phút"** (16/11, người dùng: cào kênh TikTok xong tải, hay dán link
+  để phân tích đều không được; web TikTok trên máy tính ghi "View TikTok Shop videos in the TikTok app"): trang web của TikTok (cả bản điện thoại, cả trình
+  phát nhúng `player/api/v1/items` — `url_list: [""]`, `marker_info.is_ads: true`) **không có địa chỉ video**, chỉ có nhạc. yt-dlp (nightly 2026.08.18) chỉ
+  thấy format `audio` → `-f …/b` rơi về file **.mp3 nhạc nền** (`b` tự lùi sang audio khi mọi format đều thiếu hình) và thoát 0 → `_run_ytdlp` không thấy
+  file video + có giới hạn thời lượng → báo "video dài hơn 60 phút". Đường app API của yt-dlp (`--extractor-args tiktok:app_info=<iid>`) giờ trả rỗng. Các
+  trang tải video (tikwm, snaptik…) đọc feed của app nên vẫn có mp4. Sửa: xem "Chỗ cần biết" → "yt-dlp tự có…" (TikTok Shop). **Đổi chuỗi `-f`: không
+  bao giờ để `b` trần ở cuối** (nó lấy file chỉ có tiếng).
 - **Whisper nghe nhạc ra "en" → tiêu đề chữ Trung không được dịch** (15/11, video Douyin ít lời: tên clip vẫn "冷冰冰的雪山…"): tiêu đề dịch bằng `job.language`
   (tiếng Whisper nghe được), nguồn sai thì Google trả nguyên văn. Giờ `dub._title_lang`: tiêu đề có chữ Hán / Kana / Hangul mà tiếng nghe được không phải zh / ja / ko
   → để translator tự nhận (None); kết quả còn chữ Hán thì lấy câu đầu làm tên. Cùng lượt đo: bước "AI rà tên riêng" chiếm 41 / 75 s của video 45 s → `NAMES_TIMEOUT_S`
@@ -1021,6 +1028,15 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   **Chọn file** (`POST /api/reference-video/upload`, dùng cho Cắt video, Muse, Xoá chữ, Dùng video của bạn, lồng tiếng): bỏ `MAX_VIDEO_BYTES`, chép ra đĩa từng 1 MB qua
   `.part` (`_save_upload`, không đọc hết vào RAM; đĩa đầy → 507); frontend bỏ mọi chỗ chặn / ghi "200 MB". App: `dflow_agent._temp_in_home` đặt `tempfile.tempdir` =
   `<DFlowData>/tmp` (Starlette ghi tạm file tải lên ở đó trước — trước đây là %TEMP% trên ổ C), xoá file tạm sót > 1 ngày. Test `test_ytdlp.py` (7).
+  **Video TikTok Shop / quảng cáo (16/11)**: `_run_ytdlp` dùng `-f "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b[vcodec!=?none]/b*[vcodec!=?none]"` —
+  trang không có hình thì yt-dlp báo "Requested format is not available" (thoát 1) → `reference_video.NO_PICTURE` ("trang chỉ có tiếng, không có hình…"), không
+  tải mp3. `video_fetch.fetch_video`: link `tiktok.com` mà yt-dlp không ra video (trừ lỗi dài quá / đã dừng) → **`tiktok_info(url)`** hỏi API miễn phí
+  **tikwm.com** (`TIKWM_API`, `{url, hd: 0}` → `data.play` = mp4 h264 đúng chất lượng web; `hdplay` là HEVC 1080p, không dùng vì xem trước trong app có thể
+  không phát; link tương đối thì thêm `https://www.tikwm.com`; bài ảnh → lỗi "bài ảnh") → kiểm thời lượng → `download_direct(referer tiktok.com)`. tikwm chỉ
+  cho **1 lượt / giây**: khoá chung + cách `TIKWM_GAP_S` 1,1 s, câu "Free Api Limit" thì hỏi lại (≤ `TIKWM_TRIES` 4). Lỗi cả hai đường: "yt-dlp: … · TikTok: …".
+  Mọi chỗ tải theo link đi qua đây (Cào video kênh, Cắt video, Lồng tiếng, Chỉnh sửa video, phân tích video mẫu / link, Mẫu hot, Edit auto CapCut). **Phụ thuộc
+  dịch vụ ngoài**: tikwm chết / đổi API thì video Shop lại không tải được (video thường vẫn đi yt-dlp). Thử thật 16/11: video Shop `@neostore252/…511732` qua
+  tikwm 33 s (yt-dlp thử trước ~25 s), 576×1024 h264 14 s; video TikTok thường vẫn đi yt-dlp 4 s. Test `test_video_fetch.py` (+2), `test_ytdlp.py` (+1 đoạn).
 - **Lồng tiếng: vị trí phụ đề + vùng mờ chữ gốc + job sống qua restart** (25/10): `Job.layout = {x, y, scale, blur}` (x/y = đáy-giữa
   hộp phụ đề theo tỉ lệ khung, scale = hệ số cỡ chữ, `blur = {x, y, w, h, amount}` góc trên-trái + kích thước theo tỉ lệ, amount 1–10 — vùng
   làm mờ nhẹ đè lên chữ Trung in sẵn, kiểu page "Bầu bì không khó" làm bằng CapCut). `normalize_layout`, `write_sub_ass(layout=)` ghim
@@ -2195,6 +2211,18 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
 - **VieNeu chạy nền (15/11)**: chưa chạy trong app cài (bản Nuitka + gói lồng tiếng: runtime là `addons/dub`), chưa thử máy yếu (1 tiến trình) / máy hết RAM;
   VieNeu vẫn đọc trên CPU (~1,5–3 s mỗi câu) — muốn nhanh hơn nữa phải cho VieNeu chạy GPU (onnxruntime-gpu / DirectML trong gói lồng tiếng, chưa thử);
   "Xoá file đã tải" chưa thử với B2 thật (Phase C xoá qua link ký sẵn).
+- **VIỆC CHO NGÀY MAI (người dùng dặn 16/11 khuya): phân tích "Theo video mẫu" / "Theo link sản phẩm" chậm** — hai bước này **không đi qua bảng
+  Cài đặt → AI viết**: `reference_video.analyze` gọi thẳng `gemini_api.generate_with_media` (model cứng `gemini-3.8-flash`, lùi 3.7 → 3.6 → 3.5 → 3.1-lite),
+  `product_link` gọi `gemini_api.generate_text` (`EXTRACT_MODEL` 3.1-flash-lite, `PLAN_MODEL` 3.5-flash) bằng pool Gemini key. Đo 16/11 ~23:20 (giờ VN) với clip
+  14 s 5 MB của người dùng: **máy chủ Gemini quá tải** — câu "trả lời chữ ok" 3.6-flash 62 s, 3.5-flash > 120 s, 3.8 / 3.7 / 3.1-lite 503; phân tích clip 3.5-flash
+  95 s, 3.6-flash 87 s (thinking low cũng ~89 s, out ~800 token), 3.8-flash lùi hết chuỗi > 240 s; lượt người dùng bấm 23:07 treo tới timeout 300 s rồi 502.
+  Code làm chậm thêm: `with_model_fallback` thử lại 3 lần / model (chờ 5 + 10 s) rồi mới lùi, mỗi lượt gọi chờ tới 300 s. Đã đề xuất, người dùng hẹn mai:
+  **mức 1** gửi song song 2 model lấy cái trả lời trước + `thinkingConfig.thinkingLevel: "low"` cho bước này (3.8-flash không nhận `minimal`) + quá tải hết thì báo
+  sau ~1–2 phút thay vì treo 5 phút; **mức 2** thêm dòng "Phân tích video mẫu / link" ở Cài đặt → AI viết: link → Claude hoặc Gemini (chỉ chữ, `run_llm`);
+  video → chọn Claude thì cắt ~12 khung hình + Whisper nghe lời trên máy rồi `run_llm(attachments=…)` (Claude nhận ảnh, không nhận video). Script đo:
+  scratchpad `time_analyze.py`, `raw_gen.py`, `ping_gen.py` (máy nhà, sẽ mất khi dọn).
+- **TikTok Shop qua tikwm (16/11)**: chưa thử trong app cài (Cào video kênh tải hàng loạt video Shop — nhịp 1 lượt / giây của tikwm, giới hạn ngày chưa rõ),
+  chưa thử video Shop dài. Video lỗi cũ trên danh sách Cào video kênh: bấm tải lại. Muốn chất lượng cao hơn (HEVC 1080p `hdplay`) phải đổi mã sang h264 sau khi tải.
 - **Gói Remotion (12/11, bản 1.8.8)**: chưa chạy trên Windows thật (máy Linux; Node zip + npm + Chrome Headless Shell Windows); chưa thử máy mạng chậm / chặn npm registry; giao diện thẻ cài chỉ qua tsc + build, chưa xem bằng mắt. Chữ phụ đề ffmpeg mới: chưa có cho phụ đề clip ở Bước 4 / 5 (`tts.write_ass`), thumbnail ★ Mẫu chưa vẽ theo màu mới.
 - **VIỆC KẾ TIẾP (người dùng dặn 12/11, làm ở phiên sau)**: "chỉnh hàng loạt" cho **mọi clip của MỌI link** trên trang Cắt video, không chỉ các clip của một link. Hiện: `openEditor(part, s, only)` mở editor với `siblings` = các phần cùng `run_id` (`listCutParts({run})`; các link dán cùng một lượt chung `run_id`, link dán lượt khác thì khác run) và nút "✏️ Chỉnh cả loạt" / ô chọn nằm trong từng `SessionCard`. Cần: chọn clip xuyên nhiều thẻ / nhiều run (thanh chọn chung của trang, "chọn tất cả mọi video"), mở editor với danh sách job bất kỳ (vd. `?parts=<job ids>` không cần `run`, hoặc route `/api/cut/parts?jobs=`), "Áp cho cả loạt" + màn tiến độ + "Xuất cả N đã sửa" chạy trên danh sách đó; hỏi người dùng có cần lọc theo kênh / ngày không.
 - **Chữ / sáng tối / nghe lời ngầm (11/11 khuya)**: chữ + sáng tối **chưa chạy qua Remotion thật** (mới ffmpeg + xem trước; composition đã thêm); chưa có hàng "Chữ" trên timeline, chưa xoay / độ trong nền / font khác Arial; tiêu đề **tắt sẵn** (muốn mọi phần cắt ra có tiêu đề: bật ở một video rồi lưu ★ Mẫu hoặc Áp cho cả loạt) — hỏi người dùng có muốn bật sẵn không; `beam_size` 2 trên CPU cũng áp cho lồng tiếng (chưa so chất lượng); chưa thử trên máy không card thật; trang Lồng tiếng chưa có màn tiến độ mới (vẫn bảng loạt cũ); trợ lý AI chưa biết bật tiêu đề.
@@ -2637,3 +2665,12 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
   (mới), `routes/exports.py`, `routes/running.py`, `conftest.py`, `components/ZipSaveButton.tsx` (mới), `api/client.ts`, `QuicktoolApp.tsx`, `EditPage.tsx`,
   `CutPage.tsx`, `TodayPage.tsx`, `SchedulePage.tsx`, `BackgroundTasks.tsx`. Test exports / running / boards / plans 29 pass, `tsc` sạch; Playwright trên agent thử
   8534 (đã tắt): 11 clip 611 MB lưu trong ~1,5 s, bấm 2 lần chỉ 1 lượt, toast + nút mở thư mục hiện. Chưa bấm "📂 Mở thư mục" thật (mở Explorer). Bản trùng trong Downloads chuyển vào Thùng rác (giữ một bản mỗi bộ: `10clip.zip`, `10clip (4).zip`, `1clip.zip`). Phát hành **2.2.1** (số phiên bản ở 8 file, tag `v2.2.1`).
+- **15/11** — **Phát hành 2.2.1 xong**: commit `900652f`, run 43734671280 thành công, release v2.2.1 trên dflow-releases (bộ cài 192 MB + `latest.json` 2.2.1), `dflow.io.vn/tai-app` → 2.2.1.
+- **16/11** — Sửa video **TikTok Shop / quảng cáo** không tải được (cào kênh rồi tải, dán link phân tích, cắt, lồng tiếng): web TikTok không có địa chỉ video của
+  loại này nên yt-dlp chỉ lấy được mp3 nhạc nền rồi app báo nhầm "video dài hơn 60 phút". Giờ yt-dlp không bao giờ lấy file chỉ có tiếng (báo rõ "chỉ có tiếng,
+  không có hình"), và link TikTok yt-dlp không ra video thì tải qua API tikwm.com như các trang tải video. `routes/reference_video.py` (`-f`, `NO_PICTURE`),
+  `services/video_fetch.py` (`is_tiktok`, `tiktok_info`, nhánh dự phòng). Test `test_video_fetch.py` + `test_ytdlp.py` 13 pass, 11 bộ test dùng tải video 103 pass
+  (`test_stop_fast::test_cutting_stops_in_the_middle_of_a_part` lỗi khi chạy chung — chạy riêng qua cả trước lẫn sau khi sửa, nhạy thời gian). Chạy thật bằng yt-dlp
+  + tikwm thật: video Shop trong ảnh của người dùng ra mp4 576×1024 (33 s), video thường vẫn đi yt-dlp; yt-dlp mới vẫn tải được TikTok thường + YouTube. Bản web
+  (start.ps1, `start166.log`) chạy cho người dùng thử, app cài đã tắt. Tìm hiểu vì sao phân tích video mẫu chậm (Gemini quá tải — xem Việc đang dở, để mai).
+  Phát hành **2.2.2** (số phiên bản ở 8 file, tag `v2.2.2`).

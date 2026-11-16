@@ -117,6 +117,18 @@ def test_link_download_has_no_size_cap_and_refuses_long_videos(tmp_path, monkeyp
     seen["long"] = True
     path, _t, err = rv._run_ytdlp("https://youtu.be/y", "m2", 3600)
     assert path is None and "dài hơn 60 phút" in err
+    # never settle for the sound alone (TikTok Shop videos: the web page has the music, no picture)
+    spec = seen["cmd"][seen["cmd"].index("-f") + 1].split("/")
+    assert "b" not in spec and all("vcodec!=?none" in alt or "bv*" in alt or "ext=mp4" in alt for alt in spec)
+    seen["long"] = False
+
+    def audio_only(cmd, **kw):
+        return subprocess.CompletedProcess(cmd, 1, b"", b"ERROR: [TikTok] 77: Requested format is not available. Use --list-formats")
+
+    monkeypatch.setattr(subprocess, "run", audio_only)
+    path, _t, err = rv._run_ytdlp("https://www.tiktok.com/@a/video/77", "m4", 3600)
+    assert path is None and "chỉ có tiếng" in err and "dài hơn" not in err
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     def no_tool():
         raise ytdlp.YtdlpError("không tải được yt-dlp từ GitHub (offline)")

@@ -1,1 +1,1 @@
-__version__ = "2.2.1"  # the app version (same as pyproject.toml, tauri.conf.json, package.json — checked by CI)
+__version__ = "2.2.2"  # the app version (same as pyproject.toml, tauri.conf.json, package.json — checked by CI)

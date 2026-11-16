@@ -7,12 +7,19 @@ Douyin links go through the mobile share page the way VieDub does: follow
 the short link, read ``window._ROUTER_DATA`` for the item (title, no-
 watermark play url) and download that file directly. Everything else is
 yt-dlp (``routes.reference_video._run_ytdlp``).
+
+TikTok Shop / ad videos don't play on TikTok's web page ("View TikTok Shop
+videos in the TikTok app"): the page carries the music but no video address,
+so yt-dlp finds nothing with a picture. The app's own feed still has the mp4;
+download sites read it, and so does :func:`tiktok_info` through tikwm.com's
+free API (one request a second) — only after yt-dlp found no video.
 """
 from __future__ import annotations
 
 import json
 import logging
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -24,6 +31,11 @@ logger = logging.getLogger(__name__)
 MOBILE_UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) "
              "Version/17.0 Mobile/15E148 Safari/604.1")
 DOUYIN_HOSTS = ("douyin.com", "iesdouyin.com")
+TIKTOK_HOSTS = ("tiktok.com",)
+TIKWM_API = "https://www.tikwm.com/api/"
+#: tikwm's free API answers one request a second; closer calls get "Free Api Limit"
+TIKWM_GAP_S = 1.1
+TIKWM_TRIES = 4
 MAX_DIRECT_BYTES = 300 << 20
 _URL_RE = re.compile(r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+")
 
@@ -97,6 +109,56 @@ def douyin_info(url: str, *, client: Optional[httpx.Client] = None) -> dict[str,
             c.close()
 
 
+def is_tiktok(url: str) -> bool:
+    from urllib.parse import urlparse
+
+    host = (urlparse(url).hostname or "").lower()
+    return any(host == h or host.endswith("." + h) for h in TIKTOK_HOSTS)
+
+
+_tikwm_lock = threading.Lock()
+_tikwm_last = 0.0
+
+
+def tiktok_info(url: str, *, client: Optional[httpx.Client] = None) -> dict[str, Any]:
+    """``{id, title, duration, direct_url}`` of a TikTok video from the app's feed, read through tikwm.com — for the
+    videos TikTok's web page will not play (TikTok Shop / ads). The plain (h264) file: the HD one is HEVC, which the
+    editor's preview may not play. Raises :class:`FetchError`."""
+    global _tikwm_last
+    own = client is None
+    c = client or httpx.Client(headers={"User-Agent": MOBILE_UA}, follow_redirects=True, timeout=30)
+    try:
+        for attempt in range(TIKWM_TRIES):
+            with _tikwm_lock:  # grab downloads run two at a time; tikwm takes one a second
+                wait = _tikwm_last + TIKWM_GAP_S - time.monotonic()
+                if wait > 0:
+                    time.sleep(wait)
+                try:
+                    r = c.get(TIKWM_API, params={"url": url, "hd": 0})
+                    body = r.json()
+                except (httpx.HTTPError, ValueError) as exc:
+                    raise FetchError(f"không hỏi được tikwm.com: {exc}") from exc
+                finally:
+                    _tikwm_last = time.monotonic()
+            if body.get("code") == 0:
+                break
+            msg = str(body.get("msg") or "tikwm từ chối")
+            if "limit" not in msg.lower() or attempt == TIKWM_TRIES - 1:
+                raise FetchError(msg)
+            time.sleep(TIKWM_GAP_S)
+        data = body.get("data") or {}
+        play = str(data.get("play") or data.get("wmplay") or "")
+        if not play:
+            raise FetchError("đây là bài ảnh, không phải video" if data.get("images") else "tikwm không trả link video")
+        if play.startswith("/"):
+            play = "https://www.tikwm.com" + play
+        return {"id": str(data.get("id") or ""), "title": str(data.get("title") or "").strip(),
+                "duration": float(data.get("duration") or 0), "direct_url": play}
+    finally:
+        if own:
+            c.close()
+
+
 def download_direct(url: str, dest: Path, *, referer: str = "https://www.douyin.com/", timeout: float = 300,
                     stop: Optional[Any] = None) -> None:
     tmp = dest.with_suffix(".part")
@@ -116,7 +178,7 @@ def download_direct(url: str, dest: Path, *, referer: str = "https://www.douyin.
         tmp.replace(dest)
     except httpx.HTTPError as exc:
         tmp.unlink(missing_ok=True)
-        raise FetchError(f"tải video Douyin lỗi: {exc}") from exc
+        raise FetchError(f"tải video lỗi: {exc}") from exc
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
@@ -158,9 +220,23 @@ def fetch_video(text: str, media_id: str, out_dir: Path, *, max_duration_s: Opti
                 raise
             errors.append(f"Douyin: {exc}")
     path, title, err = _run_ytdlp(url, media_id, max_duration_s, **({"stop": stop} if stop is not None else {}))
-    if path is None:
-        if err == STOPPED:
-            raise FetchError(STOPPED)
-        errors.append(f"yt-dlp: {err}")
-        raise FetchError(" · ".join(errors))
-    return path, title
+    if path is not None:
+        return path, title
+    if err == STOPPED or (stop is not None and stop()):
+        raise FetchError(STOPPED)
+    errors.append(f"yt-dlp: {err}")
+    if is_tiktok(url) and "dài hơn" not in err:
+        try:
+            info = tiktok_info(url)
+            if max_duration_s and info["duration"] > max_duration_s:
+                raise FetchError(f"video dài {info['duration'] / 60:.0f} phút — tối đa {max_duration_s / 60:.0f} phút") from None
+            dest = out_dir / f"{media_id}.mp4"
+            download_direct(info["direct_url"], dest, referer="https://www.tiktok.com/",
+                            **({"stop": stop} if stop is not None else {}))
+            logger.info("video_fetch: tiktok %s via tikwm → %s (%.0fs; %s)", info["id"], media_id, info["duration"], err[:80])
+            return dest, info["title"] or title
+        except FetchError as exc:
+            if "tối đa" in str(exc) or str(exc) == STOPPED:
+                raise
+            errors.append(f"TikTok: {exc}")
+    raise FetchError(" · ".join(errors))
