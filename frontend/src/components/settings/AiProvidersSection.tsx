@@ -13,6 +13,7 @@ import {
 } from "../../api/client";
 import { FeatureConfigRow, type FeatureTest } from "./FeatureConfigRow";
 import { ProviderSetupModal } from "./ProviderSetupModal";
+import { MUSE_ENABLED } from "../../quicktool/muse";
 import { getLlmConfigCached, getLlmProvidersCached, LLM_CONFIG_POLL_MS } from "../llmConfigCache";
 import { toast } from "../../store/toast";
 
@@ -44,7 +45,9 @@ import { toast } from "../../store/toast";
 
 // Order matters — this is the option order in every provider select.
 // Gemini first (lowest install friction), Claude middle, Codex last.
-const SHOWN_PROVIDERS: LLMProviderName[] = ["gemini", "claude", "openai", "muse"];
+// Muse is hidden while MUSE_ENABLED is off (18/11).
+const SHOWN_PROVIDERS: LLMProviderName[] = (["gemini", "claude", "openai", "muse"] as LLMProviderName[])
+  .filter((p) => p !== "muse" || MUSE_ENABLED);
 const FEATURES: LLMFeature[] = ["auto_prompt", "vision", "planner", "chat_agent"];
 // Chat AI may stay unset (it then thinks with the Planner's pin), so it
 // never blocks setup.

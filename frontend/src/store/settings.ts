@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { MUSE_ENABLED } from "../quicktool/muse";
 
 /**
  * Per-user model preferences. Survives page reload via localStorage —
@@ -149,7 +150,8 @@ function persist(state: PersistShape): void {
 const persisted = loadPersisted();
 
 const VALID_VIDEO_QUALITIES: VideoQuality[] = ["fast", "lite", "quality", "lite_relaxed"];
-const VALID_MEDIA_PROVIDERS: MediaProviderKey[] = ["flow", "muse"];
+// Muse stays off while it is hidden (quicktool/muse MUSE_ENABLED, 18/11): a saved "muse" falls back to Flow.
+const VALID_MEDIA_PROVIDERS: MediaProviderKey[] = MUSE_ENABLED ? ["flow", "muse"] : ["flow"];
 const VALID_IMAGE_PROVIDERS: ImageProviderKey[] = ["flow", "openai", "xai"];
 // a voice id of one of the voice families (services/tts.voice_kind): Edge, VieNeu, Gemini, FPT.AI
 const isVoiceId = (v: unknown): v is string =>

@@ -110,6 +110,7 @@ def status() -> dict:
     counts = _counts()
     ext_dir = app_env.extension_dir()
     credits = conn.credits if conn and isinstance(conn.credits, int) else None
+    wrong = _mismatch() if conn and project else None
 
     if conn and not outdated:
         ext_detail = f"Đã kết nối (bản {version or '?'})."
@@ -123,7 +124,11 @@ def status() -> dict:
     else:
         flow_detail = ACCOUNT_HINTS.get((conn.account_error if conn else "") or "", "") or (
             "Mở flow.google.com trong Chrome đó, đăng nhập tài khoản Google có gói AI Pro hoặc Ultra, rồi để tab mở.")
-    if project:
+    if wrong:
+        owner = " / ".join(wrong["owners"])
+        project_detail = (f"Dự án đang chọn là của {owner}, nhưng tab Flow đang đăng nhập {wrong['email']} — Flow sẽ bỏ "
+                          f"mọi video. Trên tab Flow chuyển về {owner}, hoặc dùng dự án của {wrong['email']}.")
+    elif project:
         project_detail = "Đã chọn dự án."
     elif tab_project:
         project_detail = "Tab Flow đang mở một dự án — bấm “Dùng dự án đang mở”."
@@ -139,7 +144,7 @@ def status() -> dict:
          "title": "Cài extension DFlow Bridge vào Chrome", "detail": ext_detail},
         {"id": "flow", "required": True, "ok": bool(email),
          "title": "Mở Google Flow và đăng nhập", "detail": flow_detail},
-        {"id": "project", "required": True, "ok": bool(project),
+        {"id": "project", "required": True, "ok": bool(project) and not wrong,
          "title": "Chọn dự án Flow để chứa ảnh và video", "detail": project_detail},
         {"id": "ai", "required": True, "ok": ai_ok,
          "title": "AI viết kịch bản và bài đăng", "detail": ai_detail},
@@ -156,12 +161,14 @@ def status() -> dict:
         "ready": all(s["ok"] for s in steps if s["required"]),
         # what a generation cannot do without; the account read (step "flow") is not in it — it reads the page of
         # the Flow tab and must not block work the day Flow moves a button
-        "can_generate": bool(conn) and not outdated and bool(project),
+        "can_generate": bool(conn) and not outdated and bool(project) and not wrong,
         "steps": steps,
         "flow": {
             "connected": bool(conn), "version": version, "email": email, "credits": credits,
             "tier": conn.tier if conn else None, "project_id": project, "tab_project": tab_project,
             "plan": app_env.TIERS.get(app_env.current_tier(), ""),
+            # the tab's account does not own the pinned project: {email, project_id, owners, suggest_project}
+            "mismatch": wrong,
         },
         "counts": counts,
         "extension_dir": str(ext_dir) if ext_dir else "",
@@ -169,8 +176,22 @@ def status() -> dict:
     }
 
 
-async def check(use_tab_project: bool = False) -> dict:
+def _mismatch() -> Optional[dict]:
+    from flowboard.services.account_pool import account_pool
+
+    try:
+        return account_pool.mismatch()
+    except Exception:  # noqa: BLE001 - no account data open yet
+        logger.debug("setup: mismatch check failed", exc_info=True)
+        return None
+
+
+async def check(use_tab_project: bool = False, use_account_project: bool = False, keep_project: bool = False) -> dict:
     """Look again (ask the extension to read the Flow tab), settle what can be settled, and answer ``status()``.
+
+    When the Flow tab's account does not own the pinned project, ``use_account_project`` pins the project of the tab's
+    account (the one the tab has open, else the one pinned last time that account was used) and ``keep_project`` says
+    the tab's account may use the pinned project too.
 
     ``changed`` lists what was set on the seller's behalf, in words, for a toast.
     """
@@ -203,6 +224,22 @@ async def check(use_tab_project: bool = False) -> dict:
                     changed.append("dự án Flow đang mở")
                 except Exception:  # noqa: BLE001
                     logger.warning("setup: could not pin the open project", exc_info=True)
+            wrong = _mismatch() if (use_account_project or keep_project) else None
+            if wrong and keep_project:
+                from flowboard.services.account_pool import account_pool
+
+                account_pool.share_project(wrong["project_id"], wrong["email"])
+                changed.append(f"dùng tiếp dự án này với {wrong['email']}")
+            elif wrong and use_account_project and wrong.get("suggest_project"):
+                from flowboard.routes.auth import remember_project_for_active
+                from flowboard.services.flow_project import effective_project_id, set_override
+
+                try:
+                    set_override(wrong["suggest_project"])
+                    remember_project_for_active(effective_project_id())
+                    changed.append(f"dự án Flow của {wrong['email']}")
+                except Exception:  # noqa: BLE001
+                    logger.warning("setup: could not pin the account's project", exc_info=True)
     await _refresh_ai()
     return {**status(), "changed": changed}
 

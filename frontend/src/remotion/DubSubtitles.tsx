@@ -334,7 +334,9 @@ export const DubSubtitles: React.FC<DubSubtitlesProps> = ({ src, width, height, 
             position: "absolute", left: `${lay.x * 100}%`, top: `${lay.y * 100}%`, transform: "translate(-50%, -100%)",
             // max-content: an absolute box at left: x% would otherwise shrink to the (1 − x) of the
             // frame on its right and wrap a short line into 3 (seen 26/10)
-            width: "max-content", maxWidth: `${(lay.w ?? 0.88) * 100}%`, boxSizing: "border-box", opacity: alpha, fontFamily, fontSize: fontPx, lineHeight: 1.25, textAlign: "center",
+            // 1 — libass stacks \N lines one fontsize apart, no extra leading (measured against a real render);
+            // 1.25 here made the preview's multi-line captions taller/looser than what ffmpeg actually draws
+            width: "max-content", maxWidth: `${(lay.w ?? 0.88) * 100}%`, boxSizing: "border-box", opacity: alpha, fontFamily, fontSize: fontPx, lineHeight: 1, textAlign: "center",
             whiteSpace: "pre-wrap", wordBreak: "break-word",
             ...boxCss(style, fontPx),
           }}

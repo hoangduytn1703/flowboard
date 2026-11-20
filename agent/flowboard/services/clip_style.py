@@ -21,6 +21,10 @@ from __future__ import annotations
 
 import re
 
+#: Added to every image prompt the scene writers make: "phone footage" made Nano Banana draw the camera app itself
+#: (18/11, clip #155 scene 4: a status bar with the time and a red record button over the picture).
+NO_PHONE_UI = "No phone screen, camera-app interface, record button or status bar in the picture."
+
 LOOK_RULES = (
     "LOOK — a real buyer filmed it on a phone, not an ad shoot:\n"
     "- Vertical 9:16 smartphone footage. Say where the phone is: held by a friend at chest height, propped on "
@@ -36,6 +40,12 @@ LOOK_RULES = (
     "or no makeup, normal clothes, surfaces with some wear.\n"
     "- Never use the words editorial, studio, cinematic, commercial, luxury, flawless, perfect, beauty shot, glossy, "
     "pristine, hero shot, magazine, lookbook, and no empty space kept for a logo or text. No on-screen text.\n"
+    "- The image is what the phone's camera SEES, never a picture of a phone screen: no camera-app interface, "
+    "record button, status bar, clock or battery icon, no phone frame around the picture.\n"
+    "- ONE item in every scene: the product shows the same colour, pattern and details in every scene, as in the "
+    "seller's reference photo. Never take its colour from a list of colour options / variants in the description "
+    "or notes (a bag sold in cream, red and pink is the one in the photo). Not sure of the colour: name no colour "
+    "and write 'the <item> from the reference photo'.\n"
 )
 
 MOTION_RULES = (

@@ -14,6 +14,10 @@ router = APIRouter(prefix="/api/setup", tags=["setup"])
 class CheckBody(BaseModel):
     #: Pin the project the Flow tab has open even when another one is pinned.
     use_tab_project: bool = False
+    #: The tab's account does not own the pinned project: pin that account's project instead.
+    use_account_project: bool = False
+    #: … or let that account use the pinned project (the warning was wrong).
+    keep_project: bool = False
 
 
 @router.get("/status")
@@ -23,7 +27,9 @@ def get_status() -> dict:
 
 @router.post("/check")
 async def check(body: Optional[CheckBody] = None) -> dict:
-    return await setup_status.check(use_tab_project=bool(body and body.use_tab_project))
+    body = body or CheckBody()
+    return await setup_status.check(use_tab_project=body.use_tab_project,
+                                    use_account_project=body.use_account_project, keep_project=body.keep_project)
 
 
 @router.post("/open-flow")

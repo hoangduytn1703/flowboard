@@ -85,12 +85,9 @@ def test_grocery_defaults_to_hands_only_and_food_review_needs_a_person():
     assert all("HANDS-ONLY SHOT" in n["data"]["prompt"] for n in spec["nodes"] if n["type"] in ("image", "video"))
 
     food = tpl.get_template("food_review")
-    assert food["person_required"] is True
-    with pytest.raises(tpl.PersonRequiredError, match="ăn thử"):
-        tpl.render(food, {"charGender": "hands_female"})
-    # the clothes message is unchanged
-    with pytest.raises(tpl.PersonRequiredError, match="cần người mẫu mặc"):
-        tpl.render(tpl.get_template("fashion_ad"), {"charGender": "hands_female"})
+    assert food["person_required"] is True  # only a hint for the UI now (18/11)
+    spec = tpl.render(food, {"charGender": "hands_female"})
+    assert not any(n["type"] == "character" for n in spec["nodes"])
 
 
 def test_template_for_category_picks_the_first_and_skips_any():
@@ -174,33 +171,20 @@ def test_hands_only_drops_the_model_and_keeps_the_scenes():
     assert "beautiful, well-groomed hands" in default["nodes"][3]["data"]["prompt"]
 
 
-def test_templates_offer_hands_except_where_a_person_is_required():
+def test_every_template_offers_a_person_and_hands():
+    """18/11: "person_required" (clothes, tasting food) is a hint, not a rule — a bag sits in "thời trang" too."""
     for meta in tpl.list_templates():
         gender = next(i for i in meta["inputs"] if i["key"] == "charGender")
         offered = {o[0] for o in gender["options"]}
-        assert {"female", "male"} <= offered
-        if meta.get("person_required"):
-            assert not offered & {"hands_female", "hands_male"}
-        else:
-            assert {"hands_female", "hands_male"} <= offered
+        assert {"female", "male", "hands_female", "hands_male"} <= offered, meta["id"]
 
 
-def test_clothes_ad_refuses_hands_only():
-    import pytest
-
+def test_a_fashion_clip_can_be_hands_only(client):
     fashion = tpl.get_template("fashion_ad")
-    assert fashion["person_required"] is True
-    with pytest.raises(tpl.PersonRequiredError, match="cần người mẫu"):
-        tpl.render(fashion, {"charGender": "hands_female"})
-    # a person is still fine, and other kinds still take hands
-    tpl.render(fashion, {"charGender": "male"})
-    tpl.render(tpl.get_template("fast_food_ad"), {"charGender": "hands_male"})
-
-
-def test_from_template_route_rejects_hands_for_clothes(client):
+    spec = tpl.render(fashion, {"charGender": "hands_female"})
+    assert not any(n["type"] == "character" for n in spec["nodes"])
+    assert all("HANDS-ONLY SHOT" in n["data"]["prompt"] for n in spec["nodes"] if n["type"] in ("image", "video"))
     r = client.post("/api/boards/from-template", json={"template_id": "fashion_ad", "inputs": {"charGender": "hands_male"}})
-    assert r.status_code == 400 and "người mẫu" in r.json()["detail"]
-    r = client.post("/api/boards/from-template", json={"template_id": "fast_food_ad", "inputs": {"charGender": "hands_male"}})
     assert r.status_code == 200
 
 
@@ -226,10 +210,9 @@ def test_note_how_to_matches_the_wizard_and_drops_the_model_step_in_hands_mode()
         note = next(n for n in tpl.render(full, {"charGender": "female"})["nodes"] if n["key"] == "script")["data"]["prompt"]
         assert "Veo 3.1" not in note and "Chat AI" not in note
         assert "Omni Flash" in note and "bước 5" in note and "tạo Người" in note
-        if not full.get("person_required"):
-            hands = tpl.render(full, {"charGender": "hands_female"})
-            note = next(n for n in hands["nodes"] if n["key"] == "script")["data"]["prompt"]
-            assert "tạo Người" not in note and "chỉ quay bàn tay" in note
+        hands = tpl.render(full, {"charGender": "hands_female"})  # every template, clothes too (18/11)
+        note = next(n for n in hands["nodes"] if n["key"] == "script")["data"]["prompt"]
+        assert "tạo Người" not in note and "chỉ quay bàn tay" in note, meta["id"]
 
 
 def test_every_template_defaults_the_model_to_vietnam():

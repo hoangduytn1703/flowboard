@@ -36,6 +36,14 @@
         [
           "male",
           "Nam"
+        ],
+        [
+          "hands_female",
+          "Tay nữ (không lộ mặt)"
+        ],
+        [
+          "hands_male",
+          "Tay nam (không lộ mặt)"
         ]
       ],
       "default": "female"

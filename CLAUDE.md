@@ -258,9 +258,20 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   (hoặc chỉ bản 2015 / 2017, thiếu VCRUNTIME140_1). Máy nhà có sẵn nên thử 9/11 không lộ. Lỗi ở chính `import faster_whisper` nên rơi về CPU cũng không cứu;
   onnxruntime (VieNeu, RapidOCR) cũng cần runtime này. Gỡ ngay không cần bản mới: cài https://aka.ms/vs/17/release/vc_redist.x64.exe rồi bấm "Cài lại". Code
   đã tự lo (xem "Gói lồng tiếng"). **Thư viện native cài vào máy khách: đọc bảng import DLL của nó, đừng tin "máy mình chạy được".**
+- **Key "OpenAI" của trang trung gian (xingchiapi.com, model `gpt-6.1-sol`) KHÔNG dùng được trong DFlow** (18/11, người dùng dán key + cấu hình
+  `~/.codex/config.toml` kiểu `wire_api = "responses"`): `GET /v1/models` thì được, nhưng mọi lệnh gọi model (`/v1/responses`, `/v1/chat/completions`) trả
+  **403 `client_not_allowed`** — trang đó chỉ cho các công cụ lập trình (Codex, Claude Code, Cursor, Cline…) dùng, chặn script / SDK gọi thẳng. Không giả danh
+  công cụ khác để lách (vi phạm luật của họ). Muốn AI có API cho DFlow thì dùng nhà cung cấp cho phép gọi API (Gemini key, OpenAI chính hãng…).
+- **Sản phẩm đổi màu giữa các cảnh (túi hồng ra 2 cảnh màu kem)** (18/11, clip #155 "Túi Xách Tay MATE MADE", sản phẩm #8): mô tả đọc từ trang sản phẩm ghi "It comes
+  in three solid color options: cream, red, and pink" + ghi chú "Màu sắc: Kem, Đỏ, Hồng"; AI viết kịch bản (`script_tailor`, luật cũ "gọi sản phẩm bằng chữ hình
+  ảnh: loại, màu, chất liệu…") lấy màu đầu danh sách → cả 4 prompt ảnh ghi "a cream rectangular … bag", không có nơ / dây đá / charm ngôi sao → Flow vẽ 2 cảnh theo
+  ảnh (hồng), 2 cảnh theo chữ (kem, mất chi tiết). Câu "The product must match the reference photo exactly (shape, colour…)" không thắng được chữ "cream". Sửa
+  (xem Chỗ cần biết → "Màu sản phẩm lấy từ ảnh"). **Mô tả sản phẩm có danh sách màu / size / biến thể là thuốc độc cho prompt ảnh** — đừng đưa nguyên mô tả vào prompt.
+- **Mọi video bị Flow bỏ (cả cảnh không có người), ảnh vẫn ra = tab Flow đang đăng nhập tài khoản Google KHÁC chủ dự án đang ghim** (18/11, clip #155 túi xách, 4 ngày): tab Flow (extension) đăng nhập **akiragosho2000@gmail.com** (pool: lần đọc cuối 18/11 22:36), còn dự án đang ghim `b5633a75` là của **hoangduytn1703@gmail.com** (lần cuối tab báo tài khoản đó: 14/11 11:40). Từ 15/11 mọi video trong DB đều `FLOW_DROPPED_JOB` — Veo 3.1 Lite lẫn Omni Flash (#350–357), mỗi cảnh 3,5–7,5 phút gồm lượt thử lại; ảnh vẫn ra. Lượt trước (cùng ngày) tôi **chẩn đoán sai** là "Veo 3.1 Lite bị Flow bỏ" và làm worker tự đổi Veo → Omni — người dùng đổi sang Omni vẫn bị bỏ y hệt → đã gỡ phần đổi model. Cùng kiểu với bẫy 22/10 (ghim nhầm project tài khoản khác). `a16e9764` ("Tiếp thị liên kết tiktok") là dự án của akiragosho2000 (BUGLOG FB-025). Giờ tool tự nhận ra và chặn trước khi gửi (xem Chỗ cần biết → "Tab Flow sai tài khoản"). **Thấy video bị bỏ hàng loạt: so `account_pool` (email nào được đọc gần nhất, `credits_at`) với chủ dự án đang ghim (`flow_project_for:<email>`) trước khi nghi model / gương mặt.**
+- **Chữ "phone footage" làm Nano Banana vẽ luôn giao diện camera** (18/11, clip #155 cảnh 4: thanh trạng thái có giờ + nút quay đỏ đè lên hình): luật "quay bằng điện thoại" của `clip_style` bị hiểu thành ảnh chụp màn hình điện thoại. Giờ có `clip_style.NO_PHONE_UI` gắn vào mọi prompt ảnh cảnh do AI viết + luật "ảnh là thứ camera NHÌN THẤY" trong `LOOK_RULES`.
 - **TikTok lúc có lúc không trả trang "Security Check"** thay cho trang sản phẩm (thấy thật 21/10): `product_link.fetch_page` nhận diện trang chặn (`_looks_blocked`), thử lại 1 lần sau 3 s rồi báo lỗi — trước đó đã lưu một sản phẩm tên "Security Check".
 - **Vite có lúc giữ bản biên dịch RỖNG của một file vừa sửa** (21/10: `AccountPanel.tsx` trả 0 byte → cả app trắng, lỗi "does not provide an export named …" dù `tsc` sạch). Kiểm tra `curl -s -o /dev/null -w '%{size_download}' localhost:5174/src/<file>`; sửa bằng `touch <file>`.
-- **Gemini chậm/treo không hẳn do key rẻ, mà do model**: đo cùng một câu hỏi, `gemini-3.1-flash-lite` ~4 s, `3.5-flash` ~21 s (nhiều thinking token), `3.7`/`3.8-flash` quá 40 s. Việc đọc sản phẩm từ link dùng `product_link.EXTRACT_MODEL` (lite, ~13 s cả quy trình). Kịch bản clip (`analyze`) vẫn dùng model mặc định, có thể chậm; chưa đổi vì chưa so chất lượng. Fallback chỉ xử lý 503, không xử lý treo/timeout.
+- **Gemini chậm/treo không hẳn do key rẻ, mà do model**: đo cùng một câu hỏi, `gemini-3.1-flash-lite` ~4 s, `3.5-flash` ~21 s (nhiều thinking token), `3.7`/`3.8-flash` quá 40 s. Việc đọc sản phẩm từ link dùng `product_link.EXTRACT_MODEL` (lite, ~13 s cả quy trình). Phân tích video mẫu / link (18/11) giờ đua nhiều model cùng lúc + AI viết dự phòng — xem Chỗ cần biết → "Phân tích video mẫu / link nhanh". Các chỗ khác vẫn dùng `with_model_fallback` (503 thử lại 5 + 10 s rồi mới lùi model).
 - **`NANO_BANANA_2` (NARWHAL) bị Flow từ chối** (`ogiZ0b failed: [5]`). Dùng `NANO_BANANA_PRO`. Giá trị đã lưu trong localStorage được ưu tiên hơn mặc định.
 - Video: mặc định Omni Flash. Flow tự sinh giọng tiếng Anh vào video → `flow_sdk.silent_prompt()` thêm câu "no speech"; ở bước Ghép chọn "Tiếng gốc của clip" = nhỏ lại/tắt hẳn.
 - `agent/flowboard/services/flow_batch.py` giữ **giống hệt bản flowkit upstream**, đừng sửa. Chính sách model nằm ở `flow_sdk.py`.
@@ -323,7 +334,7 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   chặn quần áo vì câu lỗi cũ ghi "bare shoulders, a short dress"): lượt kiểm tra gương mặt (chân dung áo thun đen, không có váy) cũng bị bỏ 2 lần → thủ phạm
   là khuôn mặt (người lớn bình thường, không trông trẻ). Thêm: 4 video gửi lúc 14:37:37 khi lượt kiểm tra **còn đang chạy** (bị bỏ lần 1 lúc 14:37:31, worker
   đang thử lại, kết luận 14:39:30) — nên tốn thêm 4–8 phút chờ video chết. Giờ: câu lỗi tiếng Việt chỉ đúng chỗ, không gửi video khi đang kiểm tra, chạy tự
-  động tự đổi gương mặt (xem "Kiểm tra với Flow"). Đọc log app: `D:\DFlowData\logs\agent.log` ("dropped by Flow … retrying once").
+  động tự đổi gương mặt (xem "Kiểm tra với Flow"). Đọc log app: `D:\DFlowData\logs\agent.log` ("dropped by Flow … retrying once"). **18/11: kết luận "gương mặt" này có thể cũng sai** — từ 14/11 11:40 tab Flow đã ở tài khoản akiragosho2000 trong khi dự án ghim là của hoangduytn1703 (xem bẫy "Mọi video bị Flow bỏ…"), nên lượt kiểm tra gương mặt bị bỏ có thể vì lệch tài khoản. Chưa thử lại gương mặt đó khi đúng tài khoản.
 - **Ảnh sản phẩm lấy từ shop có mặt người mẫu thật → Flow bỏ video** (đo thật 26/10): ảnh shop Đầm Bầu (2 mặt người mẫu Hàn +
   logo + chữ "OOTD") làm nguyên liệu Omni → lần 1 bị bỏ (42 s), lần 2 cùng ảnh/prompt lại ra (33 s) — chặn **không đều**. Ảnh mẹ bầu AI
   vẽ (có mặt) ra ngay 33 s. Tệ hơn: ảnh sản phẩm là tham chiếu của **mọi ảnh cảnh**, mặt người mẫu shop lọt vào cảnh → video cảnh nào
@@ -415,6 +426,18 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   `BorderStyle 3` vẽ hộp riêng cho từng dòng theo bề rộng dòng đó. Giờ `dub.text_ass` vẽ **một hình chữ nhật** (`\p1`, style `T<i>b`, layer 1) rộng theo dòng dài
   nhất (`text_line_px`: đo bằng Pillow + Arial ở cỡ em = cỡ ASS / `ASS_LINE_EM` 1,117; máy không có font thì ước theo số ký tự), cao = số dòng × cỡ chữ + đệm, chữ đè
   lên không viền. Phụ đề kiểu hộp (`box_yellow` / `box_white`) vẫn là BorderStyle 3 — mỗi dòng một hộp, chưa đổi. Đổi cách vẽ chữ: in thử ra khung hình rồi xem ảnh.
+- **🔤 Chữ: trình chỉnh sửa và video xuất ra khác nhau nhiều (20/11, người dùng chụp 2 clip "✂️ Cắt video" thật, phần cắt ra — xem ảnh gửi kèm)** — 2 lỗi,
+  đo bằng ffmpeg thật (render một khung hình 2–4 dòng rồi đếm pixel):
+  1. **Dòng chữ bị ngắt khác nhau**: `text_ass` cũ tính số CHỮ vừa một dòng bằng công thức ước lượng `width*w / (font*0.52)` (một hệ số trung bình, không
+     theo chữ thật) rồi cắt theo SỐ KÝ TỰ; preview (`textLayerCss`) để trình duyệt tự xuống dòng theo CHIỀU RỘNG PIXEL thật (`max-width`). Hai cách khác
+     nhau dễ ra khác số dòng (lời tiêu đề vừa một dòng trên preview thì bị ngắt làm 2 khi xuất, nền chữ vì vậy cũng khác cỡ). Giờ `wrap_text_px` (mới) đo
+     đúng bằng Pillow+Arial (`text_line_px`, cùng hàm đã dùng để đo bề rộng hộp) rồi mới ngắt dòng — như trình duyệt làm. Kèm theo: khi có nền, hộp
+     (border-box) giữ nguyên `w`% khung → chữ chỉ còn `w%·width − 2×font×0,3` (trừ đệm hai bên) để ngắt dòng, không phải cả `w%·width` — khớp đúng cách
+     trình duyệt tính `max-width` với `box-sizing: border-box`.
+  2. **Khoảng cách giữa các dòng khác nhau**: `textLayerCss` / `DubSubtitles` (cả hộp chữ 🔤 lẫn khung phụ đề thường) ghi `lineHeight: 1.25` — đoán, chưa
+     đo lại bao giờ. Dựng thật bằng ffmpeg (4 dòng "HHHH" cùng style, đo khoảng cách tâm từng dòng bằng Pillow): libass xếp mỗi dòng cách nhau ĐÚNG MỘT
+     `Fontsize`, không có khoảng dư — tỉ lệ thật là **1**, không phải 1,25. Preview cũ vì vậy vẽ hộp nhiều dòng CAO/THƯA hơn bản ffmpeg thật 25%. Đã sửa cả
+     hai chỗ về `lineHeight: 1`. **Đổi dòng/khoảng cách chữ: dựng thử bằng ffmpeg + đo pixel bằng Pillow, đừng đoán số libass dùng.**
 - **Nút "⬇ Tải N clip đã ghép" trông như đơ** (15/11, app 2.2.0, 10 clip ~793 MB): nút cũ là link tới `GET /api/exports/zip` — agent gom XONG cả file .zip rồi
   mới gửi byte đầu, app (WebView2) không hiện gì trong lúc đó và tự lưu vào Downloads không báo → người dùng bấm 4 lần, Downloads có 4 bản giống nhau
   (`flowboard_…_10clip (4)…(7).zip`). Tải không hỏng. Giờ mọi nút tải .zip là `ZipSaveButton` (xem "Chỗ cần biết" → "Lưu .zip vào thư mục Tải về").
@@ -447,7 +470,7 @@ của người dùng (console.neon.tech, secure.backblaze.com).
 ## Chỗ cần biết trong code
 - Backend `agent/flowboard/`: `routes/products.py` (CRUD, `from-link`, `open-tabs` + `import-tabs`, `bulk-delete`), `services/product_link.py` (đọc trang sản phẩm bằng httpx + Gemini; chặn IP nội bộ), `services/tiktok_import.py`, `services/reference_video.py` (clip từ video mẫu / link: `/api/reference-video/analyze`, `analyze-link`, `build`), `services/video_export.py`, `services/flow_sdk.py`, `templates/*.json` (8 kiểu clip), `services/llm/gemini_api.py` (gọi Gemini bằng API key: xoay vòng nhiều key khi 429, key lỗi 400/401/403 nghỉ 6 h, 503 thử lại + lùi model `3.8-flash → 3.7 → 3.6 → 3.5 → 3.1-flash-lite`; `speak()` cho giọng Gemini TTS).
 - Frontend `frontend/src/quicktool/`: `QuicktoolApp.tsx` (route + wizard 5 bước), `NewClipDialog.tsx` (chọn sản phẩm, kiểu clip, "Số clip" N clip/1 sản phẩm), `quicktool.css`. `components/ProductsPanel.tsx` (trang `/products`, chọn nhiều + xoá). Cỡ chữ: thang riêng (chữ nội dung 16px); Canvas cố ý giữ chữ nhỏ.
-- **Chế độ chỉ bàn tay**: ô "Giới tính mẫu" của mọi kiểu clip có thêm `Tay nữ` / `Tay nam` (`hands_female` / `hands_male`). `templates.render()` khi đó bỏ node nhân vật + cạnh nối, thêm câu "HANDS-ONLY SHOT…" vào prompt ảnh/video (không viết lại từng prompt), mô tả tay lấy từ ô `handLook` (mặc định "beautiful, well-groomed hands…"), quốc gia từ `charCountry`. **`fashion_ad` (quần áo) bắt buộc có người** (`person_required`): không có lựa chọn tay trên UI, backend/chat agent trả lỗi `PersonRequiredError` nếu gửi `hands_*`. Clip "theo video mẫu / link": màn review có ô **Người mẫu** (AI gợi ý / Nữ / Nam / Tay nữ / Tay nam / Không có người) + Quốc gia, gửi `character` lên `/api/reference-video/build` → `reference_video._character_for`. **Bước 1 wizard** có nút gạt Người mẫu ⇄ Chỉ bàn tay: `POST /api/boards/{id}/model-mode` (`services/model_mode.py`) xoá/tạo lại node nhân vật + cạnh, thêm/bỏ câu `HANDS_MARKER` trong prompt cảnh (idempotent), lưu `quicktool.hands`. Sản phẩm/kiểu thời trang bị từ chối ở cả ba chỗ. **Chưa tạo thử clip thật** để xem Flow vẽ tay có ổn không (kiểu quần áo chỉ tay có thể gượng).
+- **Chế độ chỉ bàn tay**: ô "Giới tính mẫu" của mọi kiểu clip có thêm `Tay nữ` / `Tay nam` (`hands_female` / `hands_male`). `templates.render()` khi đó bỏ node nhân vật + cạnh nối, thêm câu "HANDS-ONLY SHOT…" vào prompt ảnh/video (không viết lại từng prompt), mô tả tay lấy từ ô `handLook` (mặc định "beautiful, well-groomed hands…"), quốc gia từ `charCountry`. **`person_required` (`fashion_ad`, `food_review`) chỉ còn là GỢI Ý** (18/11, người dùng: túi xách nằm trong ngành "thời trang" bị chặn chỉ quay tay như quần áo — "nới ra, chỉ suggest thôi"): mọi mẫu đều có Tay nữ / Tay nam, không còn `PersonRequiredError`; UI hiện dòng "💡 Gợi ý: quần áo thường cần người mặc…" khi chọn tay. Clip "theo video mẫu / link": màn review có ô **Người mẫu** (AI gợi ý / Nữ / Nam / Tay nữ / Tay nam / Không có người) + Quốc gia, gửi `character` lên `/api/reference-video/build` → `reference_video._character_for`. **Bước 1 wizard** có nút gạt Người mẫu ⇄ Chỉ bàn tay: `POST /api/boards/{id}/model-mode` (`services/model_mode.py`) xoá/tạo lại node nhân vật + cạnh, thêm/bỏ câu `HANDS_MARKER` trong prompt cảnh (idempotent), lưu `quicktool.hands`. **Chưa tạo thử clip thật** để xem Flow vẽ tay có ổn không (kiểu quần áo chỉ tay có thể gượng).
 - **Bước 1 · Sản phẩm nhận nhiều ảnh** (tối đa `MAX_PRODUCT_PHOTOS = 4`, `store/quicktool.ts`): "+ Thêm góc khác" tạo node `visual_asset` mới nối vào đúng các cảnh mà ảnh chính đang nối, rồi upload; "Bỏ ảnh" xoá node phụ (không xoá ảnh chính). Upload qua Flow mất ~10–15 s/ảnh.
 - Sidebar: "Clip của tôi" (trang này có nút + thẻ "Clip mới" mở hộp "Clip mới": 8 mẫu theo ngành hàng + 2 nguồn có sẵn chọn ở mục 2; **sidebar không còn mục "+ Clip mới"**, 21/10), Sản phẩm, Người mẫu đã lưu (`/models`), Prompt đã lưu (`/prompts`), Lịch sử & credit (`/history`), Xoá chữ / logo (`/tools/clean`), Canvas, Cài đặt; cuối sidebar có `CreditBadge` (credit Flow).
 - Trang TikTok `shop.tiktok.com/.../pdp/<id>` đọc được không cần đăng nhập; ảnh `ibyteimg` đổi `resize-webp:260:260` → `800:800` để lấy ảnh to. Giá trên trang có nhiều mức nên Gemini có thể chọn sai: để người dùng kiểm tra.
@@ -650,7 +673,7 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   bước 1 hiện 🎙 giọng. `quicktool/VoiceField.tsx`: `VoiceField` (chọn giọng + nghe thử) và `VoicePreview` (chỉ nút ▶);
   `/api/llm/voices/preview` nhận `text` (Edge ~9 s lần đầu, sau đó cache).
 
-- **Sản phẩm "Dành cho" Nam / Nữ / Unisex — người mẫu phải cùng giới** (21/10): cột `Product.gender` (male / female / unisex /
+- **Sản phẩm "Dành cho" Nam / Nữ / Unisex — người mẫu cùng giới là GỢI Ý** (21/10; từ 18/11 không chặn nữa — xem cuối mục): cột `Product.gender` (male / female / unisex /
   "" = không rõ; migration `db.ensure_product_gender_column` thêm cột và **đoán một lần** cho sản phẩm cũ).
   `services/product_gender.py`: `guess()` theo từ khoá ("nam" trừ "Việt Nam/miền Nam", "nữ", "unisex", "nam nữ", váy/đầm…),
   `check(product, char_gender)` → `GenderMismatchError` (400). Tạo sản phẩm không gửi `gender` → tự đoán; đọc từ link → Gemini
@@ -659,6 +682,10 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   "Dành cho"; hộp Clip mới lọc ô Giới tính mẫu (+ tự chuyển Nữ→Nam khi chọn đồ nam) và màn review link/video; Bước 1 lọc ô giới
   tính / bàn tay, cảnh báo + nút "Đổi sang người mẫu nam" nếu clip cũ đang sai, thư viện khoá mẫu khác giới ("Không hợp đồ nam").
   Unisex / không rõ: không chặn. Bước 1 sửa `charGender` thẳng lên node (không qua backend) nên chỉ UI chặn ở đó.
+  **18/11 (người dùng: "mấy chỗ ràng buộc này nới ra… chỉ suggest thôi")**: `check` / `GenderMismatchError` bỏ; `product_gender.mismatch(product, pick)` = câu
+  gợi ý (hoặc None), `for_product(product, pick)` = dời một lựa chọn MẶC ĐỊNH (giới tính mặc định của mẫu clip khi người bán không chọn, gợi ý của AI ở màn
+  review) sang giới tính của sản phẩm. Lựa chọn của người bán luôn được giữ (backend + UI): mọi ô hiện đủ Nữ / Nam / Tay nữ / Tay nam, chỉ kèm dòng "💡 Gợi ý";
+  hộp Clip mới chỉ tự đổi Nữ → Nam khi ĐỔI SẢN PHẨM (không giành lại khi người bán chọn tay); thư viện người mẫu ở Bước 1 không khoá mẫu khác giới.
 - **Hộp Cài đặt = tab bên trái** (25/10, thay bố cục 2 cột dài ~2.700 px; 7/11 thêm tab **🤖 AI viết** = `AiProvidersSection` — trước đó chỉ có ở thanh công cụ Canvas đã ẩn, nên sau lần chọn AI đầu tiên không đổi được): `SettingsPanel.tsx` `TABS` — 🎬 Tạo ảnh & video (Model
   video, Model ảnh, Nguồn tạo ảnh — **đều là `<select>`**, chỉ hiện mô tả của mục đang chọn; model "chỉ Ultra" là option disabled khi
   gói Pro), ⚡ Google Flow (Project + chip "Gói Pro/Ultra", Tài khoản Flow, Danh sách tài khoản tự chuyển, Đăng xuất Flow), 🔑 Gemini
@@ -1314,6 +1341,7 @@ của người dùng (console.neon.tech, secure.backblaze.com).
     (hộp xác nhận cũ ước 12 phút). Tốn ~60 credit. Clip #19 để lại làm mẫu — xoá được.
   - Log httpx in nguyên `access_token` Facebook trong URL → `facebook_publish._RedactToken` che thành `***` (log cũ trong scratchpad còn token).
 
+- **🎬 Muse ĐANG ẨN** (18/11, người dùng: "muse chưa ổn định ở VN, ẩn đi thôi, mốt xài lại"): `frontend/src/quicktool/muse.ts` **`MUSE_ENABLED = false`** giấu khung "Làm video bằng Muse" + nút ở Bước 4 (`StepMedia.tsx`), provider Muse ở Cài đặt → AI viết (`AiProvidersSection`), ô Backend Flow / Muse của hộp tạo ảnh Canvas (`GenerationDialog`), và `settings.ts` (`mediaProvider` "muse" đã lưu về "flow"); câu lỗi tạo tự động không nhắc Muse. Code Muse giữ nguyên — bật lại: đặt `true`.
 - **🎬 Làm video bằng Muse (Meta) khi Flow chậm / bỏ lượt** (26/10 tối, máy cty): Muse **không có API** (là trợ lý chat "Sunday" trên
   muse.ai, đăng nhập bằng Facebook; người dùng hỏi thẳng Sunday: ảnh tham chiếu được, ảnh → video được, mỗi clip ~10 s cố định, ≤ 6 video /
   ≤ 4 ảnh mỗi tin nhắn, hạn mức miễn phí theo tuần; gói Power $16 / Maximum $80). Nên làm **cầu nối thủ công một lượt cho cả clip**, không
@@ -2147,11 +2175,40 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   (trạng thái giữ ngoài component — rời trang quay lại vẫn thấy; "Đang lưu clip 7/11 · 56%" + Dừng → toast "Đã lưu … vào thư mục …" + nút "📂 Mở thư mục"
   3 phút) ở Clip của tôi, Chỉnh sửa video, Cắt video, Hôm nay (cả loạt + từng clip), Lịch đăng. Test `test_the_app_saves_the_zip_into_downloads_and_follows_it`.
 - **Lưu tạm khi đổi clip trong trình chỉnh sửa (12/11)**: `DubEditor.tsx` giữ `DRAFTS` (Map cấp module, chỉ trong RAM của tab: `{doc, out, basis}` theo job id; `basis` = `started_at|media_id|số câu` — job được xuất / render lại thì bản nháp tự bỏ). Rời một clip (đổi clip ở ô chọn, sang trang khác) mà còn thay đổi → cất vào `DRAFTS` lúc unmount, **không hỏi**; mở lại clip thì nạp lại (mất lịch sử hoàn tác). Ô chọn ghi "— ● chưa xuất"; nút **"✓ Xuất cả N đã sửa"** (`exportDrafts`, `renderBodyOf(job, doc, out)` dùng chung với `exportNow`; hiện màn tiến độ loạt; prop `onSibling` để trang cha cập nhật clip khác). Chỉ cảnh báo khi bấm "← Danh sách" (kể cả các clip đang lưu tạm; đồng ý = bỏ hết nháp của loạt) và khi đóng / tải lại tab (`beforeunload`). "Áp cho cả loạt" nói rõ sẽ thay các nháp. F5 là mất nháp (chưa lưu localStorage).
+- **Phân tích video mẫu / link nhanh — `services/plan_ai.py`** (18/11, người dùng: "phân tích video ra kịch bản quá chậm"; trước đây gửi lần lượt từng model
+  Gemini, 503 thì chờ 5 + 10 s, mỗi lượt chờ tới 300 s → Google quá tải là treo 5 phút rồi 502): `reference_video.analyze` → `plan_ai.plan_from_video`,
+  `product_link.analyze` → `plan_ai.plan_from_text`. (1) **Gemini đua** `gemini_api.race(parts, accept, …)`: gửi CÙNG LÚC `RACE_MODELS` = 3.5-flash (thinking low),
+  3.8-flash (low), 3.1-flash-lite (minimal) — model nơi gọi chỉ định thêm vào đầu; mỗi bên bắt đầu ở một key khác (`with_key(offset=)`), 503 thì thử lại sau 2 → 8 s
+  trong khi cuộc đua còn (`deadline_s` 150); `accept` (parse JSON + `normalize`) từ chối câu trả lời hỏng (lite hay trả kế hoạch 1 cảnh → bị loại, thử lại 1 lần);
+  câu trả lời của lite (`RACE_SAFETY_NETS`) được giữ `RACE_PREFER_S` 15 s chờ model mạnh hơn. `generate(thinking=)` gửi `thinkingConfig.thinkingLevel`; 400 nhắc
+  "thinking" = `GeminiThinkingError` (gửi lại không có thinking — **không** để rơi vào nhánh "key sai" vì câu "not valid" từng park key 6 giờ). (2) **AI viết dự
+  phòng**: sau `BACKUP_AFTER_S` 25 s mà Gemini chưa có câu trả lời dùng được (hoặc đã thua sớm) thì hỏi thêm AI chọn ở Cài đặt → 🤖 AI viết
+  (`registry.picked_ai(feature, vision=)`: provider đã chọn + chạy được trên máy; Gemini key không tính) qua `run_llm(effort="low", gemini_backup=False)` —
+  feature `vision` cho video, `auto_prompt` cho link; cái nào xong trước thắng, bên kia bị huỷ. Video tới CLI dạng **một ảnh lưới** `contact_sheet` (12 khung hình
+  4 × 3, rộng 320 px mỗi khung, kèm giờ từng khung trong lời nhắc) + lời Whisper nghe được (`hear`: gói lồng tiếng / VieDub, chung khoá `video_cut._WHISPER_LOCK`,
+  bận thì bỏ qua; luồng `_Prep` bắt đầu ngay từ đầu, xong việc thì dừng Whisper + xoá thư mục tạm); CLI không có JSON mode nên lời nhắc kèm schema (`json_only`).
+  Video > 18 MB thì gửi Gemini bản nhỏ (`small_copy` 480p, 2 khung / giây). Kết quả có **`by`** = AI đã viết ("Gemini 3.5 Flash", "Claude (xem 12 khung hình + lời
+  nghe được)") → màn xem lại của hộp Clip mới có dòng "AI phân tích". Route `/analyze` / `/analyze-link` không còn bắt buộc Gemini key khi có AI viết đọc được.
+  Đo thật 18/11 (clip 14 s của người dùng, Google quá tải: mọi flash 503, lite trả kế hoạch 1 cảnh): **46,5 s** ra kế hoạch 3 cảnh đúng sản phẩm bởi Claude Sonnet
+  (trước: 5 phút rồi 502). Khi Gemini khoẻ: lite ~15–20 s, 3.5-flash ~20 s. Test `test_plan_ai.py` (9). Drama (`drama.py`, đang ẩn) và `dub_names` chưa đổi.
+
+- **Màu sản phẩm lấy từ ẢNH, không từ danh sách màu** (18/11, sau lỗi túi hồng ra màu kem): (1) `script_tailor.tailor_scenes` gửi kèm **ảnh sản phẩm chính**
+  (`_product_photo`: `media_ids[0]` → `media.cached_path` / `fetch_and_cache`, chỉ jpg/png/webp) qua `run_llm(attachments=)` + dòng đầu "ATTACHED: the seller's photo…";
+  luật mới trong `_BASE`: màu, chất liệu, hoạ tiết + 2–3 chi tiết nổi bật lấy từ ẢNH, gọi món đồ bằng **cùng một cụm chữ ở MỌI image_prompt**, không có ảnh thì không
+  ghi màu ("the bag from the reference photo"); AI không nhận ảnh (Codex bản chỉ chữ…) → gọi lại không ảnh. (2) `templates.visual_description(text)` bỏ câu liệt kê màu /
+  size / biến thể ("comes in three colour options…", "Available in 5 shades") — dùng ở `product_inputs` (`{{product}}` của mẫu clip), `apply_product` (`aiBrief`),
+  `script_tailor._product_facts`. (3) `clip_style.LOOK_RULES` thêm luật "ONE item in every scene… never take its colour from a list of colour options" — áp cho cả kế
+  hoạch theo link sản phẩm / video mẫu. (4) Đọc thẻ sản phẩm từ link (`product_link._PRODUCT_SYSTEM`): description chỉ tả món đồ trong ảnh chính, danh sách màu / size
+  vào `details`. Thử thật (không lưu) trên 4 cảnh của clip #155 + ảnh túi hồng, Claude Sonnet 18,8 s: cả 4 prompt "pale pink quilted faux-leather boxy top-handle vanity
+  bag… pink ribbon bow, silver bead loops and star charms". Clip cũ đã ghi màu sai: Bước 2 → "✨ Viết lại kịch bản theo sản phẩm" rồi tạo lại ảnh. Test
+  `test_script_tailor.py` (+3).
+
 ## Lộ trình (chốt với người dùng 30/10) — làm theo thứ tự A → B, C chạy song song khi cần
 Mục tiêu cuối: **bán DFlow** cho người làm affiliate (2 gói **Pro** / **Premium**), dạng **app desktop Tauri 2** — mọi thao tác trong app,
 Chrome chỉ để cài extension và mở tab Flow đúng project. Người dùng nói rõ: không cần bàn chuyện đúng sai pháp lý, họ tự chịu trách nhiệm.
 
 ### Phase A — 🤖 Trợ lý AI "làm hết từ một câu" (tính năng Premium, làm TRƯỚC app)
+- **Tab Flow sai tài khoản** (18/11, `services/account_pool.py`): `project_owners(pid)` = các email có `flow_project_for:<email>` = pid, mục pool có `project_id` = pid, và email người bán cho dùng chung (`pool.shared[pid]`, `share_project`); `mismatch()` = tab đang đăng nhập email E, dự án đang ghim có chủ đã biết mà E không nằm trong đó → `{email, project_id, owners, suggest_project, tab_project}` (`suggest_project` = dự án tab đang mở → dự án nhớ cho E, nếu không phải của tài khoản khác); dự án chưa ai được biết là chủ thì không hỏi. **Chặn**: `ensure_credits` (cổng trước mọi job video Flow) trả `wrong_account_message` (tiền tố `FLOW_WRONG_ACCOUNT:`, không thử lại, không tính credit) khi không có lượt chuyển tài khoản đang chờ; `setup_status.status()`: bước "project" chưa đạt + `can_generate` false + `flow.mismatch` → `ensureReady` của frontend mở hộp Thiết lập trước mọi lần tạo ảnh / video. **Sửa**: `POST /api/setup/check {use_account_project}` ghim `suggest_project` (+ nhớ cho E), `{keep_project}` = cho E dùng chung dự án này (báo nhầm). `on_account_read` không còn ghi dự án đang ghim cho tài khoản MỚI khi dự án đó đã có chủ khác (trước đây làm dự án sai trông như của tài khoản mới) — dùng dự án tab đang mở hoặc để trống. Frontend: `api/setup.ts` (`FlowMismatch`, `CheckOptions`), `store/setup.ts` `check(opts)`, `SetupGuide.tsx` (ô "dự án": 2 cách sửa, "↗ Mở tab Flow", "Dùng dự án của E", "Vẫn dùng dự án này"), `StepMedia.tsx` (nhãn "sai tài khoản Flow", hộp lỗi nêu đúng 2 tài khoản + "Mở Thiết lập để sửa"), `api/client.ts` (bỏ tiền tố). Câu `flow_sdk.FLOW_DROPPED_JOB` nêu lệch tài khoản trước, gương mặt sau. Test `test_flow_wrong_account.py` (6).
 - **Ý tưởng**: một khung chat (trang riêng `/assistant` + nút nổi mở được ở mọi trang). Người dùng gõ kiểu *"làm cho tao 1 clip quảng cáo sản phẩm này"*
   kèm link Shopee / TikTok và / hoặc ảnh, có thể thêm *"đăng lên page X tối nay"* → AI hỏi lại **chỉ khi thật cần** (ví dụ ngành / giới tính người
   mẫu không đoán được), báo **ước tính credit + thời gian, chờ một câu "ok"**, rồi **chạy ngầm làm hết**: đọc link → lưu sản phẩm (+ ảnh) → chọn kiểu
@@ -2211,16 +2268,16 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
 - **VieNeu chạy nền (15/11)**: chưa chạy trong app cài (bản Nuitka + gói lồng tiếng: runtime là `addons/dub`), chưa thử máy yếu (1 tiến trình) / máy hết RAM;
   VieNeu vẫn đọc trên CPU (~1,5–3 s mỗi câu) — muốn nhanh hơn nữa phải cho VieNeu chạy GPU (onnxruntime-gpu / DirectML trong gói lồng tiếng, chưa thử);
   "Xoá file đã tải" chưa thử với B2 thật (Phase C xoá qua link ký sẵn).
-- **VIỆC CHO NGÀY MAI (người dùng dặn 16/11 khuya): phân tích "Theo video mẫu" / "Theo link sản phẩm" chậm** — hai bước này **không đi qua bảng
-  Cài đặt → AI viết**: `reference_video.analyze` gọi thẳng `gemini_api.generate_with_media` (model cứng `gemini-3.8-flash`, lùi 3.7 → 3.6 → 3.5 → 3.1-lite),
-  `product_link` gọi `gemini_api.generate_text` (`EXTRACT_MODEL` 3.1-flash-lite, `PLAN_MODEL` 3.5-flash) bằng pool Gemini key. Đo 16/11 ~23:20 (giờ VN) với clip
-  14 s 5 MB của người dùng: **máy chủ Gemini quá tải** — câu "trả lời chữ ok" 3.6-flash 62 s, 3.5-flash > 120 s, 3.8 / 3.7 / 3.1-lite 503; phân tích clip 3.5-flash
-  95 s, 3.6-flash 87 s (thinking low cũng ~89 s, out ~800 token), 3.8-flash lùi hết chuỗi > 240 s; lượt người dùng bấm 23:07 treo tới timeout 300 s rồi 502.
-  Code làm chậm thêm: `with_model_fallback` thử lại 3 lần / model (chờ 5 + 10 s) rồi mới lùi, mỗi lượt gọi chờ tới 300 s. Đã đề xuất, người dùng hẹn mai:
-  **mức 1** gửi song song 2 model lấy cái trả lời trước + `thinkingConfig.thinkingLevel: "low"` cho bước này (3.8-flash không nhận `minimal`) + quá tải hết thì báo
-  sau ~1–2 phút thay vì treo 5 phút; **mức 2** thêm dòng "Phân tích video mẫu / link" ở Cài đặt → AI viết: link → Claude hoặc Gemini (chỉ chữ, `run_llm`);
-  video → chọn Claude thì cắt ~12 khung hình + Whisper nghe lời trên máy rồi `run_llm(attachments=…)` (Claude nhận ảnh, không nhận video). Script đo:
-  scratchpad `time_analyze.py`, `raw_gen.py`, `ping_gen.py` (máy nhà, sẽ mất khi dọn).
+- **Phân tích video mẫu / link nhanh (18/11)**: agent web đang chạy (start.ps1 trong cửa sổ của người dùng) **chưa khởi động lại** → chưa có code mới tới khi chạy
+  lại `.\start.ps1`; app cài cần bản mới. Chưa thử qua giao diện, chưa thử khi Gemini khoẻ (đường đua thật mới chạy lúc Google quá tải), chưa thử máy không có
+  Claude CLI (bản cài của khách: chỉ còn Gemini đua) và video dài 1–3 phút. Chưa có dòng chọn riêng "AI phân tích video mẫu" ở Cài đặt (đang lấy AI của feature
+  `vision` / `auto_prompt`); mỗi lần Gemini quá tải là tốn một lượt Claude.
+- **Bỏ chặn người mẫu / bàn tay (18/11)**: chưa xem bằng mắt trên giao diện (backend có test; agent web người dùng chưa khởi động lại nên nút "Chỉ bàn tay" ở clip
+  cũ vẫn báo lỗi tới khi chạy lại `.\start.ps1`). Chưa thử Flow vẽ clip "thời trang" chỉ quay tay (túi xách).
+- **Màu sản phẩm lấy từ ảnh (18/11)**: chưa tạo lại ảnh thật qua Flow cho clip #155 (cần agent mới + bấm "Viết lại kịch bản theo sản phẩm" rồi "Tạo lại" 4 ảnh — người
+  dùng tự bấm). Mỗi lần viết kịch bản tốn thêm ~vài giây để Claude đọc ảnh. Chưa đổi: "✨ Viết lại chuẩn" / "Tạo lại theo yêu cầu" (`prompt_synth`) chưa nhìn ảnh;
+  `aiBrief` của các clip cũ vẫn còn câu danh sách màu.
+- **Tab Flow sai tài khoản (18/11)**: tab Flow của người dùng vẫn đang ở akiragosho2000 trong khi dự án ghim là của hoangduytn1703 — người dùng phải chọn: chuyển tab Flow về hoangduytn1703 (giữ nguyên clip / sản phẩm) hoặc bấm "Dùng dự án của akiragosho2000" trong Thiết lập (DFlow gợi ý dự án tab đang mở; nếu tab không ở trong dự án nào thì gợi ý chỉ có khi đã nhớ dự án cho tài khoản đó). Agent web cần khởi động lại để có code mới. Chưa chạy thật qua Flow sau khi đúng tài khoản; chưa có ảnh cảnh mới để xem `NO_PHONE_UI` có hết vẽ giao diện camera không. Nhận diện chủ dự án dựa vào dữ liệu đã nhớ — dự án dùng chung thật sự sẽ bị báo nhầm (có nút "Vẫn dùng dự án này").
 - **TikTok Shop qua tikwm (16/11)**: chưa thử trong app cài (Cào video kênh tải hàng loạt video Shop — nhịp 1 lượt / giây của tikwm, giới hạn ngày chưa rõ),
   chưa thử video Shop dài. Video lỗi cũ trên danh sách Cào video kênh: bấm tải lại. Muốn chất lượng cao hơn (HEVC 1080p `hdplay`) phải đổi mã sang h264 sau khi tải.
 - **Gói Remotion (12/11, bản 1.8.8)**: chưa chạy trên Windows thật (máy Linux; Node zip + npm + Chrome Headless Shell Windows); chưa thử máy mạng chậm / chặn npm registry; giao diện thẻ cài chỉ qua tsc + build, chưa xem bằng mắt. Chữ phụ đề ffmpeg mới: chưa có cho phụ đề clip ở Bước 4 / 5 (`tts.write_ass`), thumbnail ★ Mẫu chưa vẽ theo màu mới.
@@ -2674,3 +2731,32 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
   + tikwm thật: video Shop trong ảnh của người dùng ra mp4 576×1024 (33 s), video thường vẫn đi yt-dlp; yt-dlp mới vẫn tải được TikTok thường + YouTube. Bản web
   (start.ps1, `start166.log`) chạy cho người dùng thử, app cài đã tắt. Tìm hiểu vì sao phân tích video mẫu chậm (Gemini quá tải — xem Việc đang dở, để mai).
   Phát hành **2.2.2** (số phiên bản ở 8 file, tag `v2.2.2`).
+- **16/11** — **Phát hành 2.2.2 xong**: commit `6ff3a72`, run 43908240618, release v2.2.2 trên dflow-releases (`latest.json` 2.2.2).
+- **18/11** — Người dùng dán key "OpenAI" của trang trung gian xingchiapi.com (`gpt-6.1-sol`) nhờ nhúng vào: trang đó trả 403 `client_not_allowed` cho mọi gọi từ
+  script (chỉ cho công cụ lập trình) → không dùng được, không nhúng (xem Bẫy). Rồi làm **phân tích video mẫu / link nhanh** (`services/plan_ai.py` mới, `gemini_api.race`
+  + `thinking` + `with_key(offset)` + `GeminiThinkingError`, `registry.run_llm(effort=, gemini_backup=)` + `picked_ai`, `reference_video.analyze`, `product_link.analyze`,
+  `routes/reference_video.py`, `api/client.ts` `by`, `NewClipDialog.tsx` dòng "AI phân tích"). Test `test_plan_ai.py` 9 + reference_video / gemini_api / registry /
+  products / shopee / drama / swipes 70 pass, `tsc` sạch. Chạy thật trên clip 14 s của người dùng lúc Google quá tải: 46,5 s, Claude viết kế hoạch 3 cảnh (trước 5 phút
+  rồi 502). Agent web của người dùng chưa khởi động lại. Chưa commit.
+- **18/11** — Sửa lỗi người dùng báo: clip túi xách (sản phẩm ngành "thời trang") bấm "Chỉ bàn tay" ở Bước 1 bị chặn "Quần áo cần người mẫu mặc…". Theo ý người
+  dùng mọi ràng buộc kiểu này thành **gợi ý**: bỏ `PersonRequiredError` + `GenderMismatchError` (`templates.py`, `model_mode.py`, `reference_video._character_for`,
+  `products.template_board_spec`, `product_gender.mismatch` / `for_product`, `routes/boards.py`, `routes/templates.py`, `routes/reference_video.py`, `chat_agent.py`),
+  `fashion_ad` / `food_review` có Tay nữ / Tay nam; UI (`StepSetup.tsx`, `NewClipDialog.tsx`) hiện đủ lựa chọn + dòng "💡 Gợi ý". Test template / model_mode /
+  product_gender / reference_video / chat / products / tailor / clip_style / assistant / bundle / plan_ai 90 pass, `tsc` sạch. Chưa xem trên giao diện. Chưa commit.
+- **18/11** — Sửa lỗi người dùng báo: túi hồng mà 4 cảnh ra 2 màu (hồng / kem) — AI viết kịch bản lấy "cream" từ danh sách màu của trang sản phẩm. Sửa từ gốc:
+  ảnh sản phẩm gửi kèm cho AI viết kịch bản + luật "màu / chi tiết lấy từ ảnh, cùng một cụm chữ mọi cảnh", bỏ câu danh sách màu khỏi mô tả đưa vào prompt
+  (`templates.visual_description`), luật chung trong `clip_style`, đọc link không ghi danh sách màu vào mô tả. `script_tailor.py`, `templates.py`, `clip_style.py`,
+  `product_link.py`. Test tailor / templates / clip_style / products / reference_video / plan_ai… 137 pass. Thử thật (không lưu) với Claude trên clip #155: cả 4 cảnh
+  "pale pink quilted… vanity bag" kèm nơ + charm. Chưa tạo lại ảnh qua Flow. Chưa commit.
+- **18/11** — Người dùng hỏi sao video clip #155 (túi, chỉ quay tay) "lâu rồi lỗi": lượt đầu chẩn đoán sai (Veo 3.1 Lite bị Flow bỏ) và làm worker tự đổi Veo → Omni Flash — đã gỡ (xem dòng dưới). Giữ: **ẩn Muse** (`MUSE_ENABLED = false`; `muse.ts`, `StepMedia.tsx`, `AiProvidersSection.tsx`, `GenerationDialog.tsx`, `settings.ts`), ảnh cảnh 4 vẽ cả giao diện camera → `clip_style.NO_PHONE_UI` (`clip_style.py`, `reference_video.py`, `script_tailor.py`), câu báo Flow bỏ lượt trung tính (`generation.ts`, `quicktool.ts`).
+- **18/11** — Người dùng: Omni Flash cũng bị bỏ hết dù cảnh không có người. Đọc request + pool trên Neon (chỉ đọc): **tab Flow đăng nhập akiragosho2000, dự án ghim là của hoangduytn1703** — từ 15/11 mọi video đều bị bỏ, ảnh vẫn ra (bẫy 22/10 ngược chiều). Gỡ phần tự đổi Veo → Omni (chẩn đoán sai; `worker/processor.py`, test trong `test_requests.py` trả về như cũ; mô tả Veo 3.1 Lite ở Cài đặt về như cũ). Làm: tool nhận ra tab Flow và dự án lệch tài khoản → chặn video ngay (`FLOW_WRONG_ACCOUNT`), Thiết lập báo + nút sửa, pool không ghi nhầm chủ dự án cho tài khoản mới. `account_pool.py`, `setup_status.py`, `routes/setup.py`, `flow_sdk.py`, `api/setup.ts`, `store/setup.ts`, `SetupGuide.tsx`, `StepMedia.tsx`, `api/client.ts`, `SettingsPanel.tsx`. Test `test_flow_wrong_account.py` 6 + account_pool / setup_status 17 pass, `tsc` sạch. Chưa chạy thật qua Flow. Chưa commit.
+- **20/11** — Sửa gấp 🔤 Chữ: trình chỉnh sửa và video xuất ra khác nhau nhiều (người dùng gửi ảnh 2 clip thật — ✂️ Cắt video). Đo bằng ffmpeg thật (dựng khung
+  hình, đếm pixel bằng Pillow) rồi sửa 2 chỗ sai: (1) ngắt dòng trong `dub.text_ass` đổi từ ước lượng theo số ký tự sang đo đúng bằng Pillow+Arial
+  (`wrap_text_px`, cùng hàm đo hộp nền), trừ đúng phần đệm hai bên khi có nền — khớp cách trình duyệt ngắt dòng ở `max-width`; (2) `lineHeight: 1.25` (đoán,
+  chưa đo) ở `textLayerCss` (🔤 Chữ) và `DubSubtitles` (khung phụ đề thường) sửa về **1** — libass xếp các dòng `\N` cách nhau đúng 1 Fontsize, đo thật bằng
+  ffmpeg xác nhận. Xem Bẫy → "🔤 Chữ: trình chỉnh sửa và video xuất ra khác nhau nhiều". Test `test_dub_text_adjust.py` + `test_dub.py` + `test_dub_canvas.py`
+  + `test_dub_bg_sub_split.py` + `test_dub_editor.py` + `test_video_cut.py` 95 pass, cả bộ test 1462 pass / 9 lỗi môi trường đã biết / 2 skip (không regression),
+  `tsc` sạch. Đã in thử khung hình bằng ffmpeg thật (không qua giao diện — người dùng chưa chạy agent). Commit cùng lượt phát hành 2.2.3 (xem dòng dưới).
+- **20/11** — Phát hành **2.2.3**: gộp sửa 🔤 Chữ (dòng trên) + mọi việc 18/11 còn chưa commit (bỏ chặn "chỉ bàn tay" / giới-tính-người-mẫu thành gợi ý, màu
+  sản phẩm lấy từ ảnh sản phẩm thay vì danh sách màu mô tả, phân tích video mẫu/link nhanh bằng đua nhiều model Gemini + AI viết dự phòng, tab Flow sai tài
+  khoản bị chặn trước khi gửi video, ẩn Muse, bỏ giao diện camera khỏi ảnh cảnh). Bump version 8 file → 2.2.3, commit, tag `v2.2.3`, push.

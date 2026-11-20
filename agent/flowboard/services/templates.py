@@ -84,20 +84,6 @@ _NATIONALITY = {"vn": "Vietnamese", "kr": "Korean", "jp": "Japanese", "cn": "Chi
                 "th": "Thai", "us": "American", "fr": "French"}
 
 
-class PersonRequiredError(ValueError):
-    """The template needs a person (clothes are judged on a body), so the
-    hands-only mode is refused. The message is meant for the user."""
-
-
-def person_required_message(template: dict) -> str:
-    """Why hands-only is refused for ``template``, for the user. The
-    template's ``person_reason`` says what the person is there for (clothes
-    are judged on a body, food on a face); without one, clothes are assumed."""
-    reason = str(template.get("person_reason") or "").strip() or "cần người mẫu mặc để thấy form và độ vừa"
-    if not reason.startswith("cần"):
-        reason = f"cần người mẫu: {reason}"
-    return (f"{template.get('title') or 'Kiểu clip này'} {reason}, "
-            "nên không dùng được chế độ chỉ quay bàn tay. Hãy chọn Nữ hoặc Nam.")
 
 
 #: The "tạo Người mẫu (bước 1) → " step of the note's how-to line.
@@ -149,8 +135,6 @@ def render(template: dict, inputs: dict[str, str] | None) -> dict:
             character[key] = values[key]
 
     hands = values.get("charGender") in HANDS_GENDERS
-    if hands and template.get("person_required"):
-        raise PersonRequiredError(person_required_message(template))
     hands_text = _hands_instruction(values) if hands else ""
     nodes = []
     dropped: set[str] = set()
@@ -192,6 +176,22 @@ def templates_for_category(category: str | None) -> list[dict]:
     return own + [t for t in listed if t.get("category") == ANY_CATEGORY]
 
 
+_OPTIONS = re.compile(r"\b(colou?rs?|variants?|sizes?|shades?|versions?)\b", re.I)
+_OFFERED = re.compile(r"\b(options?|available|comes? in|choices?|choose|variants?|set variants?)\b", re.I)
+
+
+def visual_description(text: str) -> str:
+    """``text`` without the sentences that list colour / size options or
+    variants ("It comes in three colour options: cream, red and pink") — in
+    an image prompt such a list makes Flow draw another colour than the
+    seller's photo (18/11: a pink bag came out cream in 2 of 4 scenes)."""
+    text = (text or "").strip()
+    if not text:
+        return ""
+    kept = [s for s in re.split(r"(?<=[.!?])\s+", text) if not (_OPTIONS.search(s) and _OFFERED.search(s))]
+    return " ".join(kept).strip() or text
+
+
 def product_inputs(template: dict, product: dict, inputs: dict[str, str] | None) -> dict[str, str]:
     """``inputs`` with the product's text filled in where the user left a gap.
 
@@ -205,7 +205,7 @@ def product_inputs(template: dict, product: dict, inputs: dict[str, str] | None)
     default = defaults.get("product", "")
     typed = str(out.get("product") or "").strip()
     if not typed or typed == default:
-        out["product"] = product.get("description") or product.get("name") or default
+        out["product"] = visual_description(product.get("description") or "") or product.get("name") or default
     out.setdefault("product_name", product.get("name") or "")
     typed_price = str(out.get("price") or "").strip()
     if product.get("price") and (not typed_price or typed_price == defaults.get("price", "")):
@@ -242,7 +242,7 @@ def apply_product(spec: dict, product: dict) -> dict:
     edges = list(spec["edges"])
     media_ids = [m for m in (product.get("media_ids") or []) if m]
     name = product.get("name") or ""
-    brief = product.get("description") or name
+    brief = visual_description(product.get("description") or "") or name
     by_key = {n["key"]: n for n in nodes}
 
     def photo_data(media_id: str, title: str) -> dict:

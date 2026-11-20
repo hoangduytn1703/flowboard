@@ -106,6 +106,31 @@ def _norm_email(email: Any) -> Optional[str]:
     return email.strip().lower()
 
 
+#: AppSetting key prefix of the project pinned while an account was active (routes/auth.py writes it).
+PROJECT_FOR = "flow_project_for:"
+
+
+def _remembered_projects() -> dict[str, str]:
+    """email → the Flow project pinned while that account was the one on the Flow tab."""
+    from sqlmodel import select
+
+    with get_session() as s:
+        rows = s.exec(select(AppSetting).where(AppSetting.key.startswith(PROJECT_FOR))).all()
+    return {r.key[len(PROJECT_FOR):].lower(): r.value for r in rows if r.value}
+
+
+def wrong_account_message(m: dict) -> str:
+    """The reason a video is not sent while the Flow tab and the pinned project belong to different accounts."""
+    owner = " / ".join(m["owners"])
+    return (f"{WRONG_ACCOUNT}: Tab Flow đang đăng nhập {m['email']}, nhưng dự án Flow đang chọn là của {owner}. "
+            f"Flow nhận lệnh rồi bỏ mọi video gửi kiểu này (ảnh vẫn ra) nên DFlow không gửi. Trên tab Flow chuyển về "
+            f"tài khoản {owner}, hoặc mở Thiết lập (chấm ở góc dưới sidebar) để dùng dự án của {m['email']}.")
+
+
+#: Prefix of the error a video job gets when the Flow tab and the pinned project belong to different Google accounts.
+WRONG_ACCOUNT = "FLOW_WRONG_ACCOUNT"
+
+
 class AccountPool:
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
@@ -186,6 +211,53 @@ class AccountPool:
         conn = flow_client.active_conn
         return _norm_email(conn.email) if conn and conn.email else None
 
+    # ── whose project is pinned ────────────────────────────────────────────
+    def project_owners(self, project_id: Optional[str]) -> set[str]:
+        """Google accounts the Flow project is known to belong to: the one it was pinned under, pool entries naming
+        it, and accounts the seller said share it (``keep_project``)."""
+        if not project_id:
+            return set()
+        data = _load()
+        owners = {a["email"] for a in data["accounts"] if a.get("project_id") == project_id and a.get("email")}
+        owners |= {e for e, pid in _remembered_projects().items() if pid == project_id}
+        owners |= set((data.get("shared") or {}).get(project_id) or [])
+        return owners
+
+    def mismatch(self) -> Optional[dict]:
+        """The Flow tab is signed in to one Google account while the pinned project is another's (18/11: every video
+        of clip #155 dropped for four days — the tab was akiragosho2000, the project hoangduytn1703's; pictures still
+        came back). None when it fits, or when nobody is known to own the project."""
+        email = self.current_email()
+        if not email:
+            return None
+        try:
+            pid = effective_project_id()
+        except Exception:  # noqa: BLE001 - nobody signed in yet
+            return None
+        owners = self.project_owners(pid)
+        if not pid or not owners or email in owners:
+            return None
+        conn = flow_client.active_conn
+        tab = conn.tab_project if conn else None
+        suggest = None
+        for cand in (tab, _remembered_projects().get(email)):
+            if cand and cand != pid and not (self.project_owners(cand) - {email}):
+                suggest = cand
+                break
+        return {"email": email, "project_id": pid, "owners": sorted(owners), "suggest_project": suggest,
+                "tab_project": tab}
+
+    def share_project(self, project_id: str, email: str) -> None:
+        """The seller says this account may use the project too (the mismatch was a false alarm)."""
+        norm = _norm_email(email)
+        if not norm or not project_id:
+            return
+        data = _load()
+        shared = data.setdefault("shared", {})
+        if norm not in shared.setdefault(project_id, []):
+            shared[project_id].append(norm)
+        _save(data)
+
     def on_account_read(self, info: dict) -> None:
         """flow_client calls this after every successful ``read_account``:
         the signed-in account joins the pool (with the pinned project when
@@ -204,6 +276,11 @@ class AccountPool:
                 pid = effective_project_id()
             except Exception:  # noqa: BLE001
                 pid = None
+            # a new account on the tab does not own the project another account pinned — recording it as its own made
+            # the wrong project look right; the project the tab has open is a better guess, else none
+            if pid and self.project_owners(pid) - {email}:
+                tab = flow_client.active_conn.tab_project if flow_client.active_conn else None
+                pid = tab if tab and not (self.project_owners(tab) - {email}) else None
         try:
             self.upsert(email, project_id=pid, credits=info.get("credits"), tier=info.get("tier"))
         except ValueError:
@@ -305,6 +382,11 @@ class AccountPool:
         """Gate for a Flow video job. Returns ``(error, project_id)``: error is
         a user-facing reason not to run; project_id is set when the job must
         target a different project than it was dispatched with."""
+        if self.pending is None:
+            wrong = self.mismatch()
+            if wrong:
+                # sent anyway, Flow takes it and drops it ~2–4 minutes later (twice with the retry)
+                return wrong_account_message(wrong), None
         if cost <= 0 or not self.auto():
             return None, None
         async with self._lock:

@@ -105,6 +105,33 @@ function StepActions({ step, status, onGo }: { step: SetupStep; status: SetupSta
         setSaving(false);
       }
     };
+    const wrong = status.flow.mismatch;
+    if (wrong) {
+      const owner = wrong.owners.join(" / ");
+      return (
+        <div className="su-act">
+          <ol className="su-how">
+            <li>Cách 1 (giữ ảnh, sản phẩm đã có): trên tab Flow bấm ảnh đại diện góc phải trên → chọn tài khoản <b>{owner}</b>, rồi bấm Kiểm tra lại.</li>
+            <li>Cách 2: dùng một dự án của <b>{wrong.email}</b> — ảnh sản phẩm / ảnh cảnh cũ được DFlow tự tải lên lại dự án mới khi cần.</li>
+          </ol>
+          <div className="su-btns">
+            <button type="button" className="qt-btn qt-btn--small qt-btn--accent" onClick={() => void openFlow()}>↗ Mở tab Flow</button>
+            {recheck}
+            {wrong.suggest_project
+              ? <button type="button" className="qt-btn qt-btn--small" disabled={busy}
+                        onClick={() => void check({ useAccountProject: true })}>Dùng dự án của {wrong.email}</button>
+              : <span className="su-wait">Muốn dùng {wrong.email}: trên tab Flow mở một dự án của tài khoản đó rồi bấm Kiểm tra lại.</span>}
+          </div>
+          <details className="su-more">
+            <summary>Dự án này đúng là dùng chung cho cả hai tài khoản?</summary>
+            <div className="su-btns">
+              <button type="button" className="qt-btn qt-btn--small" disabled={busy}
+                      onClick={() => void check({ keepProject: true })}>Vẫn dùng dự án này với {wrong.email}</button>
+            </div>
+          </details>
+        </div>
+      );
+    }
     return (
       <div className="su-act">
         <div className="su-btns">

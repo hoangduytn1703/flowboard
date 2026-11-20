@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useGenerationStore } from "../store/generation";
+import { MUSE_ENABLED } from "../quicktool/muse";
 import { useBoardStore, type StoryboardGrid } from "../store/board";
 import {
   STORYBOARD_GRIDS,
@@ -1279,7 +1280,7 @@ export function GenerationDialog() {
             dialogs (settings store). Muse = muse2api gateway, or a
             Pax worker via the provider-job queue; no Flow plan or
             extension needed. */}
-        {!isPrompt && (
+        {!isPrompt && MUSE_ENABLED && (
           <div className="gen-dialog__field">
             <span className="gen-dialog__label">
               Backend

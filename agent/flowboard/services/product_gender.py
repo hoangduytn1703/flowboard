@@ -32,8 +32,6 @@ def guess(*texts: Optional[str]) -> str:
     return "male" if male else "female" if female else ""
 
 
-class GenderMismatchError(ValueError):
-    """The model's gender contradicts the product's; message is for the user."""
 
 
 def model_gender(char_gender: Optional[str]) -> Optional[str]:
@@ -42,13 +40,22 @@ def model_gender(char_gender: Optional[str]) -> Optional[str]:
     return g if g in ("female", "male") else None
 
 
-def check(product: Optional[dict], char_gender: Optional[str]) -> None:
-    """Refuse a model of the other gender for a men's / women's product."""
+def mismatch(product: Optional[dict], char_gender: Optional[str]) -> Optional[str]:
+    """A suggestion — never a refusal (18/11, the seller decides) — when the
+    model is not of the gender a men's / women's product is made for."""
     target = (product or {}).get("gender") or ""
     picked = model_gender(char_gender)
     if target in ("male", "female") and picked and picked != target:
         name = (product or {}).get("name") or "Sản phẩm này"
-        raise GenderMismatchError(
-            f"\"{name}\" là đồ dành cho {LABEL[target]}, nên người mẫu phải là {LABEL[target]}. "
-            "Đổi giới tính người mẫu, hoặc sửa mục \"Dành cho\" của sản phẩm nếu nó dùng được cho cả hai."
-        )
+        return f"\"{name}\" là đồ dành cho {LABEL[target]} — nên chọn người mẫu {LABEL[target]}."
+    return None
+
+
+def for_product(product: Optional[dict], char_gender: Optional[str]) -> Optional[str]:
+    """A DEFAULT pick (nobody chose it: the template's default, the AI's
+    suggestion) moved to the product's gender, hands kept; anything else
+    unchanged. An explicit pick of the seller is never passed through here."""
+    if not mismatch(product, char_gender):
+        return char_gender
+    target = (product or {})["gender"]
+    return f"hands_{target}" if str(char_gender or "").startswith("hands_") else target

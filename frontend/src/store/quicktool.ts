@@ -773,7 +773,7 @@ export const useQuicktoolStore = create<QuicktoolStore>((set, get) => ({
           if (!s.video) continue;
           await waitForNode(s.video.id, hasMedia).catch((err: unknown) => {
             throw new Error(`Cảnh ${s.index}: ${err instanceof Error ? err.message : String(err)}. `
-              + "Ở Bước 4 bấm \"Tạo\" lại, hoặc làm cảnh này bằng Muse (khung \"🎬 Làm video bằng Muse\").");
+              + "Ở Bước 4 bấm \"Tạo\" lại, hoặc ⬆ Dùng video của bạn cho cảnh đó.");
           });
         }
       }

@@ -50,8 +50,11 @@ export function humanizeBackendError(token: string): string | null {
   if (t.startsWith("captcha_failed")) {
     return "Google Flow chưa xác minh được trình duyệt (captcha). Tải lại tab flow.google.com (F5) rồi thử lại sau vài giây.";
   }
+  if (t.startsWith("flow_wrong_account")) {
+    return token.replace(/^FLOW_WRONG_ACCOUNT:\s*/i, "");
+  }
   if (t.includes("flow_dropped_job") || t.includes("timeout_waiting_video")) {
-    return "Flow bỏ lượt này (thường do gương mặt người mẫu hoặc nội dung bị lọc) — credit được hoàn. Thử tạo lại hoặc đổi ảnh.";
+    return "Flow bỏ lượt này — credit được hoàn. Bỏ hết mọi video: xem tab Flow có đăng nhập đúng tài khoản chủ dự án không (Thiết lập). Bỏ lẻ tẻ: tạo lại hoặc đổi ảnh.";
   }
   if (t.includes("returned no media url")) {
     return "Flow không trả ảnh — thường do bộ lọc nội dung. Sửa mô tả ảnh (bỏ từ nhạy cảm) rồi tạo lại.";
@@ -1848,6 +1851,8 @@ export interface ReferenceAnalysis {
   match: { relevant: boolean; score: number; reason_vi: string };
   blocked: boolean;
   block_reason?: string;
+  /** Which AI wrote the plan ("Gemini 3.5 Flash", "Claude (xem 12 khung hình + lời nghe được)"…). */
+  by?: string;
 }
 
 export async function uploadReferenceVideo(file: File): Promise<ReferenceUpload> {

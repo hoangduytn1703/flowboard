@@ -364,30 +364,28 @@ export function StepSetup({ roles, sourceMediaId = null, personRequired = false,
       <section className="qt-card">
         <div className="qt-card__eyebrow">Bước 1 · Người mẫu</div>
         <h3 className="qt-card__title">Người mẫu & thiết lập bản dựng</h3>
-        {!personRequired && (
-          <div className="qt-mode" role="radiogroup" aria-label="Kiểu mẫu">
-            <button type="button" role="radio" aria-checked={!handsMode} disabled={switching}
-                    className={`qt-mode__opt${!handsMode ? " qt-mode__opt--active" : ""}`}
-                    onClick={() => handsMode && void applyMode("person")}>
-              👤 Người mẫu
-            </button>
-            <button type="button" role="radio" aria-checked={handsMode} disabled={switching}
-                    className={`qt-mode__opt${handsMode ? " qt-mode__opt--active" : ""}`}
-                    onClick={() => !handsMode && void applyMode("hands")}
-                    title="Không lộ mặt: chỉ bàn tay cầm, bẻ, dùng sản phẩm, quay trực diện">
-              ✋ Chỉ bàn tay (không lộ mặt)
-            </button>
-            {switching && <span className="qt-mode__busy">Đang đổi…</span>}
-          </div>
-        )}
+        <div className="qt-mode" role="radiogroup" aria-label="Kiểu mẫu">
+          <button type="button" role="radio" aria-checked={!handsMode} disabled={switching}
+                  className={`qt-mode__opt${!handsMode ? " qt-mode__opt--active" : ""}`}
+                  onClick={() => handsMode && void applyMode("person")}>
+            👤 Người mẫu
+          </button>
+          <button type="button" role="radio" aria-checked={handsMode} disabled={switching}
+                  className={`qt-mode__opt${handsMode ? " qt-mode__opt--active" : ""}`}
+                  onClick={() => !handsMode && void applyMode("hands")}
+                  title="Không lộ mặt: chỉ bàn tay cầm, bẻ, dùng sản phẩm, quay trực diện">
+            ✋ Chỉ bàn tay (không lộ mặt)
+          </button>
+          {switching && <span className="qt-mode__busy">Đang đổi…</span>}
+        </div>
         {handsMode ? (
           <div className="qt-model__form">
             <label className="qt-field">
               <span>Bàn tay</span>
               <select value={handGender} disabled={switching}
                       onChange={(e) => { const g = e.target.value as "female" | "male"; setHandGender(g); void applyMode("hands", { gender: g }); }}>
-                {allowedGenders.includes("female") && <option value="female">Tay nữ</option>}
-                {allowedGenders.includes("male") && <option value="male">Tay nam</option>}
+                <option value="female">Tay nữ</option>
+                <option value="male">Tay nam</option>
               </select>
             </label>
             <label className="qt-field">
@@ -403,6 +401,12 @@ export function StepSetup({ roles, sourceMediaId = null, personRequired = false,
                      onChange={(e) => setHandLook(e.target.value)}
                      onBlur={() => { if ((hands?.look ?? "") !== handLook.trim()) void applyMode("hands", { look: handLook.trim() }); }} />
             </label>
+            {personRequired && (
+              <small className="qt-field--wide qt-gender-note">💡 Gợi ý: quần áo / đồ ăn thường đẹp hơn khi có người mặc / ăn thử. Túi, phụ kiện, đồ cầm tay thì chỉ quay bàn tay vẫn ổn — bạn chọn.</small>
+            )}
+            {genderLocked && handGender !== productGender && (
+              <small className="qt-field--wide qt-gender-note">💡 Gợi ý: sản phẩm dành cho {forWhom} — tay {forWhom} hợp hơn.</small>
+            )}
             <p className="qt-card__hint qt-field--wide">Không có người mẫu: mọi cảnh chỉ quay bàn tay và sản phẩm, góc trực diện. Đổi ở đây sẽ sửa lại prompt của các cảnh; ảnh/video đã tạo trước đó cần bấm "Tạo lại".</p>
           </div>
         ) : model ? (
@@ -420,14 +424,12 @@ export function StepSetup({ roles, sourceMediaId = null, personRequired = false,
               <label className="qt-field">
                 <span>Giới tính</span>
                 <select value={modelGender} onChange={(e) => setNodeData(model, { charGender: e.target.value })}>
-                  {CHARACTER_GENDERS
-                    .filter((g) => allowedGenders.includes(g.key) || g.key === modelGender)
-                    .map((g) => <option key={g.key} value={g.key} disabled={!allowedGenders.includes(g.key)}>{g.label}</option>)}
+                  {CHARACTER_GENDERS.map((g) => <option key={g.key} value={g.key}>{g.label}</option>)}
                 </select>
               </label>
               {modelGenderWrong && (
                 <div className="qt-gender-warn qt-field--wide" role="alert">
-                  Sản phẩm này dành cho <strong>{forWhom}</strong> nhưng người mẫu đang là {modelGender === "male" ? "nam" : "nữ"}.
+                  💡 Gợi ý: sản phẩm này dành cho <strong>{forWhom}</strong> nhưng người mẫu đang là {modelGender === "male" ? "nam" : "nữ"} (vẫn dùng được nếu bạn muốn).
                   <button type="button" className="qt-btn qt-btn--small"
                           onClick={() => setNodeData(model, { charGender: allowedGenders[0] })}>
                     Đổi sang người mẫu {forWhom}
@@ -435,7 +437,7 @@ export function StepSetup({ roles, sourceMediaId = null, personRequired = false,
                   {hasMedia(model) && <small> Sau khi đổi, bấm "Tạo lại người mẫu" hoặc chọn mẫu {forWhom} từ thư viện để có ảnh mới.</small>}
                 </div>
               )}
-              {genderLocked && !modelGenderWrong && <small className="qt-field--wide qt-gender-note">Sản phẩm dành cho {forWhom}: chỉ dùng người mẫu {forWhom}.</small>}
+              {genderLocked && !modelGenderWrong && <small className="qt-field--wide qt-gender-note">Sản phẩm dành cho {forWhom}.</small>}
               <label className="qt-field">
                 <span>Quốc gia</span>
                 <select value={(model.data.charCountry as string) ?? "vn"} onChange={(e) => setNodeData(model, { charCountry: e.target.value })}>
@@ -487,7 +489,7 @@ export function StepSetup({ roles, sourceMediaId = null, personRequired = false,
         ) : (
           <div className="qt-empty">
             Clip này không có người mẫu (chỉ sản phẩm).{" "}
-            {!personRequired && <button type="button" className="qt-btn qt-btn--small" disabled={switching} onClick={() => void applyMode("person")}>Thêm người mẫu</button>}
+            <button type="button" className="qt-btn qt-btn--small" disabled={switching} onClick={() => void applyMode("person")}>Thêm người mẫu</button>
           </div>
         )}
 
@@ -525,11 +527,12 @@ export function StepSetup({ roles, sourceMediaId = null, personRequired = false,
                         {characterBadges(c.meta).map((b) => <span key={b} className="qt-badge">{b}</span>)}
                       </div>
                       <div className="qt-model-card__voice" title="Giọng đọc của người mẫu — thành giọng đọc của clip khi dùng">🎙 {VOICES[voiceOf(c)]?.split(" · ")[0] ?? voiceOf(c)}</div>
-                      <button type="button" className={`qt-btn qt-btn--small${current || wrongGender ? "" : " qt-btn--accent"}`}
-                              disabled={current || wrongGender || isBusy(model)} onClick={() => applySavedModel(c)}
-                              title={wrongGender ? `Sản phẩm dành cho ${forWhom}` : undefined}>
-                        {current ? "Đang dùng" : wrongGender ? `Không hợp đồ ${forWhom}` : "Dùng người mẫu này"}
+                      <button type="button" className={`qt-btn qt-btn--small${current ? "" : " qt-btn--accent"}`}
+                              disabled={current || isBusy(model)} onClick={() => applySavedModel(c)}
+                              title={wrongGender ? `Gợi ý: sản phẩm dành cho ${forWhom}` : undefined}>
+                        {current ? "Đang dùng" : "Dùng người mẫu này"}
                       </button>
+                      {wrongGender && !current && <small className="qt-gender-note">💡 Sản phẩm dành cho {forWhom}</small>}
                     </div>
                   );
                 })}

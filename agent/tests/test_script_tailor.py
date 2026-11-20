@@ -5,7 +5,7 @@ import pytest
 
 from flowboard.services import script_tailor
 from flowboard.services.prompt_synth import PRODUCT_GUARD
-from flowboard.services.templates import HANDS_MARKER, get_template, render
+from flowboard.services.templates import HANDS_MARKER, apply_product, get_template, product_inputs, render
 
 PRODUCT = {
     "id": 7, "name": "Cơm cháy siêu chà bông", "category": "food", "price": "129.000đ",
@@ -111,3 +111,77 @@ def test_existing_clip_is_rewritten_in_place_and_keeps_the_old_text(client, monk
     plain = client.post("/api/boards/from-template", json={"template_id": "fast_food_ad", "inputs": {}}).json()
     assert client.post(f"/api/boards/{plain['id']}/tailor", json={
         "scenes": [{"image_id": pairs[0][0]}]}).status_code == 400
+
+
+BAG = {"id": 8, "name": "Túi xách hộp", "category": "fashion", "media_ids": ["m-pink"],
+       "description": ("A rectangular-shaped handheld bag with a structured boxy silhouette. It comes in three solid "
+                       "color options: cream, red, and pink, as well as two set variants."),
+       "selling_points": "", "notes": "Màu sắc: Kem, Đỏ, Hồng"}
+
+
+@pytest.mark.asyncio
+async def test_the_writer_sees_the_sellers_photo_and_never_a_colour_option_list(monkeypatch, tmp_path):
+    """18/11: a pink bag sold in cream / red / pink came out cream in 2 of 4 scenes — the writer picked a colour
+    from the option list. Now it gets the photo and no option list."""
+    photo = tmp_path / "pink.jpg"
+    photo.write_bytes(b"\xff\xd8\xff\xe0jpeg")
+    _, spec = _spec()
+    seen = {}
+
+    async def fake_photo(product):
+        return str(photo)
+
+    async def fake_llm(feature, prompt, *, system_prompt=None, timeout=0, attachments=None):
+        seen.update(prompt=prompt, system=system_prompt, attachments=attachments)
+        n = prompt.count('"scene":')
+        return json.dumps([{"image_prompt": f"pale pink quilted bag with a white bow, scene {i}.",
+                            "video_prompt": "0-3s: a hand lifts it.", "voice": "Xinh ghê"} for i in range(1, n + 1)])
+
+    monkeypatch.setattr(script_tailor, "_product_photo", fake_photo)
+    monkeypatch.setattr(script_tailor, "run_llm", fake_llm)
+    await script_tailor.tailor_spec(spec, BAG, template_title="t")
+    assert seen["attachments"] == [str(photo)] and seen["prompt"].startswith("ATTACHED: the seller's photo")
+    assert "color options" not in seen["prompt"] and "structured boxy silhouette" in seen["prompt"]
+    assert "never take its colour from a list of colour options" in seen["system"].lower()
+    assert "same concrete words in EVERY image_prompt" in seen["system"]
+
+
+@pytest.mark.asyncio
+async def test_a_writer_that_takes_no_image_still_writes_from_the_text(monkeypatch, tmp_path):
+    photo = tmp_path / "pink.jpg"
+    photo.write_bytes(b"\xff\xd8\xff\xe0jpeg")
+    _, spec = _spec()
+    calls = []
+
+    async def fake_photo(product):
+        return str(photo)
+
+    async def fake_llm(feature, prompt, *, system_prompt=None, timeout=0, attachments=None):
+        calls.append(attachments)
+        if attachments:
+            raise script_tailor.LLMError("codex doesn't support vision")
+        n = prompt.count('"scene":')
+        return json.dumps([{"image_prompt": f"the bag from the reference photo, scene {i}.", "video_prompt": "x",
+                            "voice": "y"} for i in range(1, n + 1)])
+
+    monkeypatch.setattr(script_tailor, "_product_photo", fake_photo)
+    monkeypatch.setattr(script_tailor, "run_llm", fake_llm)
+    out = await script_tailor.tailor_spec(spec, BAG, template_title="t")
+    assert calls == [[str(photo)], None]
+    assert any("reference photo" in n["data"]["prompt"] for n in out["nodes"] if n["type"] == "image")
+    # "phone footage" once drew the camera app over the picture: every scene image says not to
+    from flowboard.services.clip_style import NO_PHONE_UI
+    assert all(n["data"]["prompt"].count(NO_PHONE_UI) == 1 for n in out["nodes"] if n["type"] == "image")
+
+
+def test_colour_option_lists_never_reach_an_image_prompt():
+    from flowboard.services.templates import visual_description
+
+    assert visual_description(BAG["description"]) == "A rectangular-shaped handheld bag with a structured boxy silhouette."
+    assert visual_description("Pink lipstick in a gold tube. Available in 5 shades.") == "Pink lipstick in a gold tube."
+    assert visual_description("Comes in a gift box with a ribbon.") == "Comes in a gift box with a ribbon."
+    assert visual_description("Available in 3 colours.") == "Available in 3 colours."  # nothing else to keep: kept
+    t = get_template("unboxing_review")
+    spec = apply_product(render(t, product_inputs(t, BAG, {})), BAG)
+    prompts = " ".join(n["data"].get("prompt", "") + str(n["data"].get("aiBrief", "")) for n in spec["nodes"])
+    assert "color options" not in prompts and "structured boxy silhouette" in prompts

@@ -12,7 +12,7 @@ step 1 of the wizard, on nodes that are already on the board:
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from sqlmodel import select
 
@@ -21,24 +21,13 @@ from flowboard.db.models import Board, Edge, Node
 from flowboard.services.board_builder import build_board
 from flowboard.services.templates import (
     HANDS_GENDERS,
-    PersonRequiredError,
-    get_template,
     strip_hands,
     with_hands,
 )
 
 
-def _person_required(board: Board, product: Optional[dict]) -> bool:
-    qt = (board.data or {}).get("quicktool") or {}
-    template = get_template(str(qt.get("template_id") or ""))
-    if template and template.get("person_required"):
-        return True
-    category = (product or {}).get("category") or (qt.get("reference") or {}).get("category")
-    return category == "fashion"
-
-
 def set_model_mode(board_id: int, *, mode: str, gender: str = "female", country: str = "vn",
-                   vibe: str = "casual", hand_look: str = "", product: Optional[dict] = None) -> dict[str, Any]:
+                   vibe: str = "casual", hand_look: str = "") -> dict[str, Any]:
     """``mode`` is ``person`` or ``hands``. Returns the stored ``quicktool.hands``."""
     if mode not in ("person", "hands"):
         raise ValueError("mode must be 'person' or 'hands'")
@@ -48,13 +37,6 @@ def set_model_mode(board_id: int, *, mode: str, gender: str = "female", country:
         board = s.get(Board, board_id)
         if board is None:
             raise LookupError("board not found")
-        from flowboard.services.product_gender import check
-
-        check(product, gender)
-        if mode == "hands" and _person_required(board, product):
-            raise PersonRequiredError(
-                "Quần áo cần người mẫu mặc để thấy form và độ vừa, nên không dùng được chế độ chỉ quay bàn tay."
-            )
         nodes = s.exec(select(Node).where(Node.board_id == board_id)).all()
         characters = [n for n in nodes if n.type == "character"]
         shots = [n for n in nodes if n.type in ("image", "video")]

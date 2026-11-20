@@ -281,23 +281,17 @@ def set_board_model_mode(board_id: int, body: ModelModeBody):
     """Step 1 of the wizard: show a person, or only hands. Rewrites the scene
     prompts and adds / removes the character node (see services.model_mode)."""
     from flowboard.services import model_mode
-    from flowboard.services.products import get_product
-    from flowboard.services.templates import PersonRequiredError
 
     with get_session() as s:
-        board = s.get(Board, board_id)
-        if board is None:
+        if s.get(Board, board_id) is None:
             raise HTTPException(404, "board not found")
-        product_id = ((board.data or {}).get("quicktool") or {}).get("product_id")
-    product = get_product(int(product_id)) if product_id else None
     try:
+        # any product: a person or only hands is the seller's choice (no "clothes need a model" refusal since 18/11)
         return model_mode.set_model_mode(
             board_id, mode=body.mode, gender=body.gender, country=body.country,
-            vibe=body.vibe, hand_look=body.hand_look[:200], product=product,
+            vibe=body.vibe, hand_look=body.hand_look[:200],
         )
-    except PersonRequiredError as exc:
-        raise HTTPException(400, str(exc))
-    except ValueError as exc:  # GenderMismatchError included
+    except ValueError as exc:
         raise HTTPException(400, str(exc))
 
 

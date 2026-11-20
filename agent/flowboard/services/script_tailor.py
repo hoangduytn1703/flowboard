@@ -21,6 +21,7 @@ voice lines — the pictures and the real sounds carry it.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -30,7 +31,7 @@ from flowboard.services import clip_style
 from flowboard.services.llm import run_llm
 from flowboard.services.llm.base import LLMError
 from flowboard.services.prompt_synth import restore_product_guard
-from flowboard.services.templates import HANDS_MARKER, strip_hands
+from flowboard.services.templates import HANDS_MARKER, strip_hands, visual_description
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +48,15 @@ _BASE = (
     "- Describe only what is true for this product, taken from its description and selling points; drop template "
     "details that do not apply (e.g. cheese, buns, features the product does not have). Show the product doing its "
     "real job.\n"
-    "- image_prompt and video_prompt are in English. Name the product by its concrete visual words (what it is, "
-    "colour, material, the parts that matter, e.g. 'grey long-sleeved work jacket with two small fans on the lower "
-    "back') — never just 'the product' — and leave out sizes, colour options, prices and marketing claims. An "
+    "- image_prompt and video_prompt are in English. THE ITEM'S LOOK: the attached image (when there is one) is the "
+    "seller's photo of the exact item every scene shows. Take its colour, material, pattern / print and its 2-3 most "
+    "distinctive details (a bow, chain, charms, logo plate, quilting, fans, print…) from that PHOTO — not from the "
+    "description or notes, which may list other colour options or variants. Name the item with the same concrete "
+    "words in EVERY image_prompt (e.g. 'pale pink quilted faux-leather vanity bag with a white ribbon bow and "
+    "rhinestone chain charms on the handle', 'grey long-sleeved work jacket with two small fans on the lower back') "
+    "so every scene shows one and the same item; never just 'the product', never another colour or a dropped "
+    "detail in a later scene. No photo attached: name no colour ('the bag from the reference photo' plus its shape). "
+    "Leave out sizes, colour options, prices and marketing claims. An "
     "image_prompt is ONE still moment (where the motion starts) described as a phone photo: where the phone is, "
     "framing, the person and what they are doing, the place with one or two details, the light, the texture — "
     "at most about 550 characters (the product sentence is added after it); a video_prompt at most about 450.\n"
@@ -98,13 +105,37 @@ def _product_facts(product: dict) -> str:
     if product.get("price"):
         lines.append(f"Price: {product['price']}")
     if product.get("description"):
-        lines.append(f"Description: {product['description']}")
+        # colour / size option lists stay out: the photo decides the colour
+        lines.append(f"Description: {visual_description(product['description'])}")
     points = [p.strip(" -•\t") for p in (product.get("selling_points") or "").splitlines() if p.strip(" -•\t")]
     if points:
         lines.append("Selling points (Vietnamese):\n" + "\n".join(f"- {p}" for p in points))
     if product.get("notes"):
         lines.append(f"Seller notes: {product['notes']}")
     return "\n".join(lines)
+
+
+_PHOTO_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp")
+
+
+async def _product_photo(product: dict) -> Optional[str]:
+    """The seller's main product photo on this machine (fetched when only the
+    account's store has it), or None — the writer reads the item's real
+    colour and details from it."""
+    from flowboard.services import media as media_service
+
+    for media_id in [m for m in (product.get("media_ids") or []) if m][:1]:
+        try:
+            path = await asyncio.to_thread(media_service.cached_path, media_id)
+            if path is None:
+                got = await media_service.fetch_and_cache(media_id)
+                path = got[2] if got else None
+        except Exception as exc:  # noqa: BLE001 — no photo is no reason to stop writing
+            logger.info("script_tailor: product photo %s unavailable (%s)", media_id, str(exc)[:120])
+            continue
+        if path is not None and path.is_file() and path.suffix.lower() in _PHOTO_SUFFIXES:
+            return str(path)
+    return None
 
 
 def _parse(text: str, count: int) -> list[dict[str, str]]:
@@ -185,10 +216,21 @@ async def tailor_scenes(scenes: list[dict[str, str]], product: dict, *, variant:
     user = (f"PRODUCT\n{_product_facts(product)}{shown}\n\nTEMPLATE: {template_title}{who}"
             f"{_place_note(place, place_fixed)}\n"
             f"SCENES (current version, adapt each):\n{json.dumps(brief, ensure_ascii=False, indent=1)}{variation}{wish}")
+    photo = await _product_photo(product)
+    if photo:
+        user = ("ATTACHED: the seller's photo of this exact item — its colour, material and details win over any "
+                "text.\n\n" + user)
     try:
-        text = await run_llm("auto_prompt", user, system_prompt=system_prompt(voiceless), timeout=timeout)
+        text = await run_llm("auto_prompt", user, system_prompt=system_prompt(voiceless), timeout=timeout,
+                             **({"attachments": [photo]} if photo else {}))
     except LLMError as exc:
-        raise TailorError(f"LLM failed: {exc}") from exc
+        if not photo:
+            raise TailorError(f"LLM failed: {exc}") from exc
+        logger.warning("script_tailor: the writer took no photo (%s); writing from the text only", str(exc)[:160])
+        try:
+            text = await run_llm("auto_prompt", user, system_prompt=system_prompt(voiceless), timeout=timeout)
+        except LLMError as exc2:
+            raise TailorError(f"LLM failed: {exc2}") from exc2
     rewritten = _parse(text, len(scenes))
     out = []
     for sc, new in zip(scenes, rewritten):
@@ -196,6 +238,8 @@ async def tailor_scenes(scenes: list[dict[str, str]], product: dict, *, variant:
         img = ""
         if new["image_prompt"]:
             img = restore_product_guard(new["image_prompt"], old_img, image_with_product=True).rstrip()
+            if clip_style.NO_PHONE_UI not in img:
+                img += " " + clip_style.NO_PHONE_UI
             img += _hands_tail(old_img)
         vid = ""
         if new["video_prompt"] and old_vid:

@@ -41,8 +41,6 @@ from flowboard.services.activity import record_activity
 from flowboard.services.board_builder import BoardSpecError, build_board
 from flowboard.services.flow_project import effective_project_id
 from flowboard.services.products import TemplateBuildError, list_products, template_board_spec
-from flowboard.services.templates import PersonRequiredError
-from flowboard.services.product_gender import GenderMismatchError
 from flowboard.services.llm.base import LLMError
 from flowboard.services.llm.registry import run_llm
 from flowboard.short_id import generate_unique_short_id
@@ -636,7 +634,7 @@ async def _tool_build_from_template(board_id: int, args: dict) -> dict:
             args.get("template_id"), {str(k): str(v) for k, v in inputs.items()}, product_id
         )
         created = build_board(board_id, spec)
-    except (TemplateBuildError, BoardSpecError, PersonRequiredError, GenderMismatchError) as exc:
+    except (TemplateBuildError, BoardSpecError) as exc:
         raise ChatAgentError(str(exc)) from exc
     return {"ok": True, "tool": "build_from_template", "template_id": template["id"],
             "product": product["name"] if product else None, "nodes": created}

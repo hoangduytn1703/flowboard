@@ -3,7 +3,7 @@ review screen of a link / video clip."""
 import pytest
 
 from flowboard.services import reference_video as rv
-from flowboard.services.templates import HANDS_MARKER, PersonRequiredError
+from flowboard.services.templates import HANDS_MARKER
 
 
 def _board_from(client, template_id, **inputs):
@@ -52,12 +52,13 @@ def test_step1_switches_to_hands_and_back(client):
     assert d["board"]["data"]["quicktool"]["hands"] is None
 
 
-def test_step1_refuses_hands_for_a_clothes_clip(client):
+def test_step1_takes_hands_for_a_bag_in_a_fashion_clip(client):
+    """18/11: a bag sits in "thời trang" and used to be refused hands-only like clothes — now only a hint in the UI."""
     bid = _board_from(client, "fashion_ad")
     r = client.post(f"/api/boards/{bid}/model-mode", json={"mode": "hands", "gender": "female"})
-    assert r.status_code == 400 and "người mẫu" in r.json()["detail"]
+    assert r.status_code == 200, r.text
     _, types, _ = _detail(client, bid)
-    assert "character" in types
+    assert "character" not in types
 
 
 def _analysis(category="food", character=None):
@@ -89,8 +90,8 @@ def test_review_screen_can_override_the_suggested_model():
     assert not any(HANDS_MARKER in n["data"].get("prompt", "") for n in spec["nodes"])
 
 
-def test_review_screen_refuses_hands_for_clothes():
-    with pytest.raises(PersonRequiredError):
-        rv.board_spec(_analysis(category="fashion"), None, {"gender": "hands_male"})
-    with pytest.raises(PersonRequiredError):
-        rv.board_spec(_analysis(category="food"), {"id": 1, "name": "áo", "category": "fashion"}, {"gender": "hands_male"})
+def test_review_screen_takes_hands_for_a_fashion_product():
+    for analysis, product in ((_analysis(category="fashion"), None),
+                              (_analysis(category="food"), {"id": 1, "name": "túi xách", "category": "fashion"})):
+        spec = rv.board_spec(analysis, product, {"gender": "hands_male"})
+        assert not any(n["type"] == "character" for n in spec["nodes"])

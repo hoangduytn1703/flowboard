@@ -323,19 +323,21 @@ async def analyze(url: str, product: Optional[dict], *, scenes: Optional[int] = 
     if scenes:
         n = max(reference_video.MIN_SCENES, min(reference_video.MAX_SCENES, scenes))
         ask.append(f"Use exactly {n} scenes in the plan.")
+    from flowboard.services import plan_ai
+
+    def accept(text: str) -> dict[str, Any]:
+        try:
+            return reference_video.normalize(gemini_api.parse_json(text), product, voiceless=voiceless)
+        except reference_video.ReferenceVideoError as exc:
+            raise ValueError(str(exc)) from exc
+
     try:
-        text = await gemini_api.generate_text(
-            "\n\n".join(ask), system=reference_video.system_prompt(_SYSTEM_HEAD, voiceless), model=model,
-            response_schema=_SCHEMA, timeout=180.0,
+        # Gemini models race; the AI picked in Cài đặt → 🤖 AI viết steps in when Google is overloaded
+        analysis = await plan_ai.plan_from_text(
+            "\n\n".join(ask), system=reference_video.system_prompt(_SYSTEM_HEAD, voiceless), schema=_SCHEMA,
+            accept=accept, model=model,
         )
-        data = gemini_api.parse_json(text)
-    except gemini_api.GeminiAPIError as exc:
-        raise ProductLinkError(str(exc)) from exc
-    except ValueError as exc:
-        raise ProductLinkError(f"Gemini returned invalid JSON: {exc}") from exc
-    try:
-        analysis = reference_video.normalize(data, product, voiceless=voiceless)
-    except reference_video.ReferenceVideoError as exc:
+    except plan_ai.PlanError as exc:
         raise ProductLinkError(str(exc)) from exc
     analysis["page"] = {"url": page["url"], "title": page["title"], "image_url": page["image_url"]}
     return analysis
@@ -349,7 +351,8 @@ _PRODUCT_SYSTEM = (
     "or promises. name: the product's name in Vietnamese, tidied (drop keyword stuffing, "
     "hashtags and repeated words), <= 80 chars. description: ENGLISH, <= 300 chars, what the "
     "item physically looks like (type, colour, material, shape, distinctive details, size cues) "
-    "so an image model can draw it; no marketing words. category: fashion for clothing, shoes, "
+    "so an image model can draw it — the item in the main photo / first listed colour only, never a list of colour "
+    "or size options (they go in details); no marketing words. category: fashion for clothing, shoes, "
     "bags and wearable accessories; cosmetics for beauty and skincare; food for food and drink; "
     "grocery for small everyday goods and phone accessories (phone cases, acrylic stands, cables, "
     "chargers, earphones, hooks, boxes, organisers); home for household appliances and kitchen "

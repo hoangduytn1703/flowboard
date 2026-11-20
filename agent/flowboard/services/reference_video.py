@@ -6,6 +6,7 @@ plan into an ordinary board the Quicktool wizard can render.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any, Optional
@@ -15,7 +16,7 @@ from flowboard.db.models import Board
 from flowboard.services import clip_style
 from flowboard.services.board_builder import build_board as _build_board
 from flowboard.services.llm import gemini_api
-from flowboard.services.templates import PersonRequiredError, apply_product, with_hands
+from flowboard.services.templates import apply_product, with_hands
 
 logger = logging.getLogger(__name__)
 
@@ -148,9 +149,14 @@ def _product_brief(product: Optional[dict]) -> str:
 
 
 async def analyze(video_path: Path, product: Optional[dict], *, scenes: Optional[int] = None,
-                  model: str = gemini_api.DEFAULT_MODEL, voiceless: bool = False) -> dict[str, Any]:
-    """Gemini's analysis + adapted plan for ``video_path``. Adds
-    ``blocked`` when the product does not fit the video."""
+                  model: Optional[str] = None, voiceless: bool = False) -> dict[str, Any]:
+    """The analysis + adapted plan for ``video_path`` — Gemini models race,
+    the AI picked in Cài đặt → 🤖 AI viết steps in when Google is overloaded
+    (``services/plan_ai``). Adds ``blocked`` when the product does not fit
+    the video, ``by`` = which AI wrote it."""
+    from flowboard.services import plan_ai
+    from flowboard.services.video_export import probe_clip
+
     if not video_path.is_file():
         raise ReferenceVideoError("video file not found")
     ask = [
@@ -159,17 +165,21 @@ async def analyze(video_path: Path, product: Optional[dict], *, scenes: Optional
     ]
     if scenes:
         ask.append(f"Use exactly {max(MIN_SCENES, min(MAX_SCENES, scenes))} scenes in the plan.")
+    info = await asyncio.to_thread(probe_clip, video_path)
+
+    def accept(text: str) -> dict[str, Any]:
+        try:
+            return normalize(gemini_api.parse_json(text), product, voiceless=voiceless)
+        except ReferenceVideoError as exc:
+            raise ValueError(str(exc)) from exc
+
     try:
-        text = await gemini_api.generate_with_media(
-            [], video_path, [gemini_api.text_part("\n\n".join(ask))],
-            model=model, system=system_prompt(_SYSTEM_HEAD, voiceless), response_schema=_SCHEMA, timeout=300.0,
+        return await plan_ai.plan_from_video(
+            video_path, "\n\n".join(ask), system=system_prompt(_SYSTEM_HEAD, voiceless), schema=_SCHEMA,
+            accept=accept, duration=info.duration if info else 0.0, model=model,
         )
-        data = gemini_api.parse_json(text)
-    except gemini_api.GeminiAPIError as exc:
+    except plan_ai.PlanError as exc:
         raise ReferenceVideoError(str(exc)) from exc
-    except ValueError as exc:
-        raise ReferenceVideoError(f"Gemini returned invalid JSON: {exc}") from exc
-    return normalize(data, product, voiceless=voiceless)
 
 
 def normalize(data: dict[str, Any], product: Optional[dict], *, voiceless: bool = False) -> dict[str, Any]:
@@ -233,22 +243,13 @@ def _character_for(analysis: dict[str, Any], product: Optional[dict], pick: Char
     pick = pick or {}
     gender = str(pick.get("gender") or "")
     country = str(pick.get("country") or (suggested or {}).get("country") or "vn")
-    category = (product or {}).get("category") if product else analysis.get("category")
-    if gender and gender != "none":
-        from flowboard.services.product_gender import check
+    if not gender and suggested and product:
+        # The AI's suggestion is only a default: a men's / women's product moves it to its gender.
+        # What the seller picks is used as is (18/11: "chỉ suggest thôi").
+        from flowboard.services.product_gender import for_product
 
-        check(product, gender)
-    elif not gender and suggested and product:
-        # Keeping the AI's suggestion: it must not contradict the product either.
-        from flowboard.services.product_gender import check
-
-        check(product, suggested.get("gender"))
+        suggested = {**suggested, "gender": for_product(product, suggested.get("gender"))}
     if gender.startswith("hands_"):
-        if category == "fashion":
-            raise PersonRequiredError(
-                "Quần áo cần người mẫu mặc để thấy form và độ vừa, nên không dùng được chế độ chỉ quay bàn tay. "
-                "Hãy chọn Nữ hoặc Nam."
-            )
         return None, {"gender": gender, "country": country, "look": str(pick.get("hand_look") or "")}
     if gender == "none":
         return None, None
@@ -295,7 +296,8 @@ def board_spec(analysis: dict[str, Any], product: Optional[dict], character_pick
     nodes.append({"key": "product", "type": "visual_asset", "data": {"title": "Sản phẩm — upload ảnh thật"}})
     refs.append("product")
     rule = (" The product must match the reference photo exactly (shape, colour, print, material)."
-            " Keep the product at its real size relative to the person, as in the reference photos.")
+            " Keep the product at its real size relative to the person, as in the reference photos. "
+            + clip_style.NO_PHONE_UI)
     for i, p in enumerate(plan, start=1):
         nodes.append({"key": f"s{i}", "type": "image", "data": {
             "title": f"Cảnh {i} - {p['title_vi']}"[:80],

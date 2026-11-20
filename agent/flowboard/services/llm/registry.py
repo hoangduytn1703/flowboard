@@ -90,6 +90,20 @@ def _gemini_keys_ready() -> bool:
         return False
 
 
+async def picked_ai(feature: Feature, *, vision: bool = False) -> Optional[str]:
+    """The AI the account picked for ``feature`` when it runs on this machine
+    (and reads images when ``vision``) — None when nothing is picked or it
+    cannot run here. The Gemini keys stand-in does not count."""
+    entry = secrets.read_feature_config().get(feature)
+    provider = _PROVIDERS.get(entry["provider"]) if entry else None
+    if provider is None or (vision and not provider.supports_vision):
+        return None
+    try:
+        return entry["provider"] if await provider.is_available() else None
+    except Exception:  # noqa: BLE001 — a probe that breaks is "not here"
+        return None
+
+
 def get_provider(name: str) -> Optional[LLMProvider]:
     """Lookup by name. None if the name is unknown."""
     return _PROVIDERS.get(name)
@@ -107,8 +121,15 @@ async def run_llm(
     system_prompt: Optional[str] = None,
     attachments: Optional[list[str]] = None,
     timeout: float = 90.0,
+    effort: Optional[str] = None,
+    gemini_backup: bool = True,
 ) -> str:
     """Feature-routed LLM dispatch.
+
+    ``effort`` replaces the feature's pinned reasoning effort for this one
+    call (a job that needs speed over depth). ``gemini_backup=False`` skips
+    the account's Gemini keys as a stand-in for a missing / failing AI (a
+    caller that already raced Gemini itself).
 
     Resolution chain:
       1. Look up the configured provider / model / effort for ``feature``
@@ -141,7 +162,7 @@ async def run_llm(
     # A new account has picked no AI yet, and a picked CLI can be missing on this machine (the installed app on a
     # friend's PC has no Claude CLI): the account's Gemini keys answer instead of an error — "install and it works".
     # Not when a caller asked for one AI by name (use_ai): that choice is kept.
-    backup = pick is None and _gemini_keys_ready()
+    backup = gemini_backup and pick is None and _gemini_keys_ready()
 
     async def by_keys(why: str) -> str:
         logger.info("llm: feature=%s answered by the Gemini keys (%s)", feature, why)
@@ -153,7 +174,7 @@ async def run_llm(
         raise LLMError(f"{NO_AI} (No AI provider configured for {feature})")
     provider_name = entry["provider"]
     model = entry.get("model")
-    effort = entry.get("effort")
+    effort = effort or entry.get("effort")
     provider = _PROVIDERS.get(provider_name)
     if provider is None:
         raise LLMError(

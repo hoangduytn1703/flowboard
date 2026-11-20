@@ -115,8 +115,8 @@ const CATEGORY_LABEL: Record<string, string> = {
 
 /** Why a template refuses the hands-only mode (shown under its form). */
 const PERSON_REASON: Record<string, string> = {
-  fashion_ad: "Quảng cáo quần áo cần người mẫu mặc để thấy form và độ vừa, nên không có lựa chọn chỉ quay bàn tay.",
-  food_review: "Review ăn thử cần có người ăn để thấy phản ứng khi nếm, nên không có lựa chọn chỉ quay bàn tay.",
+  fashion_ad: "quần áo thường cần người mẫu mặc để thấy form và độ vừa; túi, phụ kiện thì chỉ quay bàn tay vẫn ổn.",
+  food_review: "review ăn thử thường đẹp hơn khi có người ăn để thấy phản ứng khi nếm.",
 };
 /** A template for every product line: shown last, never tagged as the fit. */
 const ANY_CATEGORY = "any";
@@ -286,30 +286,29 @@ export function NewClipDialog({
     setExtraSettings([]);
   }, [kind]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** Can this model pick (female / male / hands_*) be used with the chosen product? */
-  function genderAllowed(v: string): boolean {
+  /** Does this model pick (female / male / hands_*) match the product's "Dành cho"? Only a suggestion (18/11). */
+  function genderFits(v: string): boolean {
     const g = v.replace(/^hands_/, "");
     if (g !== "female" && g !== "male") return true;
     return allowedModelGenders(product?.gender).includes(g);
   }
-  // Review screen: an AI-suggested model of the wrong gender for the product
-  // (a woman for a men's shirt) is replaced by an allowed one up front.
+  // Review screen: the AI's suggestion of the other gender for a men's / women's product is moved to the product's
+  // gender up front (a default only — any pick the seller makes is kept).
   useEffect(() => {
     const suggested = shown?.character?.gender;
-    if (pickGender === "auto" && suggested && !genderAllowed(suggested)) {
+    if (pickGender === "auto" && suggested && !genderFits(suggested)) {
       setPickGender(allowedModelGenders(product?.gender)[0]);
-    } else if (pickGender !== "auto" && pickGender !== "none" && !genderAllowed(pickGender)) {
-      setPickGender(pickGender.startsWith("hands_") ? `hands_${allowedModelGenders(product?.gender)[0]}` as CharacterPick["gender"] : allowedModelGenders(product?.gender)[0]);
     }
-  }, [shown?.character?.gender, product?.id ?? null, product?.gender, pickGender]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [shown?.character?.gender, product?.id ?? null, product?.gender]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Picking a men's product while "Nữ" is selected switches it to "Nam" (and back).
+  // Picking a men's product while "Nữ" is selected switches it to "Nam" once — when the PRODUCT changes, so a model
+  // the seller then picks by hand stays as picked.
   useEffect(() => {
     const cur = inputs.charGender;
-    if (!cur || genderAllowed(cur)) return;
-    const allowed = allowedModelGenders(product?.gender)[0];
-    setInputs((p) => ({ ...p, charGender: cur.startsWith("hands_") ? `hands_${allowed}` : allowed }));
-  }, [product?.id ?? null, product?.gender, inputs.charGender]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!cur || genderFits(cur)) return;
+    const fit = allowedModelGenders(product?.gender)[0];
+    setInputs((p) => ({ ...p, charGender: cur.startsWith("hands_") ? `hands_${fit}` : fit }));
+  }, [product?.id ?? null, product?.gender]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // "Tên gọi trong lời thoại" follows the chosen product (its name), and goes
   // back to the template's wording when the product is cleared. Runs after
@@ -554,7 +553,7 @@ export function NewClipDialog({
 
   const refBase = product?.name ?? shown?.product_seen ?? "Clip";
   // Clothes are judged on a body: no hands-only option for them.
-  const pickPersonRequired = (product?.category ?? shown?.category) === "fashion";
+  const pickPersonHint = (product?.category ?? shown?.category) === "fashion";
   const characterPick: CharacterPick | null = pickGender === "auto" && !pickCountry ? null : {
     gender: pickGender === "auto" ? (shown?.character ? shown.character.gender as "female" | "male" : "none") : pickGender,
     country: pickCountry || shown?.character?.country || "vn",
@@ -584,6 +583,7 @@ export function NewClipDialog({
                   <div><span>Hook</span><strong>{shown.hook}</strong></div>
                   {shown.style && <div><span>Phong cách</span><strong>{shown.style}{shown.tone ? ` · ${shown.tone}` : ""}</strong></div>}
                   <div><span>Cảnh</span><strong>{shown.plan.length} cảnh × 8 s</strong></div>
+                  {shown.by && <div><span>AI phân tích</span><strong>{shown.by}</strong></div>}
                 </div>
                 <div className="tpl-inputs qt-ref__model">
                   <label className="tpl-inputs__field">
@@ -595,10 +595,10 @@ export function NewClipDialog({
                           ? `AI gợi ý: ${shown.character.gender === "male" ? "nam" : "nữ"} · ${shown.character.country.toUpperCase()}`
                           : "AI gợi ý: không có người"}
                       </option>
-                      {genderAllowed("female") && <option value="female">Nữ</option>}
-                      {genderAllowed("male") && <option value="male">Nam</option>}
-                      {!pickPersonRequired && genderAllowed("female") && <option value="hands_female">Tay nữ (không lộ mặt)</option>}
-                      {!pickPersonRequired && genderAllowed("male") && <option value="hands_male">Tay nam (không lộ mặt)</option>}
+                      <option value="female">Nữ</option>
+                      <option value="male">Nam</option>
+                      <option value="hands_female">Tay nữ (không lộ mặt)</option>
+                      <option value="hands_male">Tay nam (không lộ mặt)</option>
                       <option value="none">Không có người (chỉ sản phẩm)</option>
                     </select>
                   </label>
@@ -621,8 +621,11 @@ export function NewClipDialog({
                              onChange={(e) => setPickHandLook(e.target.value)} />
                     </label>
                   )}
-                  {pickPersonRequired && (
-                    <p className="qt-new__hint qt-field--wide">Sản phẩm thời trang cần người mẫu mặc, nên không có lựa chọn chỉ quay bàn tay.</p>
+                  {pickPersonHint && pickGender.startsWith("hands_") && (
+                    <p className="qt-new__hint qt-field--wide">💡 Gợi ý: quần áo thường cần người mặc để thấy form; túi, phụ kiện thì chỉ quay bàn tay vẫn ổn.</p>
+                  )}
+                  {pickGender !== "auto" && pickGender !== "none" && !genderFits(pickGender) && (
+                    <p className="qt-new__hint qt-field--wide">💡 Gợi ý: sản phẩm dành cho {product?.gender === "male" ? "nam" : "nữ"} — người mẫu {product?.gender === "male" ? "nam" : "nữ"} hợp hơn.</p>
                   )}
                 </div>
                 <ol className="qt-ref__plan">
@@ -896,13 +899,10 @@ export function NewClipDialog({
                       <>
                         <select className="project-modal__input" value={inputs[i.key] ?? i.default ?? ""}
                                 onChange={(e) => setInputs((p) => ({ ...p, [i.key]: e.target.value }))} disabled={locked}>
-                          {(i.options ?? [])
-                            // A men's / women's product: only models of that gender (hands too).
-                            .filter(([v]) => i.key !== "charGender" || genderAllowed(v))
-                            .map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+                          {(i.options ?? []).map(([v, label]) => <option key={v} value={v}>{label}</option>)}
                         </select>
-                        {i.key === "charGender" && product && (product.gender === "male" || product.gender === "female") && (
-                          <small className="qt-new__hint">Sản phẩm dành cho {product.gender === "male" ? "nam" : "nữ"} — chỉ chọn được người mẫu {product.gender === "male" ? "nam" : "nữ"}.</small>
+                        {i.key === "charGender" && product && !genderFits(inputs.charGender ?? "") && (
+                          <small className="qt-new__hint">💡 Gợi ý: sản phẩm dành cho {product.gender === "male" ? "nam" : "nữ"} — người mẫu {product.gender === "male" ? "nam" : "nữ"} hợp hơn.</small>
                         )}
                       </>
                     ) : i.key === "setting" ? (
@@ -921,12 +921,12 @@ export function NewClipDialog({
                     )}
                   </label>
                 ))}
-              {template.person_required && (
+              {template.person_required && (inputs.charGender ?? "").startsWith("hands_") && (
                 <p className="qt-new__hint qt-field--wide">
-                  {PERSON_REASON[template.id] ?? `${template.title} cần có người mẫu, nên không có lựa chọn chỉ quay bàn tay.`}
+                  💡 Gợi ý: {PERSON_REASON[template.id] ?? `${template.title} thường đẹp hơn khi có người mẫu.`}
                 </p>
               )}
-              {(inputs.charGender ?? "").startsWith("hands_") && !template.person_required && (
+              {(inputs.charGender ?? "").startsWith("hands_") && (
                 <label className="tpl-inputs__field qt-field--wide">
                   <span>Mô tả bàn tay (tiếng Anh, tuỳ chọn)</span>
                   <input className="project-modal__input" type="text" maxLength={200}

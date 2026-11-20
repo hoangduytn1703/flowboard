@@ -994,6 +994,26 @@ def wrap_text(text: str, max_chars: int) -> list[str]:
     return out
 
 
+def wrap_text_px(text: str, max_px: float, font_px: int, *, bold: bool = False, italic: bool = False) -> list[str]:
+    """Lines of ``text``, wrapped at spaces so each line's measured width (:func:`text_line_px`) stays within
+    ``max_px`` — the same rule the browser applies at ``max-width`` (``textLayer.ts textLayerCss``), unlike
+    :func:`wrap_text`'s crude average-character-width guess. A single word already wider than ``max_px`` is kept
+    on its own line rather than split."""
+    out: list[str] = []
+    for raw in text.split("\n"):
+        line = ""
+        for word in raw.split():
+            cand = f"{line} {word}".strip()
+            if line and text_line_px(cand, font_px, bold=bold, italic=italic) > max_px:
+                out.append(line)
+                line = word
+            else:
+                line = cand
+        if line:
+            out.append(line)
+    return out
+
+
 def text_font_px(height: int, size: float) -> int:
     return max(14, round(height * 0.036 * size))
 
@@ -1036,7 +1056,9 @@ def text_line_px(line: str, font_px: int, *, bold: bool = False, italic: bool = 
 def text_ass(texts: list[dict[str, Any]], width: int, height: int, total_s: float) -> tuple[list[str], list[str]]:
     """``(style lines, events)`` of the text layers — each its own style ``T<i>``: with a background colour, ONE
     rectangle behind all its lines (drawn as a shape, style ``T<i>b`` — what the editor shows; libass's own
-    BorderStyle 3 boxes every line to its own width), else outlined text; centred on (x, y), over the subtitles."""
+    BorderStyle 3 boxes every line to its own width), else outlined text; centred on (x, y), over the subtitles.
+    Wrapped at the same pixel width the editor's preview wraps at (``wrap_text_px``), so the number of lines —
+    and so the background box's size — matches what was shown in the editor."""
     styles, events = [], []
     for i, t in enumerate(texts):
         font = text_font_px(height, t["size"])
@@ -1054,8 +1076,12 @@ def text_ass(texts: list[dict[str, Any]], width: int, height: int, total_s: floa
         if stroke > 0:  # "Độ đậm": the same words once more on top, with a stroke in their own colour
             styles.append(f"Style: T{i}s,Arial,{font},{primary},&H000000FF,{primary},&HFF000000,{bold},0,100,100,0,0,1,"
                           f"{stroke:g},0,5,0,0,0,1")
-        chars = max(4, int(width * t["w"] / (font * 0.52)))
-        lines = [x.replace("{", "(").replace("}", ")") for x in wrap_text(t["text"], chars)]
+        # the editor's box (border-box) tops out at `w` of the frame — with a background, that includes its own
+        # padding (font*0.3 each side, same as textLayer.ts), so the WORDS get that much less room to wrap in
+        pad_x = font * 0.3 if t["bg"] else 0.0
+        max_px = max(font * 0.6, width * t["w"] - 2 * pad_x)
+        lines = [x.replace("{", "(").replace("}", ")")
+                 for x in wrap_text_px(t["text"], max_px, font, bold=bool(face), italic=bool(t.get("italic")))]
         body = "\\N".join(lines)
         end = min(total_s, t["secs"]) if t["secs"] > 0 and total_s > 0 else (total_s or t["secs"] or 36000.0)
         if not body or end <= 0.05:

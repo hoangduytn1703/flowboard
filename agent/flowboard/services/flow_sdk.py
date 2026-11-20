@@ -428,9 +428,9 @@ NOT_LISTED_MIN_LOOKUPS = 2
 # model check — a head-and-shoulders portrait in a T-shirt — dropped twice).
 FLOW_DROPPED_JOB = (
     "FLOW_DROPPED_JOB: Flow nhận lệnh rồi tự huỷ video này (đã hoàn credit), không nói lý do. "
-    "Hay gặp nhất là gương mặt người mẫu: Flow coi khuôn mặt đó như người thật / người nổi tiếng "
-    "và bỏ mọi video có mặt đó — quần áo thường ngày (hở vai, váy ngắn) thường không phải lý do. "
-    "Ở Bước 1 bấm \"🎬 Kiểm tra với Flow\" để biết chắc; bị chặn thì tạo người mẫu khác rồi vẽ lại ảnh cảnh."
+    "Bị bỏ HẾT mọi video (cả cảnh không có người): tab Flow đang đăng nhập tài khoản Google khác chủ dự án đang chọn "
+    "— mở Thiết lập để kiểm tra. Bị bỏ vài video: gương mặt người mẫu Flow coi như người thật / người nổi tiếng "
+    "(Bước 1 → \"🎬 Kiểm tra với Flow\"). Quần áo thường ngày (hở vai, váy ngắn) thường không phải lý do."
 )
 
 

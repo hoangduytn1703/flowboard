@@ -7,6 +7,9 @@
 // dropped onto step 4 in one go. Measured by the seller (26/10): image-to-
 // video works, each clip is ~10 s (fixed), a free weekly quota.
 
+/** Muse is hidden everywhere (18/11: not stable from Vietnam). The code stays; set true to bring it back. */
+export const MUSE_ENABLED = false;
+
 export const MUSE_URL = "https://muse.ai";
 /** Muse makes at most this many videos per message. */
 export const MUSE_MAX_VIDEOS = 6;

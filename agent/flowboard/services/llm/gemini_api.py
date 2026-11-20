@@ -26,7 +26,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Optional, TypeVar
+from typing import Any, Awaitable, Callable, Generic, Optional, TypeVar
 
 import httpx
 
@@ -70,6 +70,10 @@ class GeminiKeyError(GeminiAPIError):
 
 class GeminiBusyError(GeminiAPIError):
     """503 / UNAVAILABLE: the model is overloaded right now (not the key)."""
+
+
+class GeminiThinkingError(GeminiAPIError):
+    """400 about ``thinkingConfig``: this model takes no such thinking level (the call is sent again without it)."""
 
 
 #: When a model answers 503, the call is retried, then moved down this list.
@@ -268,6 +272,9 @@ def _raise_for(resp: httpx.Response) -> None:
                                limit=quota.get("value"), per_day=per_day)
     if resp.status_code == 503 or status == "UNAVAILABLE":
         raise GeminiBusyError(f"HTTP {resp.status_code}: {message}")
+    if resp.status_code == 400 and re.search(r"thinking", message, re.I):
+        # before the key check below: "... is not valid for this model" must never park a good key for hours
+        raise GeminiThinkingError(f"HTTP 400: {message}")
     if resp.status_code == 404 and re.search(r"models?/|no longer available|not found", message):
         # A retired or unknown model, not a bad key: the fallback chain
         # moves on to the next model.
@@ -284,12 +291,13 @@ MAX_WAIT_S = 45.0
 
 
 async def with_key(fn: Callable[[str], Awaitable[T]], *, model: Optional[str] = None,
-                   max_wait_s: float = MAX_WAIT_S) -> T:
+                   max_wait_s: float = MAX_WAIT_S, offset: int = 0) -> T:
     """Run ``fn(key)`` with the first key usable for ``model``, moving to the
     next one when a key is out of quota (parked for the model the answer
     names, or ``model``) or refused (parked as a whole). When every key is
     parked but one comes back within ``max_wait_s``, wait for it. Other
-    errors propagate."""
+    errors propagate. ``offset`` starts the round at a later key (calls sent
+    side by side spread over the keys instead of all hitting the first)."""
     if not secrets.get_gemini_keys():
         raise NoKeyAvailable("Chưa có Gemini API key — thêm trong Settings → Gemini API keys.")
     tried: list[str] = []
@@ -300,7 +308,10 @@ async def with_key(fn: Callable[[str], Awaitable[T]], *, model: Optional[str] = 
         rounds += 1
         if rounds > 50:
             break
-        for st in pool.candidates(model):
+        cands = pool.candidates(model)
+        if cands and offset:
+            cands = cands[offset % len(cands):] + cands[:offset % len(cands)]
+        for st in cands:
             key = st.key
             tried.append(mask(key))
             try:
@@ -377,9 +388,11 @@ async def generate(
     response_schema: Optional[dict] = None,
     temperature: Optional[float] = None,
     timeout: float = 180.0,
+    thinking: Optional[str] = None,
 ) -> str:
     """One ``generateContent`` call; the model's text (JSON text when a
-    schema was given)."""
+    schema was given). ``thinking`` = ``thinkingConfig.thinkingLevel``
+    ("minimal" | "low" | ...; None = the model's default)."""
     payload: dict[str, Any] = {"contents": [{"role": "user", "parts": parts}]}
     if system:
         payload["systemInstruction"] = {"parts": [{"text": system}]}
@@ -389,6 +402,8 @@ async def generate(
         config["responseSchema"] = response_schema
     if temperature is not None:
         config["temperature"] = temperature
+    if thinking:
+        config["thinkingConfig"] = {"thinkingLevel": thinking}
     if config:
         payload["generationConfig"] = config
     url = f"{BASE_URL}/v1beta/models/{model}:generateContent"
@@ -516,6 +531,129 @@ async def generate_text(
         lambda m: generate(key, parts, model=m, system=system, response_schema=response_schema, timeout=timeout),
         model,
     ))
+
+
+# -- one heavy request sent to several models at once ----------------------
+
+#: A reference video's / product page's ad plan goes to these at the SAME time: (model, thinking level). Measured 18/11
+#: with Google overloaded: 3.5 / 3.6 / 3.7 / 3.8-flash answered 503 (some only after 30-60 s), 3.1-flash-lite answered
+#: the full plan in 15-20 s. One model at a time with 5 + 10 s waits between retries and 300 s per call kept the
+#: seller waiting 5 minutes for an error; the race answers as soon as any model can.
+RACE_MODELS: list[tuple[str, Optional[str]]] = [
+    ("gemini-3.5-flash", "low"),
+    ("gemini-3.8-flash", "low"),
+    ("gemini-3.1-flash-lite", "minimal"),
+]
+#: answers from these are plainer: once only such a model has answered, a stronger one gets RACE_PREFER_S more to land
+RACE_SAFETY_NETS = ("gemini-3.1-flash-lite",)
+RACE_PREFER_S = 15.0
+#: a 503 is retried after this many seconds (doubling up to RACE_RETRY_MAX_S) while the race lasts
+RACE_RETRY_S = 2.0
+RACE_RETRY_MAX_S = 8.0
+
+
+class RaceLost(GeminiAPIError):
+    """No model of the race gave a usable answer in time."""
+
+
+@dataclass
+class RaceResult(Generic[T]):
+    value: T
+    model: str
+
+
+async def race(
+    parts: list[dict],
+    accept: Callable[[str], T],
+    *,
+    system: Optional[str] = None,
+    response_schema: Optional[dict] = None,
+    models: Optional[list[tuple[str, Optional[str]]]] = None,
+    deadline_s: float = 150.0,
+    call_timeout_s: float = 120.0,
+    got_answer: Optional[asyncio.Event] = None,
+) -> RaceResult[T]:
+    """Send ``parts`` to every model of ``models`` at once and return the
+    first answer ``accept`` takes (it parses / checks the text and raises
+    ``ValueError`` on a bad one). A safety-net model's answer is held up to
+    :data:`RACE_PREFER_S` for a stronger one. 503s are retried while the
+    race lasts; each racer starts at a different key. ``got_answer`` is set
+    as soon as any usable answer exists (even one that is still held)."""
+    models = models or RACE_MODELS
+    loop = asyncio.get_running_loop()
+    end = loop.time() + deadline_s
+    won: asyncio.Future = loop.create_future()
+    held: list[RaceResult[T]] = []
+    errors: dict[str, str] = {}
+    strong_in_race = any(m not in RACE_SAFETY_NETS for m, _ in models)
+
+    def offer(result: RaceResult[T]) -> None:
+        if got_answer is not None:
+            got_answer.set()
+        if won.done():
+            return
+        if result.model in RACE_SAFETY_NETS and strong_in_race:
+            held.append(result)
+            loop.call_later(RACE_PREFER_S, lambda: won.done() or won.set_result(held[0]))
+            return
+        won.set_result(result)
+
+    async def racer(i: int, model: str, thinking: Optional[str]) -> None:
+        gap, tries, level = RACE_RETRY_S, 0, thinking
+        while not won.done() and loop.time() < end:
+            tries += 1
+            left = end - loop.time()
+            try:
+                text = await with_key(
+                    lambda key: generate(key, parts, model=model, system=system, response_schema=response_schema,
+                                         timeout=min(call_timeout_s, max(5.0, left)), thinking=level),
+                    model=model, max_wait_s=0.0, offset=i + tries,
+                )
+            except GeminiThinkingError as exc:
+                errors[model] = str(exc)[:200]
+                if level is None:
+                    return
+                level = None  # this model takes no such level: send it plain
+                continue
+            except GeminiBusyError as exc:
+                errors[model] = "quá tải (503)"
+                logger.info("gemini race: %s busy (try %d): %s", model, tries, str(exc)[:80])
+                await asyncio.sleep(min(gap, max(0.0, end - loop.time())))
+                gap = min(gap * 2, RACE_RETRY_MAX_S)
+                continue
+            except GeminiAPIError as exc:  # quota on every key, timeout, refused...
+                errors[model] = str(exc)[:200]
+                logger.warning("gemini race: %s gave up: %s", model, str(exc)[:160])
+                return
+            try:
+                value = accept(text)
+            except (ValueError, TypeError, KeyError) as exc:
+                errors[model] = f"trả lời không dùng được: {exc}"[:200]
+                logger.warning("gemini race: %s answer rejected (try %d): %s", model, tries, str(exc)[:160])
+                if tries >= 2:
+                    return
+                continue
+            logger.info("gemini race: %s answered after %d try(s)", model, tries)
+            offer(RaceResult(value, model))
+            return
+
+    tasks = [asyncio.create_task(racer(i, m, lv)) for i, (m, lv) in enumerate(models)]
+    everyone = asyncio.gather(*tasks, return_exceptions=True)
+    try:
+        await asyncio.wait({won, everyone}, timeout=max(1.0, end - loop.time() + 1.0),
+                           return_when=asyncio.FIRST_COMPLETED)
+        if not won.done() and held:
+            won.set_result(held[0])  # every stronger racer has finished without an answer
+        if won.done():
+            return won.result()
+        raise RaceLost("Gemini đang quá tải — " + "; ".join(f"{m}: {e}" for m, e in errors.items()) if errors
+                       else "Gemini không trả lời kịp")
+    finally:
+        for task in tasks:
+            task.cancel()
+        everyone.cancel()
+        # read the gather's outcome so a race cut short (another AI won) logs no "exception never retrieved"
+        everyone.add_done_callback(lambda f: f.cancelled() or f.exception())
 
 
 TTS_MODEL = "gemini-3.8-flash-tts"

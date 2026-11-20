@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { checkSetup, getSetup, type SetupStatus } from "../api/setup";
+import { checkSetup, getSetup, type CheckOptions, type SetupStatus } from "../api/setup";
 import { toast } from "./toast";
 
 /**
@@ -13,8 +13,8 @@ interface SetupState {
   guideOpen: boolean;
   reason: string;
   refresh(): Promise<SetupStatus | null>;
-  /** look at the Flow tab again (the agent may pin the open project / plan) */
-  check(useTabProject?: boolean): Promise<SetupStatus | null>;
+  /** look at the Flow tab again (the agent may pin the open project / plan); `true` = use the tab's open project */
+  check(opts?: CheckOptions | boolean): Promise<SetupStatus | null>;
   openGuide(reason?: string): void;
   closeGuide(): void;
   /** true when a generation can start; otherwise opens the guide and answers false */
@@ -40,11 +40,11 @@ export const useSetupStore = create<SetupState>((set, get) => ({
       return get().status;
     }
   },
-  async check(useTabProject = false) {
+  async check(opts = {}) {
     if (get().busy) return get().status;
     set({ busy: true });
     try {
-      const status = await checkSetup(useTabProject);
+      const status = await checkSetup(typeof opts === "boolean" ? { useTabProject: opts } : opts);
       readAt = Date.now();
       set({ status });
       if (status.changed?.length) toast.success(`Đã tự chọn: ${status.changed.join(", ")}`);

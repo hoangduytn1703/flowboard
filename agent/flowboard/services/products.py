@@ -77,9 +77,13 @@ def template_board_spec(
         raise TemplateBuildError(f"unknown template {template_id!r}")
     if product is None:
         return template, render(template, inputs), None
-    # A men's / women's product cannot be shown on a model of the other gender.
-    from flowboard.services.product_gender import check
+    # Nobody picked a model: the template's default follows a men's / women's product. A pick is kept as is.
+    from flowboard.services.product_gender import for_product
 
-    check(product, (inputs or {}).get("charGender") or _template_default_gender(template))
+    if not (inputs or {}).get("charGender"):
+        default = _template_default_gender(template)
+        fitted = for_product(product, default)
+        if fitted != default:
+            inputs = {**(inputs or {}), "charGender": fitted}
     spec = apply_product(render(template, product_inputs(template, product, inputs)), product)
     return template, spec, product

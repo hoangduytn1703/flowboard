@@ -23,10 +23,8 @@ from flowboard.db import get_session
 from flowboard.db.models import Asset
 from flowboard.services import media as media_service
 from flowboard.services import product_link, reference_video
-from flowboard.services.llm import gemini_api
+from flowboard.services.llm import gemini_api, registry
 from flowboard.services.products import get_product
-from flowboard.services.templates import PersonRequiredError
-from flowboard.services.product_gender import GenderMismatchError
 from flowboard.services.video_export import probe_clip
 
 logger = logging.getLogger(__name__)
@@ -129,8 +127,9 @@ async def analyze_reference_video(body: AnalyzeBody) -> dict[str, Any]:
     call then needs ``force``."""
     path = _video_path(body.media_id)
     product = _product_or_404(body.product_id)
-    if not gemini_api.configured():
-        raise HTTPException(400, "Chưa có Gemini API key — thêm trong Settings → Gemini API keys.")
+    if not gemini_api.configured() and not await registry.picked_ai("vision", vision=True):
+        raise HTTPException(400, "Chưa có AI xem được video: thêm Gemini API key ở Cài đặt → 🔑 Gemini key, "
+                                 "hoặc chọn AI đọc ảnh ở Cài đặt → 🤖 AI viết.")
     try:
         analysis = await reference_video.analyze(
             path, product, scenes=body.scenes, model=body.model or gemini_api.DEFAULT_MODEL,
@@ -155,8 +154,9 @@ async def analyze_product_link(body: AnalyzeLinkBody) -> dict[str, Any]:
     """Same plan as ``/analyze`` but from a product page instead of a video;
     the result is built with ``/build`` (no ``media_id``)."""
     product = _product_or_404(body.product_id)
-    if not gemini_api.configured():
-        raise HTTPException(400, "Chưa có Gemini API key — thêm trong Settings → Gemini API keys.")
+    if not gemini_api.configured() and not await registry.picked_ai("auto_prompt"):
+        raise HTTPException(400, "Chưa có AI nào: thêm Gemini API key ở Cài đặt → 🔑 Gemini key, "
+                                 "hoặc chọn AI ở Cài đặt → 🤖 AI viết.")
     try:
         analysis = await product_link.analyze(
             body.url, product, scenes=body.scenes, model=body.model, voiceless=body.voiceless,
@@ -194,15 +194,12 @@ def build_from_reference(body: BuildBody) -> dict[str, Any]:
         raise HTTPException(400, str(exc))
     if analysis["blocked"] and not body.force:
         raise HTTPException(409, analysis.get("block_reason") or "sản phẩm không khớp video mẫu")
-    try:
-        return reference_video.build_board(
-            analysis, product, name=body.name,
-            source_media_id=media_service.normalize_media_id(body.media_id) if body.media_id else None,
-            source_url=body.source_url, character_pick=body.character, channel_id=body.channel_id,
-            voiceless=body.voiceless,
-        )
-    except (PersonRequiredError, GenderMismatchError) as exc:
-        raise HTTPException(400, str(exc))
+    return reference_video.build_board(
+        analysis, product, name=body.name,
+        source_media_id=media_service.normalize_media_id(body.media_id) if body.media_id else None,
+        source_url=body.source_url, character_pick=body.character, channel_id=body.channel_id,
+        voiceless=body.voiceless,
+    )
 
 
 # ── from a link (TikTok / YouTube / …) ────────────────────────────────────

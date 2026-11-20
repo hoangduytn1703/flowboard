@@ -60,7 +60,9 @@ export function textLayerCss(x: DubTextSpec, frameH: number, fontFamily = "Arial
     // a stroke is centred on the outline: twice the width grows the letters by ``stroke`` px outwards
     ...(stroke > 0 ? { WebkitTextStroke: `${stroke * 2}px ${x.color}`, paintOrder: "stroke fill" } : {}),
     fontStyle: x.italic ? "italic" : "normal",
-    textDecoration: x.underline ? "underline" : "none", lineHeight: 1.25, textAlign: "center",
+    // 1 — measured against the real renderer (libass stacks \N lines one fontsize apart, no extra leading);
+    // the editor used to show 1.25 here, a guess that made multi-line boxes taller/looser than the real export
+    textDecoration: x.underline ? "underline" : "none", lineHeight: 1, textAlign: "center",
     whiteSpace: "pre-wrap", wordBreak: "break-word", color: x.color,
     ...(x.bg
       ? { background: x.bg, padding: `${font * 0.2}px ${font * 0.3}px` }

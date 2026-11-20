@@ -1,16 +1,17 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { mediaUrl, patchNode } from "../../api/client";
 import { useBoardStore } from "../../store/board";
 import type { FlowNode } from "../../store/board";
 import { FLOW_DROPPED_VIDEO, useGenerationStore } from "../../store/generation";
+import { useSetupStore } from "../../store/setup";
 import { useQuicktoolStore } from "../../store/quicktool";
 import { useSettingsStore } from "../../store/settings";
 import { useFlowCredits } from "../../components/credits";
 import { creditsPerClip, hasMedia, isBusy, type ClipRoles } from "../roles";
 import { toast } from "../../store/toast";
 import { knownFlowCheck } from "../flowModelCheck";
-import { FLOW_SLOW_AFTER_S, clockOf } from "../muse";
+import { FLOW_SLOW_AFTER_S, MUSE_ENABLED, clockOf } from "../muse";
 import { MuseBridge, flowWaitS, useFlowWaits, useNow, type MuseFocus } from "./MuseBridge";
 import { JoinOptions } from "./JoinOptions";
 import { askConfirm } from "../../components/Dialogs";
@@ -18,7 +19,10 @@ import { askConfirm } from "../../components/Dialogs";
 function statusLabel(n: FlowNode | null, waitS: number | null = null): string {
   if (!n) return "chưa có node";
   if (isBusy(n)) return n.data.autoPromptStatus === "pending" ? "đang viết prompt…" : `đang tạo…${waitS !== null ? ` ${clockOf(waitS)}` : ""}`;
-  if (n.data.status === "error") return flowDropped(n.data.error) ? "Flow bỏ lượt này" : `lỗi: ${String(n.data.error ?? "không rõ").slice(0, 80)}`;
+  if (n.data.status === "error") {
+    if (wrongAccount(n.data.error)) return "sai tài khoản Flow";
+    return flowDropped(n.data.error) ? "Flow bỏ lượt này" : `lỗi: ${String(n.data.error ?? "không rõ").slice(0, 80)}`;
+  }
   if (hasMedia(n)) return "xong";
   return "chưa tạo";
 }
@@ -35,6 +39,11 @@ function statusTone(n: FlowNode | null): string {
 function flowDropped(error: unknown): boolean {
   const e = String(error ?? "");
   return e.startsWith(FLOW_DROPPED_VIDEO.slice(0, 24)) || /timeout_waiting_video|Timed out|FLOW_DROPPED_JOB/i.test(e);
+}
+
+/** The agent did not send the video: the Flow tab's Google account is not the pinned project's (account_pool.mismatch). */
+function wrongAccount(error: unknown): boolean {
+  return String(error ?? "").startsWith("FLOW_WRONG_ACCOUNT");
 }
 
 /** One-tap requests for "Tạo lại theo yêu cầu" (Vietnamese; the agent rewrites the English prompt). */
@@ -134,6 +143,10 @@ export function StepMedia({ roles, kind, productName = "", boardName = "", voice
   const running = auto !== "idle" && auto !== "done" && auto !== "stopped" && auto !== "failed";
   const videoModel = useSettingsStore((s) => s.videoModel);
   const videoQuality = useSettingsStore((s) => s.videoQuality);
+  const mismatch = useSetupStore((s) => s.status?.flow.mismatch ?? null);
+  const openGuide = useSetupStore((s) => s.openGuide);
+  // the scene boxes say "wrong Flow account" from the setup answer: read it once when the step opens
+  useEffect(() => { if (kind === "video") void useSetupStore.getState().refresh(); }, [kind]);
   const { credits: flowCredits } = useFlowCredits();
   const [uploading, setUploading] = useState<number | null>(null);
   // Scene whose "Tạo lại…" box is open.
@@ -230,7 +243,7 @@ export function StepMedia({ roles, kind, productName = "", boardName = "", voice
           <p className="qt-card__hint">
             Mỗi clip 8 giây bằng {videoModel === "omni_flash" ? "Omni Flash (~12 credit)" : "Veo 3.1"}, thường 1–2 phút. Clip chưa ưng thì bấm "Tạo lại…" ở cảnh đó và ghi muốn sửa gì,
             hoặc <strong>⬆ Dùng video của bạn</strong> để thay bằng cảnh quay thật (mp4/mov, không tốn credit).
-            Flow chậm quá hoặc bỏ lượt thì làm cảnh đó bằng <strong>Muse</strong> (khung "🎬 Làm video bằng Muse" bên dưới).
+            {MUSE_ENABLED && <> Flow chậm quá hoặc bỏ lượt thì làm cảnh đó bằng <strong>Muse</strong> (khung "🎬 Làm video bằng Muse" bên dưới).</>}
           </p>
         )}
         {kind === "video" && <JoinOptions roles={roles} voiceless={voiceless} />}
@@ -299,15 +312,26 @@ export function StepMedia({ roles, kind, productName = "", boardName = "", voice
               {slow && (
                 <div className="qt-slow">
                   <span>⏱ Flow đã chạy {clockOf(waitS ?? 0)} — lâu hơn thường lệ.</span>
-                  <button type="button" className="qt-btn qt-btn--small" onClick={() => museFor(scene.index)}>🎬 Làm cảnh này bằng Muse</button>
+                  {MUSE_ENABLED && <button type="button" className="qt-btn qt-btn--small" onClick={() => museFor(scene.index)}>🎬 Làm cảnh này bằng Muse</button>}
                 </div>
               )}
               {kind === "video" && node && !isBusy(node) && node.data.status === "error"
-                && flowDropped(node.data.error) && (
+                && (flowDropped(node.data.error) || wrongAccount(node.data.error)) && (
                 <div className="qt-dropped">
-                  <p>{FLOW_DROPPED_VIDEO}</p>
-                  <button type="button" className="qt-btn qt-btn--small" onClick={() => museFor(scene.index)}>🎬 Làm cảnh này bằng Muse</button>
-                  {roles.model && modelCheck?.status !== "ok" ? (
+                  <p>{wrongAccount(node.data.error)
+                    ? "DFlow chưa gửi video này: tab Flow và dự án Flow đang chọn thuộc hai tài khoản Google khác nhau."
+                    : FLOW_DROPPED_VIDEO}</p>
+                  {MUSE_ENABLED && <button type="button" className="qt-btn qt-btn--small" onClick={() => museFor(scene.index)}>🎬 Làm cảnh này bằng Muse</button>}
+                  {mismatch || wrongAccount(node.data.error) ? (
+                    <>
+                      <p>{mismatch
+                        ? <>Tab Flow đang đăng nhập <strong>{mismatch.email}</strong>, còn dự án đang chọn là của <strong>{mismatch.owners.join(" / ")}</strong> — Flow nhận rồi bỏ mọi video gửi kiểu này (ảnh vẫn ra).</>
+                        : "Tab Flow vừa đổi tài khoản Google — kiểm tra lại trong Thiết lập."}</p>
+                      <button type="button" className="qt-btn qt-btn--small qt-btn--accent" onClick={() => openGuide("Sửa tài khoản Flow trước khi tạo video")}>
+                        Mở Thiết lập để sửa
+                      </button>
+                    </>
+                  ) : roles.model && modelCheck?.status !== "ok" ? (
                     <>
                       <p>{modelCheck?.status === "blocked"
                         ? "Đã kiểm tra: Flow chặn gương mặt người mẫu của clip này — đổi người mẫu rồi tạo lại ảnh cảnh."
@@ -318,7 +342,10 @@ export function StepMedia({ roles, kind, productName = "", boardName = "", voice
                       </button>
                     </>
                   ) : (
-                    <p>Thử: bấm "Tạo" lại, đổi ảnh cảnh này ở bước 3 sang góc cận sản phẩm, hoặc ⬆ Dùng video của bạn.</p>
+                    <p>{roles.model ? "" : "Clip này không có gương mặt người, nên không phải do người mẫu. "}
+                      Mọi cảnh đều bị bỏ thì thường là tab Flow đang đăng nhập tài khoản Google khác chủ dự án —{" "}
+                      <button type="button" className="qt-link" onClick={() => openGuide("Kiểm tra tài khoản Flow")}>mở Thiết lập</button> để kiểm tra.
+                      Bị bỏ lẻ tẻ: bấm "Tạo" lại, đổi ảnh cảnh này ở bước 3, hoặc ⬆ Dùng video của bạn.</p>
                   )}
                 </div>
               )}
@@ -335,7 +362,7 @@ export function StepMedia({ roles, kind, productName = "", boardName = "", voice
                  onChange={(e) => { void onVideoFile(e.target.files); e.target.value = ""; }} />
         )}
       </section>
-      {kind === "video" && roles.scenes.some((s) => s.video) && (
+      {MUSE_ENABLED && kind === "video" && roles.scenes.some((s) => s.video) && (
         <MuseBridge roles={roles} productName={productName} boardName={boardName} boardId={boardId}
                     focus={museFocus} waits={waits} now={now} />
       )}
