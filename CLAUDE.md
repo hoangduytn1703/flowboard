@@ -2769,4 +2769,10 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
   cũ nên xoá. Test mới `test_disk_usage.py` 3 pass (file có trên máy / file chỉ đăng ký DB nhưng không có file thật → tính 0, không lỗi), `test_boards.py`
   + file mới 13 pass, `tsc` sạch. **Chưa xem bằng mắt trên trình duyệt thật** (extension Claude-in-Chrome không kết nối trong phiên này) — mới kiểm bằng
   `curl` thật trên agent tạm (cổng 8434, dữ liệu `D:\dflow-qc2`, đã xoá) xác nhận cả 2 route trả đúng dữ liệu; code hiển thị (banner, nút, badge) dựa vào
-  đúng kiểu dữ liệu đã qua `tsc`, nhưng chưa chụp ảnh giao diện. Chưa commit.
+  đúng kiểu dữ liệu đã qua `tsc`, nhưng chưa chụp ảnh giao diện.
+- **21/11** — Commit `a4fac39` + tag `v2.2.4` (nhắc nhở bộ nhớ sắp hết, nút quét bộ nhớ, nhãn "N ngày trước" trên clip — dòng trên). Build CI bị chặn
+  vì **lỗi thanh toán GitHub Actions** (private repo hết quota phút miễn phí + Windows runner tính gấp đôi) — người dùng **chuyển repo `flowboard`
+  sang public** (build Actions free không giới hạn cho repo public) → `gh run rerun` build lại, thành công sau ~18 phút. **Phát hành 2.2.4 xong**:
+  release v2.2.4 trên dflow-releases (`DFlow_2.2.4_x64-setup.exe` + `latest.json` 2.2.4), `dflow.io.vn/tai-app` → 2.2.4. **Lưu ý: `flowboard` giờ là
+  repo CÔNG KHAI** (trước đó luôn riêng tư) — source code, lịch sử git, mọi ghi chú trong file này giờ ai cũng xem được trên GitHub; cân nhắc trước khi
+  ghi thông tin nhạy cảm vào đây hoặc commit. `docs/cai-dat-dflow.html` tự lấy bản mới nhất qua API GitHub nên không cần sửa trang khi phát hành.
