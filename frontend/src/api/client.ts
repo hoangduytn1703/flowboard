@@ -247,6 +247,30 @@ export function listBoardSummaries(): Promise<BoardSummary[]> {
   return api<BoardSummary[]>("/api/boards?summary=true");
 }
 
+export interface DiskStatus {
+  free: number;
+  total: number;
+  /** Below the threshold the agent keeps (routes/boards.py LOW_DISK_BYTES) — the Library page shows a warning banner. */
+  low: boolean;
+}
+
+/** One cheap syscall (no file stats) — safe to call whenever the Library page opens. */
+export function getDiskStatus(): Promise<DiskStatus> {
+  return api<DiskStatus>("/api/boards/disk-status");
+}
+
+export interface StorageScan extends DiskStatus {
+  /** Bytes each clip's own media takes up ON THIS MACHINE, keyed by board id (as a string — JSON object keys). */
+  by_board: Record<string, number>;
+  total_clips_bytes: number;
+}
+
+/** Stats every asset referenced by every clip — can take a moment with a big library, so only run it from an
+ * explicit "🔍 Quét bộ nhớ" button, never automatically. */
+export function scanStorage(): Promise<StorageScan> {
+  return api<StorageScan>("/api/boards/storage-scan", { method: "POST" });
+}
+
 /** Shallow-merge `data` into the board's settings (a null value removes a key). */
 /** How many of a clip's scenes already have their 60 fps copy, made in the background (services/smooth_prewarm). */
 export interface Smooth60Status {

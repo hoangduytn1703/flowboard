@@ -1,9 +1,12 @@
+import shutil
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from sqlmodel import delete as sql_delete, select
 
+from flowboard import config
 from flowboard.db import get_session
 from flowboard.db.models import (
     Asset,
@@ -29,6 +32,10 @@ from flowboard.timestamps import utc_iso
 from flowboard.request_types import MEDIA_PRODUCING_TYPES, SIDECAR_REQUEST_TYPES
 
 router = APIRouter(prefix="/api/boards", tags=["boards"])
+
+#: below this many free bytes on the data drive, the Library page warns the
+#: user to clear out old clips.
+LOW_DISK_BYTES = 5 * 1024 ** 3
 
 # In-flight = the statuses the worker can still move a row out of.
 # `done` / `failed` / `timeout` / `canceled` are all terminal.
@@ -115,6 +122,53 @@ def list_boards(summary: bool = Query(False)):
                 by_board.setdefault(bid, []).append((t, st, d))
             return [_board_summary(b, by_board.get(b.id, [])) for b in boards]
         return boards
+
+
+@router.get("/disk-status")
+def disk_status() -> dict:
+    """Free / total space on the drive holding this account's data files —
+    one cheap syscall (no file stats), so the Library page can show a "sắp
+    hết bộ nhớ" warning on every load without running the heavier per-clip
+    scan below."""
+    total, _used, free = shutil.disk_usage(config.STORAGE_DIR)
+    return {"free": free, "total": total, "low": free < LOW_DISK_BYTES}
+
+
+@router.post("/storage-scan")
+def storage_scan() -> dict:
+    """How many bytes each clip's own media takes up ON THIS MACHINE: never
+    downloads anything from the cloud, only stats files already here (media
+    that lives only on another machine / the cloud counts as 0 for this
+    one). Deliberately explicit — stats every asset referenced by every
+    board, which can be slow with a big library — so the Library page only
+    runs this from its "🔍 Quét bộ nhớ" button, not on every page load."""
+    with get_session() as s:
+        boards = s.exec(select(Board)).all()
+        by_board_nodes: dict[int, list[tuple]] = {}
+        for bid, t, st, d in s.exec(select(Node.board_id, Node.type, Node.status, Node.data)).all():
+            by_board_nodes.setdefault(bid, []).append((t, st, d))
+        board_media: dict[int, set[str]] = {
+            b.id: {d.get("mediaId") for _t, _st, d in by_board_nodes.get(b.id, []) if (d or {}).get("mediaId")}
+            for b in boards
+        }
+        all_ids: set[str] = set().union(*board_media.values()) if board_media else set()
+        sizes: dict[str, int] = {}
+        if all_ids:
+            rows = s.exec(select(Asset.uuid_media_id, Asset.local_path).where(Asset.uuid_media_id.in_(all_ids))).all()
+            for mid, path in rows:
+                if not path:
+                    continue
+                try:
+                    sizes[mid] = Path(path).stat().st_size
+                except OSError:
+                    pass  # only on another machine / the cloud — not counted here
+        by_board = {bid: sum(sizes.get(mid, 0) for mid in ids) for bid, ids in board_media.items()}
+        total, _used, free = shutil.disk_usage(config.STORAGE_DIR)
+        return {
+            "free": free, "total": total, "low": free < LOW_DISK_BYTES,
+            "by_board": by_board,
+            "total_clips_bytes": sum(by_board.values()),
+        }
 
 
 @router.post("")

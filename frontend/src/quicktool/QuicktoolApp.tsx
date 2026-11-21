@@ -5,9 +5,13 @@ import {
   clipThumbUrl,
   listBoardSummaries,
   mediaUrl,
+  getDiskStatus,
+  scanStorage,
   type BoardSummary,
   type BoardTemplate,
   type QuicktoolState,
+  type DiskStatus,
+  type StorageScan,
   getProduct,
   type ProductGender,
 } from "../api/client";
@@ -53,6 +57,7 @@ import { useFeature } from "../lib/features";
 import { editPath, MAX_EDIT_TOGETHER } from "../api/edit";
 import { FeatureGate } from "./FeatureGate";
 import { toast, useToastOn } from "../store/toast";
+import { agoOf } from "../api/grab";
 import { PageEmpty, PageLoading } from "./PageState";
 import { askConfirm, askText } from "../components/Dialogs";
 
@@ -204,6 +209,10 @@ function useGridColumns(ref: React.RefObject<HTMLElement>): number {
 /** "Clip của tôi": at most this many rows of cards a page ("Clip mới" counts as one card). */
 const LIBRARY_ROWS = 3;
 
+function fmtBytes(n: number): string {
+  return n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1).replace(".", ",")} GB` : `${Math.max(1, Math.round(n / 1024 ** 2))} MB`;
+}
+
 /** A clip made by "🎙 Lồng tiếng" / "✂️ Cắt video": the editor project behind it (several open together with "✏️ Chỉnh N video"). */
 function dubJobOf(b: BoardSummary): string | null {
   const qt = (b.data as { quicktool?: { template_id?: string; dub?: { job_id?: string } } } | undefined)?.quicktool;
@@ -217,6 +226,9 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
   const boardId = useBoardStore((s) => s.boardId);
   const boards = useBoardStore((s) => s.boards);
   const [summaries, setSummaries] = useState<BoardSummary[] | null>(null);
+  const [disk, setDisk] = useState<DiskStatus | null>(null);
+  const [scan, setScan] = useState<StorageScan | null>(null);
+  const [scanning, setScanning] = useState(false);
   const [picked, setPicked] = useState<Set<number>>(() => new Set());
   const queue = useQuicktoolStore((s) => s.queue);
   const runQueue = useQuicktoolStore((s) => s.runQueue);
@@ -232,6 +244,25 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
   useEffect(() => {
     listBoardSummaries().then(setSummaries).catch(() => setSummaries([]));
   }, [boards.length, pathname]);
+  // Cheap (one syscall) so it is safe to check every time the page opens; the deeper per-clip
+  // breakdown only runs from the "🔍 Quét bộ nhớ" button below.
+  useEffect(() => {
+    getDiskStatus().then(setDisk).catch(() => {});
+  }, [pathname]);
+  async function runStorageScan() {
+    if (scanning) return;
+    setScanning(true);
+    try {
+      const row = await scanStorage();
+      setScan(row);
+      setDisk(row);
+      toast.info(`Video đã làm đang chiếm ${fmtBytes(row.total_clips_bytes)} trên máy này — còn trống ${fmtBytes(row.free)}.`);
+    } catch {
+      toast.error("Quét bộ nhớ lỗi, thử lại sau.");
+    } finally {
+      setScanning(false);
+    }
+  }
   // While the queue runs, the cards keep up with the clip being worked on.
   useEffect(() => {
     if (!queue.running) return;
@@ -379,6 +410,12 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
                     ⚡ Chạy tất cả {unfinished.length} clip dở
                   </button>
                 )}
+                {list.length > 0 && (
+                  <button type="button" className="qt-btn qt-btn--ghost" disabled={scanning} onClick={() => void runStorageScan()}
+                          title="Đo mỗi clip đang chiếm bao nhiêu dung lượng trên máy này, và còn trống bao nhiêu — có thể chậm một chút nếu thư viện lớn">
+                    {scanning ? "Đang quét…" : "🔍 Quét bộ nhớ"}
+                  </button>
+                )}
                 <button type="button" className="qt-btn qt-btn--accent" onClick={() => navigate("/clips/new")}>+ Clip mới</button>
               </>
             )}
@@ -390,6 +427,12 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
             Hàng đợi: clip {queue.done.length + Object.keys(queue.failed).length + 1}/{queue.done.length + Object.keys(queue.failed).length + 1 + queue.pending.length}
             {queue.current !== null && ` — ${list.find((b) => b.id === queue.current)?.name ?? `#${queue.current}`}`}
             {autoMessage ? ` · ${autoMessage}` : ""}
+          </div>
+        )}
+        {disk?.low && (
+          <div className="qt-banner qt-banner--warn">
+            ⚠ Ổ đĩa máy này sắp hết chỗ — chỉ còn {fmtBytes(disk.free)} trống. Bấm "🔍 Quét bộ nhớ" để xem clip nào
+            đang chiếm nhiều dung lượng rồi xoá bớt clip cũ không cần nữa.
           </div>
         )}
         {list.length > 0 && !queue.running && (
@@ -442,6 +485,10 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
                     <span className="qt-clip__thumb qt-clip__thumb--empty">🎬</span>
                   )}
                   <span className="qt-clip__name">{b.name}</span>
+                  <span className="qt-clip__age" title={`Tạo lúc ${new Date(b.created_at).toLocaleString("vi-VN")}`}>
+                    {agoOf(b.created_at)}
+                    {scan?.by_board[String(b.id)] !== undefined && ` · ${fmtBytes(scan.by_board[String(b.id)])}`}
+                  </span>
                   <span className="qt-clip__meta">
                     {b.summary.scenes_done}/{b.summary.scenes} ảnh · {b.summary.clips_done}/{b.summary.clips} video
                   </span>

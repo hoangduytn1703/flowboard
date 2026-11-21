@@ -2760,3 +2760,13 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
 - **20/11** — Phát hành **2.2.3**: gộp sửa 🔤 Chữ (dòng trên) + mọi việc 18/11 còn chưa commit (bỏ chặn "chỉ bàn tay" / giới-tính-người-mẫu thành gợi ý, màu
   sản phẩm lấy từ ảnh sản phẩm thay vì danh sách màu mô tả, phân tích video mẫu/link nhanh bằng đua nhiều model Gemini + AI viết dự phòng, tab Flow sai tài
   khoản bị chặn trước khi gửi video, ẩn Muse, bỏ giao diện camera khỏi ảnh cảnh). Bump version 8 file → 2.2.3, commit, tag `v2.2.3`, push.
+- **21/11** — Nhắc nhở bộ nhớ máy sắp hết + nút quét bộ nhớ trong "Clip của tôi": `routes/boards.py` thêm `GET /api/boards/disk-status` (một lệnh
+  `shutil.disk_usage` rẻ, Library tự gọi mỗi lần mở trang, hiện banner vàng "⚠ Ổ đĩa máy này sắp hết chỗ…" khi còn dưới `LOW_DISK_BYTES` 5 GB) và
+  `POST /api/boards/storage-scan` (nặng hơn — gom mọi `mediaId` mà mỗi board tham chiếu, `stat()` file đã có **trên máy này** của từng Asset, bỏ qua file
+  chỉ có trên cloud/máy khác chứ không tự tải về; trả `by_board` theo id). Nút **"🔍 Quét bộ nhớ"** ở `QuicktoolApp.tsx` (`Library`) gọi route nặng,
+  báo tổng dung lượng + chỗ trống qua toast và lưu kết quả vào state để mỗi thẻ clip hiện thêm kích thước. Mỗi thẻ clip luôn có dòng **"N ngày trước"**
+  (`agoOf` từ `api/grab.ts`, dùng lại — không viết thêm bản thứ 4 — trên `Board.created_at` sẵn có, không cần sửa backend cho phần này) để dễ nhận ra clip
+  cũ nên xoá. Test mới `test_disk_usage.py` 3 pass (file có trên máy / file chỉ đăng ký DB nhưng không có file thật → tính 0, không lỗi), `test_boards.py`
+  + file mới 13 pass, `tsc` sạch. **Chưa xem bằng mắt trên trình duyệt thật** (extension Claude-in-Chrome không kết nối trong phiên này) — mới kiểm bằng
+  `curl` thật trên agent tạm (cổng 8434, dữ liệu `D:\dflow-qc2`, đã xoá) xác nhận cả 2 route trả đúng dữ liệu; code hiển thị (banner, nút, badge) dựa vào
+  đúng kiểu dữ liệu đã qua `tsc`, nhưng chưa chụp ảnh giao diện. Chưa commit.
