@@ -23,17 +23,17 @@ function subLook(style: string): { bar: string; line: string; shadow: string } {
  * before thumbnails existed — has one. A preset with nothing to draw gets the plain default: a dark 9:16 screen with a
  * subtitle bar near the bottom.
  */
-export function LookThumb({ preset }: { preset: DecorPreset }) {
+export function LookThumb({ preset, width = SLOT_W }: { preset: DecorPreset; width?: number }) {
   const d = (preset.data ?? {}) as Partial<LookPresetData>;
   const layout: Partial<DubLayout> = d.layout ?? {};
   const c = layout.canvas ?? null;
   const [aw, ah] = ASPECTS[c?.aspect ?? "9:16"] ?? [9, 16];
   const outW = aw * 100, outH = ah * 100;
   const wide = aw > ah;
-  const slotH = Math.round(SLOT_W * 16 / 9);
+  const slotH = Math.round(width * 16 / 9);
   // the frame's own size inside the slot, in px (so grid cells scale like the render's)
-  const fw = wide ? SLOT_W : Math.round(slotH * aw / ah);
-  const fh = wide ? Math.round(SLOT_W * ah / aw) : slotH;
+  const fw = wide ? width : Math.round(slotH * aw / ah);
+  const fh = wide ? Math.round(width * ah / aw) : slotH;
 
   // background of the whole frame
   const back: CSSProperties = { background: "linear-gradient(160deg, #2c3346, #161922)" };
@@ -64,7 +64,7 @@ export function LookThumb({ preset }: { preset: DecorPreset }) {
   const mascot = layout.mascot ?? null;
 
   return (
-    <span className="dx-lookthumb" aria-hidden="true">
+    <span className="dx-lookthumb" aria-hidden="true" style={{ width, height: slotH }}>
       <span className="dx-lookthumb__f" style={{ width: fw, height: fh, ...back }}>
         {frameBg && <span className="dx-lookthumb__abs" style={frameBg} />}
         <span className="dx-lookthumb__video"

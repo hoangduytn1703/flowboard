@@ -106,10 +106,10 @@ export function DubNowDialog({ count, missing, onStart, onClose, onOpenPage }: {
         )}
         {looks.length > 0 && (
           <label className="qt-field">
-            <span>Kiểu chỉnh sửa <small>(khung, nền, kiểu phụ đề đã lưu)</small></span>
+            <span>Template <small>(khung, nền, kiểu phụ đề đã lưu)</small></span>
             <select value={o.look_preset_id ?? ""} onChange={(e) => setO({ ...o, look_preset_id: e.target.value ? Number(e.target.value) : null })}>
-              <option value="">— Không dùng mẫu —</option>
-              {looks.map((p) => <option key={p.id} value={p.id}>★ {p.name}</option>)}
+              <option value="">— Không dùng template —</option>
+              {looks.map((p) => <option key={p.id} value={p.id}>{p.favorite ? "★ " : ""}{p.name}</option>)}
             </select>
           </label>
         )}

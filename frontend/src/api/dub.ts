@@ -464,9 +464,11 @@ export interface DecorPreset {
   data: DubFrame | DubMascot | LookPresetData;
   thumb: string;
   uses: number;
+  /** ★ marked by the seller: listed first */
+  favorite?: boolean;
 }
 
-/** "★ Mẫu chỉnh sửa": the clip-independent look of a dubbed video (services/dub.normalize_look_preset). */
+/** "Template" (the editor's ★ Template button): the clip-independent look of a dubbed video (services/dub.normalize_look_preset). */
 export interface LookPresetData {
   layout: DubLayout;
   style: string;
@@ -480,6 +482,11 @@ export function listLookPresets(): Promise<DecorPreset[]> {
 }
 export function saveLookPreset(name: string, data: LookPresetData): Promise<DecorPreset> {
   return post<DecorPreset>("/api/dub/decor/presets", { kind: "look", name, data: { ...data, highlights: { ...data.highlights, points: [], picked: "" } } });
+}
+/** Rename a template, ★ mark it, or overwrite its look with the clip being edited ("Lưu đè"). */
+export function updateLookPreset(id: number, patch: { name?: string; favorite?: boolean; data?: LookPresetData }): Promise<DecorPreset> {
+  const body = patch.data ? { ...patch, data: { ...patch.data, highlights: { ...patch.data.highlights, points: [], picked: "" } } } : patch;
+  return api<DecorPreset>(`/api/dub/decor/presets/${id}`, { method: "PATCH", body: JSON.stringify(body) });
 }
 /** The look new dubbing jobs start with (null = plain defaults). */
 export function getDefaultLook(): Promise<{ id: number | null }> {

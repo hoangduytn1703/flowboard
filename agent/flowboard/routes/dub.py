@@ -443,7 +443,8 @@ class PresetBody(BaseModel):
 
 def _preset_row(p: Any) -> dict[str, Any]:
     return {"id": p.id, "kind": p.kind, "name": p.name, "data": dict(p.data or {}), "thumb": p.thumb or "",
-            "uses": p.uses, "created_at": p.created_at.isoformat() if p.created_at else None}
+            "uses": p.uses, "favorite": bool(getattr(p, "favorite", False)),
+            "created_at": p.created_at.isoformat() if p.created_at else None}
 
 
 @router.get("/decor/presets")
@@ -453,7 +454,9 @@ def list_presets(kind: Optional[str] = None) -> list[dict[str, Any]]:
     from sqlmodel import select
 
     with get_session() as s:
-        q = select(DecorPreset).order_by(DecorPreset.uses.desc(), DecorPreset.id.desc())  # type: ignore[union-attr]
+        # ★ favourites first, then the ones used most
+        q = select(DecorPreset).order_by(DecorPreset.favorite.desc(), DecorPreset.uses.desc(),  # type: ignore[union-attr,attr-defined]
+                                         DecorPreset.id.desc())  # type: ignore[union-attr]
         if kind in ("frame", "mascot", "look"):
             q = q.where(DecorPreset.kind == kind)
         else:
@@ -509,6 +512,43 @@ def save_preset(body: PresetBody) -> dict[str, Any]:
     with get_session() as s:
         p = DecorPreset(kind=body.kind, name=(body.name or {"frame": "Khung", "mascot": "Nhân vật", "look": "Mẫu"}[body.kind]).strip()[:60],
                         data=data, thumb=thumb)
+        s.add(p)
+        s.commit()
+        s.refresh(p)
+        return _preset_row(p)
+
+
+class PresetPatch(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=200)
+    favorite: Optional[bool] = None
+    # a template's whole look replaced by the editor's current one ("Lưu đè"); frames / stickers keep theirs
+    data: Optional[dict[str, Any]] = None
+
+
+@router.patch("/decor/presets/{preset_id}")
+def patch_preset(preset_id: int, body: PresetPatch) -> dict[str, Any]:
+    """Rename a saved template, ★ mark it, or overwrite its look with the clip being edited."""
+    from flowboard.db import get_session
+    from flowboard.db.models import DecorPreset
+
+    with get_session() as s:
+        p = s.get(DecorPreset, preset_id)
+        if p is None:
+            raise HTTPException(404, "Không thấy template này")
+        if body.name is not None:
+            name = body.name.strip()[:60]
+            if not name:
+                raise HTTPException(400, "Tên template không được để trống")
+            p.name = name
+        if body.favorite is not None:
+            p.favorite = bool(body.favorite)
+        if body.data is not None:
+            if p.kind != "look":
+                raise HTTPException(400, "Chỉ ghi đè được template chỉnh sửa")
+            data = dub.normalize_look_preset(body.data)
+            p.data = data
+            lay = data["layout"]
+            p.thumb = (lay.get("mascot") or {}).get("media_id") or (lay.get("frame") or {}).get("bg_image") or ""
         s.add(p)
         s.commit()
         s.refresh(p)

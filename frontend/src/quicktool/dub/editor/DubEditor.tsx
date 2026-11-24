@@ -800,7 +800,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
                         media={job.board_id ? [] : [{ media_id: job.media_id, name: job.name || job.title || "video" }]} />
           )}
           {job.board_id && <button type="button" className="qt-btn qt-btn--small" disabled={batchBusy} onClick={() => navigate(`/clips/${job.board_id}/export`)}>Mở clip →</button>}
-          <LookPresets readOnly={readOnly}
+          <LookPresets readOnly={readOnly} jobId={job.job_id}
                        current={{ layout: doc.layout, style: doc.style, engine: out.engine, highlights: doc.highlights }}
                        onApply={(d, name) => {
                          // the whole look in one undo step; this clip's own key-moment points and title words stay
@@ -810,7 +810,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
                                           layout: { ...theirs, texts: withTextSlots(carryTexts(theirs.texts ?? [], x.layout.texts ?? [], w.title, w.subtitle), w.title, w.subtitle) },
                                           highlights: { ...normHighlights(d.highlights), points: x.highlights.points, picked: x.highlights.picked } }));
                          setOut((o) => ({ ...o, engine: d.engine }));
-                         toast.success(`Đã áp mẫu "${name}" — xem trước rồi bấm Xuất lại video.`);
+                         toast.success(`Đã áp template "${name}" — xem trước rồi bấm Xuất lại video.`);
                        }} />
           {siblings.length > 1 && onApplyAll && (
             <button type="button" className="qt-btn qt-btn--small" disabled={readOnly || applyingAll} onClick={() => void applyAll()}

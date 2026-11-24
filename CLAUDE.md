@@ -2161,6 +2161,14 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   đi thẳng sang `/tools/edit`; link cũ `/tools/dub?job=`, `/tools/cut?job=&run=&parts=` tự chuyển. Nút "✏️ Chỉnh N video đã lồng" ở thanh chọn Cào video kênh,
   "✏️ Chỉnh N video" ở Clip của tôi (clip `dub` / `cut_part`). **Chưa dạy trợ lý AI** (trợ lý đang ẩn). Test `test_video_edit.py` (4, ffmpeg thật).
   **24/11 đổi (xem mục dưới)**: `/tools/edit` không còn danh sách riêng — chỉ là trình chỉnh sửa; video nhập vào thành clip ngay.
+- **★ Template (mẫu chỉnh sửa) — 24/11** (nút trên thanh trình chỉnh sửa, `dub/editor/LookPresets.tsx`; trước gọi "★ Kiểu" / "Mẫu chỉnh sửa", mọi chữ người
+  dùng thấy đổi thành "Template" — cả ô chọn ở Lồng tiếng, Cắt video, hộp "Lồng tiếng ngay"): mỗi dòng = **☆/★ yêu thích** (đầu dòng; `DecorPreset.favorite`,
+  migration `db.ensure_decorpreset_favorite_column`, danh sách xếp ★ trước rồi lượt dùng) · ảnh nhỏ · tên (2 dòng) + nhãn "đang dùng" / "mặc định" · nút nhỏ
+  **Áp dụng** · **⋯** (mở hàng nút: Đổi tên, Cập nhật bằng clip này, Đặt / Bỏ mặc định, Xoá). `PATCH /api/dub/decor/presets/{id} {name?, favorite?, data?}`
+  (`data` = ghi đè look, chỉ kind look, chuẩn hoá như lúc lưu). **Lưu khi clip đang theo một template** → hộp `askChoice` (mới trong `components/Dialogs.tsx`:
+  nhiều lựa chọn có dòng giải thích, Esc / Huỷ = null): "Cập nhật template X" / "Lưu thành template mới". Clip nhớ template đã áp trong localStorage
+  `dflow.template.applied` (job id → id, 300 mục) — máy khác / clip tạo bằng template mặc định thì chưa biết, vẫn ghi đè được qua ⋯. Popover không đóng khi
+  bấm trong hộp hỏi nó mở (`.dlg-backdrop`). Test `test_a_template_is_renamed_starred_first_and_overwritten`.
 - **Gộp giao diện 24/11** (`docs/ux-review-2026-11-24.md`, người dùng: "nồi lẩu thập cẩm" → làm mục 1–14, 16–18): **"🎞 Xử lý video"** (`/tools`,
   `pages/VideoHubPage.tsx` + `videohub.css`, tiền tố `vh`) = một cửa đưa video vào: ① link (mỗi ô một link, dán nhiều tự tách) / file (tải lên ngay qua
   `uploadDubVideo`) / "Chọn từ Clip của tôi" (`ClipPickDialog everyClip`) / "Lấy từ kênh" → ② Lồng tiếng · Chỉ phụ đề · Cắt · Chỉnh sửa · Xoá chữ (`why(a)` nói
@@ -2823,3 +2831,8 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
   Clip mới, Cào kênh, Bài viết — không tràn ngang, không lỗi console (chỉ 401 trước đăng nhập). Cả bộ test 1362 pass / 2 skip / 1 lỗi 0600 đã biết (bỏ 4 file lỗi
   môi trường). Bản web khởi động lại (start.ps1). Chưa commit.
 - **24/11 (phát hành)** — Người dùng bảo push hết + tạo bản cập nhật: số phiên bản **2.3.0** ở 8 file (gộp giao diện 24/11, chọn chỗ lưu video tải về, "Clip của tôi" chỉ clip xong + phát được trên máy), commit + tag `v2.3.0`. Không đưa `extension/_metadata/generated_indexed_rulesets/_ruleset1` (Chrome tự sinh lại khi nạp extension) vào commit. Trả lời người dùng: lồng tiếng chỉ ra tiếng Việt, "Chỉ thêm phụ đề" chọn 12 ngôn ngữ (vi, en, zh, ja, ko, th, id, es, fr, de, pt, ru) + "đúng lời gốc".
+- **24/11 (tối)** — Theo góp ý nút "Kiểu" trong trình chỉnh sửa: đổi tên thành **Template**, ★ yêu thích (lên đầu), đổi tên template, dòng gọn (Áp dụng + ⋯),
+  lưu khi clip đang theo template thì hỏi cập nhật hay tạo mới (xem Chỗ cần biết → "★ Template"). `db/models.py`, `db/__init__.py`, `routes/dub.py`, `api/dub.ts`,
+  `Dialogs.tsx`, `LookPresets.tsx`, `LookThumb.tsx` (cỡ ảnh nhỏ), `DubEditor.tsx`, `DubPage.tsx`, `CutPage.tsx`, `DubNowDialog.tsx`, `editor.css`, `styles.css`.
+  Test template / editor / cắt 34 pass, `tsc` sạch; Playwright trên agent QC 8534: lưu → hỏi → cập nhật, ★ đổi thứ tự, đổi tên, ⋯, 1280 px. Bản web chạy lại
+  (`start170.log`, lần đầu mở kho sẽ thêm cột `favorite`). Phát hành **2.3.1** (số phiên bản ở 8 file, tag `v2.3.1`).

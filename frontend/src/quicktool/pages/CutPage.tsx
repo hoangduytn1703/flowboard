@@ -99,7 +99,7 @@ export function CutPage() {
   // saved cut prompts (with the account): each analysed video's editor picks from them
   const [prompts, setPrompts] = useState<CutPrompt[]>([]);
   const [channelId, setChannelId] = useState<number | null>(null);
-  // "★ Mẫu chỉnh sửa": the saved look (9:16 frame, background, sticker, blur boxes…) every part is rendered in;
+  // "★ Template": the saved look (9:16 frame, background, sticker, blur boxes…) every part is rendered in;
   // the default one is pre-picked, like the dubbing form
   const [looks, setLooks] = useState<DecorPreset[]>([]);
   const [lookId, setLookId] = useState<number | null>(null);
@@ -326,12 +326,12 @@ export function CutPage() {
                 đoạn rồi cắt luôn được. Lời trong video được nghe ngầm phía sau (chỉ cần cho “AI chọn đoạn” và phụ đề), không chặn bạn.</p>
               {looks.length > 0 && (
                 <label className="qt-field">
-                  <span>Kiểu chỉnh sửa cho các video cắt ra <small className="qt-card__hint">(khung 9:16, nền, logo / nhân vật, vùng mờ… đã lưu bằng nút ★ Kiểu trong trình chỉnh sửa)</small></span>
+                  <span>Template cho các video cắt ra <small className="qt-card__hint">(khung 9:16, nền, logo / nhân vật, vùng mờ… đã lưu bằng nút ★ Template trong trình chỉnh sửa)</small></span>
                   <select className="qt-input" value={lookId ?? ""} onChange={(e) => setLookId(e.target.value ? Number(e.target.value) : null)}>
-                    <option value="">— Không dùng kiểu nào, để video thô —</option>
-                    {looks.map((p) => <option key={p.id} value={p.id}>★ {p.name}{p.uses ? ` · dùng ${p.uses} lần` : ""}</option>)}
+                    <option value="">— Không dùng template, để video thô —</option>
+                    {looks.map((p) => <option key={p.id} value={p.id}>{p.favorite ? "★ " : ""}{p.name}{p.uses ? ` · dùng ${p.uses} lần` : ""}</option>)}
                   </select>
-                  {lookId !== null && <small className="qt-card__hint">Cắt xong mỗi video được áp kiểu này và xuất luôn — mở ✏️ Chỉnh nếu muốn sửa thêm.</small>}
+                  {lookId !== null && <small className="qt-card__hint">Cắt xong mỗi video được áp template này và xuất luôn — mở ✏️ Chỉnh nếu muốn sửa thêm.</small>}
                 </label>
               )}
               <ChannelPicker value={channelId} onChange={setChannelId} label="Lưu clip vào kênh" />

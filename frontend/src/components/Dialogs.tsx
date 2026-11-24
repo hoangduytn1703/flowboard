@@ -10,16 +10,27 @@ import { create } from "zustand";
  *
  *   if (!(await askConfirm("Đăng bài này lên Page ngay?"))) return;
  *   const name = await askText("Tên mẫu", "Mẫu 1");   // null = cancelled
+ *   const pick = await askChoice("Lưu thế nào?", [{ value: "over", label: "Lưu đè" }, { value: "new", label: "Tạo mới", primary: true }]);
  */
+export interface Choice {
+  value: string;
+  label: string;
+  /** one line under the label */
+  hint?: string;
+  /** the main (orange) choice — Enter picks it */
+  primary?: boolean;
+}
+
 interface Pending {
   id: number;
-  kind: "confirm" | "text";
+  kind: "confirm" | "text" | "choice";
   message: string;
   ok: string;
   cancel: string;
   danger: boolean;
   value: string;
   placeholder: string;
+  choices: Choice[];
   resolve: (value: boolean | string | null) => void;
 }
 
@@ -46,14 +57,21 @@ function open(item: Omit<Pending, "id" | "resolve">): Promise<boolean | string |
 
 export function askConfirm(message: string, opts: ConfirmOptions = {}): Promise<boolean> {
   return open({
-    kind: "confirm", message, ok: opts.ok ?? "Đồng ý", cancel: opts.cancel ?? "Huỷ", danger: !!opts.danger, value: "", placeholder: "",
+    kind: "confirm", message, ok: opts.ok ?? "Đồng ý", cancel: opts.cancel ?? "Huỷ", danger: !!opts.danger, value: "", placeholder: "", choices: [],
   }).then((v) => v === true);
 }
 
 export function askText(message: string, value = "", opts: TextOptions = {}): Promise<string | null> {
   return open({
     kind: "text", message, ok: opts.ok ?? "Lưu", cancel: opts.cancel ?? "Huỷ", danger: !!opts.danger, value,
-    placeholder: opts.placeholder ?? "",
+    placeholder: opts.placeholder ?? "", choices: [],
+  }).then((v) => (typeof v === "string" ? v : null));
+}
+
+/** Several ways out (a big button each, then "Huỷ"): the picked choice's value, null = cancelled. */
+export function askChoice(message: string, choices: Choice[], opts: { cancel?: string } = {}): Promise<string | null> {
+  return open({
+    kind: "choice", message, ok: "", cancel: opts.cancel ?? "Huỷ", danger: false, value: "", placeholder: "", choices,
   }).then((v) => (typeof v === "string" ? v : null));
 }
 
@@ -82,7 +100,7 @@ export function DialogHost() {
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
-        close(item, item.kind === "text" ? null : false);
+        close(item, item.kind === "confirm" ? false : null);
       }
     };
     window.addEventListener("keydown", onKey, true);
@@ -90,6 +108,29 @@ export function DialogHost() {
   }, [item]);
 
   if (!item) return null;
+  if (item.kind === "choice") {
+    return (
+      <div className="project-modal-backdrop dlg-backdrop" role="presentation"
+           onMouseDown={(e) => { if (e.target === e.currentTarget) close(item, null); }}>
+        <div className="project-modal dlg" role="alertdialog" aria-modal="true" aria-label="Chọn">
+          <p className="dlg__message">{item.message}</p>
+          <div className="dlg__choices">
+            {item.choices.map((c) => (
+              <button key={c.value} type="button" ref={c.primary ? okRef : undefined}
+                      className={`project-modal__btn dlg__choice${c.primary ? " project-modal__btn--primary" : ""}`}
+                      onClick={() => close(item, c.value)}>
+                <strong>{c.label}</strong>
+                {c.hint && <small>{c.hint}</small>}
+              </button>
+            ))}
+          </div>
+          <div className="project-modal__actions">
+            <button type="button" className="project-modal__btn" onClick={() => close(item, null)}>{item.cancel}</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
   const submit = () => close(item, item.kind === "text" ? text : true);
   return (
     <div className="project-modal-backdrop dlg-backdrop" role="presentation"

@@ -66,7 +66,7 @@ export function DubPage() {
   const setVoice = useSettingsStore((s) => s.setDubVoice);
   const [style, setStyle] = useState("box_yellow");
   const [engine, setEngine] = useState<DubEngine>("ass");
-  // "★ Mẫu chỉnh sửa": a saved look for the new video (the default one is pre-picked); its style / engine win
+  // "★ Template": a saved look for the new video (the default one is pre-picked); its style / engine win
   const [looks, setLooks] = useState<DecorPreset[]>([]);
   const [lookId, setLookId] = useState<number | null>(null);
   useEffect(() => {
@@ -576,14 +576,14 @@ export function DubPage() {
                 {!subOnly && <VoiceField value={voice} onChange={setVoice} sampleText="Các mẹ bầu bị căng cứng bụng cuối thai kỳ thì nhớ đeo đai nâng bụng ngay nha." disabled={working} />}
                 {looks.length > 0 && (
                   <label className="qt-field">
-                    <span>Kiểu chỉnh sửa <small className="qt-card__hint">(kiểu phụ đề, vùng mờ, khung xuất, khung, nhân vật… đã lưu từ clip trước — lưu / đặt mặc định ở nút ★ Kiểu trong trình chỉnh sửa)</small></span>
+                    <span>Template <small className="qt-card__hint">(kiểu phụ đề, vùng mờ, khung xuất, khung, nhân vật… đã lưu từ clip trước — lưu / đặt mặc định ở nút ★ Template trong trình chỉnh sửa)</small></span>
                     <select value={lookId ?? ""} onChange={(e) => setLookId(e.target.value ? Number(e.target.value) : null)} disabled={working}>
-                      <option value="">— Không dùng kiểu nào, chỉnh tay —</option>
-                      {looks.map((p) => <option key={p.id} value={p.id}>★ {p.name}{p.uses ? ` · dùng ${p.uses} lần` : ""}</option>)}
+                      <option value="">— Không dùng template, chỉnh tay —</option>
+                      {looks.map((p) => <option key={p.id} value={p.id}>{p.favorite ? "★ " : ""}{p.name}{p.uses ? ` · dùng ${p.uses} lần` : ""}</option>)}
                     </select>
                   </label>
                 )}
-                {lookId !== null && <p className="qt-card__hint">Kiểu phụ đề lấy theo kiểu chỉnh sửa đã chọn; ô dưới chỉ dùng khi không chọn.</p>}
+                {lookId !== null && <p className="qt-card__hint">Kiểu phụ đề lấy theo template đã chọn; ô dưới chỉ dùng khi không chọn template.</p>}
                 <label className="qt-field">
                   <span>Cách vẽ phụ đề <small className="qt-card__hint">(nhanh · hoặc đẹp: font Việt, emoji màu, chữ sáng từng từ)</small></span>
                   <select value={engine} onChange={(e) => pickEngine(e.target.value as DubEngine)} disabled={working || lookId !== null}>

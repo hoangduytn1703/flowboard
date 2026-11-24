@@ -338,6 +338,7 @@ class DecorPreset(SQLModel, table=True):
     data: dict = Field(default_factory=dict, sa_column=Column(JSON))
     thumb: str = ""
     uses: int = 0
+    favorite: bool = False  # ★ marked by the seller: listed first (db.ensure_decorpreset_favorite_column)
     created_at: datetime = Field(default_factory=_utcnow)
 
 

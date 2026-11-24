@@ -54,3 +54,31 @@ def test_look_presets_are_saved_listed_defaulted_and_start_a_job(client, monkeyp
     # deleting the default leaves no default
     assert client.delete(f"/api/dub/decor/presets/{pid}").status_code == 200
     assert client.get("/api/dub/decor/presets/default").json() == {"id": None}
+
+
+def test_a_template_is_renamed_starred_first_and_overwritten(client):
+    def save(name: str) -> int:
+        r = client.post("/api/dub/decor/presets", json={"kind": "look", "name": name,
+                                                        "data": {"layout": {"y": 0.8}, "style": "outline", "engine": "ass"}})
+        assert r.status_code == 201, r.text
+        return r.json()["id"]
+
+    a, b = save("A"), save("B")
+    listed = client.get("/api/dub/decor/presets?kind=look").json()
+    assert [p["id"] for p in listed] == [b, a] and not any(p["favorite"] for p in listed)
+    # ★ puts a template first
+    r = client.patch(f"/api/dub/decor/presets/{a}", json={"favorite": True})
+    assert r.status_code == 200 and r.json()["favorite"] is True
+    assert [p["id"] for p in client.get("/api/dub/decor/presets?kind=look").json()] == [a, b]
+    # rename (blank is refused)
+    assert client.patch(f"/api/dub/decor/presets/{a}", json={"name": "  Page vũ trụ  "}).json()["name"] == "Page vũ trụ"
+    assert client.patch(f"/api/dub/decor/presets/{a}", json={"name": "  "}).status_code == 400
+    # overwrite the look with the editor's current one: normalised, points dropped, name / star kept
+    r = client.patch(f"/api/dub/decor/presets/{a}", json={"data": {"layout": {"y": 0.5, "canvas": {"aspect": "9:16"}}, "style": "box_white",
+                                                                     "engine": "ass", "highlights": {"on": True, "points": [{"at": 1, "words": "x"}]}}})
+    p = r.json()
+    assert r.status_code == 200 and p["data"]["layout"]["y"] == 0.5 and p["data"]["style"] == "box_white"
+    assert p["data"]["highlights"]["points"] == [] and p["name"] == "Page vũ trụ" and p["favorite"] is True
+    assert client.patch("/api/dub/decor/presets/9999", json={"favorite": True}).status_code == 404
+    for pid in (a, b):
+        client.delete(f"/api/dub/decor/presets/{pid}")
