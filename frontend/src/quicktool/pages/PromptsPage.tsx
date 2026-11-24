@@ -94,8 +94,8 @@ export function PromptsPage() {
     setError(null);
     try {
       const { added } = await restoreSamplePrompts();
-      if (added) toast.success(`Đã thêm lại ${added} prompt mẫu.`);
-      else toast.info("Đã có đủ prompt mẫu, không thiếu cái nào.");
+      if (added) toast.success(`Đã thêm lại ${added} prompt có sẵn.`);
+      else toast.info("Đã có đủ prompt có sẵn, không thiếu cái nào.");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "lỗi");
@@ -141,7 +141,7 @@ export function PromptsPage() {
                    onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void load(); }} />
             <button type="button" className="qt-btn qt-btn--ghost qt-btn--small" onClick={() => void load()}>Tìm</button>
             <button type="button" className="qt-btn qt-btn--ghost qt-btn--small" onClick={() => void restoreSamples()}
-                    title="Thêm lại các prompt mẫu có sẵn đã bị xoá">↺ Prompt mẫu</button>
+                    title="Thêm lại các prompt có sẵn có sẵn đã bị xoá">↺ Prompt có sẵn</button>
           </div>
         </div>
 
@@ -201,8 +201,8 @@ export function PromptsPage() {
         {items === null && <PageLoading text="Đang tải prompt…" />}
         {items && items.length === 0 && (
           <PageEmpty icon="📚" title="Chưa có prompt nào"
-                     actions={<button type="button" className="qt-btn qt-btn--accent" onClick={() => void restoreSamples()}>↺ Thêm lại prompt mẫu</button>}>
-            Lưu prompt hay ở Bước 2 của clip (<strong>★ Lưu</strong>) để dùng lại, hoặc thêm lại bộ prompt mẫu có sẵn.
+                     actions={<button type="button" className="qt-btn qt-btn--accent" onClick={() => void restoreSamples()}>↺ Thêm lại prompt có sẵn</button>}>
+            Lưu prompt hay ở Bước 2 của clip (<strong>★ Lưu</strong>) để dùng lại, hoặc thêm lại bộ prompt có sẵn có sẵn.
           </PageEmpty>
         )}
 
@@ -211,7 +211,7 @@ export function PromptsPage() {
             <article key={p.id} className="qt-plib-card">
               <div className="qt-plib-card__head">
                 <span className={`qt-plib-card__kind qt-plib-card__kind--${p.kind}`}>{PROMPT_KIND_LABEL[p.kind]}</span>
-                {p.tags.includes(SAMPLE_TAG) && <span className="qt-plib-card__sample" title="Prompt mẫu có sẵn — sửa hay xoá tuỳ ý">Mẫu</span>}
+                {p.tags.includes(SAMPLE_TAG) && <span className="qt-plib-card__sample" title="Prompt có sẵn — sửa hay xoá tuỳ ý">Có sẵn</span>}
                 <button type="button" className="qt-btn qt-btn--small qt-btn--danger qt-plib-card__del" onClick={() => void remove(p)}>🗑 Xoá</button>
               </div>
               <button type="button" className="qt-plib-card__title" onClick={() => void rename(p)} title={`${p.title} — bấm để đổi tên`}>{p.title} ✎</button>

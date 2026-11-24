@@ -89,7 +89,6 @@ export function PostsPage() {
   const [options, setOptions] = useState<PostOptions | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [saved, setSaved] = useState<SavedPost[]>([]);
-  const [tab, setTab] = useState<"form" | "chat">("form");
   // "✍️ Viết & đăng" by hand ⇄ "🤖 Tự động đăng" (fixed schedules, services/autopilot); /posts?auto=1 opens the latter
   const [mode, setMode] = useState<"write" | "auto">(() => (params.get("auto") ? "auto" : "write"));
   const fbOn = useFeature("facebook");
@@ -695,7 +694,7 @@ export function PostsPage() {
       </header>
       <div className="qt-home qt-posts">
         {autoOn && <div className="qt-posts__modes" role="tablist" aria-label="Cách đăng">
-          <button type="button" role="tab" aria-selected={mode === "write"} className={mode === "write" ? "is-on" : ""} onClick={() => setMode("write")}>✍️ Viết & đăng</button>
+          <button type="button" role="tab" aria-selected={mode === "write"} className={mode === "write" ? "is-on" : ""} onClick={() => setMode("write")}>✍️ Viết bài</button>
           <button type="button" role="tab" aria-selected={mode === "auto"} className={mode === "auto" ? "is-on" : ""} onClick={() => setMode("auto")}>🤖 Tự động đăng theo lịch</button>
         </div>}
         {mode === "auto" && autoOn ? (
@@ -703,11 +702,6 @@ export function PostsPage() {
         ) : (<>
         <div className="qt-posts__grid">
           <section className="qt-card qt-posts__left">
-            <div className="qt-posts__tabs" role="tablist">
-              <button type="button" role="tab" aria-selected={tab === "form"} className={tab === "form" ? "is-on" : ""} onClick={() => setTab("form")}>📝 Điền mẫu</button>
-              <button type="button" role="tab" aria-selected={tab === "chat"} className={tab === "chat" ? "is-on" : ""} onClick={() => setTab("chat")}>💬 Chat với AI</button>
-            </div>
-
             <div className="qt-posts__block">
               <div className="qt-posts__blockhead"><span className="qt-posts__num">1</span> Đăng ở đâu</div>
               <ChannelPicker value={channelId} onChange={setChannelId} required label="Kênh / page" />
@@ -732,7 +726,7 @@ export function PostsPage() {
               )}
             </div>
 
-            {tab === "form" ? (
+            <>
               <div className="qt-posts__form">
                 <div className="qt-posts__block">
                   <div className="qt-posts__blockhead"><span className="qt-posts__num">2</span> Viết gì</div>
@@ -923,42 +917,41 @@ export function PostsPage() {
                   </button>
                   {noChannel && <small className="qt-posts__need">Chọn <strong>Kênh / page</strong> ở bước 1 trước — AI viết theo giọng của page đó.</small>}
                   {!noChannel && noSeries && <small className="qt-posts__need">Đang chọn <strong>Câu chuyện nhiều kỳ</strong> — chọn loạt truyện hoặc đặt tên loạt mới.</small>}
-                  {autoOn && <button type="button" className="qt-btn qt-btn--small qt-btn--ghost qt-posts__autolink" disabled={noChannel || noSeries || boardId !== null}
-                          title={boardId !== null ? "Bài gắn clip không chạy theo lịch được" : "Dùng đúng cài đặt này (kênh, kiểu bài, ý chính, ảnh, sản phẩm, loạt truyện) cho lịch tự động đăng"}
-                          onClick={() => { setAutoSeed({ channel_id: channelId, brief: { ...brief }, product_id: productId, series: seriesWriting ? series.trim() : "" }); setMode("auto"); }}>
-                    🤖 Tự động đăng theo lịch với cài đặt này
-                  </button>}
+                  {autoOn && !noChannel && !noSeries && boardId === null && (
+                    <button type="button" className="qt-link qt-posts__autolink"
+                            title="Dùng đúng cài đặt này (kênh, kiểu bài, ý chính, ảnh, sản phẩm, loạt truyện) cho lịch tự động đăng"
+                            onClick={() => { setAutoSeed({ channel_id: channelId, brief: { ...brief }, product_id: productId, series: seriesWriting ? series.trim() : "" }); setMode("auto"); }}>
+                      Muốn tool tự viết & đăng đều đặn với cài đặt này? → Tạo lịch tự động
+                    </button>
+                  )}
                 </div>
               </div>
-            ) : (
+              {/* talking to the AI is a side box, not a second way of writing: say what post you want, or what to change */}
               <div className="qt-posts__chat">
+                <div className="qt-posts__blockhead">💬 {hasDraft ? "Nhờ AI sửa bài này" : "Hoặc nói thẳng cần bài gì"}</div>
+                {(chat.length > 0 || busy) && (
                 <div className="qt-posts__msgs">
-                  {chat.length === 0 && (
-                    <p className="qt-card__hint">
-                      Nói AI cần bài gì, VD: “viết bài hỏi mọi người hay ăn vặt gì lúc 3h chiều, nhắc khéo tới cơm cháy”.
-                      {hasDraft ? " Hoặc bảo AI sửa bài đang có bên phải." : ""} Kiểu bài, giọng, độ dài ở tab “Điền mẫu” vẫn được dùng.
-                    </p>
-                  )}
                   {chat.map((m, i) => (
                     <div key={i} className={`qt-posts__msg qt-posts__msg--${m.role}`}>{m.text}</div>
                   ))}
                   {busy && <div className="qt-posts__msg qt-posts__msg--assistant">Đang viết…</div>}
                   <div ref={chatEnd} />
                 </div>
+                )}
                 {hasDraft && (
                   <div className="qt-posts__chips">
                     {QUICK_ASKS.map((q) => <button key={q} type="button" className="qt-chip" disabled={busy || noChannel || !!handPosted} onClick={() => void run(q)}>{q}</button>)}
                   </div>
                 )}
                 <form className="qt-posts__send" onSubmit={(e) => { e.preventDefault(); if (message.trim()) void run(message); }}>
-                  <textarea className="qt-textarea" value={message} onChange={(e) => setMessage(e.target.value)} placeholder={hasDraft ? "Muốn sửa gì? VD: thêm ý freeship, bỏ emoji" : "Cần bài viết gì?"}
+                  <textarea className="qt-textarea" value={message} onChange={(e) => setMessage(e.target.value)}
+                            placeholder={hasDraft ? "Muốn sửa gì? VD: thêm ý freeship, bỏ emoji" : "VD: viết bài hỏi mọi người hay ăn vặt gì lúc 3h chiều, nhắc khéo tới cơm cháy"}
                             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (message.trim()) void run(message); } }} />
                   <button type="submit" className="qt-btn qt-btn--accent" disabled={busy || noChannel || !message.trim() || !!handPosted}
                           title={noChannel ? "Chọn kênh / page trước" : undefined}>Gửi</button>
                 </form>
-                {noChannel && <small className="qt-posts__need">Chọn <strong>Kênh / page</strong> ở trên trước khi chat với AI.</small>}
               </div>
-            )}
+            </>
           </section>
 
           <section className="qt-card qt-posts__right">

@@ -621,7 +621,7 @@ export function ProductsPanel({
                         🎬 Tạo clip
                       </button>
                       {bundleOn && <button type="button" className="project-modal__btn product-card__bundle" onClick={() => setBundleFor(p)}
-                              title="Một lần ra trọn bộ: clip + bài Facebook + caption TikTok cho sản phẩm này">🎁 Gói</button>}
+                              title="Một lần ra trọn bộ: clip + bài Facebook + caption TikTok cho sản phẩm này">🎁 Combo nội dung</button>}
                     </span>
                   </div>
                 ))}
@@ -649,7 +649,7 @@ export function ProductsPanel({
                     <span className="product-row__actions">
                       <button type="button" className="project-modal__btn" onClick={() => openForm(p)}>Sửa</button>
                       <button type="button" className="project-modal__btn project-modal__btn--primary" onClick={() => onMakeClip(p)}>🎬 Tạo clip</button>
-                      {bundleOn && <button type="button" className="project-modal__btn" onClick={() => setBundleFor(p)} title="Clip + bài Facebook + caption TikTok một lần">🎁 Gói</button>}
+                      {bundleOn && <button type="button" className="project-modal__btn" onClick={() => setBundleFor(p)} title="Clip + bài Facebook + caption TikTok một lần">🎁 Combo nội dung</button>}
                     </span>
                   </div>
                 ))}

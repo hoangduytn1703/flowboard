@@ -19,6 +19,46 @@ export function useVoiceGroups(): VoiceGroup[] {
   return groups;
 }
 
+// ── the short list: a voice picker opens on a handful of voices, not ~50 (24/11) ─────────────────────────────
+const RECENT_KEY = "dflow.voices.recent";
+/** good defaults while nothing was picked yet: the two free Edge voices and two VieNeu ones (free, on this machine) */
+const STARTERS = ["vi-VN-HoaiMyNeural", "vi-VN-NamMinhNeural", "vieneu:Hải Đăng", "vieneu:Ngọc Huyền"];
+const SHORT_LIST = 6;
+const SHOW_ALL = "__all_voices__";
+
+function recentVoices(): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(RECENT_KEY) || "[]");
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** A voice the seller just picked goes to the top of the short list (this browser). */
+export function rememberVoice(voice: string): void {
+  if (!voice || voice.startsWith("__")) return;
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify([voice, ...recentVoices().filter((v) => v !== voice)].slice(0, 10)));
+  } catch { /* private window */ }
+}
+
+/** The short list: the voice in use, the ones picked lately, then good defaults — only voices this machine can use. */
+function favouriteVoices(groups: VoiceGroup[], value: string): [string, string][] {
+  const usable = new Map<string, string>();
+  for (const g of groups) {
+    if (g.id === "clone" || g.available === false) continue;
+    for (const [k, label] of g.voices) usable.set(k, label);
+  }
+  const out: [string, string][] = [];
+  for (const k of [value, ...recentVoices(), ...STARTERS]) {
+    if (out.length >= SHORT_LIST) break;
+    const label = usable.get(k);
+    if (label && !out.some(([x]) => x === k)) out.push([k, label]);
+  }
+  return out;
+}
+
 /** `<optgroup>`s for a voice `<select>`: families the machine cannot use are disabled and say why. */
 export function VoiceOptions({ groups, short = false }: { groups: VoiceGroup[]; short?: boolean }) {
   const SHORT: Record<string, string> = { clone: "🧬 Giọng nhân bản", edge: "Edge", vieneu: "VieNeu · trên máy", gemini: "Gemini", fpt: "FPT.AI" };
@@ -97,6 +137,62 @@ export function VoicePreview({ voice, style, text, iconOnly = true, disabled }: 
 /** The picker's last option: opens "🧬 Giọng nhân bản" instead of choosing a voice. */
 const CLONE_NEW = "__clone_new__";
 
+/**
+ * A voice `<select>` that opens on a short list (your own cloned voices, the voice in use, the ones you picked lately,
+ * good free defaults) with "Xem tất cả giọng…" for the rest. ``emptyLabel`` adds a first "" option (e.g. "giọng chung").
+ */
+export function VoiceSelect({ value, onChange, disabled, emptyLabel, short = false, withClone = false, ariaLabel = "Giọng đọc" }: {
+  value: string;
+  onChange: (voice: string) => void;
+  disabled?: boolean;
+  emptyLabel?: string;
+  short?: boolean;
+  withClone?: boolean;
+  ariaLabel?: string;
+}) {
+  const groups = useVoiceGroups();
+  const navigate = useNavigate();
+  const ref = useRef<HTMLSelectElement>(null);
+  const [all, setAll] = useState(false);
+  const favs = favouriteVoices(groups, value);
+  const clones = groups.find((g) => g.id === "clone");
+  const total = groups.reduce((n, g) => n + g.voices.length, 0);
+  // the voice in use is always in the list, even when it is not a favourite (another machine's, a family turned off)
+  const inShort = !value || favs.some(([k]) => k === value) || !!clones?.voices.some(([k]) => k === value);
+  const showAll = all || !inShort;
+  function pick(v: string) {
+    if (v === SHOW_ALL) {
+      setAll(true);
+      window.setTimeout(() => { try { ref.current?.focus(); ref.current?.showPicker?.(); } catch { /* not every browser */ } }, 0);
+      return;
+    }
+    if (v === CLONE_NEW) { navigate("/voices"); return; }
+    rememberVoice(v);
+    onChange(v);
+  }
+  return (
+    <select ref={ref} value={value} disabled={disabled} aria-label={ariaLabel} onChange={(e) => pick(e.target.value)}>
+      {emptyLabel !== undefined && <option value="">{emptyLabel}</option>}
+      {showAll ? (
+        <VoiceOptions groups={groups} short={short} />
+      ) : (
+        <>
+          {clones && clones.voices.length > 0 && <VoiceOptions groups={[clones]} short={short} />}
+          <optgroup label="⭐ Hay dùng">
+            {favs.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+          </optgroup>
+          <option value={SHOW_ALL}>Xem tất cả giọng ({total})…</option>
+        </>
+      )}
+      {withClone && (
+        <optgroup label="🧬 Giọng của chính bạn">
+          <option value={CLONE_NEW}>＋ Nhân bản giọng của bạn (thu 10 giây)…</option>
+        </optgroup>
+      )}
+    </select>
+  );
+}
+
 /** A voice picker (cloned voices, Edge, VieNeu, Gemini, FPT.AI) with "▶ Nghe thử". */
 export function VoiceField({
   value,
@@ -113,19 +209,11 @@ export function VoiceField({
   disabled?: boolean;
   compact?: boolean;
 }) {
-  const groups = useVoiceGroups();
-  const navigate = useNavigate();
   // a VieNeu voice on show: its model loads in the background now, so hearing it / dubbing with it starts at once
   useEffect(() => { if (!disabled) warmVoice(value); }, [value, disabled]);
   return (
     <div className={`qt-voice-field${compact ? " qt-voice-field--compact" : ""}`}>
-      <select value={value} disabled={disabled} aria-label="Giọng đọc"
-              onChange={(e) => (e.target.value === CLONE_NEW ? navigate("/voices") : onChange(e.target.value))}>
-        <VoiceOptions groups={groups} />
-        <optgroup label="🧬 Giọng của chính bạn">
-          <option value={CLONE_NEW}>＋ Nhân bản giọng của bạn (thu 10 giây)…</option>
-        </optgroup>
-      </select>
+      <VoiceSelect value={value} onChange={onChange} disabled={disabled} withClone />
       <VoicePreview voice={value} style={style} text={sampleText} iconOnly={!!compact} disabled={disabled} />
     </div>
   );

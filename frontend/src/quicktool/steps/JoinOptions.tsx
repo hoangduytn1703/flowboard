@@ -5,18 +5,18 @@ import { useBoardStore, type FlowboardNodeData } from "../../store/board";
 import { useQuicktoolStore } from "../../store/quicktool";
 import { useSettingsStore } from "../../store/settings";
 import { isBusy, type ClipRoles } from "../roles";
-import { useVoiceGroups, VoiceOptions, VoicePreview } from "../VoiceField";
+import { VoicePreview, VoiceSelect } from "../VoiceField";
 
 /** How the joined clip gets its subtitles — mirrors services/video_export.subtitle_choice + tts.SUB_STYLES +
  * dub_remotion.STYLES. Stored on the export node as ``subtitles`` / ``subEngine`` / ``subStyle``. */
 export const SUB_CHOICES: { key: string; label: string; remotion?: boolean }[] = [
   { key: "off", label: "Không thêm phụ đề" },
-  { key: "ass:outline", label: "ffmpeg · Chữ trắng viền đen (nhanh)" },
-  { key: "ass:box_yellow", label: "ffmpeg · Hộp vàng chữ đen" },
-  { key: "ass:box_white", label: "ffmpeg · Hộp trắng chữ đen" },
-  { key: "remotion:rm_box", label: "Remotion · Hộp vàng bo góc, font Việt", remotion: true },
-  { key: "remotion:rm_karaoke", label: "Remotion · Bật sáng từng chữ (kiểu TikTok)", remotion: true },
-  { key: "remotion:rm_outline", label: "Remotion · Chữ trắng viền, font Việt", remotion: true },
+  { key: "ass:outline", label: "Nhanh · Chữ trắng viền đen" },
+  { key: "ass:box_yellow", label: "Nhanh · Hộp vàng chữ đen" },
+  { key: "ass:box_white", label: "Nhanh · Hộp trắng chữ đen" },
+  { key: "remotion:rm_box", label: "Đẹp · Hộp vàng bo góc, font Việt", remotion: true },
+  { key: "remotion:rm_karaoke", label: "Đẹp · Bật sáng từng chữ (kiểu TikTok)", remotion: true },
+  { key: "remotion:rm_outline", label: "Đẹp · Chữ trắng viền, font Việt", remotion: true },
 ];
 
 export function subChoiceOf(data: FlowboardNodeData | undefined): string {
@@ -62,15 +62,15 @@ export function SubtitleField({ value, onChange, disabled, reveal, onReveal }: {
       <select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
         {SUB_CHOICES.map((c) => (
           <option key={c.key} value={c.key} disabled={c.remotion && remotion === false}>
-            {c.label}{c.remotion && remotion === false ? " (chưa cài gói Remotion)" : ""}
+            {c.label}{c.remotion && remotion === false ? " (chưa cài bộ cài phụ đề đẹp)" : ""}
           </option>
         ))}
       </select>
       {remotion === false && (
-        <small className="qt-hint">Muốn dùng phụ đề Remotion: cài “Gói Remotion” ở Cài đặt → 🖥 Máy này (một lần).</small>
+        <small className="qt-hint">Muốn dùng phụ đề đẹp: cài “Bộ cài phụ đề đẹp” ở Cài đặt → 🖥 Máy này (một lần).</small>
       )}
       {value.startsWith("remotion") && (
-        <small className="qt-hint">Remotion vẽ phụ đề sau khi ghép (thêm ~1 phút cho clip 30 s); lỗi thì tự in bằng ffmpeg.</small>
+        <small className="qt-hint">Phụ đề đẹp vẽ sau khi ghép (thêm ~1 phút cho clip 30 s); lỗi thì tự dùng phụ đề nhanh.</small>
       )}
     </label>
     {onReveal && value.startsWith("ass:") && (
@@ -166,7 +166,7 @@ export function JoinOptions({ roles, voiceless = false }: { roles: ClipRoles; vo
   const ensureExportNode = useQuicktoolStore((s) => s.ensureExportNode);
   const favourite = useSettingsStore((s) => s.dubVoice);
   const setFavourite = useSettingsStore((s) => s.setDubVoice);
-  const groups = useVoiceGroups();
+
   const voice = joinVoice(exp?.data, favourite);
   const sub = subChoiceOf(exp?.data);
   const busy = isBusy(exp);
@@ -201,9 +201,7 @@ export function JoinOptions({ roles, voiceless = false }: { roles: ClipRoles; vo
       <div className="qt-joinopts__row">
         <label className="qt-field">
           <span>Giọng đọc <VoicePreview voice={voice} /></span>
-          <select value={voice} disabled={busy} onChange={(e) => { void save({ voice: e.target.value }); setFavourite(e.target.value); }}>
-            <VoiceOptions groups={groups} />
-          </select>
+          <VoiceSelect value={voice} disabled={busy} onChange={(v) => { void save({ voice: v }); setFavourite(v); }} />
         </label>
         <SubtitleField value={sub} disabled={busy} onChange={(key) => void save(subChoicePatch(key))}
                        reveal={exp?.data.subReveal} onReveal={(r) => void save({ subReveal: r })} />

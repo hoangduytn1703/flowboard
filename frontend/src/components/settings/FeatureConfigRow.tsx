@@ -103,7 +103,7 @@ export function FeatureConfigRow({
 
       <div className="feature-config-row__controls">
         <label className="feature-config-row__field">
-          <span className="feature-config-row__label">Provider</span>
+          <span className="feature-config-row__label">AI</span>
           <select
             className="gen-dialog__select"
             value={value.provider ?? ""}
@@ -129,7 +129,7 @@ export function FeatureConfigRow({
         </label>
 
         <label className="feature-config-row__field">
-          <span className="feature-config-row__label">Model</span>
+          <span className="feature-config-row__label">Phiên bản</span>
           {models.length > 0 ? (
             <select
               className="gen-dialog__select"
@@ -140,7 +140,7 @@ export function FeatureConfigRow({
               <option value="">
                 {selected?.defaultModel
                   ? `Mặc định · ${selected.defaultModel}`
-                  : "Mặc định của provider"}
+                  : "Mặc định"}
               </option>
               {models.map((m) => (
                 <option key={m.id} value={m.id}>
@@ -160,14 +160,14 @@ export function FeatureConfigRow({
               className="feature-config-row__model-input"
               value={value.model ?? ""}
               disabled={!hasProvider}
-              placeholder={selected?.defaultModel ?? "mặc định của provider"}
+              placeholder={selected?.defaultModel ?? "mặc định"}
               onChange={(e) => onPatch({ model: e.target.value.trim() || null })}
             />
           )}
         </label>
 
         <label className="feature-config-row__field feature-config-row__field--effort">
-          <span className="feature-config-row__label">Effort</span>
+          <span className="feature-config-row__label">Mức suy nghĩ</span>
           {efforts.length > 0 ? (
             <select
               className="gen-dialog__select"
@@ -187,7 +187,7 @@ export function FeatureConfigRow({
               title={
                 hasProvider
                   ? `${providerLabel(selected.name)} không có các mức effort.`
-                  : "Hãy chọn provider trước."
+                  : "Chọn AI trước."
               }
             >
               —
@@ -201,7 +201,7 @@ export function FeatureConfigRow({
             className="feature-test-row__btn"
             onClick={onRefreshModels}
             disabled={!hasProvider || modelsRefreshing}
-            title="Lấy lại danh sách model của provider này từ CLI."
+            title="Lấy lại danh sách phiên bản của AI này."
             aria-label="Làm mới danh sách model"
           >
             {modelsRefreshing ? "⟳…" : "⟳"}
@@ -211,7 +211,7 @@ export function FeatureConfigRow({
             className="feature-test-row__btn"
             onClick={onTest}
             disabled={!hasProvider || test.state === "testing"}
-            title="Gửi một prompt nhỏ qua đúng provider/model/effort này."
+            title="Gửi thử một câu ngắn để xem AI này có trả lời không."
           >
             {test.state === "testing"
               ? "Đang kiểm tra…"

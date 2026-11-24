@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { announceRunning } from "../../components/BackgroundTasks";
 import { askConfirm } from "../../components/Dialogs";
-import { ZipSaveButton } from "../../components/ZipSaveButton";
+import { SaveButton, ZipSaveButton } from "../../components/ZipSaveButton";
 import {
   getDefaultLook, getDubJob, linksIn, listLookPresets, normAdjust, normSpeed, normVolume, SPEED_MARKS, SPEED_MAX, SPEED_MIN, speedLabel, VOLUME_MARKS, VOLUME_MAX, volumeLabel, subLangName, uploadDubVideo,
   type DecorPreset, type DubCutRow,
@@ -27,6 +27,8 @@ import "../dub.css";
 import { setGain } from "../../lib/audioBoost";
 import "../posts.css";
 import "../cut.css";
+import { takeHandoff } from "../sources/handoff";
+import { VideoToolsTabs } from "../VideoToolsTabs";
 
 const MAX_LINKS = 10;
 const FORM_KEY = "flowboard.cut.form";
@@ -69,7 +71,7 @@ interface UpFile { key: string; name: string; media_id?: string; busy: boolean; 
 const SUGGEST_HOWS: { key: CutHow; icon: string; label: string }[] = [
   { key: "ai", icon: "✨", label: "AI tự chọn đoạn hay" },
   { key: "prompt", icon: "✍️", label: "Theo yêu cầu của bạn" },
-  { key: "even", icon: "⇔", label: "Chia đều" },
+  { key: "even", icon: "⇔", label: "Chia đều theo độ dài" },
 ];
 
 function hostOf(url: string | null): string {
@@ -222,6 +224,16 @@ export function CutPage() {
     setParams(next, { replace: true });
   }, [wantGrab]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // sent over from "📥 Thêm video": links and videos already here (files / clips) fill the form
+  useEffect(() => {
+    const h = takeHandoff("cut");
+    if (!h) return;
+    const vids = h.videos.slice(0, MAX_LINKS).map((v, k) => ({ key: `hub-${k}-${v.media_id}`, name: v.name, media_id: v.media_id, busy: false }));
+    setFiles(vids);
+    const room = Math.max(0, MAX_LINKS - vids.length);
+    setLinks(h.links.length && room ? h.links.slice(0, room) : [""]);
+  }, []);
+
   /** "🔍 Phân tích": download + hear every video; each one then waits on its card for its parts (typed or the AI's). */
   async function start() {
     if (!count || starting) return;
@@ -265,6 +277,7 @@ export function CutPage() {
   return (
     <>
       <header className="qt-header"><span className="qt-header__crumb">✂️ Cắt video</span></header>
+      <VideoToolsTabs />
       <div className="qt-home ct">
         <div className="ct__grid">
           <div className="ct__left">
@@ -313,12 +326,12 @@ export function CutPage() {
                 đoạn rồi cắt luôn được. Lời trong video được nghe ngầm phía sau (chỉ cần cho “AI chọn đoạn” và phụ đề), không chặn bạn.</p>
               {looks.length > 0 && (
                 <label className="qt-field">
-                  <span>Mẫu chỉnh sửa cho các video cắt ra <small className="qt-card__hint">(khung 9:16, nền, logo / nhân vật, vùng mờ… đã lưu bằng nút ★ Mẫu trong trình chỉnh sửa)</small></span>
+                  <span>Kiểu chỉnh sửa cho các video cắt ra <small className="qt-card__hint">(khung 9:16, nền, logo / nhân vật, vùng mờ… đã lưu bằng nút ★ Kiểu trong trình chỉnh sửa)</small></span>
                   <select className="qt-input" value={lookId ?? ""} onChange={(e) => setLookId(e.target.value ? Number(e.target.value) : null)}>
-                    <option value="">— Không dùng mẫu, để video thô —</option>
+                    <option value="">— Không dùng kiểu nào, để video thô —</option>
                     {looks.map((p) => <option key={p.id} value={p.id}>★ {p.name}{p.uses ? ` · dùng ${p.uses} lần` : ""}</option>)}
                   </select>
-                  {lookId !== null && <small className="qt-card__hint">Cắt xong mỗi video được áp mẫu và xuất luôn — mở ✏️ Chỉnh nếu muốn sửa thêm.</small>}
+                  {lookId !== null && <small className="qt-card__hint">Cắt xong mỗi video được áp kiểu này và xuất luôn — mở ✏️ Chỉnh nếu muốn sửa thêm.</small>}
                 </label>
               )}
               <ChannelPicker value={channelId} onChange={setChannelId} label="Lưu clip vào kênh" />
@@ -536,7 +549,9 @@ function PartCard({ p, picked, onPick, onEdit, onDub }: {
       </div>
       <div className="ct-part__acts">
         <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={missing} onClick={onEdit}>✏️ Chỉnh</button>
-        <a className="qt-btn qt-btn--small" href={`/media/${p.media_id}`} download={`${name.replace(/[\\/:*?"<>|]+/g, " ").trim() || "video"}.mp4`} title="Tải video">⬇</a>
+        <SaveButton className="qt-btn qt-btn--small" label="⬇" title="Lưu video này vào thư mục lưu video"
+                    ids={p.board_id ? [p.board_id] : []}
+                    media={p.board_id ? [] : [{ media_id: p.media_id, name }]} />
         <button type="button" className="qt-btn qt-btn--small" disabled={!p.board_id} onClick={onDub} title="Lồng tiếng video này">🎙</button>
         {p.board_id && <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={() => navigate(`/clips/${p.board_id}/export`)} title="Mở clip (đăng, lên lịch, viết bài)">Clip →</button>}
       </div>
@@ -582,6 +597,7 @@ function RowsEditor({ s, initial, onCancel, onDone, prompts, onPrompts, langs, p
   const [rate, setRate] = useState(() => normSpeed(s.speed ?? 1));
   const [vol, setVol] = useState(() => normVolume(s.volume ?? 1));
   const [bright, setBright] = useState(() => normAdjust(s.adjust ?? null)?.brightness ?? 1);
+  const outChanged = rate !== 1 || vol !== 1 || Math.abs(bright - 1) >= 0.005;
   const hearing = isHearing(s);
   const video = useRef<HTMLVideoElement>(null);
   useEffect(() => { if (video.current) video.current.playbackRate = rate; }, [rate]);
@@ -677,6 +693,12 @@ function RowsEditor({ s, initial, onCancel, onDone, prompts, onPrompts, langs, p
                    onLoadedMetadata={(e) => { e.currentTarget.playbackRate = rate; setGain(e.currentTarget, vol); }}
                    onPlay={(e) => { e.currentTarget.playbackRate = rate; setGain(e.currentTarget, vol); }}
                    onTimeUpdate={(e) => { const t = e.currentTarget.currentTime; if (stopAt.current !== null && t >= stopAt.current) { e.currentTarget.pause(); stopAt.current = null; } }} />
+            {/* speed / volume / brightness are the editor's too: here they stay folded, for one setting on every part */}
+            <details className="ct-rows__out" open={outChanged || undefined}>
+              <summary>Tốc độ, âm lượng, sáng tối cho mọi đoạn cắt ra
+                {outChanged ? <small> · {[rate !== 1 ? speedLabel(rate) : "", vol !== 1 ? `âm lượng ${volumeLabel(vol)}` : "", Math.abs(bright - 1) >= 0.005 ? `sáng ${Math.round(bright * 100)}%` : ""].filter(Boolean).join(" · ")}</small>
+                  : <small> · như gốc</small>}
+              </summary>
             <label className="ct-rows__bright" title="Tốc độ video: xem ở đây nhanh / chậm thế nào thì mọi đoạn cắt ra được XUẤT đúng tốc độ đó (hình và tiếng cùng đổi). 1× = như gốc; sửa tiếp được trong ✏️ Chỉnh">
               <span>Tốc độ <small>{speedLabel(rate)}{rate !== 1 ? " · các đoạn cắt xuất ra theo tốc độ này" : " · như gốc"}</small></span>
               <TickRange min={SPEED_MIN} max={SPEED_MAX} step={0.1} value={rate} every={0.1} marks={SPEED_MARKS} disabled={!!busy} onChange={(v) => setRate(normSpeed(v))} ariaLabel="Tốc độ video" />
@@ -689,6 +711,7 @@ function RowsEditor({ s, initial, onCancel, onDone, prompts, onPrompts, langs, p
               <span>Sáng / tối <small>{Math.round(bright * 100)}%{Math.abs(bright - 1) >= 0.005 ? " · áp cho các đoạn cắt" : ""}</small></span>
               <TickRange min={0.4} max={1.8} step={0.01} value={bright} every={0.1} marks={[1]} disabled={!!busy} onChange={setBright} ariaLabel="Sáng tối" />
             </label>
+            </details>
           </div>
         )}
         <div className="ct-rows__again">
@@ -722,7 +745,7 @@ function RowsEditor({ s, initial, onCancel, onDone, prompts, onPrompts, langs, p
           <div className="ct-rows__aibtns">
             <button type="button" className="qt-btn qt-btn--small" disabled={!!busy || (hearing && how !== "even")} onClick={() => void suggest(false)}
                     title={hearing && how !== "even" ? "Chờ tool nghe xong lời trong video" : undefined}>
-              {busy === "suggest" ? "AI đang chọn…" : hearing && how !== "even" ? `⏳ Chờ nghe lời ${s.hear_progress ?? 0}%` : how === "even" ? "⇔ Chia đều" : fromAi ? "✨ Gợi ý lại" : "✨ AI chọn đoạn"}
+              {busy === "suggest" ? "AI đang chọn…" : hearing && how !== "even" ? `⏳ Chờ nghe lời ${s.hear_progress ?? 0}%` : how === "even" ? "Điền vào bảng ↓" : fromAi ? "✨ Gợi ý lại" : "✨ AI chọn đoạn"}
             </button>
             {waiting.length > 0 && (
               <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" disabled={!!busy || (hearing && how !== "even")} onClick={() => void suggest(true)}

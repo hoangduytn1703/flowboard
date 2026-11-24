@@ -79,7 +79,31 @@ class BoardUpdate(BaseModel):
     data: Optional[dict] = None
 
 
-def _board_summary(board: Board, nodes: list[tuple]) -> dict:
+def _video_states(media_ids: set[str]) -> dict[str, str]:
+    """Where each finished clip's video can be played from: ``here`` (the file is on this machine), ``cloud`` (in the
+    bucket, or not known yet) or ``missing`` — made on another machine / in another data folder (the desktop app and the
+    web version keep separate folders) and never uploaded (a full bucket refuses every upload): opening it shows
+    nothing, so the library keeps it out of the finished clips."""
+    from flowboard.services import file_store
+    from flowboard.services import media as media_service
+
+    if not media_ids:
+        return {}
+    with get_session() as s:
+        paths = dict(s.exec(select(Asset.uuid_media_id, Asset.local_path).where(Asset.uuid_media_id.in_(media_ids))).all())
+    out: dict[str, str] = {}
+    for mid in media_ids:
+        path = paths.get(mid)
+        if path and Path(path).is_file():
+            out[mid] = "here"
+        elif path is None or media_service.recently_missed(mid) or file_store.in_bucket(path) is False:
+            out[mid] = "missing"
+        else:
+            out[mid] = "cloud"
+    return out
+
+
+def _board_summary(board: Board, nodes: list[tuple], videos: Optional[dict[str, str]] = None) -> dict:
     """The board row plus what the Quicktool home and "Hôm nay" need to draw
     its card: scene / clip progress, a thumbnail, failed nodes and the
     finished clip. ``nodes`` are this board's ``(type, status, data)``."""
@@ -104,6 +128,7 @@ def _board_summary(board: Board, nodes: list[tuple]) -> dict:
             "clip_errors": sum(1 for st, _d in clips if st == "error"),
             "exported": bool(exports),
             "export_media": exports[-1].get("mediaId") if exports else None,
+            "video": (videos or {}).get(exports[-1].get("mediaId")) if exports else None,
             "downloaded_at": qt.get("downloaded_at"),
             "thumbnail": thumb,
         },
@@ -112,6 +137,13 @@ def _board_summary(board: Board, nodes: list[tuple]) -> dict:
 
 @router.get("")
 def list_boards(summary: bool = Query(False)):
+    if summary:
+        from flowboard.services import video_edit
+        try:
+            video_edit.ensure_clips()  # older imports into "Chỉnh sửa video" join the library (once per run)
+        except Exception as exc:  # noqa: BLE001 — the library must always load
+            import logging
+            logging.getLogger(__name__).warning("boards: could not give old edit imports a clip: %s", exc)
     with get_session() as s:
         boards = s.exec(select(Board)).all()
         if summary:
@@ -120,7 +152,10 @@ def list_boards(summary: bool = Query(False)):
             by_board: dict[int, list[tuple]] = {}
             for bid, t, st, d in s.exec(select(Node.board_id, Node.type, Node.status, Node.data)).all():
                 by_board.setdefault(bid, []).append((t, st, d))
-            return [_board_summary(b, by_board.get(b.id, [])) for b in boards]
+            finals = {d["mediaId"] for rows in by_board.values() for t, _st, d in rows
+                      if t in ("export", "merge") and (d or {}).get("mediaId")}
+            videos = _video_states(finals)
+            return [_board_summary(b, by_board.get(b.id, []), videos) for b in boards]
         return boards
 
 

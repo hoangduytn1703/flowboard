@@ -25,6 +25,8 @@ import { StopButton } from "../../components/StopButton";
 import { DubAddonCard } from "../dub/DubAddonCard";
 import { RemotionAddonCard } from "../dub/RemotionAddonCard";
 import { ModePicker } from "../dub/ModePicker";
+import { takeHandoff } from "../sources/handoff";
+import { VideoToolsTabs } from "../VideoToolsTabs";
 
 const POLL_MS = 2000;
 const DEFAULT_VOICE = "vi-VN-HoaiMyNeural";
@@ -130,6 +132,19 @@ export function DubPage() {
     loadStatus();
   }, [loadStatus]);
   useEffect(() => { refreshRecent(); refreshLinkCount(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // sent over from "📥 Thêm video": the links, or the videos already here (files / clips), and dub vs subtitles only
+  useEffect(() => {
+    const h = takeHandoff("dub");
+    if (!h) return;
+    if (h.mode) setMode(h.mode);
+    if (h.videos.length) {
+      setClips(h.videos.slice(0, MAX_PICKED).map((v, k) => ({ board_id: v.board_id ?? -(k + 1), name: v.name, media_id: v.media_id })));
+      setLinks([""]);
+      setFile(null);
+    } else if (h.links.length) {
+      setLinks(h.links.slice(0, MAX_LINKS));
+    }
+  }, []);
   // /tools/dub?links=1 (the "đang chạy" badge for links waiting in the library) opens the library
   useEffect(() => { if (searchParams.get("links")) setLinksOpen(true); }, [searchParams]);
   function closeLinks() {
@@ -447,7 +462,7 @@ export function DubPage() {
     lang === "orig" ? "phụ đề ngôn ngữ gốc, không dịch" : lang !== "vi" ? `phụ đề ${subLangName(lang)} (Google Dịch)`
       : translator === "ai" ? "dịch bằng AI" : "dịch bằng Google",
     !subOnly && status.separate ? (keepBgm ? "giữ nhạc nền" : "bỏ nhạc nền") : "",
-    lookName ? `mẫu “${lookName}”` : `phụ đề ${styleName}`,
+    lookName ? `kiểu “${lookName}”` : `phụ đề ${styleName}`,
     review ? "dừng ở bản dịch để xem lại" : "tự xuất video",
     channelId ? "gắn kênh đã chọn" : "",
   ].filter(Boolean).join(" · ");
@@ -457,6 +472,7 @@ export function DubPage() {
       <header className="qt-header">
         <span className="qt-header__crumb">🎙 Lồng tiếng video{editing && job ? ` › ${job.name || job.title || "chỉnh sửa"}` : ""}</span>
       </header>
+      {!editing && <VideoToolsTabs />}
       <div className={`qt-home qt-dub${dragOver && !editing ? " is-dropping" : ""}`}
            onDragOver={(e) => { if (!editing && e.dataTransfer.types.includes("Files")) { e.preventDefault(); setDragOver(true); } }}
            onDragLeave={(e) => { if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false); }}
@@ -470,24 +486,11 @@ export function DubPage() {
           <div className="qt-dub__addon"><DubAddonCard initial={status.addon} onReady={loadStatus} /></div>
         ) : !status.available ? (
           <PageEmpty icon="🎙" title="Chưa dùng được trên máy này">
-            {status.reason ?? "Thiếu mô hình Whisper."}
+            {status.reason ?? "Máy này chưa có bộ cài lồng tiếng."}
           </PageEmpty>
         ) : (
           <div className="qt-dub__grid">
             <div className="qt-dub__left">
-              <section className="qt-card qt-dub__reopen">
-                <span className="qt-dub__reopenicon" aria-hidden="true">📂</span>
-                <div className="qt-dub__reopentext">
-                  <strong>Chỉnh lại video đã làm</strong>
-                  <small>Kéo thả vào trang này video đã tải từ tool (hoặc chọn file) — mở lại đúng chỗ đã chỉnh, kể cả hôm sau.</small>
-                </div>
-                <input ref={reopenInput} type="file" accept="video/*" hidden
-                       onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void reopenFromFile(f); }} />
-                <button type="button" className="qt-btn qt-btn--small" disabled={reopening} onClick={() => reopenInput.current?.click()}>
-                  {reopening ? "Đang nhận ra…" : "Chọn video…"}
-                </button>
-              </section>
-
               <section className="qt-card">
                 <div className="qt-card__eyebrow">1 · Video gốc</div>
                 <h3 className="qt-card__title">Link hoặc file</h3>
@@ -513,8 +516,8 @@ export function DubPage() {
                         <button type="button" className="qt-btn qt-btn--small qt-btn--ghost qt-dub__addlink" disabled={starting} onClick={() => addRow()}>＋ Thêm link</button>
                       )}
                       <button type="button" className="qt-btn qt-btn--small qt-dub__libbtn" disabled={starting} onClick={() => setLinksOpen(true)}
-                              title="Thư viện link: nhập file .txt / .md có link, xem link nào đã lồng tiếng, đưa link chưa làm vào hàng đợi">
-                        📚 Import từ thư viện{linksTodo > 0 && <span className="qt-dub__libcount">{linksTodo} chưa làm</span>}
+                              title="Có cả danh sách link trong file .txt / .md? Nhập vào đây — tool nhớ link nào đã lồng tiếng và làm dần những link chưa làm">
+                        📄 Nhập danh sách link từ file{linksTodo > 0 && <span className="qt-dub__libcount">{linksTodo} chưa làm</span>}
                       </button>
                     </div>
                   </div>
@@ -573,31 +576,31 @@ export function DubPage() {
                 {!subOnly && <VoiceField value={voice} onChange={setVoice} sampleText="Các mẹ bầu bị căng cứng bụng cuối thai kỳ thì nhớ đeo đai nâng bụng ngay nha." disabled={working} />}
                 {looks.length > 0 && (
                   <label className="qt-field">
-                    <span>Mẫu chỉnh sửa <small className="qt-card__hint">(kiểu phụ đề, vùng mờ, khung xuất, khung, nhân vật… đã lưu từ clip trước — lưu / đặt mặc định ở nút ★ Mẫu trong trình chỉnh sửa)</small></span>
+                    <span>Kiểu chỉnh sửa <small className="qt-card__hint">(kiểu phụ đề, vùng mờ, khung xuất, khung, nhân vật… đã lưu từ clip trước — lưu / đặt mặc định ở nút ★ Kiểu trong trình chỉnh sửa)</small></span>
                     <select value={lookId ?? ""} onChange={(e) => setLookId(e.target.value ? Number(e.target.value) : null)} disabled={working}>
-                      <option value="">— Không dùng mẫu, chỉnh tay —</option>
+                      <option value="">— Không dùng kiểu nào, chỉnh tay —</option>
                       {looks.map((p) => <option key={p.id} value={p.id}>★ {p.name}{p.uses ? ` · dùng ${p.uses} lần` : ""}</option>)}
                     </select>
                   </label>
                 )}
-                {lookId !== null && <p className="qt-card__hint">Công nghệ + kiểu phụ đề lấy theo mẫu; ô dưới chỉ dùng khi không chọn mẫu.</p>}
+                {lookId !== null && <p className="qt-card__hint">Kiểu phụ đề lấy theo kiểu chỉnh sửa đã chọn; ô dưới chỉ dùng khi không chọn.</p>}
                 <label className="qt-field">
-                  <span>Công nghệ phụ đề <small className="qt-card__hint">(ffmpeg = cách cũ · Remotion = font Việt, emoji màu, xem trước đúng y kết quả)</small></span>
+                  <span>Cách vẽ phụ đề <small className="qt-card__hint">(nhanh · hoặc đẹp: font Việt, emoji màu, chữ sáng từng từ)</small></span>
                   <select value={engine} onChange={(e) => pickEngine(e.target.value as DubEngine)} disabled={working || lookId !== null}>
-                    <option value="ass">ffmpeg · như hiện tại (nhanh)</option>
+                    <option value="ass">Phụ đề nhanh</option>
                     <option value="remotion" disabled={!status.remotion}>
-                      Remotion · mới{status.remotion ? "" : " — chưa cài gói Remotion"}
+                      Phụ đề đẹp — font Việt, emoji màu{status.remotion ? "" : " (chưa cài bộ cài phụ đề đẹp)"}
                     </option>
                   </select>
                 </label>
                 {!status.remotion && (status.remotion_addon?.supported
                   ? <RemotionAddonCard compact initial={status.remotion_addon} onReady={loadStatus} />
-                  : status.remotion_reason && <p className="qt-card__hint">Remotion chưa dùng được: {status.remotion_reason}</p>)}
+                  : status.remotion_reason && <p className="qt-card__hint">Phụ đề đẹp chưa dùng được: {status.remotion_reason}</p>)}
                 {lang === "vi" && (
                   <label className="qt-field">
                     <span>Dịch bằng</span>
                     <select value={translator} onChange={(e) => setTranslator(e.target.value as DubTranslator)} disabled={working}>
-                      <option value="google">Google Dịch — miễn phí, không tốn lượt AI (như VieDub)</option>
+                      <option value="google">Google Dịch — miễn phí, không tốn lượt AI</option>
                       <option value="ai">AI theo Cài đặt (Claude / Gemini…) — câu nói tự nhiên, vừa giờ hơn, tốn lượt AI</option>
                     </select>
                   </label>
@@ -610,7 +613,7 @@ export function DubPage() {
                     {styleOptions.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
                   </select>
                 </label>
-                {engine === "remotion" && <p className="qt-card__hint">Remotion vẽ phụ đề bằng Chrome nên render chậm hơn ffmpeg (ước 1–3 phút cho clip 1 phút); lần đầu còn tải Chrome (~150 MB) và đóng gói giao diện.</p>}
+                {engine === "remotion" && <p className="qt-card__hint">Phụ đề đẹp xuất chậm hơn phụ đề nhanh (ước 1–3 phút cho clip 1 phút); lần đầu còn tải Chrome (~150 MB) và đóng gói giao diện.</p>}
                 {!subOnly && (
                   <label className="qt-check" title={status.separate ? "Tách giọng nói khỏi nhạc (spleeter), giữ nhạc nền dưới giọng Việt" : "Máy này chưa có mô hình tách giọng"}>
                     <input type="checkbox" checked={keepBgm} disabled={!status.separate || working} onChange={(e) => setKeepBgm(e.target.checked)} /> Giữ nhạc nền gốc (tách giọng nói ra)
@@ -644,6 +647,19 @@ export function DubPage() {
                   </ul>
                 </section>
               )}
+
+              <section className="qt-card qt-dub__reopen">
+                <span className="qt-dub__reopenicon" aria-hidden="true">📂</span>
+                <div className="qt-dub__reopentext">
+                  <strong>Mở lại video đã lồng tiếng</strong>
+                  <small>Có file video đã tải từ tool? Chọn hoặc kéo thả vào trang này — mở lại đúng chỗ đã chỉnh, kể cả hôm sau.</small>
+                </div>
+                <input ref={reopenInput} type="file" accept="video/*" hidden
+                       onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void reopenFromFile(f); }} />
+                <button type="button" className="qt-btn qt-btn--small" disabled={reopening} onClick={() => reopenInput.current?.click()}>
+                  {reopening ? "Đang nhận ra…" : "Chọn video…"}
+                </button>
+              </section>
             </div>
 
             <div className="qt-dub__right">
@@ -681,7 +697,7 @@ export function DubPage() {
                   <p className="qt-card__hint">Video nào xong bấm "✏️ Mở" để xem / chỉnh ngay. Xong cả loạt sẽ mở trình chỉnh sửa: chọn clip ở ô trên cùng, chỉnh một clip rồi bấm "⇪ Áp cho cả loạt" để mọi clip cùng kiểu chữ, khung, nhân vật.</p>
                 </section>
               ) : !job ? (
-                <div className="qt-empty qt-dub__placeholder">Tiến độ hiện ở đây. Xong là mở trình chỉnh sửa kiểu CapCut: xem video với giọng Việt, sửa chữ ngay trên hình, kéo câu trên timeline.</div>
+                <div className="qt-empty qt-dub__placeholder">Tiến độ hiện ở đây. Xong là mở trình chỉnh sửa: xem video với giọng Việt, sửa chữ ngay trên hình, kéo câu trên timeline.</div>
               ) : (
                 (isWorking(job) || job.status === "error") ? (
                   <ProgressRing

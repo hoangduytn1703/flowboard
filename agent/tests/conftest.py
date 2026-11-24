@@ -34,6 +34,8 @@ os.environ["FLOWBOARD_REMOTION_ADDON_DIR"] = str(Path(_TMPDIR) / "addons" / "rem
 os.environ["FLOWBOARD_MACHINE_FILE"] = str(Path(_TMPDIR) / "machine.json")  # the card check's answer (services/machine.py)
 os.environ["FLOWBOARD_TOOLS_DIR"] = str(Path(_TMPDIR) / "tools")  # the own yt-dlp copy never lands in the repo
 os.environ["FLOWBOARD_DOWNLOADS_DIR"] = str(Path(_TMPDIR) / "downloads")  # the zip of clips (services/zip_save.py)
+os.environ["FLOWBOARD_SAVE_DIR"] = ""  # nor the developer's own save folder from .env
+os.environ["FLOWBOARD_SAVE_ASK"] = ""
 # no resident VieNeu (services/voice_server.py) under test: VieNeu goes through dub._runner, which the tests fake
 os.environ["FLOWBOARD_VOICE_SERVER"] = "0"
 os.environ.pop("FLOWBOARD_LICENSE_STRICT", None)

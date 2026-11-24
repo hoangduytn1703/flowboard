@@ -742,6 +742,55 @@ export function NewClipDialog({
         <div className="qt-new__section">
           <div className="qt-new__label">2 · Kiểu clip</div>
           <div className="qt-new__group">
+            <p className="qt-new__group-title">Từ link sản phẩm hoặc video mẫu — AI tự viết kịch bản</p>
+            <div className="tpl-grid" role="radiogroup" aria-label="Từ nguồn có sẵn">
+              <button
+                type="button"
+                className={`tpl-card tpl-card--reference${isReference ? " tpl-card--active" : ""}`}
+                onClick={() => setKind(REFERENCE_KIND)}
+                disabled={locked}
+                role="radio"
+                aria-checked={isReference}
+              >
+                <span className="tpl-card__title">🎞️ Theo video mẫu</span>
+                <span className="tpl-card__blurb">
+                  Bỏ một video quảng cáo có sẵn vào, AI xem và viết lại kịch bản theo đúng nhịp đó cho sản phẩm của bạn.
+                </span>
+                <span className="tpl-card__meta">AI viết · 2–6 cảnh</span>
+              </button>
+              <button
+                type="button"
+                className={`tpl-card tpl-card--reference${isLink ? " tpl-card--active" : ""}`}
+                onClick={() => setKind(PRODUCT_LINK_KIND)}
+                disabled={locked}
+                role="radio"
+                aria-checked={isLink}
+              >
+                <span className="tpl-card__title">🔗 Theo link sản phẩm</span>
+                <span className="tpl-card__blurb">
+                  Dán link trang sản phẩm (Shopee, Lazada, TikTok Shop, web shop…), AI đọc thông tin và viết kịch bản quảng cáo, không cần video mẫu.
+                </span>
+                <span className="tpl-card__meta">AI viết · 3–5 cảnh</span>
+              </button>
+              {DRAMA_ENABLED && (
+                <button
+                  type="button"
+                  className={`tpl-card tpl-card--reference${isDrama ? " tpl-card--active" : ""}`}
+                  onClick={() => setKind(DRAMA_KIND)}
+                  disabled={locked}
+                  role="radio"
+                  aria-checked={isDrama}
+                >
+                  <span className="tpl-card__title">📰 Tạo drama</span>
+                  <span className="tpl-card__blurb">
+                    Dán link bài viết hoặc gõ câu chuyện, AI tóm tắt thành các đoạn: mỗi đoạn một ảnh minh hoạ + lời kể + tiêu đề, ảnh chuyển cảnh nối nhau. Chèn thêm video phỏng vấn nếu có.
+                  </span>
+                  <span className="tpl-card__meta">AI viết · 4–12 đoạn · không cần sản phẩm</span>
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="qt-new__group">
             <p className="qt-new__group-title">
               Theo ngành hàng
               {product && fitCount > 0 && (
@@ -764,58 +813,9 @@ export function NewClipDialog({
                     {fits(t) && <span className="tpl-card__fit" title="Kiểu clip dành cho ngành hàng của sản phẩm đã chọn">phù hợp</span>}
                   </span>
                   <span className="tpl-card__blurb">{t.blurb}</span>
-                  <span className="tpl-card__meta">{t.scenes} cảnh · {t.scenes} video</span>
+                  <span className="tpl-card__meta">{t.scenes} cảnh</span>
                 </button>
               ))}
-            </div>
-          </div>
-          <div className="qt-new__group">
-            <p className="qt-new__group-title">Từ nguồn có sẵn</p>
-            <div className="tpl-grid" role="radiogroup" aria-label="Từ nguồn có sẵn">
-              <button
-                type="button"
-                className={`tpl-card tpl-card--reference${isReference ? " tpl-card--active" : ""}`}
-                onClick={() => setKind(REFERENCE_KIND)}
-                disabled={locked}
-                role="radio"
-                aria-checked={isReference}
-              >
-                <span className="tpl-card__title">🎞️ Theo video mẫu</span>
-                <span className="tpl-card__blurb">
-                  Bỏ một video quảng cáo có sẵn vào, AI xem và viết lại kịch bản theo đúng nhịp đó cho sản phẩm của bạn.
-                </span>
-                <span className="tpl-card__meta">Gemini · 2–6 cảnh</span>
-              </button>
-              <button
-                type="button"
-                className={`tpl-card tpl-card--reference${isLink ? " tpl-card--active" : ""}`}
-                onClick={() => setKind(PRODUCT_LINK_KIND)}
-                disabled={locked}
-                role="radio"
-                aria-checked={isLink}
-              >
-                <span className="tpl-card__title">🔗 Theo link sản phẩm</span>
-                <span className="tpl-card__blurb">
-                  Dán link trang sản phẩm (Shopee, Lazada, TikTok Shop, web shop…), AI đọc thông tin và viết kịch bản quảng cáo, không cần video mẫu.
-                </span>
-                <span className="tpl-card__meta">Gemini · 3–5 cảnh</span>
-              </button>
-              {DRAMA_ENABLED && (
-                <button
-                  type="button"
-                  className={`tpl-card tpl-card--reference${isDrama ? " tpl-card--active" : ""}`}
-                  onClick={() => setKind(DRAMA_KIND)}
-                  disabled={locked}
-                  role="radio"
-                  aria-checked={isDrama}
-                >
-                  <span className="tpl-card__title">📰 Tạo drama</span>
-                  <span className="tpl-card__blurb">
-                    Dán link bài viết hoặc gõ câu chuyện, AI tóm tắt thành các đoạn: mỗi đoạn một ảnh minh hoạ + lời kể + tiêu đề, ảnh chuyển cảnh nối nhau. Chèn thêm video phỏng vấn nếu có.
-                  </span>
-                  <span className="tpl-card__meta">Gemini · 4–12 đoạn · không cần sản phẩm</span>
-                </button>
-              )}
             </div>
           </div>
         </div>

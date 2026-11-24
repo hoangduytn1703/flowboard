@@ -6495,6 +6495,12 @@ button.chat-dock__presence[aria-expanded="true"] {
 
 /* Settings → Dữ liệu: the bucket form */
 .data-sync__box { display: flex; flex-direction: column; gap: 6px; padding: 10px; margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; }
+details.data-sync__box > summary { cursor: pointer; }
+details.data-sync__box:not([open]) { display: block; }
+/* Settings → AI viết: the per-task choice, folded under the one simple choice */
+.ai-providers-section__advanced { margin-top: 6px; }
+.ai-providers-section__advanced > summary { cursor: pointer; padding: 8px 0; font-weight: 600; color: var(--muted); }
+.ai-providers-section__advanced[open] > summary { color: var(--text); margin-bottom: 8px; }
 
 /* Settings dialog with a tab rail (25/10): fixed height, the content scrolls. */
 .settings-panel--tabs {
@@ -6643,6 +6649,8 @@ button.chat-dock__presence[aria-expanded="true"] {
 /* Settings → 🖥 Máy này (settings/MachineSection) */
 .settings-machine__row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
 .settings-machine__row .settings-panel__select { flex: 1 1 260px; }
+.settings-machine__check { display: inline-flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 14px; cursor: pointer; }
+.settings-machine__check input { width: 16px; height: 16px; accent-color: var(--qt-accent, #ff6a2b); cursor: pointer; }
 .settings-machine__pending { border: 1px solid rgba(255, 106, 43, 0.55); border-radius: 10px; padding: 10px 12px;
   background: rgba(255, 106, 43, 0.08); }
 

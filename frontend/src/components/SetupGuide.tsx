@@ -199,25 +199,33 @@ export function SetupSteps({ status, onlyRequired = false, onGo = () => {} }: { 
 export function SetupCard() {
   const status = useSetupStore((s) => s.status);
   const [hidden, setHidden] = useState(() => { try { return localStorage.getItem(HIDE_KEY) === "1"; } catch { return false; } });
+  const [open, setOpen] = useState(false);
   const allDone = !!status && status.steps.every((s) => s.ok);
   useSetupPolling(!allDone && !(hidden && !!status?.ready));
   if (!status || allDone || (hidden && status.ready)) return null;
   const need = status.steps.filter((s) => s.required);
   const done = need.filter((s) => s.ok).length;
+  const next = status.steps.find((s) => !s.ok);
+  // one line on "Hôm nay" (it used to fill the first screen and push the overview down); the steps open on demand
   return (
-    <section className={`su-card${status.ready ? " su-card--ready" : ""}`}>
+    <section className={`su-card su-card--slim${status.ready ? " su-card--ready" : ""}`}>
       <header className="su-card__head">
         <div>
-          <h2 className="su-card__title">{status.ready ? "🎉 DFlow đã sẵn sàng" : "🚀 Thiết lập DFlow — làm một lần"}</h2>
+          <h2 className="su-card__title">{status.ready ? "🎉 DFlow đã sẵn sàng" : `🚀 Thiết lập DFlow — xong ${done}/${need.length} bước`}</h2>
           <p className="su-card__sub">{status.ready
             ? "Phần kết nối đã xong. Thêm sản phẩm rồi tạo clip đầu tiên."
-            : `Xong ${done}/${need.length} bước. Làm theo thứ tự từ trên xuống — DFlow tự nhận ra khi bạn làm xong từng bước.`}</p>
+            : next ? `Bước tiếp: ${next.title}` : ""}</p>
         </div>
-        {status.ready && <button type="button" className="su-hide" title="Ẩn hướng dẫn này"
-          onClick={() => { try { localStorage.setItem(HIDE_KEY, "1"); } catch { /* ignore */ } setHidden(true); }}>Ẩn</button>}
+        <div className="su-card__acts">
+          <button type="button" className={`qt-btn qt-btn--small${open ? "" : " qt-btn--accent"}`} aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+            {open ? "Thu gọn" : status.ready ? "Xem các bước" : "Tiếp tục thiết lập"}
+          </button>
+          {status.ready && <button type="button" className="su-hide" title="Ẩn hướng dẫn này"
+            onClick={() => { try { localStorage.setItem(HIDE_KEY, "1"); } catch { /* ignore */ } setHidden(true); }}>Ẩn</button>}
+        </div>
       </header>
       {!status.ready && <div className="su-bar" aria-hidden="true"><span style={{ width: `${(done / need.length) * 100}%` }} /></div>}
-      <SetupSteps status={status} />
+      {open && <SetupSteps status={status} />}
     </section>
   );
 }

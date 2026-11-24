@@ -4,6 +4,11 @@
   background: linear-gradient(180deg, rgba(255, 106, 43, 0.09), rgba(255, 106, 43, 0.02) 60%), #14171e; }
 .su-card--ready { border-color: rgba(52, 211, 153, 0.4); background: linear-gradient(180deg, rgba(52, 211, 153, 0.08), rgba(52, 211, 153, 0.01) 60%), #14171e; }
 .su-card__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.su-card--slim { padding: 12px 16px 10px; }
+.su-card--slim .su-card__title { font-size: 16.5px; }
+.su-card--slim .su-card__sub { font-size: 14px; margin-top: 2px; }
+.su-card--slim .su-bar { margin: 8px 0 0; }
+.su-card__acts { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
 .su-card__title { margin: 0; font-size: 20px; font-weight: 800; color: #fff; }
 .su-card__sub { margin: 4px 0 0; font-size: 14.5px; color: #aab1c0; line-height: 1.5; }
 .su-hide { border: 0; background: none; color: #8b93a5; font: inherit; font-size: 13px; cursor: pointer; padding: 4px 6px; }

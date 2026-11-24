@@ -19,7 +19,7 @@ interface BundleResult {
 let kindsCache: { key: string; label: string }[] | null = null;
 
 /**
- * "🎁 Gói nội dung" for one product: on one channel, in one go — a clip
+ * "🎁 Combo nội dung" for one product: on one channel, in one go — a clip
  * board with the script written for the product, a Facebook post to go
  * with it (affiliate link in the first comment) and a short TikTok caption.
  * The clip's images / videos are rendered afterwards in the wizard (credits).
@@ -76,7 +76,7 @@ export function BundleDialog({ product, channelId: initialChannel = null, onClos
       const n = [out.clip, out.post, out.tiktok].filter(Boolean).length;
       const bad = Object.keys(out.errors).length;
       if (bad) toast.warning(`Xong ${n} phần, ${bad} phần lỗi — xem bên dưới.`);
-      else toast.success(`Gói nội dung "${product.name}" đã sẵn sàng (${n} phần).`);
+      else toast.success(`Combo nội dung "${product.name}" đã sẵn sàng (${n} phần).`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
@@ -87,14 +87,14 @@ export function BundleDialog({ product, channelId: initialChannel = null, onClos
   return (
     <div className="project-modal-backdrop" onClick={() => { if (!busy) onClose(); }}>
       <div className="project-modal project-modal--wide qt-bundle" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-        <h3 className="qt-card__title">🎁 Gói nội dung · {product.name}</h3>
+        <h3 className="qt-card__title">🎁 Combo nội dung · {product.name}</h3>
         {!result ? (
           <>
             <p className="qt-card__hint">Một lần bấm ra trọn bộ cho sản phẩm này, cùng giọng của kênh: clip (kịch bản viết riêng, chưa tốn credit), bài Facebook đi kèm (link aff ở bình luận đầu) và caption TikTok ngắn.</p>
             <ChannelPicker value={channelId} onChange={setChannelId} required label="Đăng trên kênh / page" />
             <label className="qt-bundle__part">
               <input type="checkbox" checked={withClip} onChange={(e) => setWithClip(e.target.checked)} />
-              <span><strong>🎬 Clip</strong> — board + kịch bản 3–4 cảnh viết theo sản phẩm; tạo ảnh/video sau ở wizard.</span>
+              <span><strong>🎬 Clip</strong> — kịch bản 3–4 cảnh viết theo sản phẩm; tạo ảnh / video sau trong clip.</span>
             </label>
             {withClip && (
               <label className="qt-field qt-bundle__sub">

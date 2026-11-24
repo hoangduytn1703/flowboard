@@ -359,3 +359,7 @@
 .qt-posts__sched--hand { color: #042f2e; background: #2dd4bf; border-color: #5eead4; text-decoration: none; }
 .qt-posts__handposted { border-color: rgba(45, 212, 191, 0.55); background: rgba(45, 212, 191, 0.07); }
 .qt-post__body[readonly], .qt-post__tags[readonly] { cursor: default; }
+/* 24/11: one way of writing (the form); talking to the AI is a side box under it */
+.qt-posts__chat { margin-top: 6px; padding-top: 12px; border-top: 1px dashed var(--border); }
+.qt-posts__chat .qt-posts__msgs { max-height: 240px; }
+.qt-posts__autolink { align-self: flex-start; font-size: 13.5px; }

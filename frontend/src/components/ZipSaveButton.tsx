@@ -1,12 +1,14 @@
-// "⬇ Tải N clip" — the agent writes the .zip straight into this machine's Downloads folder and the button follows it.
+// "⬇ Tải" — the agent writes the video(s) straight into this machine's save folder (Settings → 🖥 Máy này, else
+// Downloads): one video as its own .mp4, several as one .zip. The button follows the save.
 //
 // The old button was a plain link to GET /api/exports/zip: the agent built the whole archive (ten clips ≈ 800 MB)
 // before the first byte, the desktop app showed nothing meanwhile, and the button looked dead — people pressed it
-// four times and got four copies (15/11). Now one press starts a save (a second press on the same clips joins it),
+// four times and got four copies (15/11). Now one press starts a save (a second press on the same videos joins it),
 // the button shows how far it is, and at the end it offers to show the file. The save goes on when the page is left
 // (the "việc đang chạy" badge lists it); the state lives here, outside any component, so coming back shows it.
+// With "Hỏi chỗ lưu mỗi lần" on, the computer's folder picker opens first.
 import { useEffect, useRef, useSyncExternalStore } from "react";
-import { getZipSave, revealZipSave, startZipSave, stopZipSave, type ZipSaveJob } from "../api/client";
+import { getSaveFolder, getZipSave, pickFolder, revealZipSave, startSave, stopZipSave, type SaveMedia, type ZipSaveJob } from "../api/client";
 import { toast } from "../store/toast";
 import { announceRunning } from "./BackgroundTasks";
 import { StopButton } from "./StopButton";
@@ -31,8 +33,8 @@ function subscribe(l: () => void) {
   return () => listeners.delete(l);
 }
 
-function keyOf(ids: number[]): string {
-  return [...new Set(ids)].sort((a, b) => a - b).join(",");
+function keyOf(ids: number[], media: SaveMedia[]): string {
+  return [...[...new Set(ids)].sort((a, b) => a - b).map(String), ...media.map((m) => `m:${m.media_id}`).sort()].join(",");
 }
 
 function gb(n: number): string {
@@ -54,21 +56,28 @@ async function follow(key: string, job: ZipSaveJob) {
     emit();
   }
   if (j.status === "done") {
-    const skipped = j.skipped.length ? ` (${j.skipped.length} clip chưa ghép bị bỏ qua)` : "";
-    toast.success(`Đã lưu ${j.name} (${gb(j.total_bytes)}) vào thư mục ${j.folder}${skipped}`);
+    const skipped = j.skipped.length ? ` (${j.skipped.length} clip chưa có video bị bỏ qua)` : "";
+    toast.success(`Đã lưu ${j.name} (${gb(j.total_bytes)}) vào ${j.folder}${skipped}`);
   } else if (j.status === "error") {
-    toast.error(j.error || "Lưu file .zip bị lỗi");
+    toast.error(j.error || "Lưu video bị lỗi");
   } else {
-    toast.info("Đã dừng lưu file .zip");
+    toast.info("Đã dừng lưu video");
   }
 }
 
-async function begin(key: string, ids: number[]) {
+async function begin(key: string, ids: number[], media: SaveMedia[]) {
   if (starting.has(key)) return;
   starting.add(key);
   emit();
   try {
-    const job = await startZipSave(ids, window.location.pathname + window.location.search);
+    let folder = "";
+    const where = await getSaveFolder().catch(() => null);
+    if (where?.ask) {
+      const picked = await pickFolder(where.folder, "Lưu video vào thư mục nào?");
+      if (!picked) return; // closed the picker: nothing saved
+      folder = picked;
+    }
+    const job = await startSave({ ids, media, page: window.location.pathname + window.location.search, folder });
     const already = jobs.get(key);
     jobs.set(key, job);
     announceRunning();
@@ -79,17 +88,19 @@ async function begin(key: string, ids: number[]) {
   }
 }
 
-export function ZipSaveButton({ ids, label, className = "qt-btn", title, onDone }: {
+export function SaveButton({ ids = [], media = [], label, className = "qt-btn", title, onDone }: {
   /** clip (board) ids; clips that are not joined yet are skipped by the agent */
-  ids: number[];
+  ids?: number[];
+  /** videos named by the page itself (not through a clip) */
+  media?: SaveMedia[];
   label: string;
   className?: string;
   title?: string;
-  /** after a save of exactly these clips ends well (e.g. reload the "chưa tải" list) */
+  /** after a save of exactly these videos ends well (e.g. reload the "chưa tải" list) */
   onDone?: () => void;
 }) {
   useSyncExternalStore(subscribe, () => version);
-  const key = keyOf(ids);
+  const key = keyOf(ids, media);
   const job = jobs.get(key);
   const status = job?.status;
   const prev = useRef(status);
@@ -98,7 +109,7 @@ export function ZipSaveButton({ ids, label, className = "qt-btn", title, onDone 
     prev.current = status;
   }, [status, onDone]);
 
-  if (!ids.length) return null;
+  if (!ids.length && !media.length) return null;
   if (starting.has(key) && job?.status !== "running") {
     return (
       <button type="button" className={className} disabled aria-busy="true">
@@ -112,7 +123,7 @@ export function ZipSaveButton({ ids, label, className = "qt-btn", title, onDone 
     return (
       <>
         <button type="button" className={className} disabled aria-busy="true"
-                title={job.total_bytes ? `${gb(job.done_bytes)} / ${gb(job.total_bytes)} — lưu vào thư mục Tải về` : "Đang chuẩn bị"}>
+                title={job.total_bytes ? `${gb(job.done_bytes)} / ${gb(job.total_bytes)} — lưu vào ${job.folder || "thư mục lưu video"}` : "Đang chuẩn bị"}>
           <span className="qt-spinner" style={{ display: "inline-block", verticalAlign: "-1px", marginRight: 6 }} />
           {job.phase}{pct}
         </button>
@@ -125,8 +136,8 @@ export function ZipSaveButton({ ids, label, className = "qt-btn", title, onDone 
   return (
     <>
       <button type="button" className={className}
-              title={title ?? "Lưu một file .zip các clip đã ghép vào thư mục Tải về (Downloads) của máy này"}
-              onClick={() => void begin(key, ids).catch((e: unknown) => toast.error(e instanceof Error ? e.message : String(e)))}>
+              title={title ?? "Lưu video vào thư mục lưu video của máy này (đổi thư mục ở Cài đặt → 🖥 Máy này)"}
+              onClick={() => void begin(key, ids, media).catch((e: unknown) => toast.error(e instanceof Error ? e.message : String(e)))}>
         {label}
       </button>
       {recent && (
@@ -138,3 +149,6 @@ export function ZipSaveButton({ ids, label, className = "qt-btn", title, onDone 
     </>
   );
 }
+
+/** The many-clips form ("⬇ Tải N clip"): kept for the pages that pass clip ids. */
+export const ZipSaveButton = SaveButton;

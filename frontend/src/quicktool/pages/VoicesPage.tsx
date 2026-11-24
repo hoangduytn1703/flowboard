@@ -168,7 +168,7 @@ export function VoicesPage() {
 
         {machine && !machine.ok && (
           <div className="vc__warn" role="status">
-            <strong>Máy này chưa nhân bản giọng được:</strong> {machine.reason || "cần gói lồng tiếng"}.
+            <strong>Máy này chưa nhân bản giọng được:</strong> {machine.reason || "cần bộ cài lồng tiếng"}.
             <button type="button" className="qt-btn qt-btn--small" onClick={() => navigate("/settings")}>Mở Cài đặt → 🖥 Máy này</button>
           </div>
         )}

@@ -25,7 +25,7 @@ function elapsed(since: string | null): string {
 }
 
 /**
- * "🎙 Gói lồng tiếng": the speech AI the installed app does not carry (Whisper, spleeter, VieNeu). One click
+ * "🎙 Bộ cài lồng tiếng": the speech AI the installed app does not carry (Whisper, spleeter, VieNeu). One click
  * downloads it into the data folder (services/dub_addon.py); dubbing, "chỉ chèn phụ đề", cutting by the words and
  * the VieNeu voices work once it is there. Shown on the dubbing page when nothing is installed, and in
  * Cài đặt → 🖥 Máy này (``compact``: one line when installed, with "Gỡ").
@@ -46,7 +46,7 @@ export function DubAddonCard({ initial, compact = false, onReady }: {
       setSt(s);
       if (wasRunning.current && !s.running) {
         if (s.installed) {
-          toast.success("Đã cài xong gói lồng tiếng — giờ lồng tiếng được trên máy này.");
+          toast.success("Đã cài xong bộ cài lồng tiếng — giờ lồng tiếng được trên máy này.");
           onReady?.();
         } else if (s.error) {
           toast.error(s.error);
@@ -54,7 +54,7 @@ export function DubAddonCard({ initial, compact = false, onReady }: {
       }
       wasRunning.current = s.running;
     } catch (e) {
-      toast.error(`Không đọc được gói lồng tiếng: ${errText(e)}`);
+      toast.error(`Không đọc được bộ cài lồng tiếng: ${errText(e)}`);
     }
   }, [onReady]);
 
@@ -80,18 +80,18 @@ export function DubAddonCard({ initial, compact = false, onReady }: {
   };
 
   const cancel = async () => {
-    if (!(await askConfirm("Huỷ cài gói lồng tiếng? Phần đã tải được giữ lại — bấm Cài lại là tải tiếp chỗ dở.", { ok: "Huỷ cài", cancel: "Tiếp tục cài" }))) return;
+    if (!(await askConfirm("Huỷ cài bộ cài lồng tiếng? Phần đã tải được giữ lại — bấm Cài lại là tải tiếp chỗ dở.", { ok: "Huỷ cài", cancel: "Tiếp tục cài" }))) return;
     try { setSt(await cancelDubAddon()); } catch (e) { toast.error(errText(e)); }
   };
 
   const remove = async () => {
     if (!st) return;
-    if (!(await askConfirm(`Gỡ gói lồng tiếng (${gb(st.size_mb ?? 0)} ở ${st.dir})? Lồng tiếng sẽ không dùng được tới khi cài lại.`,
+    if (!(await askConfirm(`Gỡ bộ cài lồng tiếng (${gb(st.size_mb ?? 0)} ở ${st.dir})? Lồng tiếng sẽ không dùng được tới khi cài lại.`,
       { ok: "Gỡ gói", danger: true }))) return;
     setBusy(true);
     try {
       setSt(await removeDubAddon());
-      toast.success("Đã gỡ gói lồng tiếng.");
+      toast.success("Đã gỡ bộ cài lồng tiếng.");
       onReady?.();
     } catch (e) {
       toast.error(errText(e));
@@ -111,9 +111,9 @@ export function DubAddonCard({ initial, compact = false, onReady }: {
         <div className="qt-addon__head">
           <span className="qt-addon__icon" aria-hidden="true">✓</span>
           <div>
-            <strong>Gói lồng tiếng đã cài</strong>
+            <strong>Bộ cài lồng tiếng đã cài</strong>
             <small>
-              {onCard ? `Whisper chạy bằng card ${st.info.gpu?.name ?? "NVIDIA"}` : "Whisper chạy bằng CPU"}
+              {onCard ? `AI nghe lời chạy bằng card ${st.info.gpu?.name ?? "NVIDIA"}` : "AI nghe lời chạy bằng CPU (chậm hơn)"}
               {st.size_mb ? ` · ${gb(st.size_mb)}` : ""} · <code>{st.dir}</code>
             </small>
           </div>
@@ -133,7 +133,7 @@ export function DubAddonCard({ initial, compact = false, onReady }: {
       <div className="qt-addon__head">
         <span className="qt-addon__icon" aria-hidden="true">🎙</span>
         <div>
-          <strong>{st.running ? "Đang cài gói lồng tiếng" : "Máy này chưa có gói lồng tiếng"}</strong>
+          <strong>{st.running ? "Đang cài bộ cài lồng tiếng" : "Máy này chưa có bộ cài lồng tiếng"}</strong>
           <small>
             Lồng tiếng, chèn phụ đề, cắt video theo lời nói và giọng VieNeu cần bộ AI nghe tiếng (Whisper), tách nhạc nền và
             giọng đọc. Bộ cài DFlow không kèm sẵn vì quá nặng — bấm cài một lần, tải miễn phí về thư mục dữ liệu, sau đó dùng mãi.
@@ -172,11 +172,11 @@ export function DubAddonCard({ initial, compact = false, onReady }: {
           {short && <p className="qt-addon__warn">Ổ đĩa không đủ chỗ — dọn bớt (hoặc đổi Thư mục dữ liệu ở Cài đặt → 🖥 Máy này) rồi cài.</p>}
           {st.error && <p className="qt-addon__err">{withLinks(st.error)}</p>}
           {!st.supported ? (
-            <p className="qt-addon__warn">Gói lồng tiếng chỉ có cho Windows.</p>
+            <p className="qt-addon__warn">Bộ cài lồng tiếng chỉ có cho Windows.</p>
           ) : (
             <div className="qt-addon__acts">
               <button type="button" className="qt-btn qt-btn--accent" disabled={busy || short} onClick={() => void install()}>
-                {st.error || st.done_mb ? "⬇ Cài lại (tải tiếp chỗ dở)" : `⬇ Cài gói lồng tiếng (~${gb(st.download_mb)})`}
+                {st.error || st.done_mb ? "⬇ Cài lại (tải tiếp chỗ dở)" : `⬇ Cài bộ cài lồng tiếng (~${gb(st.download_mb)})`}
               </button>
             </div>
           )}

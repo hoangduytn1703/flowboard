@@ -24,6 +24,7 @@ import { CutPane } from "./CutPane";
 import "./editor.css";
 import { askConfirm } from "../../../components/Dialogs";
 import { StopButton } from "../../../components/StopButton";
+import { SaveButton } from "../../../components/ZipSaveButton";
 import { getEditHear, hearEditJob, stopEditHear, type HearState } from "../../../api/edit";
 
 const MIN_SLOT = 0.3;
@@ -751,7 +752,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
     <div className={`dx${landscapeClass(frameW, frameH)}`}>
       <div className="dx__top">
         <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={close} disabled={applyingAll}
-                title={isCut ? "Về trang Cắt video" : "Về trang Lồng tiếng"}>← Danh sách</button>
+                title="Đóng trình chỉnh sửa, về trang đã mở video này">← Quay lại</button>
         {siblings.length > 1 ? (
           <label className="dx__pick" title="Clip trong loạt — chọn clip cần chỉnh">
             <span>{isCut ? "Video" : "Clip"} {Math.max(1, siblings.findIndex((s) => s.job_id === job.job_id) + 1)}/{siblings.length}</span>
@@ -793,9 +794,10 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
         </div>
         <div className="dx__actions">
           {job.media_url && <button type="button" className="qt-btn qt-btn--small" disabled={batchBusy} onClick={() => { stage.current?.pause(); setShowResult(true); }} title="Xem video đã xuất">▶ Bản đã xuất</button>}
-          {job.media_url && (
-            <a className="qt-btn qt-btn--small" href={job.media_url}
-               download={`${(job.name || job.title || "video-long-tieng").replace(/[\\/:*?"<>|]+/g, " ").trim()}.mp4`}>⬇ Tải</a>
+          {job.media_url && job.media_id && (
+            <SaveButton className="qt-btn qt-btn--small" label="⬇ Tải"
+                        ids={job.board_id ? [job.board_id] : []}
+                        media={job.board_id ? [] : [{ media_id: job.media_id, name: job.name || job.title || "video" }]} />
           )}
           {job.board_id && <button type="button" className="qt-btn qt-btn--small" disabled={batchBusy} onClick={() => navigate(`/clips/${job.board_id}/export`)}>Mở clip →</button>}
           <LookPresets readOnly={readOnly}
@@ -858,7 +860,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
             {LEFT_TABS.map((x) => (
               <button key={x.key} type="button" role="tab" aria-selected={leftTab === x.key}
                       className={`dx-side__tab${leftTab === x.key ? " is-on" : ""}`} onClick={() => setLeftTab(x.key)}>
-                <span aria-hidden="true">{x.icon}</span>{x.label}
+                <span aria-hidden="true">{x.icon}</span><b className="dx-side__label">{x.label}</b>
               </button>
             ))}
           </div>
@@ -1004,7 +1006,7 @@ export function DubEditor({ job, status, onJob, onClose, siblings = [], onSwitch
             {RIGHT_TABS.filter((x) => x.key !== "cut" || !isCut).map((x) => (
               <button key={x.key} type="button" role="tab" aria-selected={rightTab === x.key}
                       className={`dx-side__tab${rightTab === x.key ? " is-on" : ""}`} onClick={() => setRightTab(x.key)}>
-                <span aria-hidden="true">{x.icon}</span>{x.label}
+                <span aria-hidden="true">{x.icon}</span><b className="dx-side__label">{x.label}</b>
               </button>
             ))}
           </div>

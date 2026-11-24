@@ -168,9 +168,9 @@ export type DubSubtitlesProps = {
 };
 
 export const DUB_REMOTION_STYLES: { key: DubRemotionStyle; label: string }[] = [
-  { key: "rm_box", label: "Remotion · hộp vàng bo góc, font Việt, emoji màu" },
-  { key: "rm_karaoke", label: "Remotion · bật sáng từng từ (kiểu TikTok)" },
-  { key: "rm_outline", label: "Remotion · chữ trắng viền đen" },
+  { key: "rm_box", label: "Hộp vàng bo góc, font Việt, emoji màu" },
+  { key: "rm_karaoke", label: "Bật sáng từng từ (kiểu TikTok)" },
+  { key: "rm_outline", label: "Chữ trắng viền đen, font Việt" },
 ];
 
 export const DUB_FPS = 30;

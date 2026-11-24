@@ -115,9 +115,18 @@ def download_zip(ids: str = Query(..., description="comma-separated clip (board)
                         background=BackgroundTask(lambda: Path(tmp).unlink(missing_ok=True)))
 
 
+class SaveMedia(BaseModel):
+    media_id: str = Field(min_length=1, max_length=120)
+    name: str = Field("", max_length=2000)
+
+
 class SaveBody(BaseModel):
-    ids: list[int] = Field(min_length=1, max_length=200)
+    ids: list[int] = Field(default_factory=list, max_length=200)
+    # videos the page names itself (a cut part, the editor's export…), not through a clip
+    media: list[SaveMedia] = Field(default_factory=list, max_length=200)
     page: str = Field("", max_length=200)
+    # a folder picked for this save only ("hỏi chỗ lưu mỗi lần"); "" = the machine's save folder
+    folder: str = Field("", max_length=400)
 
 
 def _job_or_404(job_id: str) -> zip_save.ZipJob:
@@ -130,7 +139,28 @@ def _job_or_404(job_id: str) -> zip_save.ZipJob:
 @router.post("/zip/save")
 def save_zip(body: SaveBody) -> dict:
     try:
-        return zip_save.start(body.ids, body.page).view()
+        return zip_save.start(body.ids, body.page, [m.model_dump() for m in body.media], body.folder).view()
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.get("/save-folder")
+def save_folder() -> dict:
+    """Where "⬇ Tải" writes on this machine, and whether the page should ask for a folder each time."""
+    return {"folder": str(zip_save.downloads_dir()), "custom": zip_save.chosen_dir(), "ask": zip_save.ask_each_time(),
+            "system": str(zip_save.system_downloads())}
+
+
+class PickBody(BaseModel):
+    start: str = Field("", max_length=400)
+    title: str = Field("Chọn thư mục lưu video", max_length=120)
+
+
+@router.post("/pick-folder")
+def pick_folder(body: PickBody) -> dict:
+    """The folder picker of this computer (blocks until it is closed); ``path`` None = cancelled."""
+    try:
+        return {"path": zip_save.pick_folder(body.start, body.title)}
     except ValueError as e:
         raise HTTPException(400, str(e))
 

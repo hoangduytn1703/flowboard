@@ -8,7 +8,7 @@ import { askConfirm, askText } from "../../../components/Dialogs";
 import { LookThumb } from "./LookThumb";
 
 /**
- * "★ Mẫu chỉnh sửa": the whole look of a dubbed clip — subtitle place / size / style, blur boxes, output format, frame,
+ * "★ Kiểu chỉnh sửa": the whole look of a dubbed clip — subtitle place / size / style, blur boxes, output format, frame,
  * sticker, key-moment settings — kept under a name and put on any other clip in one click, so every clip of a page
  * looks the same without redoing it. One preset can be the default for new videos (the start form picks it).
  */
@@ -45,7 +45,7 @@ export function LookPresets({ current, readOnly, onApply }: {
       setPresets((list) => [row, ...(list ?? [])]);
       if (!(presets ?? []).length) { await setDefaultLook(row.id); setDefaultId(row.id); }
       toast.success(`Đã lưu mẫu "${row.name}"${!(presets ?? []).length ? " và đặt làm mặc định cho video mới" : ""}. `
-        + "Với clip khác: mở ★ Mẫu → ✓ Áp dụng → Xuất lại video.");
+        + "Với clip khác: mở ★ Kiểu → ✓ Áp dụng → Xuất lại video.");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
@@ -81,13 +81,13 @@ export function LookPresets({ current, readOnly, onApply }: {
   return (
     <div className="dx-presets" ref={box}>
       <button type="button" className={`qt-btn qt-btn--small${open ? " is-on" : ""}`} onClick={() => setOpen((o) => !o)}
-              title="Mẫu chỉnh sửa: lưu kiểu phụ đề / vùng mờ / khung xuất / khung / nhân vật / nhấn chữ của clip này, dùng lại cho clip khác">
-        ★ Mẫu
+              title="Kiểu chỉnh sửa: lưu kiểu phụ đề / vùng mờ / khung xuất / khung / nhân vật / nhấn chữ của clip này, dùng lại cho clip khác">
+        ★ Kiểu
       </button>
       {open && (
-        <div className="dx-presets__pop" role="dialog" aria-label="Mẫu chỉnh sửa">
+        <div className="dx-presets__pop" role="dialog" aria-label="Kiểu chỉnh sửa">
           <div className="dx-presets__head">
-            <strong>Mẫu chỉnh sửa</strong>
+            <strong>Kiểu chỉnh sửa</strong>
             <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={busy || readOnly} onClick={() => void save()}>★ Lưu kiểu hiện tại</button>
           </div>
           <p className="dx-presets__tip">Một mẫu = vị trí / cỡ / độ rộng / kiểu phụ đề, các vùng mờ, khung xuất + nền, khung trang trí, nhân vật / logo,
@@ -102,11 +102,11 @@ export function LookPresets({ current, readOnly, onApply }: {
                   const c = d.layout?.canvas;
                   const bg = c && c.fit !== "crop" && c.fit !== "blur" && c.fit !== "black" ? `nền ${c.fit === "grid" ? "lưới" : c.fit === "color" ? "màu" : c.fit === "video" ? "video" : "ảnh"}` : "";
                   const bits = [d.style, c ? `khung ${c.aspect}` : "", bg, (d.layout?.blurs?.length ?? (d.layout?.blur ? 1 : 0)) ? `${d.layout.blurs?.length ?? 1} vùng mờ` : "",
-                                d.layout?.frame ? "khung trang trí" : "", d.layout?.mascot?.media_id ? "nhân vật" : "", d.highlights?.on ? "nhấn chữ" : "", d.engine === "remotion" ? "Remotion" : ""].filter(Boolean);
+                                d.layout?.frame ? "khung trang trí" : "", d.layout?.mascot?.media_id ? "nhân vật" : "", d.highlights?.on ? "nhấn chữ" : "", d.engine === "remotion" ? "phụ đề đẹp" : ""].filter(Boolean);
                   return (
                     <li key={p.id} className={p.id === defaultId ? "is-default" : ""}>
                       <LookThumb preset={p} />
-                      <button type="button" className="dx-presets__use" disabled={readOnly} onClick={() => apply(p)} title="Áp mẫu này cho clip đang mở">
+                      <button type="button" className="dx-presets__use" disabled={readOnly} onClick={() => apply(p)} title="Áp kiểu này cho clip đang mở">
                         <strong>{p.id === defaultId ? "★ " : ""}{p.name}</strong>
                         <small>{bits.join(" · ")}{p.uses ? ` · dùng ${p.uses} lần` : ""}</small>
                       </button>

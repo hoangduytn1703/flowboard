@@ -5,8 +5,11 @@
  *  Rendered inside the /clips layout like ProductsPage. */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { announceRunning } from "../../components/BackgroundTasks";
+import { SaveButton } from "../../components/ZipSaveButton";
+import { takeHandoff } from "../sources/handoff";
+import { VideoToolsTabs } from "../VideoToolsTabs";
 
 import {
   aiStatus as fetchAiStatus,
@@ -46,7 +49,6 @@ function errMessage(e: unknown): string {
 }
 
 export function CleanToolPage() {
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
     const prev = document.title;
@@ -223,7 +225,7 @@ export function CleanToolPage() {
     try {
       const out = await eraseBoxes(video.media_id, boxes, method);
       setResult(out);
-      setResultLabel(method === "delogo" ? `Đã xoá ${boxes.length} vùng (delogo)` : `Đã làm mờ ${boxes.length} vùng`);
+      setResultLabel(method === "delogo" ? `Đã xoá ${boxes.length} vùng` : `Đã làm mờ ${boxes.length} vùng`);
     } catch (e) {
       setBoxError(errMessage(e));
     } finally {
@@ -287,7 +289,7 @@ export function CleanToolPage() {
         if (j.status === "done" && j.media_id && j.url) {
           setResult({ media_id: j.media_id, url: j.url, duration_s: j.duration_s ?? video?.duration_s ?? 0,
                       width: video?.width ?? 0, height: video?.height ?? 0 });
-          setResultLabel("Đã xoá phụ đề bằng AI (LaMa)");
+          setResultLabel("Đã xoá phụ đề bằng AI");
         } else if (j.status === "error") {
           setAiError(j.error ?? "Xoá bằng AI lỗi.");
         }
@@ -316,7 +318,7 @@ export function CleanToolPage() {
         setJob(j);
         if (j.status === "done" && j.media_id && j.url) {
           setResult({ media_id: j.media_id, url: j.url, duration_s: j.duration_s ?? v.duration_s, width: v.width, height: v.height });
-          setResultLabel("Đã xoá phụ đề bằng AI (LaMa)");
+          setResultLabel("Đã xoá phụ đề bằng AI");
         }
       } catch {
         if (live) setAiError("Không thấy tiến trình xoá chữ này nữa (agent đã khởi động lại?).");
@@ -325,6 +327,20 @@ export function CleanToolPage() {
     return () => { live = false; };
   }, [wantedJob]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // sent over from "📥 Thêm video": one video already here (a file or a clip's video)
+  useEffect(() => {
+    const h = takeHandoff("clean");
+    const v = h?.videos[0];
+    if (!v) return;
+    let live = true;
+    setUploading(true);
+    void cleanInfo(v.media_id)
+      .then((info) => { if (live) { resetForVideo(info); setResult(null); } })
+      .catch((e) => { if (live) setUploadError(`Không mở được video: ${errMessage(e)}`); })
+      .finally(() => { if (live) setUploading(false); });
+    return () => { live = false; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const jobRunning = job?.status === "queued" || job?.status === "running";
   const busyAny = boxBusy || bandBlurBusy || jobRunning || detecting;
 
@@ -332,10 +348,8 @@ export function CleanToolPage() {
     <>
       <header className="qt-header">
         <span className="qt-header__crumb">🧽 Xoá chữ / logo / watermark</span>
-        <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={() => navigate("/clips")}>
-          ← Clip của tôi
-        </button>
       </header>
+      <VideoToolsTabs />
       <div className="qt-home">
         {/* 1 · upload */}
         <section className="qt-card">
@@ -371,7 +385,6 @@ export function CleanToolPage() {
               <span>Kích thước <strong>{video.width}×{video.height}</strong></span>
               <span>Thời lượng <strong>{fmtTime(video.duration_s)}</strong></span>
               {video.has_audio === false && <span>Không có tiếng</span>}
-              <span>Media <code>{video.media_id.slice(0, 8)}…</code></span>
             </div>
           )}
         </section>
@@ -433,7 +446,7 @@ export function CleanToolPage() {
                 <div className="clean-radio">
                   <label>
                     <input type="radio" name="clean-method" checked={method === "delogo"} onChange={() => setMethod("delogo")} />
-                    Xoá (delogo)
+                    Xoá
                   </label>
                   <label>
                     <input type="radio" name="clean-method" checked={method === "blur"} onChange={() => setMethod("blur")} />
@@ -466,8 +479,8 @@ export function CleanToolPage() {
                   </p>
                 ) : (
                   <p className="qt-card__hint">
-                    Tìm các dòng chữ lặp lại ở cùng độ cao (phụ đề in sẵn), rồi vẽ lại nền bằng LaMa trên GPU.
-                    {ai.model_cached === false && " Lần đầu sẽ tải mô hình LaMa (~200 MB)."}
+                    Tìm các dòng chữ lặp lại ở cùng độ cao (phụ đề in sẵn), rồi AI vẽ lại phần nền phía sau (cần card màn hình NVIDIA).
+                    {ai.model_cached === false && " Lần đầu sẽ tải mô hình AI (~200 MB)."}
                   </p>
                 )}
                 <div className="qt-row">
@@ -493,7 +506,7 @@ export function CleanToolPage() {
                 {bands && bands.length > 0 && (
                   <div className="qt-row">
                     <button type="button" className="qt-btn qt-btn--accent" disabled={!ai?.available || busyAny} onClick={() => void runAiErase()}>
-                      Xoá bằng AI (chậm, GPU)
+                      Xoá bằng AI (chậm hơn)
                     </button>
                     <button type="button" className="qt-btn" disabled={busyAny} onClick={() => void runBandBlur()}>
                       {bandBlurBusy ? <><span className="qt-spinner" /> Đang làm mờ…</> : "Làm mờ dải (nhanh)"}
@@ -533,9 +546,8 @@ export function CleanToolPage() {
             <h2 className="qt-card__title">{resultLabel || "Video đã làm sạch"}</h2>
             <video key={result.media_id} src={result.url} controls playsInline />
             <div className="qt-row">
-              <a className="qt-btn qt-btn--accent" href={result.url} download={`clean-${result.media_id.slice(0, 8)}.mp4`}>
-                ⬇ Tải về
-              </a>
+              <SaveButton className="qt-btn qt-btn--accent" label="⬇ Tải về"
+                          media={[{ media_id: result.media_id, name: resultLabel || "video-da-lam-sach" }]} />
               <button type="button" className="qt-btn" onClick={() => resetForVideo(result)}>
                 Làm sạch tiếp trên kết quả này
               </button>

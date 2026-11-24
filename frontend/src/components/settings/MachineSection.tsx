@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { api } from "../../api/client";
+import { api, pickFolder } from "../../api/client";
 import { toast } from "../../store/toast";
-import { AppVersionSection } from "../AppUpdate";
 import { askConfirm } from "../Dialogs";
+import { useGenerationStore } from "../../store/generation";
 import { DubAddonCard } from "../../quicktool/dub/DubAddonCard";
 import { RemotionAddonCard } from "../../quicktool/dub/RemotionAddonCard";
 
@@ -28,6 +28,10 @@ interface AppStatus {
   erase_root: string;
   erase_python: string;
   capcut_drafts: string;
+  /** where "⬇ Tải" saves videos now / the folder chosen ("" = Downloads) / ask for a folder on every save */
+  save_dir: string;
+  save_dir_custom: string;
+  save_ask: boolean;
   /** keys saved that only take effect after a restart */
   restart_pending: string[];
   /** the card check (services/machine): asked once, remembered */
@@ -36,6 +40,7 @@ interface AppStatus {
 
 type Settings = Partial<{
   paygate_tier: string; central_db_url: string; storage_dir: string; erase_root: string; erase_python: string; capcut_drafts: string;
+  save_dir: string; save_ask: boolean;
 }>;
 
 const errMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -45,7 +50,10 @@ const errMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
  * the Flow plan, the cloud data line, where the data / dubbing kit / CapCut projects live — and, in the desktop
  * app, the extension folder to load into Chrome, the app's folders and a restart.
  */
-export function MachineSection() {
+export function MachineSection({ part = "machine" }: {
+  /** which tab this is on: "machine" (this computer), "data" (cloud line + data folder), "flow" (the Flow plan) */
+  part?: "machine" | "data" | "flow";
+}) {
   const [st, setSt] = useState<AppStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [dbLine, setDbLine] = useState("");
@@ -54,6 +62,8 @@ export function MachineSection() {
   const [erasePython, setErasePython] = useState("");
   const [restarting, setRestarting] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const [saveDir, setSaveDir] = useState("");
 
   async function load() {
     try {
@@ -62,6 +72,7 @@ export function MachineSection() {
       setStorage(s.storage_custom);
       setEraseRoot(s.erase_root);
       setErasePython(s.erase_python);
+      setSaveDir(s.save_dir_custom);
     } catch (e) {
       toast.error(errMessage(e));
     }
@@ -96,7 +107,19 @@ export function MachineSection() {
     }
   }
 
-  async function open(what: "extension" | "data" | "logs" | "settings") {
+  async function chooseSaveDir() {
+    setPicking(true);
+    try {
+      const path = await pickFolder(st?.save_dir ?? "", "Chọn thư mục lưu video tải về");
+      if (path) await save({ save_dir: path }, `Video tải về sẽ lưu vào ${path}`);
+    } catch (e) {
+      toast.error(errMessage(e));
+    } finally {
+      setPicking(false);
+    }
+  }
+
+  async function open(what: "extension" | "data" | "logs" | "settings" | "save") {
     try {
       await api("/api/app/open", { method: "POST", body: JSON.stringify({ what }) });
     } catch (e) {
@@ -139,15 +162,18 @@ export function MachineSection() {
   if (!st) return <div className="settings-panel__section"><div className="settings-panel__hint">Đang tải…</div></div>;
 
   const pending = st.restart_pending.length > 0;
+  // each thing lives on one tab only: the Flow plan on "Google Flow", the cloud line and the data folder on "Dữ liệu"
+  const M = part === "machine";
+  const D = part === "data";
+  const F = part === "flow";
   return (
     <>
-      <AppVersionSection />
-      {pending && (
+      {pending && (M || D) && (
         <div className="settings-panel__section settings-machine__pending">
           <div className="settings-panel__label">Cần khởi động lại để áp dụng</div>
           <div className="settings-panel__hint">
             Đã lưu {st.restart_pending.map((k) => (k.includes("CENTRAL") ? "dòng dữ liệu cloud" : "thư mục dữ liệu")).join(" và ")}.
-            {st.can_restart ? "" : " Tắt cửa sổ DFlow (start.ps1) rồi chạy lại."}
+            {st.can_restart ? "" : " Tắt cửa sổ đang chạy DFlow rồi mở lại."}
           </div>
           {st.can_restart && (
             <div className="qt-post__actions" style={{ marginTop: 8 }}>
@@ -159,7 +185,7 @@ export function MachineSection() {
         </div>
       )}
 
-      {st.machine && (
+      {M && st.machine && (
         <div className="settings-panel__section">
           <div className="settings-panel__label">Card màn hình của máy này</div>
           <div className="settings-machine__row">
@@ -190,23 +216,65 @@ export function MachineSection() {
         </div>
       )}
 
-      <div className="settings-panel__section">
-        <div className="settings-panel__label">Gói Google Flow của tài khoản trên máy này</div>
-        <div className="qt-post__actions" role="radiogroup" aria-label="Gói Flow">
-          {[["PAYGATE_TIER_ONE", "Pro"], ["PAYGATE_TIER_TWO", "Ultra"]].map(([key, label]) => (
-            <button key={key} type="button" role="radio" aria-checked={st.paygate_tier === key} disabled={busy}
-                    className={`qt-btn qt-btn--small${st.paygate_tier === key ? " qt-btn--accent" : " qt-btn--ghost"}`}
-                    onClick={() => st.paygate_tier !== key && void save({ paygate_tier: key }, `Đã chọn gói ${label} — có hiệu lực ngay.`)}>
-              {label}
-            </button>
-          ))}
+      {F && (
+        <div className="settings-panel__section">
+          <div className="settings-panel__label">Gói Google Flow bạn đang dùng</div>
+          <div className="qt-post__actions" role="radiogroup" aria-label="Gói Flow">
+            {[["PAYGATE_TIER_ONE", "Pro"], ["PAYGATE_TIER_TWO", "Ultra"]].map(([key, label]) => (
+              <button key={key} type="button" role="radio" aria-checked={st.paygate_tier === key} disabled={busy}
+                      className={`qt-btn qt-btn--small${st.paygate_tier === key ? " qt-btn--accent" : " qt-btn--ghost"}`}
+                      onClick={() => {
+                        if (st.paygate_tier === key) return;
+                        void save({ paygate_tier: key }, `Đã chọn gói ${label} — có hiệu lực ngay.`)
+                          .then((ok) => { if (ok) useGenerationStore.setState({ paygateTier: key as "PAYGATE_TIER_ONE" | "PAYGATE_TIER_TWO" }); });
+                      }}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="settings-panel__hint">
+            Xem ở flow.google.com: bấm ảnh đại diện góc trên phải. Chọn sai gói thì Flow từ chối hoặc dùng model kém hơn.
+          </div>
         </div>
-        <div className="settings-panel__hint">
-          Xem ở flow.google.com: bấm ảnh đại diện góc trên phải. Chọn sai gói thì Flow từ chối hoặc dùng model kém hơn.
-        </div>
-      </div>
+      )}
 
-      {st.extension_dir && (
+      {M && <div className="settings-panel__section">
+        <div className="settings-panel__label">📁 Thư mục lưu video tải về</div>
+        <div className="settings-panel__hint">
+          Mọi nút “⬇ Tải” lưu vào: <code>{st.save_dir}</code>
+          {st.save_dir_custom ? "" : " (thư mục Tải về của Windows)"}. Một video lưu thành file .mp4, nhiều video gộp thành một file .zip.
+        </div>
+        <div className="settings-machine__row">
+          <input type="text" className="settings-panel__select" value={saveDir} placeholder="để trống = thư mục Tải về (Downloads)"
+                 onChange={(e) => setSaveDir(e.target.value)} disabled={busy || picking} />
+          {st.can_open && (
+            <button type="button" className="qt-btn qt-btn--small" disabled={busy || picking} onClick={() => void chooseSaveDir()}
+                    title="Mở hộp chọn thư mục của Windows">
+              {picking ? "Đang chọn…" : "📂 Chọn thư mục…"}
+            </button>
+          )}
+          <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={busy || saveDir.trim() === st.save_dir_custom}
+                  onClick={() => void save({ save_dir: saveDir.trim() }, saveDir.trim() ? `Video tải về sẽ lưu vào ${saveDir.trim()}` : "Video tải về sẽ lưu vào thư mục Tải về.")}>
+            Lưu
+          </button>
+        </div>
+        <label className="settings-machine__check">
+          <input type="checkbox" checked={st.save_ask} disabled={busy || !st.can_open}
+                 onChange={(e) => void save({ save_ask: e.target.checked }, e.target.checked ? "Mỗi lần tải sẽ hỏi chỗ lưu." : "Tải về sẽ lưu thẳng vào thư mục trên.")} />
+          <span>Hỏi chỗ lưu mỗi lần tải</span>
+        </label>
+        <div className="qt-post__actions" style={{ marginTop: 8 }}>
+          {st.can_open && <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={() => void open("save")}>📂 Mở thư mục lưu video</button>}
+          {st.save_dir_custom && (
+            <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" disabled={busy}
+                    onClick={() => { setSaveDir(""); void save({ save_dir: "" }, "Video tải về sẽ lưu vào thư mục Tải về."); }}>
+              ↺ Về thư mục Tải về
+            </button>
+          )}
+        </div>
+      </div>}
+
+      {M && st.extension_dir && (
         <div className="settings-panel__section">
           <div className="settings-panel__label">Extension DFlow Bridge (cầu nối với Google Flow)</div>
           <div className="settings-panel__hint">
@@ -222,7 +290,7 @@ export function MachineSection() {
         </div>
       )}
 
-      <div className="settings-panel__section">
+      {D && <div className="settings-panel__section">
         <div className="settings-panel__label">Dùng chung dữ liệu với máy khác (cloud)</div>
         <div className="settings-panel__hint">
           {st.cloud_db.active
@@ -230,7 +298,7 @@ export function MachineSection() {
             : st.cloud_db.set
               ? <>Đã lưu dòng kết nối (<code>{st.cloud_db.host}</code>) — khởi động lại để dùng.</>
               : <>Đang dùng dữ liệu trên máy này. Muốn thấy cùng sản phẩm, clip, bài viết với máy khác: dán dòng kết nối người quản lý DFlow gửi
-                  riêng (bắt đầu bằng <code>postgresql://</code> hoặc <code>FLOWBOARD_CENTRAL_DB_URL=</code>). <b>Giữ bí mật dòng này.</b></>}
+                  riêng (bắt đầu bằng <code>postgresql://</code>). <b>Giữ bí mật dòng này.</b></>}
         </div>
         <div className="settings-machine__row">
           <input type="password" className="settings-panel__select" value={dbLine} placeholder="Dán dòng kết nối vào đây" autoComplete="off"
@@ -249,10 +317,10 @@ export function MachineSection() {
             </button>
           )}
         </div>
-      </div>
+      </div>}
 
-      <div className="settings-panel__section">
-        <div className="settings-panel__label">Thư mục lưu ảnh, video, dữ liệu</div>
+      {D && <div className="settings-panel__section">
+        <div className="settings-panel__label">Thư mục lưu ảnh, video, dữ liệu trên máy này</div>
         <div className="settings-panel__hint">
           Đang ở <code>{st.storage_dir}</code>. Ổ C đầy thì chọn thư mục ở ổ khác (ví dụ <code>D:\DFlow-data</code>). Dữ liệu cũ <b>không</b> tự chuyển
           sang — nếu cần, tắt DFlow rồi chép nội dung thư mục cũ sang thư mục mới. Dùng dữ liệu cloud thì ảnh / video tự tải về lại khi cần.
@@ -265,22 +333,22 @@ export function MachineSection() {
             Lưu
           </button>
         </div>
-      </div>
+      </div>}
 
-      <div className="settings-panel__section">
-        <div className="settings-panel__label">🎙 Gói lồng tiếng (AI nghe tiếng, tách nhạc, giọng VieNeu)</div>
+      {M && <div className="settings-panel__section">
+        <div className="settings-panel__label">🎙 Bộ cài lồng tiếng (AI nghe tiếng, tách nhạc, giọng Việt trên máy)</div>
         <DubAddonCard compact />
-      </div>
+      </div>}
 
-      <div className="settings-panel__section">
-        <div className="settings-panel__label">🎬 Gói Remotion (phụ đề font Việt, emoji màu, chữ sáng từng từ)</div>
+      {M && <div className="settings-panel__section">
+        <div className="settings-panel__label">🎬 Bộ cài phụ đề đẹp (font Việt, emoji màu, chữ sáng từng từ)</div>
         <RemotionAddonCard compact />
-      </div>
+      </div>}
 
-      <div className="settings-panel__section">
-        <div className="settings-panel__label">Bộ VieDub đầy đủ (không bắt buộc)</div>
+      {M && <div className="settings-panel__section">
+        <div className="settings-panel__label">Bộ xoá phụ đề bằng AI (không bắt buộc)</div>
         <div className="settings-panel__hint">
-          Chỉ cần khi muốn xoá chữ bằng AI (LaMa). Máy đã có VieDub thì DFlow dùng nó thay cho gói lồng tiếng. Để trống nếu VieDub nằm ở
+          Chỉ cần khi muốn AI xoá phụ đề cứng trong video. Máy đã cài sẵn bộ này (VieDub) thì DFlow dùng luôn. Để trống nếu nó nằm ở
           {" "}<code>D:\codes\pyvideotrans</code>.
         </div>
         <label className="settings-field">
@@ -300,15 +368,15 @@ export function MachineSection() {
             Lưu
           </button>
         </div>
-      </div>
+      </div>}
 
-      {st.can_open && (
+      {M && st.can_open && (
         <div className="settings-panel__section">
           <div className="settings-panel__label">Thư mục của DFlow</div>
           <div className="qt-post__actions">
             <button type="button" className="qt-btn qt-btn--small" onClick={() => void open("data")}>📂 Dữ liệu</button>
             <button type="button" className="qt-btn qt-btn--small" onClick={() => void open("logs")}>📄 Nhật ký (log)</button>
-            <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={() => void open("settings")}>⚙ File cấu hình (.env)</button>
+            <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" onClick={() => void open("settings")}>⚙ File cấu hình</button>
           </div>
           <div className="settings-panel__hint">Gặp lỗi: gửi file <code>agent.log</code> trong thư mục Nhật ký cho người hỗ trợ.</div>
         </div>

@@ -34,9 +34,9 @@ FRONTEND = ROOT / "frontend"
 SCRIPT = FRONTEND / "remotion" / "render.mjs"
 #: keys the composition understands (`frontend/src/remotion/DubSubtitles.tsx` DUB_REMOTION_STYLES)
 STYLES: dict[str, str] = {
-    "rm_box": "Remotion · hộp vàng bo góc, font Việt, emoji màu",
-    "rm_karaoke": "Remotion · bật sáng từng từ (kiểu TikTok)",
-    "rm_outline": "Remotion · chữ trắng viền đen",
+    "rm_box": "Hộp vàng bo góc, font Việt, emoji màu",
+    "rm_karaoke": "Bật sáng từng từ (kiểu TikTok)",
+    "rm_outline": "Chữ trắng viền đen, font Việt",
 }
 DEFAULT_STYLE = "rm_box"
 FPS = 30

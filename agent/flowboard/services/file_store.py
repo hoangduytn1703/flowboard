@@ -48,6 +48,8 @@ _worker: Optional[threading.Thread] = None
 _remote_keys: set[str] = set()
 #: Their sizes, from the last listing (used to spot a copy that differs from the file on this machine).
 _remote_sizes: dict[str, int] = {}
+#: True once the bucket has been listed for the active account: only then does "not in _remote_keys" mean "not there".
+_listed = False
 _stats = {"uploaded": 0, "downloaded": 0, "upload_errors": 0, "download_errors": 0, "last_error": None,
           "broken_skipped": 0}
 #: Files up to this size go up from one read of their bytes (size and content always agree); bigger ones stream.
@@ -140,8 +142,9 @@ def reset() -> None:
         _client_cfg = None
     _remote_keys.clear()
     _remote_sizes.clear()
-    global _downloads_paused_until
+    global _downloads_paused_until, _listed
     _downloads_paused_until = 0.0
+    _listed = False
 
 
 def make_client(cfg: dict):
@@ -411,7 +414,22 @@ def list_keys() -> set[str]:
         token = resp.get("NextContinuationToken")
     _remote_keys.clear()
     _remote_keys.update(keys)
+    global _listed
+    _listed = True
     return keys
+
+
+def in_bucket(local_path: Optional[str]) -> Optional[bool]:
+    """Can this file be fetched from the bucket? False when there is no bucket or the listing lacks it,
+    None while the bucket has not been listed yet (unknown — reconcile lists it right after login)."""
+    if not enabled():
+        return False
+    key = key_for(local_path) if local_path else None
+    if key is None:
+        return False
+    if key in _remote_keys:
+        return True
+    return False if _listed else None
 
 
 def _asset_paths() -> list[str]:

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { patchNode, refinePromptApi, tailorBoardApi } from "../../api/client";
-import { VoiceOptions, useVoiceGroups } from "../VoiceField";
+import { VoiceSelect } from "../VoiceField";
 import { toast } from "../../store/toast";
 import { PromptLibraryButtons } from "../PromptLibraryButtons";
 import { sceneTagOf } from "../promptTags";
@@ -41,10 +41,7 @@ function VoicePick({ node }: { node: FlowNode }) {
   return (
     <span className="qt-voice-pick" title="Giọng đọc riêng cho cảnh này (mặc định = giọng chọn ở bước 5)">
       Giọng:
-      <select value={value} onChange={(e) => saveVoice(node, e.target.value)}>
-        <option value="">mặc định (bước 5)</option>
-        <VoiceOptions groups={useVoiceGroups()} short />
-      </select>
+      <VoiceSelect value={value} short emptyLabel="giọng chung của clip" ariaLabel="Giọng riêng cho cảnh này" onChange={(v) => saveVoice(node, v)} />
     </span>
   );
 }
@@ -71,6 +68,11 @@ export function StepScript({ roles, category, productId = null, boardId = null, 
     toast.success(on ? "Đã chuyển thành clip không lời." : "Đã bật lại lời thoại — AI viết lời cho các cảnh còn trống.");
   }
   const [writing, setWriting] = useState(false);
+  // One voice for the whole clip by default (chosen at step 4 / 5); a voice per scene only when asked for — or when a
+  // scene already has one.
+  const [perScene, setPerScene] = useState(() =>
+    roles.scenes.some((s) => typeof s.video?.data.voice === "string" && !!s.video.data.voice) ||
+    roles.scenes.some((s) => typeof s.image.data.voice === "string" && !!s.image.data.voice));
   // "Viết lại kịch bản theo sản phẩm": the box is open / the wish typed / busy.
   const [tailorOpen, setTailorOpen] = useState(false);
   const [tailorWish, setTailorWish] = useState("");
@@ -206,6 +208,9 @@ export function StepScript({ roles, category, productId = null, boardId = null, 
             <button type="button" className="qt-btn qt-btn--small qt-btn--ghost" disabled={switching} onClick={() => void switchVoice(true)}>
               🔇 Chuyển thành clip không lời
             </button>
+            <label className="qt-check qt-voiceless__perscene" title="Mặc định cả clip một giọng (chọn ở Bước 4 / 5). Bật để mỗi cảnh chọn giọng riêng.">
+              <input type="checkbox" checked={perScene} onChange={(e) => setPerScene(e.target.checked)} /> Giọng riêng cho từng cảnh
+            </label>
           </div>
         ))}
         {tailorOpen && productId !== null && (
@@ -289,7 +294,7 @@ export function StepScript({ roles, category, productId = null, boardId = null, 
                             {hooksBusy ? "đang nghĩ…" : "✨ 5 câu mở đầu khác"}
                           </button>
                         )}
-                        <VoicePick node={s.video} />
+                        {perScene && <VoicePick node={s.video} />}
                         <PromptLibraryButtons kind="narration" context={ctx}
                           getText={() => (useBoardStore.getState().nodes.find((n) => n.id === s.video!.id)?.data.narration as string) ?? ""}
                           onApply={(t) => { saveField(s.video!, "narration", t); setVoiceWords((p) => ({ ...p, [s.video!.id]: wordCount(t) })); }} />
@@ -346,7 +351,7 @@ export function StepScript({ roles, category, productId = null, boardId = null, 
                     <label className="qt-field" htmlFor={`qt-nar-${s.image.id}`}>
                       <span>
                         🎙 Lời kể cho ảnh này
-                        <VoicePick node={s.image} />
+                        {perScene && <VoicePick node={s.image} />}
                       </span>
                       <textarea
                         id={`qt-nar-${s.image.id}`}

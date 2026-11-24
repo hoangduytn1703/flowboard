@@ -167,7 +167,7 @@ export function DecorControls({ layout, onChange, orientation = "portrait" }: {
     try {
       const row = await saveDecorPreset({ kind, name, data });
       setPresets((list) => [row, ...(list ?? [])]);
-      toast.success(`Đã lưu ${kind === "frame" ? "khung" : "nhân vật"} "${row.name}" — dùng lại ở ★ Mẫu đã lưu.`);
+      toast.success(`Đã lưu ${kind === "frame" ? "khung" : "nhân vật"} "${row.name}" — dùng lại ở mục ★ Đã lưu.`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     }
@@ -218,7 +218,7 @@ export function DecorControls({ layout, onChange, orientation = "portrait" }: {
       </div>
 
       <div className="qt-decor__block">
-        <strong>★ Mẫu đã lưu</strong>
+        <strong>★ Đã lưu</strong>
         {presets === null ? <small className="qt-card__hint">Đang tải…</small>
           : presets.length === 0 ? <small className="qt-card__hint">Chưa có — chỉnh khung / nhân vật ưng ý rồi bấm ★ Lưu bên dưới.</small>
           : (

@@ -212,3 +212,8 @@
 .ct-rows__custom span { min-width: 0; line-height: 1.4; }
 .ct-rows__custom input.qt-input { width: 84px; flex: 0 0 84px; }
 .ct-rows__custom span { flex: 1 1 0; }
+/* speed / volume / brightness for every part: folded (the editor has them too) */
+.ct-rows__out { margin-top: 6px; }
+.ct-rows__out > summary { cursor: pointer; font-size: 13.5px; font-weight: 600; color: var(--muted); padding: 4px 0; }
+.ct-rows__out > summary small { font-weight: 500; }
+.ct-rows__out[open] > summary { color: var(--text); }

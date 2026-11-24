@@ -15,7 +15,7 @@ function elapsed(since: string | null): string {
 }
 
 /**
- * "🎬 Gói Remotion": the second subtitle engine (font Việt, emoji màu, karaoke) needs Node + the Remotion packages +
+ * "🎬 Bộ cài phụ đề đẹp": the second subtitle engine (font Việt, emoji màu, karaoke) needs Node + the Remotion packages +
  * a headless Chrome, which the installed app does not carry. One click installs them next to the user's data
  * (services/remotion_addon.py). Shown where Remotion is offered but does not run yet, and in Cài đặt → 🖥 Máy này
  * (``compact``: one line when installed, with "Gỡ").
@@ -36,7 +36,7 @@ export function RemotionAddonCard({ initial, compact = false, onReady }: {
       setSt(s);
       if (wasRunning.current && !s.running) {
         if (s.installed) {
-          toast.success("Đã cài xong gói Remotion — chọn được phụ đề Remotion trên máy này.");
+          toast.success("Đã cài xong bộ cài phụ đề đẹp — chọn được phụ đề đẹp trên máy này.");
           onReady?.();
         } else if (s.error) {
           toast.error(s.error);
@@ -44,7 +44,7 @@ export function RemotionAddonCard({ initial, compact = false, onReady }: {
       }
       wasRunning.current = s.running;
     } catch (e) {
-      toast.error(`Không đọc được gói Remotion: ${errText(e)}`);
+      toast.error(`Không đọc được bộ cài phụ đề đẹp: ${errText(e)}`);
     }
   }, [onReady]);
 
@@ -70,18 +70,18 @@ export function RemotionAddonCard({ initial, compact = false, onReady }: {
   };
 
   const cancel = async () => {
-    if (!(await askConfirm("Huỷ cài gói Remotion?", { ok: "Huỷ cài", cancel: "Tiếp tục cài" }))) return;
+    if (!(await askConfirm("Huỷ cài bộ cài phụ đề đẹp?", { ok: "Huỷ cài", cancel: "Tiếp tục cài" }))) return;
     try { setSt(await cancelRemotionAddon()); } catch (e) { toast.error(errText(e)); }
   };
 
   const remove = async () => {
     if (!st) return;
-    if (!(await askConfirm(`Gỡ gói Remotion (${mbText(st.size_mb ?? 0)} ở ${st.dir})? Phụ đề Remotion sẽ không dùng được tới khi cài lại.`,
+    if (!(await askConfirm(`Gỡ bộ cài phụ đề đẹp (${mbText(st.size_mb ?? 0)} ở ${st.dir})? Phụ đề đẹp sẽ không dùng được tới khi cài lại.`,
       { ok: "Gỡ gói", danger: true }))) return;
     setBusy(true);
     try {
       setSt(await removeRemotionAddon());
-      toast.success("Đã gỡ gói Remotion.");
+      toast.success("Đã gỡ bộ cài phụ đề đẹp.");
       onReady?.();
     } catch (e) {
       toast.error(errText(e));
@@ -100,7 +100,7 @@ export function RemotionAddonCard({ initial, compact = false, onReady }: {
         <div className="qt-addon__head">
           <span className="qt-addon__icon" aria-hidden="true">✓</span>
           <div>
-            <strong>Gói Remotion đã cài</strong>
+            <strong>Bộ cài phụ đề đẹp đã cài</strong>
             <small>
               Remotion {st.info.remotion ?? ""} · Node {st.info.node ?? ""}{st.size_mb ? ` · ${mbText(st.size_mb)}` : ""} · <code>{st.dir}</code>
             </small>
@@ -119,9 +119,9 @@ export function RemotionAddonCard({ initial, compact = false, onReady }: {
       <div className="qt-addon__head">
         <span className="qt-addon__icon" aria-hidden="true">🎬</span>
         <div>
-          <strong>{st.running ? "Đang cài gói Remotion" : "Máy này chưa có gói Remotion"}</strong>
+          <strong>{st.running ? "Đang cài bộ cài phụ đề đẹp" : "Máy này chưa có bộ cài phụ đề đẹp"}</strong>
           <small>
-            Phụ đề Remotion (font Việt đẹp, emoji màu, chữ sáng từng từ kiểu TikTok) cần Node.js, bộ Remotion và một trình duyệt ẩn để
+            Phụ đề đẹp (font Việt đẹp, emoji màu, chữ sáng từng từ kiểu TikTok) cần Node.js, bộ Remotion và một trình duyệt ẩn để
             vẽ. Bộ cài DFlow không kèm sẵn — bấm cài một lần, tải miễn phí về thư mục dữ liệu, sau đó dùng mãi.
           </small>
         </div>
@@ -150,11 +150,11 @@ export function RemotionAddonCard({ initial, compact = false, onReady }: {
           {short && <p className="qt-addon__warn">Ổ đĩa không đủ chỗ — dọn bớt (hoặc đổi Thư mục dữ liệu ở Cài đặt → 🖥 Máy này) rồi cài.</p>}
           {st.error && <p className="qt-addon__err">{st.error}</p>}
           {!st.supported ? (
-            <p className="qt-addon__warn">Gói Remotion chưa có cho máy này.</p>
+            <p className="qt-addon__warn">Bộ cài phụ đề đẹp chưa có cho máy này.</p>
           ) : (
             <div className="qt-addon__acts">
               <button type="button" className="qt-btn qt-btn--accent" disabled={busy || short} onClick={() => void install()}>
-                {st.error ? "⬇ Cài lại" : `⬇ Cài gói Remotion (~${mbText(st.download_mb)})`}
+                {st.error ? "⬇ Cài lại" : `⬇ Cài bộ cài phụ đề đẹp (~${mbText(st.download_mb)})`}
               </button>
             </div>
           )}

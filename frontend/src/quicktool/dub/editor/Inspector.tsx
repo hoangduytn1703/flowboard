@@ -197,7 +197,7 @@ export function Inspector({
               ) : (
                 <>
                   <button type="button" className="qt-btn qt-btn--small qt-btn--accent" disabled={readOnly} onClick={lang.hear.start}
-                          title="AI nghe lời trong video (Whisper) để có phụ đề; chạy ngầm, vẫn chỉnh tiếp được">🎧 Nghe lời để có phụ đề</button>
+                          title="AI nghe lời trong video để có phụ đề; chạy ngầm, vẫn chỉnh tiếp được">🎧 Nghe lời để có phụ đề</button>
                   {lang.hear.error && <p className="dx-insp__tip dx-insp__tip--warn">⚠ {lang.hear.error}</p>}
                 </>
               )
@@ -313,7 +313,7 @@ export function Inspector({
               </select>
               {out.engine !== "remotion" && !style.startsWith("rm_") && (
                 <label className="qt-field" style={{ marginTop: 10 }}
-                       title="Kiểu ffmpeg in rất nhanh. Chữ hiện theo giọng: mỗi chữ chiếm phần thời gian theo độ dài của nó trong câu.">
+                       title="Phụ đề nhanh xuất rất nhanh. Chữ hiện theo giọng: mỗi chữ chiếm phần thời gian theo độ dài của nó trong câu.">
                   <span>Hiện chữ</span>
                   <select className="dx-insp__select" value={layout.reveal ?? ""} disabled={readOnly} aria-label="Hiện chữ"
                           onChange={(e) => onLayout({ ...layout, reveal: normReveal(e.target.value) })}>
@@ -467,8 +467,8 @@ export function Inspector({
                 const opts = next === "remotion" ? status.remotion_styles ?? [] : status.styles;
                 if (!opts.some((o) => o.key === style)) onStyle(opts[0]?.key ?? (next === "remotion" ? "rm_box" : "box_yellow"));
               }}>
-                <option value="ass">ffmpeg · nhanh</option>
-                <option value="remotion" disabled={!status.remotion}>Remotion · font Việt, emoji màu{status.remotion ? "" : " (chưa cài gói Remotion)"}</option>
+                <option value="ass">Phụ đề nhanh</option>
+                <option value="remotion" disabled={!status.remotion}>Phụ đề đẹp — font Việt, emoji màu{status.remotion ? "" : " (chưa cài bộ cài phụ đề đẹp)"}</option>
               </select>
             </label>
             {!status.remotion && status.remotion_addon?.supported && (
@@ -485,7 +485,7 @@ export function Inspector({
               {out.mode === "sub"
                 ? "Chỉ phụ đề: video giữ nguyên tiếng gốc, không đọc giọng — xuất nhanh dù sửa chữ hay dời câu."
                 : "Đổi giọng, sửa chữ hoặc dời câu thì lúc xuất phải đọc lại giọng (lâu hơn); chỉ đổi vị trí / kiểu / khung / vùng mờ thì chỉ in lại hình (nhanh)."}{" "}
-              Kiểu có sẵn của {out.engine === "remotion" ? "Remotion" : "ffmpeg"}: {engineStyles.map((s) => s.label).join(", ")}.
+              Kiểu có sẵn của {out.engine === "remotion" ? "phụ đề đẹp" : "phụ đề nhanh"}: {engineStyles.map((s) => s.label).join(", ")}.
             </p>
           </section>
         )}

@@ -14,6 +14,7 @@ import { AccountPoolSection } from "./settings/AccountPoolSection";
 import { ImageProvidersSection } from "./settings/ImageProvidersSection";
 import { GeminiMarkSection } from "./settings/GeminiMarkSection";
 import { DataFolderSection } from "./settings/DataFolderSection";
+import { AppVersionSection } from "./AppUpdate";
 import {
   getPinnedFlowProject,
   setPinnedFlowProject,
@@ -50,13 +51,13 @@ const UUID_ANYWHERE =
 const IMAGE_MODELS: { key: ImageModelKey; label: string; hint: string }[] = [
   {
     key: "NANO_BANANA_PRO",
-    label: "Nano Banana Pro",
-    hint: "Bản cao cấp: ảnh nét hơn, chậm hơn một chút — nên dùng.",
+    label: "Ảnh nét, đẹp — nên dùng (Nano Banana Pro)",
+    hint: "Ảnh nét hơn, chậm hơn một chút.",
   },
   {
     key: "NANO_BANANA_2",
-    label: "Nano Banana 2",
-    hint: "Bản nhẹ, nhanh hơn — Flow hay từ chối bản này, chỉ chọn khi bản Pro lỗi.",
+    label: "Ảnh nhanh, nhẹ (Nano Banana 2)",
+    hint: "Nhanh hơn nhưng Flow hay từ chối — chỉ chọn khi kiểu trên bị lỗi.",
   },
 ];
 
@@ -74,32 +75,32 @@ const VIDEO_QUALITIES: {
 }[] = [
   {
     key: "lite",
-    label: "Veo 3.1 Lite",
-    hint: "Nhanh nhất, model nhẹ nhất. Áp dụng cho cả 16:9 và 9:16.",
+    label: "Nhanh, nhẹ (Veo 3.1 Lite)",
+    hint: "Nhanh nhất, chất lượng vừa. Dùng được cho video dọc lẫn ngang.",
     ultraOnly: false,
   },
   {
     key: "fast",
-    label: "Veo 3.1 Fast",
-    hint: "Mặc định — cân bằng giữa chất lượng và tốc độ. Áp dụng cho cả 16:9 và 9:16.",
+    label: "Cân bằng (Veo 3.1 Fast)",
+    hint: "Cân bằng giữa chất lượng và tốc độ. Dùng được cho video dọc lẫn ngang.",
     ultraOnly: true,
   },
   {
     key: "quality",
-    label: "Veo 3.1 Quality",
-    hint: "Chất lượng cao nhất, chậm nhất. Hợp cho cảnh chính. Áp dụng cho cả 16:9 và 9:16.",
+    label: "Đẹp nhất, chậm (Veo 3.1 Quality)",
+    hint: "Chất lượng cao nhất, chậm nhất — hợp cho cảnh chính.",
     ultraOnly: true,
   },
   {
     key: "lite_relaxed",
-    label: "Veo 3.1 Lite (Ưu tiên thấp)",
-    hint: "Cùng bản Lite nhưng xếp hàng ưu tiên thấp — 0 credit. Chậm hơn khi Flow đang bận.",
+    label: "Miễn phí, xếp hàng chậm (Veo 3.1 Lite)",
+    hint: "Như kiểu “Nhanh, nhẹ” nhưng không tốn credit — phải chờ lâu hơn khi Flow đang bận.",
     ultraOnly: true,
   },
 ];
 
 const OMNI_HINT =
-  "Nên dùng. Làm video 8 giây từ ảnh cảnh (≈12 credit Flow mỗi video), dọc lẫn ngang đều được, " +
+  "Làm mỗi cảnh thành video 8 giây (≈12 credit Flow mỗi cảnh), dọc lẫn ngang đều được, " +
   "ổn định nhất trên cả gói Pro lẫn Ultra.";
 
 type SettingsTab = "gen" | "flow" | "ai" | "keys" | "data" | "machine" | "about";
@@ -362,7 +363,7 @@ export function SettingsPanel({
               <>
                 <div className="settings-panel__section">
                   <label className="settings-field">
-                    <span className="settings-panel__label">Model video</span>
+                    <span className="settings-panel__label">Kiểu tạo video</span>
                     <select
                       className="settings-panel__select"
                       value={videoValue}
@@ -376,7 +377,7 @@ export function SettingsPanel({
                         }
                       }}
                     >
-                      <option value="omni_flash">Omni Flash — nên dùng</option>
+                      <option value="omni_flash">Ổn định nhất — nên dùng (Omni Flash)</option>
                       {VIDEO_QUALITIES.map((q) => {
                         const locked = q.ultraOnly && !isUltra;
                         return (
@@ -390,14 +391,14 @@ export function SettingsPanel({
                   <div className="settings-panel__hint">{videoHint}</div>
                   {!isUltra && (
                     <div className="settings-panel__hint">
-                      Gói đang dùng: <strong>{tierLabel}</strong> — các model "chỉ Ultra" bị khoá.
+                      Gói đang dùng: <strong>{tierLabel}</strong> — các kiểu “chỉ Ultra” bị khoá (đổi gói ở tab Google Flow).
                     </div>
                   )}
                 </div>
 
                 <div className="settings-panel__section">
                   <label className="settings-field">
-                    <span className="settings-panel__label">Model ảnh</span>
+                    <span className="settings-panel__label">Kiểu tạo ảnh</span>
                     <select
                       className="settings-panel__select"
                       value={imageModel}
@@ -418,19 +419,14 @@ export function SettingsPanel({
 
             {tab === "flow" && (
               <>
+                <MachineSection part="flow" />
                 {/* The one uuid every board generates into. Flow dropped project
                     creation + listing in the September 2026 migration, so there is no
                     way to pick one from a list — the user pastes it, and until they do
                     nothing can generate. */}
                 <div className="settings-panel__section">
                   <div className="settings-panel__row-head">
-                    <span className="settings-panel__label">Project Google Flow</span>
-                    <span
-                      className="settings-panel__chip"
-                      title="Đặt bằng FLOWBOARD_PAYGATE_TIER trong file .env của agent — Flow không còn báo gói tài khoản nên phải khai báo thủ công."
-                    >
-                      Gói {tierLabel}
-                    </span>
+                    <span className="settings-panel__label">Dự án Google Flow</span>
                   </div>
                   {flowProjectError ? (
                     <>
@@ -485,18 +481,12 @@ export function SettingsPanel({
                       </div>
 
                       <div className="settings-panel__hint">
-                        {flowProject.source === "override"
-                          ? "Đặt tại Cài đặt (ghi đè .env). "
-                          : flowProject.source === "env"
-                            ? "Lấy từ FLOWBOARD_FLOW_PROJECT_ID trong .env. "
-                            : ""}
-                        Mọi board tạo vào project này; lưu project mới thì các board đang ở project cũ chuyển theo.
+                        Mọi clip tạo ảnh / video vào dự án này; đổi sang dự án khác thì các clip cũ chuyển theo.
                       </div>
 
                       {legacyEnvId && (
                         <div className="settings-panel__hint">
-                          ID trong <code>.env</code> không phải uuid. Vẫn dùng được, nhưng muốn ghim lại từ đây thì
-                          cần dán uuid — nút Lưu tắt cho tới lúc đó.
+                          Mã dự án đang dùng không đúng dạng — vẫn chạy được, nhưng muốn đổi thì dán link dự án Flow vào ô trên.
                         </div>
                       )}
 
@@ -507,10 +497,10 @@ export function SettingsPanel({
                           disabled={projectSaving}
                           onClick={() => saveFlowProject(null)}
                         >
-                          Xoá ghi đè —{" "}
+                          Bỏ dự án đã chọn ở đây —{" "}
                           {flowProject.env_project_id
-                            ? `quay về ${flowProject.env_project_id.slice(0, 8)}… trong .env`
-                            : "sẽ không còn project nào, nên không tạo được nữa"}
+                            ? `dùng lại dự án ${flowProject.env_project_id.slice(0, 8)}… trong file cấu hình`
+                            : "sẽ không còn dự án nào, nên không tạo được ảnh / video nữa"}
                         </button>
                       )}
 
@@ -567,11 +557,18 @@ export function SettingsPanel({
 
             {tab === "keys" && <GeminiKeysSection />}
 
-            {tab === "data" && <DataFolderSection />}
+            {tab === "data" && (
+              <>
+                <DataFolderSection />
+                <MachineSection part="data" />
+              </>
+            )}
 
             {tab === "machine" && <MachineSection />}
 
             {tab === "about" && (
+              <>
+              <AppVersionSection />
               <div className="settings-panel__section">
                 <div className="settings-panel__label">Thông tin</div>
                 <div className="settings-panel__about-row">
@@ -592,6 +589,7 @@ export function SettingsPanel({
                   </span>
                 </div>
               </div>
+              </>
             )}
           </div>
         </div>

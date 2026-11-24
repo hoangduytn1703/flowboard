@@ -208,7 +208,7 @@ def test_board_data_merges_and_summary_counts_progress(client):
     rows = client.get("/api/boards", params={"summary": "true"}).json()
     row = next(b for b in rows if b["id"] == bid)
     assert row["summary"] == {"scenes": 2, "scenes_done": 1, "clips": 1, "clips_done": 0,
-                              "errors": 0, "clip_errors": 0, "exported": False, "export_media": None,
+                              "errors": 0, "clip_errors": 0, "exported": False, "export_media": None, "video": None,
                               "downloaded_at": None, "thumbnail": "m1"}
     # A failed clip and a finished export show up for "Hôm nay".
     nodes = client.get(f"/api/boards/{bid}").json()["nodes"]

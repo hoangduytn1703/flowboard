@@ -2160,6 +2160,22 @@ của người dùng (console.neon.tech, secure.backblaze.com).
   cùng; quay về `?batch=` khi loạt còn lồng), `CutPage` `openEditor` / `openEditorMany` (thanh **"Chọn mọi video (N)"** ở đầu danh sách — tick xuyên mọi thẻ / mọi link)
   đi thẳng sang `/tools/edit`; link cũ `/tools/dub?job=`, `/tools/cut?job=&run=&parts=` tự chuyển. Nút "✏️ Chỉnh N video đã lồng" ở thanh chọn Cào video kênh,
   "✏️ Chỉnh N video" ở Clip của tôi (clip `dub` / `cut_part`). **Chưa dạy trợ lý AI** (trợ lý đang ẩn). Test `test_video_edit.py` (4, ffmpeg thật).
+  **24/11 đổi (xem mục dưới)**: `/tools/edit` không còn danh sách riêng — chỉ là trình chỉnh sửa; video nhập vào thành clip ngay.
+- **Gộp giao diện 24/11** (`docs/ux-review-2026-11-24.md`, người dùng: "nồi lẩu thập cẩm" → làm mục 1–14, 16–18): **"🎞 Xử lý video"** (`/tools`,
+  `pages/VideoHubPage.tsx` + `videohub.css`, tiền tố `vh`) = một cửa đưa video vào: ① link (mỗi ô một link, dán nhiều tự tách) / file (tải lên ngay qua
+  `uploadDubVideo`) / "Chọn từ Clip của tôi" (`ClipPickDialog everyClip`) / "Lấy từ kênh" → ② Lồng tiếng · Chỉ phụ đề · Cắt · Chỉnh sửa · Xoá chữ (`why(a)` nói
+  vì sao nút mờ; `?do=edit|dub|sub|cut|clean` chọn sẵn). Chuyển video sang trang công cụ bằng **`sources/handoff.ts`** (`giveHandoff` / `takeHandoff`,
+  sessionStorage `dflow.video.handoff`, một lần đọc) — DubPage / CutPage / CleanToolPage nhận link + video; "Chỉnh sửa" gọi thẳng `importEditFiles` /
+  `importEditClips` rồi `editPath(ids)`. `VideoToolsTabs.tsx` = hàng tab trên đầu 4 trang (tự tính tab sáng, "Chỉnh sửa" sáng cả ở `/tools?do=edit`).
+  Sidebar: nhóm "Video có sẵn" (Xử lý video, Cào video kênh), "Đăng bài", "Kho của bạn", "Khác". **Clip của tôi** = danh sách video duy nhất, thẻ có "✏️ Chỉnh";
+  `video_edit._new_job` tạo clip ngay khi nhập (`dub._save_board`), `ensure_clips()` bù clip cho video nhập trước 24/11 (gọi trong `GET /api/boards?summary`).
+  `/tools/edit` không có `jobs` → `/tools?do=edit`. **Clip video** (`template_id` dub / dub_part / cut_part / capcut, `videoKindOf`) mở một màn (`StepExport
+  videoOnly`), không stepper. **Trình chỉnh sửa chiếm cả cửa sổ**: `QuicktoolApp` thêm `qt-app--focus` khi `/tools/edit?jobs=…` (ẩn sidebar + `qt-header`,
+  `.dx` cao `100vh − 16px`), nút "← Quay lại"; tab công cụ trái 2 hàng × 3 (`.dx-side__label`). Cài đặt: `MachineSection part` — gói Pro/Ultra ở tab Google Flow,
+  cloud + thư mục dữ liệu ở tab Dữ liệu; AI viết = một hàng nút + "Nâng cao" gập. Ô chọn giọng `VoiceSelect` (VoiceField.tsx): giọng gần đây (localStorage
+  `dflow.voices.recent`) + vài giọng hay dùng, "Xem thêm giọng…". Bước 2: giọng từng cảnh chỉ hiện khi bật (`perScene`). Đổi chữ: Kiểu clip, Học bài viral,
+  ★ Kiểu (mẫu chỉnh sửa), Bộ cài lồng tiếng / phụ đề đẹp, Combo nội dung, Phụ đề nhanh / đẹp (ffmpeg / Remotion), "cảnh" cho đoạn 8 giây. Sidebar cửa sổ thấp
+  (≤ 760 px): © + phiên bản một dòng, menu có thanh cuộn mảnh.
 - **🤖 Trợ lý AI ĐANG ẨN (15/11, người dùng: "tạm thời pending, cho nó ẩn đi… chức năng này cần test kỹ lại")**: `plans.HIDDEN_FEATURES` + `lib/features.ts HIDDEN`
   thêm `assistant` (nút chat mất với mọi tài khoản kể cả quản trị; route `/api/assistant/*` + code giữ nguyên); gói Premium đã bỏ `assistant` trong bảng gói đã ký
   (`plans.save` trên máy nhà, chữ ký ok). Mở lại: bỏ `assistant` khỏi hai danh sách đó + tick lại ở 📦 Gói & tính năng. Web `dflow-web` cũng đã bỏ khỏi danh sách tính năng + trang hướng dẫn (commit `ff69152`, đã push = deploy).
@@ -2258,6 +2274,9 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
   Chrome Web Store từ chối → giữ cách cài tay kèm video.
 
 ## Việc đang dở / chưa kiểm chứng
+- **Gộp giao diện 24/11 — đã làm, chưa commit, chưa phát hành** (`docs/ux-review-2026-11-24.md` mục "Đã làm"): mới thử trên agent QC 8534 + Playwright;
+  chưa bấm thật luồng Xử lý video → Lồng tiếng / Cắt tới khi ra video (chỉ tới trang công cụ có sẵn video), chưa thử trong app cài (WebView2). Chưa làm mục
+  "Đề xuất sắp xếp lại menu" phần "Lịch sử & credit sang Tài khoản". Kho B2 đầy → app không đẩy được video từ 23/11 — người dùng cần nâng hạn mức / dọn kho.
 - **🎞 Chỉnh sửa video (15/11)**: chưa commit, chưa phát hành; người dùng chưa bấm thử (bản chạy thử cổng 8534, dữ liệu `D:\dflow-qc`). **Để sau theo lời người dùng**:
   rút gọn form Lồng tiếng / Cắt video / Cào video kênh (xem xong menu mới rồi quyết). Chưa làm: clip `cut_part` của video import vẫn ghi "Video 1/1 cắt từ video dài"
   ở Bước 5 (đã sửa 15/11: ghi "Video đã chỉnh sửa", nút mở thẳng menu mới; hộp chọn clip của menu mới liệt kê mọi clip — `everyClip`); kéo thả sắp thứ tự / thư mục trong danh sách; nút "việc đang chạy" cho lượt nghe lời; trang Lồng tiếng
@@ -2776,3 +2795,31 @@ Chrome chỉ để cài extension và mở tab Flow đúng project. Người dù
   release v2.2.4 trên dflow-releases (`DFlow_2.2.4_x64-setup.exe` + `latest.json` 2.2.4), `dflow.io.vn/tai-app` → 2.2.4. **Lưu ý: `flowboard` giờ là
   repo CÔNG KHAI** (trước đó luôn riêng tư) — source code, lịch sử git, mọi ghi chú trong file này giờ ai cũng xem được trên GitHub; cân nhắc trước khi
   ghi thông tin nhạy cảm vào đây hoặc commit. `docs/cai-dat-dflow.html` tự lấy bản mới nhất qua API GitHub nên không cần sửa trang khi phát hành.
+- **24/11** — Hai việc người dùng giao (bản web): (1) **chọn chỗ lưu video tải về**: Cài đặt → 🖥 Máy này có mục "📁 Thư mục lưu video tải về"
+  (ô đường dẫn + "📂 Chọn thư mục…" = hộp chọn thư mục của Windows do agent mở qua PowerShell `FolderBrowserDialog`, + "Hỏi chỗ lưu mỗi lần tải",
+  "↺ Về thư mục Tải về"); lưu ở `.env` máy đó `FLOWBOARD_SAVE_DIR` / `FLOWBOARD_SAVE_ASK` (có hiệu lực ngay). Mọi nút "⬇ Tải" video giờ đi qua agent
+  (`components/ZipSaveButton.tsx` → `SaveButton`, nhận `ids` clip hoặc `media` {media_id, name}): **một video lưu thẳng file .mp4**, nhiều video mới gộp
+  .zip (trước đây Hôm nay / Lịch đăng tải 1 clip cũng ra .zip 1 file); Bước 5 "Tải về đăng TikTok", trình chỉnh sửa "⬇ Tải", Cắt video "⬇", tab ✂️ Cắt,
+  Xoá chữ, video của bài viết. Agent: `zip_save` (`start(ids, page, media, folder)`, `downloads_dir` = `FLOWBOARD_DOWNLOADS_DIR` (test) → thư mục đã chọn →
+  Downloads, `usable_folder`, `pick_folder`), routes `GET /api/exports/save-folder`, `POST /api/exports/pick-folder`, `POST /api/exports/zip/save {ids, media,
+  folder}`, `PUT /api/app/settings {save_dir, save_ask}`, `POST /api/app/open {what: "save"}`. (2) **"Clip của tôi" chỉ còn clip đã xong và phát được trên máy
+  này**: tab ✓ Đã xong (mặc định) / ✎ Đang làm dở / ⚠ Video không có trên máy này (2 tab sau chỉ hiện khi có). `GET /api/boards?summary=true` thêm
+  `summary.video` = here | cloud | missing (`routes/boards._video_states`: file của Asset có trên máy → here; không có mà kho cloud có / chưa liệt kê kho →
+  cloud; không có Asset, kho không có (`file_store.in_bucket`, cờ mới `_listed`), hoặc vừa tải hỏng (`recently_missed`) → missing); `clipReady()` (client.ts)
+  dùng cho Hôm nay, Lịch đăng, hộp "Chọn từ Clip của tôi"; thẻ missing không xin ảnh poster (hết ảnh vỡ). **Nguyên nhân 2 clip người dùng chụp (#160, #161,
+  lồng tiếng 23/11)**: không phải job lỗi — làm xong ở **app cài** (dữ liệu `D:\DFlowData`), còn bản web dùng `storage/` của repo, và **mọi lần đẩy video
+  lên B2 từ app đều lỗi** ("Server disconnected…" trong `D:\DFlowData\logs\agent.log` từ 23/11 23:35 — kho B2 đầy, xem Bẫy) → bản web không lấy được
+  file. Test `test_library_video_state.py` (mới) + `test_exports_zip.py` (+1) + sửa `test_boards.py`; `tsc` sạch. Thử thật trên agent QC 8534 (dữ liệu
+  `D:\dflow-qc`, thêm clip thử #12 dở / #13 thiếu video): 3 tab đúng, không ảnh vỡ, lưu clip 1 thành `.mp4` vào `D:\dflow-qc\saved`; hộp chọn thư mục mới
+  chạy thử phần PowerShell (chưa bấm hộp thật). Cả bộ test 1329 pass / 2 skip (bỏ các file lỗi môi trường Windows đã biết). Bản web khởi động lại
+  bằng start.ps1 (cửa sổ thu nhỏ). Cùng ngày: rà soát giao diện → `docs/ux-review-2026-11-24.md` (chờ người dùng chọn). Chưa commit.
+- **24/11 (tiếp)** — **Gộp giao diện** theo rà soát (người dùng chọn mục 1–13, 14, 16, 17, 18, "thấy không hợp lý / bug thì cứ fix"): menu "🎞 Xử lý video"
+  (`/tools`) một cửa đưa video vào rồi chọn việc, chuyển video sang trang công cụ (`sources/handoff.ts`), tab chung 4 trang công cụ; "Clip của tôi" là danh sách
+  duy nhất (✏️ Chỉnh trên thẻ, video nhập vào thành clip ngay, `video_edit.ensure_clips`); clip video chỉ một màn; trình chỉnh sửa chiếm cả cửa sổ (`qt-app--focus`),
+  tab trái 2×3; Cài đặt mỗi thứ một chỗ + AI viết gọn; đổi chữ kỹ thuật / chữ "Mẫu" "Gói"; ô chọn giọng rút gọn; Cào video kênh / Cắt video gập phần phụ; Hôm
+  nay thẻ thiết lập một dòng; Lồng tiếng, hộp Clip mới, Bài viết sắp lại. Sửa thêm: sidebar 720 px khuất "Cài đặt", trang Xoá chữ bỏ media id / delogo / LaMa.
+  Chi tiết: "Chỗ cần biết" → "Gộp giao diện 24/11" và `docs/ux-review-2026-11-24.md`. `tsc` sạch, `vite build` được; Playwright trên agent QC 8534 (1440 / 1280×720
+  / 760 px): thư viện, Xử lý video → Chỉnh sửa / Lồng tiếng / Chỉ phụ đề / Cắt / Xoá chữ (video tới đúng trang), trình chỉnh sửa, Cài đặt 7 tab, Bước 2, Hôm nay,
+  Clip mới, Cào kênh, Bài viết — không tràn ngang, không lỗi console (chỉ 401 trước đăng nhập). Cả bộ test 1362 pass / 2 skip / 1 lỗi 0600 đã biết (bỏ 4 file lỗi
+  môi trường). Bản web khởi động lại (start.ps1). Chưa commit.
+- **24/11 (phát hành)** — Người dùng bảo push hết + tạo bản cập nhật: số phiên bản **2.3.0** ở 8 file (gộp giao diện 24/11, chọn chỗ lưu video tải về, "Clip của tôi" chỉ clip xong + phát được trên máy), commit + tag `v2.3.0`. Không đưa `extension/_metadata/generated_indexed_rulesets/_ruleset1` (Chrome tự sinh lại khi nạp extension) vào commit. Trả lời người dùng: lồng tiếng chỉ ra tiếng Việt, "Chỉ thêm phụ đề" chọn 12 ngôn ngữ (vi, en, zh, ja, ko, th, id, es, fr, de, pt, ru) + "đúng lời gốc".

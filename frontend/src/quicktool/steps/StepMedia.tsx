@@ -209,7 +209,7 @@ export function StepMedia({ roles, kind, productName = "", boardName = "", voice
     if (kind === "video") {
       const cost = missing * creditsPerClip(videoModel, videoQuality);
       const balance = flowCredits === null ? "" : ` Tài khoản còn ${flowCredits.toLocaleString("vi-VN")} credit${cost > flowCredits ? " — KHÔNG ĐỦ" : ""}.`;
-      if (!await askConfirm(`Tạo ${missing} video (~${cost} credit Flow, 1–3 phút mỗi clip).${balance} Tiếp tục?`)) return;
+      if (!await askConfirm(`Tạo video cho ${missing} cảnh (~${cost} credit Flow, 1–3 phút mỗi cảnh).${balance} Tiếp tục?`)) return;
     }
     void generateAll();
   }
@@ -241,7 +241,7 @@ export function StepMedia({ roles, kind, productName = "", boardName = "", voice
         </div>
         {kind === "video" && (
           <p className="qt-card__hint">
-            Mỗi clip 8 giây bằng {videoModel === "omni_flash" ? "Omni Flash (~12 credit)" : "Veo 3.1"}, thường 1–2 phút. Clip chưa ưng thì bấm "Tạo lại…" ở cảnh đó và ghi muốn sửa gì,
+            Mỗi cảnh thành một video 8 giây{videoModel === "omni_flash" ? " (~12 credit Flow)" : ""}, thường 1–2 phút. Cảnh chưa ưng thì bấm "Tạo lại…" ở cảnh đó và ghi muốn sửa gì,
             hoặc <strong>⬆ Dùng video của bạn</strong> để thay bằng cảnh quay thật (mp4/mov, không tốn credit).
             {MUSE_ENABLED && <> Flow chậm quá hoặc bỏ lượt thì làm cảnh đó bằng <strong>Muse</strong> (khung "🎬 Làm video bằng Muse" bên dưới).</>}
           </p>

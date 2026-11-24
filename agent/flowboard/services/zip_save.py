@@ -1,4 +1,5 @@
-"""Save several finished clips as one .zip straight into this machine's Downloads folder.
+"""Save finished videos straight into this machine's save folder (Settings → 🖥 Máy này, else Downloads):
+one video as its own .mp4, several as one .zip.
 
 The agent runs on the user's own machine, so it writes the file itself instead of building the
 whole archive and only then handing it to the browser: ten clips (~800 MB) took tens of seconds
@@ -51,6 +52,10 @@ JOBS: dict[str, "ZipJob"] = {}
 class ZipJob:
     id: str
     ids: tuple[int, ...]
+    #: videos named by the page rather than through a clip: (media id, file name without extension)
+    media: tuple[tuple[str, str], ...] = ()
+    #: a folder picked for this one save ("ask every time"), else the machine's save folder
+    target: str = ""
     page: str = ""
     owner: str = ""
     status: str = "running"
@@ -69,7 +74,7 @@ class ZipJob:
 
     def view(self) -> dict[str, Any]:
         pct = int(self.done_bytes * 100 / self.total_bytes) if self.total_bytes else 0
-        return {"id": self.id, "ids": list(self.ids), "status": self.status, "phase": self.phase,
+        return {"id": self.id, "ids": list(self.ids), "media": [m for m, _n in self.media], "status": self.status, "phase": self.phase,
                 "progress": min(100, pct) if self.status == "running" else (100 if self.status == "done" else pct),
                 "done_bytes": self.done_bytes, "total_bytes": self.total_bytes, "clips": self.clips,
                 "name": self.name, "folder": self.folder, "skipped": list(self.skipped), "error": self.error,
@@ -113,15 +118,77 @@ def _xdg_downloads() -> Optional[Path]:
         return None
 
 
-def downloads_dir() -> Path:
-    """``FLOWBOARD_DOWNLOADS_DIR`` (tests), else the system's Downloads folder, else ``<data>/exports``."""
-    raw = os.environ.get("FLOWBOARD_DOWNLOADS_DIR", "").strip()
-    if raw:
-        return Path(raw)
+#: Settings → 🖥 Máy này: where saved videos go (a path on this machine) and whether to ask for a folder each time.
+SAVE_DIR_KEY = "FLOWBOARD_SAVE_DIR"
+SAVE_ASK_KEY = "FLOWBOARD_SAVE_ASK"
+
+
+def system_downloads() -> Path:
+    """The system's Downloads folder, else ``<data>/exports``."""
     for found in (_known_downloads(), _xdg_downloads(), Path.home() / "Downloads"):
         if found is not None and found.is_dir() and os.access(found, os.W_OK):
             return found
     return Path(config.HOME or config.ROOT) / "exports"
+
+
+def chosen_dir() -> str:
+    return os.environ.get(SAVE_DIR_KEY, "").strip().strip('"')
+
+
+def ask_each_time() -> bool:
+    return os.environ.get(SAVE_ASK_KEY, "").strip() == "1"
+
+
+def downloads_dir() -> Path:
+    """``FLOWBOARD_DOWNLOADS_DIR`` (tests), else the folder chosen in Settings, else the system's Downloads folder."""
+    raw = os.environ.get("FLOWBOARD_DOWNLOADS_DIR", "").strip()
+    if raw:
+        return Path(raw)
+    chosen = chosen_dir()
+    if chosen and Path(chosen).is_absolute():
+        return Path(chosen)
+    return system_downloads()
+
+
+def usable_folder(raw: str) -> Path:
+    """A folder a save may write into (created when missing) — ValueError with the reason otherwise."""
+    path = Path(raw.strip().strip('"'))
+    if not path.is_absolute():
+        raise ValueError(f"Cần đường dẫn đầy đủ, ví dụ D:\\Video (nhận được: {raw})")
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".dflow-write-test"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+    except OSError as exc:
+        raise ValueError(f"Không ghi được vào thư mục {path} ({exc.strerror or exc})")
+    return path
+
+
+def pick_folder(start: str = "", title: str = "Chọn thư mục lưu video") -> Optional[str]:
+    """The Windows folder picker, on this machine (the agent runs on the user's own computer); None when cancelled.
+    A separate PowerShell process so the dialog is a real window even from the app's hidden agent; an owner form
+    kept on top so it does not open behind the DFlow window."""
+    if sys.platform != "win32":
+        raise ValueError("Chỉ chọn thư mục bằng hộp thoại được trên Windows — gõ đường dẫn vào ô.")
+    script = (
+        "Add-Type -AssemblyName System.Windows.Forms;"
+        "$o = New-Object System.Windows.Forms.Form; $o.TopMost = $true; $o.ShowInTaskbar = $false;"
+        "$o.StartPosition = 'CenterScreen'; $o.Size = New-Object System.Drawing.Size(1,1); $o.Opacity = 0; $o.Show(); $o.Activate();"
+        "$d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.ShowNewFolderButton = $true;"
+        "$d.Description = $env:DFLOW_PICK_TITLE;"
+        "if ($env:DFLOW_PICK_START -and (Test-Path -LiteralPath $env:DFLOW_PICK_START)) { $d.SelectedPath = $env:DFLOW_PICK_START };"
+        "$r = $d.ShowDialog($o); $o.Close();"
+        "if ($r -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::OutputEncoding = [Text.Encoding]::UTF8; Write-Output $d.SelectedPath }"
+    )
+    env = {**os.environ, "DFLOW_PICK_TITLE": title[:120], "DFLOW_PICK_START": start or str(downloads_dir())}
+    try:
+        done = subprocess.run(["powershell.exe", "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script],
+                              capture_output=True, timeout=15 * 60, env=env)
+    except subprocess.TimeoutExpired:
+        return None
+    out = done.stdout.decode("utf-8", "replace").strip().splitlines()
+    return out[-1].strip() if out and out[-1].strip() else None
 
 
 def free_name(folder: Path, stem: str, ext: str = ".zip") -> Path:
@@ -188,16 +255,27 @@ def _norm_ids(ids: list[int]) -> tuple[int, ...]:
     return tuple(seen[:MAX_CLIPS])
 
 
-def start(ids: list[int], page: str = "") -> ZipJob:
+def _norm_media(media: Optional[list[dict[str, Any]]]) -> tuple[tuple[str, str], ...]:
+    out: list[tuple[str, str]] = []
+    for m in media or []:
+        mid = str((m or {}).get("media_id") or "").strip().removeprefix("media/")
+        if mid and all(c.isalnum() or c in "-_" for c in mid) and mid not in (x for x, _ in out):
+            out.append((mid, str((m or {}).get("name") or "").strip()[:120]))
+    return tuple(out[:MAX_CLIPS])
+
+
+def start(ids: list[int], page: str = "", media: Optional[list[dict[str, Any]]] = None, folder: str = "") -> ZipJob:
     board_ids = _norm_ids(ids)
-    if not board_ids:
-        raise ValueError("Chưa chọn clip nào.")
+    items = _norm_media(media)
+    if not board_ids and not items:
+        raise ValueError("Chưa chọn video nào.")
+    target = str(usable_folder(folder)) if folder.strip() else ""
     page = page if page.startswith("/") and len(page) <= 200 else ""
     with _LOCK:
         for j in JOBS.values():
-            if j.status == "running" and j.ids == board_ids:
+            if j.status == "running" and j.ids == board_ids and j.media == items:
                 return j  # a second click on the same clips: the save already under way
-        job = ZipJob(id=uuid.uuid4().hex[:12], ids=board_ids, page=page, owner=_owner())
+        job = ZipJob(id=uuid.uuid4().hex[:12], ids=board_ids, media=items, target=target, page=page, owner=_owner())
         JOBS[job.id] = job
         for old in sorted((x for x in JOBS.values() if x.status != "running"), key=lambda x: x.started_at)[:-KEEP_JOBS]:
             JOBS.pop(old.id, None)
@@ -230,61 +308,87 @@ def _run(job: ZipJob) -> None:
     part: Optional[Path] = None
     try:
         ids = list(job.ids)
-        names = clip_names(ids)
-        medias = final_media(ids)
+        names = clip_names(ids) if ids else {}
+        medias = final_media(ids) if ids else {}
         today = date.today().isoformat()
+        # (board id or 0, file name in the folder / zip, source)
         files: list[tuple[int, str, Path]] = []
         used: set[str] = set()
-        for n, bid in enumerate(ids, 1):
+        total = len(ids) + len(job.media)
+
+        def add(bid: int, media: Optional[str], name: str, n: int) -> None:
             if job.stop:
                 raise _Stopped()
-            media = medias.get(bid) if bid in names else None
-            job.phase = f"Đang lấy clip {n}/{len(ids)}"
+            job.phase = f"Đang lấy video {n}/{total}"
             path = media_service.cached_path(media) if media else None  # may fetch it from the cloud bucket
             if path is None or not Path(path).is_file():
-                job.skipped.append(bid)
-                continue
-            base = (names.get(bid) or "").split(" — ")[0]
-            name = f"{slug(base)}_{today}_{bid}.mp4"
+                if bid:
+                    job.skipped.append(bid)
+                return
             while name in used:
                 name = name.replace(".mp4", "_.mp4")
             used.add(name)
             files.append((bid, name, Path(path)))
+
+        for n, bid in enumerate(ids, 1):
+            base = (names.get(bid) or "").split(" — ")[0]
+            add(bid, medias.get(bid) if bid in names else None, f"{slug(base)}_{today}_{bid}.mp4", n)
+        for n, (mid, label) in enumerate(job.media, len(ids) + 1):
+            add(0, mid, f"{slug(label) if label else 'video'}_{today}.mp4", n)
         if not files:
-            raise RuntimeError("Chưa có clip nào đã ghép trong số đã chọn.")
+            raise RuntimeError("Video chưa có trên máy này (chưa ghép xong, hoặc làm ở máy khác mà chưa lên cloud).")
         job.clips = len(files)
         job.total_bytes = sum(p.stat().st_size for _, _, p in files)
-        folder = downloads_dir()
-        folder.mkdir(parents=True, exist_ok=True)
+        folder = Path(job.target) if job.target else downloads_dir()
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise RuntimeError(f"Không tạo được thư mục lưu {folder} ({exc.strerror or exc}) — đổi ở Cài đặt → 🖥 Máy này.")
         free = shutil.disk_usage(folder).free
         if free < job.total_bytes + SPARE_BYTES:
             raise RuntimeError(f"Ổ chứa thư mục {folder} chỉ còn {_gb(free)} trống, cần khoảng {_gb(job.total_bytes)}.")
+        single = len(files) == 1
         with _LOCK:  # two saves finishing together must not pick the same name
-            target = free_name(folder, f"DFlow_{today}_{len(files)}clip")
+            if single:
+                target = free_name(folder, Path(files[0][1]).stem, ".mp4")
+            else:
+                target = free_name(folder, f"DFlow_{today}_{len(files)}clip")
             part = target.with_name(target.name + ".part")
             part.touch()
         job.folder, job.name = str(folder), target.name
-        # Stored, not deflated: mp4 is already compressed.
-        with zipfile.ZipFile(part, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as zf:
-            for k, (_, name, src) in enumerate(files, 1):
-                job.phase = f"Đang lưu clip {k}/{len(files)}"
-                info = zipfile.ZipInfo(name, date_time=time.localtime(src.stat().st_mtime)[:6])
-                info.compress_type = zipfile.ZIP_STORED
-                info.file_size = src.stat().st_size
-                with src.open("rb") as fin, zf.open(info, "w", force_zip64=info.file_size >= 2 ** 31) as fout:
-                    while True:
-                        if job.stop:
-                            raise _Stopped()
-                        buf = fin.read(CHUNK)
-                        if not buf:
-                            break
-                        fout.write(buf)
-                        job.done_bytes += len(buf)
+        if single:
+            job.phase = "Đang lưu video"
+            with files[0][2].open("rb") as fin, part.open("wb") as fout:
+                while True:
+                    if job.stop:
+                        raise _Stopped()
+                    buf = fin.read(CHUNK)
+                    if not buf:
+                        break
+                    fout.write(buf)
+                    job.done_bytes += len(buf)
+        else:
+            # Stored, not deflated: mp4 is already compressed.
+            with zipfile.ZipFile(part, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as zf:
+                for k, (_, name, src) in enumerate(files, 1):
+                    job.phase = f"Đang lưu video {k}/{len(files)}"
+                    info = zipfile.ZipInfo(name, date_time=time.localtime(src.stat().st_mtime)[:6])
+                    info.compress_type = zipfile.ZIP_STORED
+                    info.file_size = src.stat().st_size
+                    with src.open("rb") as fin, zf.open(info, "w", force_zip64=info.file_size >= 2 ** 31) as fout:
+                        while True:
+                            if job.stop:
+                                raise _Stopped()
+                            buf = fin.read(CHUNK)
+                            if not buf:
+                                break
+                            fout.write(buf)
+                            job.done_bytes += len(buf)
         os.replace(part, target)
         part = None
         job.path = str(target)
         if job.owner == _owner():
-            _mark_downloaded([bid for bid, _, _ in files])
+            _mark_downloaded([bid for bid, _, _ in files if bid])
         job.phase = "Đã lưu"
         job.status = "done"
         if job.skipped:
@@ -326,8 +430,8 @@ def running_items() -> list[dict[str, Any]]:
     for j in list(JOBS.values()):
         if j.status != "running":
             continue
-        n = len(j.ids)
-        out.append({"key": f"zip:{j.id}", "kind": "zip", "title": f"Lưu {n} clip vào thư mục Tải về",
+        n = len(j.ids) + len(j.media)
+        out.append({"key": f"zip:{j.id}", "kind": "zip", "title": f"Lưu {n} video vào thư mục lưu video",
                     "detail": j.phase, "progress": j.view()["progress"] if j.total_bytes else None,
                     "started_at": j.started_at, "link": j.page or "/clips"})
     return out

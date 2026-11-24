@@ -638,3 +638,26 @@
 .dx-text__biu button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.08); }
 .dx-text__biu button.is-on { background: var(--qt-accent, #ff6a2b); color: #fff; }
 .dx-text__biu button:disabled { opacity: 0.5; cursor: default; }
+
+/* ── the editor fills the window (24/11): QuicktoolApp adds qt-app--focus on /tools/edit?jobs=… ── */
+.qt-app--focus { grid-template-columns: minmax(0, 1fr); }
+.qt-app--focus > .qt-sidebar { display: none; }
+.qt-app--focus .qt-content > .qt-header { display: none; }
+.qt-app--focus .qt-content > .qt-home { padding: 8px 10px; }
+.qt-app--focus .dx { height: calc(100vh - 16px); }
+/* tab labels: their own line under the icon on the left, never run into the label of the next tab */
+.dx-side__label { font: inherit; display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.dx-side--left .dx-side__tab { gap: 3px; padding: 8px 2px 6px; font-size: 11.5px; }
+.dx-side--left .dx-side__tab + .dx-side__tab { border-left: 1px solid rgba(255, 255, 255, 0.04); }
+@media (min-width: 1041px) and (max-width: 1280px) {
+  .qt-app--focus .dx__main { grid-template-columns: 268px minmax(0, 1fr) 300px; }
+}
+@media (max-width: 1040px) { .qt-app--focus .dx { height: auto; } }
+/* six tools on the left: two rows of three, icon beside the word — no tab label is ever cut ("Trang…", "Làm …") */
+.dx-side--left .dx-side__tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 0; overflow: visible; }
+.dx-side--left .dx-side__tab { flex-direction: row; justify-content: center; gap: 5px; min-width: 0; padding: 7px 4px 6px; font-size: 12.5px; }
+.dx-side--left .dx-side__tab > span { font-size: 14px; }
+.dx-side--left .dx-side__tab + .dx-side__tab { border-left: 0; }
+/* "📱 Xem trên" in the narrow left panel: its words on one line, the picker the width of the panel */
+.dx-side .dx-format__view { flex: 1 1 100%; min-width: 0; max-width: 100%; box-sizing: border-box; padding: 2px 0; border-left: 0; white-space: nowrap; }
+.dx-side .dx-format__view select { flex: 1 1 0; width: 0; min-width: 0; }

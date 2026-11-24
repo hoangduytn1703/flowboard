@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { clipThumbUrl, listBoardSummaries, mediaUrl, type BoardSummary } from "../../api/client";
+import { clipReady, clipThumbUrl, listBoardSummaries, mediaUrl, type BoardSummary } from "../../api/client";
 import { ZipSaveButton } from "../../components/ZipSaveButton";
 import { listPosts, splitTags, type SavedPost } from "../../api/posts";
 import {
@@ -133,7 +133,7 @@ export function SchedulePage() {
     return { posts: new Set(live.filter((s) => s.kind === "post").map((s) => s.post_id)), clips: new Set(live.filter((s) => s.kind === "clip").map((s) => s.board_id)) };
   }, [taken, all]);
   const unscheduledPosts = posts.filter((p) => !onCalendar.posts.has(p.id) && p.kind !== "tiktok_caption").slice(0, 24);
-  const unscheduledClips = boards.filter((b) => b.summary.exported && !onCalendar.clips.has(b.id)).slice(0, 12);
+  const unscheduledClips = boards.filter((b) => clipReady(b.summary) && !onCalendar.clips.has(b.id)).slice(0, 12);
   const postTarget = (p: SavedPost): ScheduleTarget => ({ kind: "post", postId: p.id, channelId: p.channel_id, title: p.title || p.body.split("\n")[0] });
   const clipTarget = (b: BoardSummary): ScheduleTarget => ({ kind: "clip", boardId: b.id, channelId: (b.data?.quicktool as { channel_id?: number } | undefined)?.channel_id ?? null, title: b.name });
   /** A day takes drops until its end has passed. */

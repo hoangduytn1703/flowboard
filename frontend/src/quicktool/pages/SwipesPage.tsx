@@ -16,7 +16,7 @@ function when(iso: string | null): string {
 }
 
 /**
- * "🔥 Mẫu đang hot": paste a link (post or video) or the text of something
+ * "🔥 Học bài viral": paste a link (post or video) or the text of something
  * that did well; the AI explains why it worked (hook, beats, triggers) and
  * writes the seller's own post or clip for a product on that structure.
  */
@@ -30,7 +30,7 @@ export function SwipesPage() {
   const [q, setQ] = useState("");
 
   useEffect(() => {
-    document.title = "Mẫu đang hot · DFlow";
+    document.title = "Học bài viral · DFlow";
     void listSwipes().then((rows) => { setItems(rows); setOpenId(rows[0]?.id ?? null); }).catch((e) => { setItems([]); toast.error(`Không tải được: ${e instanceof Error ? e.message : e}`); });
   }, []);
   useEffect(() => {
@@ -76,7 +76,7 @@ export function SwipesPage() {
   return (
     <>
       <header className="qt-header">
-        <span className="qt-header__crumb">Mẫu đang hot</span>
+        <span className="qt-header__crumb">Học bài viral</span>
       </header>
       <div className="qt-home qt-swipes">
         <section className="qt-card">

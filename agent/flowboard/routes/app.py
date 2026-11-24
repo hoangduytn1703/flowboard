@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from flowboard import config
 from flowboard.services import app_env
 from flowboard.services import machine
+from flowboard.services import zip_save
 
 router = APIRouter(prefix="/api/app", tags=["app"])
 
@@ -57,6 +58,10 @@ def status() -> dict[str, Any]:
         "erase_root": values.get("FLOWBOARD_ERASE_ROOT", ""),
         "erase_python": values.get("FLOWBOARD_ERASE_PYTHON", ""),
         "capcut_drafts": values.get("FLOWBOARD_CAPCUT_DRAFTS", ""),
+        # "⬇ Tải" writes here (zip_save): the folder chosen, else the system's Downloads
+        "save_dir": str(zip_save.downloads_dir()),
+        "save_dir_custom": values.get(zip_save.SAVE_DIR_KEY, ""),
+        "save_ask": values.get(zip_save.SAVE_ASK_KEY, "") == "1",
         "restart_pending": pending,
         "machine": machine.public(),
     }
@@ -76,6 +81,9 @@ class SettingsBody(BaseModel):
     erase_root: Optional[str] = Field(default=None, max_length=400)
     erase_python: Optional[str] = Field(default=None, max_length=400)
     capcut_drafts: Optional[str] = Field(default=None, max_length=400)
+    # where saved videos go ("" = back to Downloads) and whether to ask for a folder on every save
+    save_dir: Optional[str] = Field(default=None, max_length=400)
+    save_ask: Optional[bool] = None
 
 
 def _folder(raw: str, label: str, *, create: bool = False) -> str:
@@ -110,13 +118,24 @@ def save_settings(body: SettingsBody) -> dict[str, Any]:
         updates["FLOWBOARD_ERASE_PYTHON"] = _folder(body.erase_python, "Python của VieDub") if body.erase_python.strip() else None
     if body.capcut_drafts is not None:
         updates["FLOWBOARD_CAPCUT_DRAFTS"] = _folder(body.capcut_drafts, "Thư mục dự án CapCut") if body.capcut_drafts.strip() else None
+    if body.save_dir is not None:
+        if body.save_dir.strip():
+            try:
+                updates[zip_save.SAVE_DIR_KEY] = str(zip_save.usable_folder(body.save_dir))
+            except ValueError as e:
+                raise HTTPException(400, f"Thư mục lưu video: {e}")
+        else:
+            updates[zip_save.SAVE_DIR_KEY] = None
+    if body.save_ask is not None:
+        updates[zip_save.SAVE_ASK_KEY] = "1" if body.save_ask else None
     if not updates:
         return status()
     app_env.write_values(updates)
     if body.paygate_tier:
         app_env.apply_tier(body.paygate_tier)
-    # the dubbing kit / CapCut paths are read on every call: in effect at once
-    for key in ("FLOWBOARD_ERASE_ROOT", "FLOWBOARD_ERASE_PYTHON", "FLOWBOARD_CAPCUT_DRAFTS"):
+    # the dubbing kit / CapCut paths and the save folder are read on every call: in effect at once
+    for key in ("FLOWBOARD_ERASE_ROOT", "FLOWBOARD_ERASE_PYTHON", "FLOWBOARD_CAPCUT_DRAFTS",
+                zip_save.SAVE_DIR_KEY, zip_save.SAVE_ASK_KEY):
         if key in updates:
             if updates[key]:
                 os.environ[key] = updates[key] or ""
@@ -207,7 +226,7 @@ def connect(body: ConnectBody, request: Request) -> dict[str, Any]:
 
 
 class OpenBody(BaseModel):
-    what: str = Field(pattern="^(extension|data|logs|settings)$")
+    what: str = Field(pattern="^(extension|data|logs|settings|save)$")
 
 
 @router.post("/open")
@@ -221,6 +240,9 @@ def open_folder(body: OpenBody) -> dict[str, Any]:
         target = _storage_root()
     elif body.what == "logs":
         target = app_env.logs_dir()
+        target.mkdir(parents=True, exist_ok=True)
+    elif body.what == "save":
+        target = zip_save.downloads_dir()
         target.mkdir(parents=True, exist_ok=True)
     else:
         target = app_env.env_file()

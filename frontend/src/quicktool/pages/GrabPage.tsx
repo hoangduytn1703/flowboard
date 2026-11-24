@@ -388,6 +388,9 @@ export function GrabPage() {
   }, [lot, liveDub.length, work]);
   useEffect(() => { setShown(PAGE); }, [chan, tag, q, minViews, days, len, kind, have, markF, aiOnly, sort]);
   const filtersOn = !!(q.trim() || minViews || days || len || kind || have || markF || aiOnly);
+  // only search + sort stay in sight; the other filters fold under "Lọc thêm" (open when one of them is on)
+  const extraOn = [minViews, days, len, kind, have, markF].filter(Boolean).length;
+  const [moreOpen, setMoreOpen] = useState(extraOn > 0);
   function clearFilters() { setQ(""); setMinViews(0); setDays(0); setLen(""); setKind(""); setHave(""); pickMarkFilter(""); setAiOnly(false); }
   function pickMarkFilter(f: MarkFilter) { setMarkF(f); store("flowboard.grab.markFilter", f); }
 
@@ -690,22 +693,27 @@ export function GrabPage() {
             </button>
           </div>
           <p className="qt-card__hint">
-            Tool đọc danh sách video của kênh (tiêu đề, lượt xem, tim, độ dài, ngày đăng) — <strong>chưa tải gì về</strong>. Bạn lọc hoặc nhờ AI chọn, rồi mới tải
-            những video muốn làm. Đọc được: <PlatformChip platform="youtube" label="YouTube (kênh, Shorts, playlist)" /> <PlatformChip platform="tiktok" label="TikTok" />
-            {" "}<PlatformChip platform="douyin" label="Douyin" /> <PlatformChip platform="bilibili" label="Bilibili (bilibili.com)" beta />
-            {" "}· Facebook, Instagram không cho đọc danh sách kênh — dán từng link video vào Cắt video / Lồng tiếng.
+            Tool đọc danh sách video của kênh (lượt xem, tim, độ dài, ngày đăng) — <strong>chưa tải gì về</strong>. Lọc hoặc nhờ AI chọn rồi mới tải video muốn làm.
           </p>
-          <p className="qt-card__hint">
-            <strong>Douyin và Bilibili</strong> được đọc qua Chrome của bạn: lúc quét, extension DFlow mở trang kênh trong một cửa sổ Chrome, cuộn lấy
-            danh sách rồi tự đóng (đừng đóng tay). Douyin cần bạn <strong>đã đăng nhập douyin.com</strong> trong Chrome đó; trang hỏi mã xác minh thì làm
-            ngay trong cửa sổ ấy. Douyin không công bố lượt xem — tool hiện lượt tim.
-          </p>
-          <p className="gb__bili">
-            <b className="gb-beta">BETA</b> <strong>Bilibili:</strong> chỉ đọc được <strong>bilibili.com</strong> — bản Trung Quốc, link kênh dạng
-            <code>space.bilibili.com/123456</code> (cả dạng có <code>/en/</code> khi vào từ Việt Nam). <strong>Chưa</strong> đọc được <strong>bilibili.tv</strong> (bản quốc
-            tế, giao diện tiếng Việt, link <code>bilibili.tv/vi/space/…</code>) — đó là một trang khác. Chưa đăng nhập thì chỉ đọc được vài chục video mới nhất và
-            hay bị Bilibili chặn tạm khi quét nhiều kênh liền nhau.
-          </p>
+          <details className="gb__help">
+            <summary>Đọc được kênh nào? Douyin, Bilibili cần gì?</summary>
+            <p className="qt-card__hint">
+              Đọc được: <PlatformChip platform="youtube" label="YouTube (kênh, Shorts, playlist)" /> <PlatformChip platform="tiktok" label="TikTok" />
+              {" "}<PlatformChip platform="douyin" label="Douyin" /> <PlatformChip platform="bilibili" label="Bilibili (bilibili.com)" beta />
+              {" "}· Facebook, Instagram không cho đọc danh sách kênh — dán từng link video vào “Xử lý video”.
+            </p>
+            <p className="qt-card__hint">
+              <strong>Douyin và Bilibili</strong> được đọc qua Chrome của bạn: lúc quét, extension DFlow mở trang kênh trong một cửa sổ Chrome, cuộn lấy
+              danh sách rồi tự đóng (đừng đóng tay). Douyin cần bạn <strong>đã đăng nhập douyin.com</strong> trong Chrome đó; trang hỏi mã xác minh thì làm
+              ngay trong cửa sổ ấy. Douyin không công bố lượt xem — tool hiện lượt tim.
+            </p>
+            <p className="gb__bili">
+              <b className="gb-beta">BETA</b> <strong>Bilibili:</strong> chỉ đọc được <strong>bilibili.com</strong> — bản Trung Quốc, link kênh dạng
+              <code>space.bilibili.com/123456</code> (cả dạng có <code>/en/</code> khi vào từ Việt Nam). <strong>Chưa</strong> đọc được <strong>bilibili.tv</strong> (bản quốc
+              tế, link <code>bilibili.tv/vi/space/…</code>). Chưa đăng nhập thì chỉ đọc được vài chục video mới nhất và hay bị Bilibili chặn tạm khi quét
+              nhiều kênh liền nhau.
+            </p>
+          </details>
           {limit > 200 && (
             <p className="gb__note">
               Lấy {limit === (status?.max_limit ?? MAX_LIMIT) ? "tất cả" : limit} video thì quét lâu hơn: YouTube / TikTok khoảng 1 phút mỗi 1000 video; Douyin / Bilibili cửa sổ Chrome
@@ -800,6 +808,13 @@ export function GrabPage() {
                       {SORTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
                     </select>
                   </label>
+                  <button type="button" className={`qt-btn qt-btn--small gb__more${moreOpen ? " qt-btn--on" : ""}`} aria-expanded={moreOpen}
+                          onClick={() => setMoreOpen((o) => !o)}>
+                    {moreOpen ? "▴ Thu gọn bộ lọc" : `▾ Lọc thêm${extraOn ? ` (${extraOn} đang bật)` : ""}`}
+                  </button>
+                </div>
+                {moreOpen && (<>
+                <div className="gb__filters gb__filters--more">
                   <label className="qt-field"><span>Lượt xem</span>
                     <select value={minViews} onChange={(e) => setMinViews(Number(e.target.value))}>
                       {VIEW_STEPS.map((n) => <option key={n} value={n}>{n ? `Từ ${shortCount(n)} trở lên` : "Tất cả"}</option>)}
@@ -842,6 +857,7 @@ export function GrabPage() {
                     );
                   })}
                 </div>
+                </>)}
                 {days > 0 && undated > 0 && (
                   <p className="gb__note">{undated} video không rõ ngày đăng (YouTube không ghi ngày cho Shorts trong danh sách) nên đang ẩn — chọn “Mọi lúc” để thấy.</p>
                 )}

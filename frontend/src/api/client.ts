@@ -190,6 +190,9 @@ export interface BoardSummary extends Board {
     exported: boolean;
     /** Media id of the finished clip, if any. */
     export_media: string | null;
+    /** Where the finished video plays from: on this machine, the cloud, or nowhere here (made on another machine /
+     *  in the desktop app's own data folder, never uploaded). null = not joined yet. */
+    video?: "here" | "cloud" | "missing" | null;
     /** When the finished clip was downloaded (ms), via the zip or step 5. */
     downloaded_at: number | null;
     thumbnail: string | null;
@@ -200,8 +203,13 @@ export interface BoardSummary extends Board {
  * (`/api/media/{id}/poster` — a dubbed / uploaded / CapCut clip has no scene images), else none. */
 export function clipThumbUrl(s: BoardSummary["summary"]): string | null {
   if (s.thumbnail) return mediaUrl(s.thumbnail);
-  if (s.export_media) return `/api/media/${encodeURIComponent(s.export_media.replace(/^media\//, ""))}/poster`;
+  if (s.export_media && s.video !== "missing") return `/api/media/${encodeURIComponent(s.export_media.replace(/^media\//, ""))}/poster`;
   return null;
+}
+
+/** A clip that is finished AND whose video can be played on this machine — what "Clip của tôi" lists. */
+export function clipReady(s: BoardSummary["summary"]): boolean {
+  return s.exported && s.video !== "missing";
 }
 
 /** One .zip with the finished clips of these boards (marks them downloaded). */
@@ -213,6 +221,7 @@ export function exportsZipUrl(boardIds: number[]): string {
 export interface ZipSaveJob {
   id: string;
   ids: number[];
+  media?: string[];
   status: "running" | "done" | "error" | "stopped";
   phase: string;
   progress: number;
@@ -228,7 +237,34 @@ export interface ZipSaveJob {
 }
 
 export function startZipSave(ids: number[], page: string): Promise<ZipSaveJob> {
-  return api<ZipSaveJob>("/api/exports/zip/save", { method: "POST", body: JSON.stringify({ ids, page }) });
+  return startSave({ ids, page });
+}
+
+/** A video the page names itself (a cut part, the editor's export…) rather than through a clip. */
+export interface SaveMedia { media_id: string; name: string }
+
+/** One video → its own .mp4, several → one .zip, in this machine's save folder (or ``folder``, picked just now). */
+export function startSave(body: { ids?: number[]; media?: SaveMedia[]; page: string; folder?: string }): Promise<ZipSaveJob> {
+  return api<ZipSaveJob>("/api/exports/zip/save", { method: "POST", body: JSON.stringify({ ids: [], media: [], ...body }) });
+}
+
+export interface SaveFolder {
+  /** where saves go now */
+  folder: string;
+  /** the folder chosen in Settings ("" = the system's Downloads) */
+  custom: string;
+  /** ask for a folder on every save */
+  ask: boolean;
+  system: string;
+}
+
+export function getSaveFolder(): Promise<SaveFolder> {
+  return api<SaveFolder>("/api/exports/save-folder");
+}
+
+/** This computer's folder picker (the agent opens it); null = cancelled. */
+export async function pickFolder(start = "", title = "Chọn thư mục lưu video"): Promise<string | null> {
+  return (await api<{ path: string | null }>("/api/exports/pick-folder", { method: "POST", body: JSON.stringify({ start, title }) })).path;
 }
 
 export function getZipSave(id: string): Promise<ZipSaveJob> {

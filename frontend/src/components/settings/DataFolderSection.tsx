@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { getCloudStatus, syncCloudFiles, type CloudStatus } from "../../api/cloud";
 import { toast } from "../../store/toast";
 import { askConfirm } from "../Dialogs";
+import { useAccountStore } from "../../store/account";
 
 async function detail(res: Response): Promise<string> {
   try {
@@ -19,6 +20,7 @@ async function detail(res: Response): Promise<string> {
  * machine shares after login, and the one-time move to the cloud.
  */
 export function DataFolderSection() {
+  const isAdmin = useAccountStore((st) => !!st.me?.is_admin);
   const [s, setS] = useState<CloudStatus | null>(null);
   const [s3, setS3] = useState({ endpoint: "", bucket: "", keyId: "", secret: "" });
   const [busy, setBusy] = useState<"" | "s3" | "sync" | "migrate">("");
@@ -91,17 +93,20 @@ export function DataFolderSection() {
       ) : (
         <>
           <div className="settings-panel__hint">
-            {s.account.auth ? <>Tài khoản <strong>{s.account.username}</strong>. </> : <>Chưa bật đăng nhập (FLOWBOARD_AUTH=off). </>}
-            Database: {s.via_api
-              ? <strong>trên cloud DFlow (qua {s.files.endpoint?.replace(/^https?:\/\//, "") || "dflow.io.vn"}) — đăng nhập ở máy nào cũng thấy; máy này chỉ giữ quyền vào đúng dữ liệu của tài khoản.</strong>
-              : s.account.backend === "postgres"
-              ? <strong>trên cloud (Postgres) — đăng nhập ở máy nào cũng thấy.</strong>
-              : <>trên máy này (<code>{s.account.storage_dir}</code>){s.central_cloud ? " — máy này đã nối cloud, bấm chuyển bên dưới." : " — máy này chưa có FLOWBOARD_CENTRAL_DB_URL trong .env."}</>}
-            {" "}File media: {s.files.enabled
-              ? <>{s.via_api ? <>kho file DFlow</> : <>bucket <code>{s.files.bucket}</code></>} — đã đẩy {s.files.uploaded}, đã tải {s.files.downloaded}{s.files.pending_uploads ? `, đang chờ ${s.files.pending_uploads}` : ""}.</>
+            {s.account.auth ? <>Tài khoản <strong>{s.account.username}</strong>. </> : <>Chưa bật đăng nhập. </>}
+            Sản phẩm, clip, bài viết: {s.via_api || s.account.backend === "postgres"
+              ? <strong>trên cloud — đăng nhập ở máy nào cũng thấy.</strong>
+              : <>chỉ trên máy này (<code>{s.account.storage_dir}</code>){s.central_cloud ? " — máy này đã nối cloud, bấm chuyển bên dưới." : "."}</>}
+            {" "}Ảnh, video: {s.files.enabled
+              ? <>trên kho file cloud — đã đẩy lên {s.files.uploaded}, đã tải về {s.files.downloaded}{s.files.pending_uploads ? `, đang chờ đẩy ${s.files.pending_uploads}` : ""}.</>
               : <>chỉ trên máy này.</>}
           </div>
-          {s.files.last_error && <div className="settings-panel__project-error">Lỗi đồng bộ file gần nhất: {s.files.last_error}</div>}
+          {s.files.last_error && (
+            <div className="settings-panel__project-error">
+              Lỗi đồng bộ ảnh / video gần nhất: {s.files.last_error}
+              {s.files.upload_errors > 0 && <> — {s.files.upload_errors} file chưa lên được cloud, máy khác sẽ không mở được các video đó.</>}
+            </div>
+          )}
           <div className="qt-row">
             {s.account.auth && s.account.backend !== "postgres" && s.central_cloud && !s.via_api && (
               <button type="button" className="flow-accounts__btn" disabled={busy !== ""} onClick={() => void migrate()}>
@@ -114,8 +119,8 @@ export function DataFolderSection() {
               </button>
             )}
           </div>
-          {!s.via_api && <div className="data-sync__box">
-            <strong>Kho file media (S3: Backblaze B2 / Cloudflare R2) — dùng chung cho mọi máy đăng nhập</strong>
+          {!s.via_api && isAdmin && <details className="data-sync__box">
+            <summary><strong>Nâng cao: kho file ảnh / video (Backblaze B2 / Cloudflare R2) — chỉ người quản lý</strong></summary>
             <input className="settings-panel__project-input" placeholder={s.files.endpoint ?? "Endpoint: s3.us-west-004.backblazeb2.com"}
                    value={s3.endpoint} onChange={(e) => setS3({ ...s3, endpoint: e.target.value })} />
             <input className="settings-panel__project-input" placeholder={s.files.bucket ?? "Tên bucket"}
@@ -130,7 +135,7 @@ export function DataFolderSection() {
                 {busy === "s3" ? "Đang kiểm tra…" : s.files.enabled ? "Đổi kho file" : "Kiểm tra & lưu"}
               </button>
             </div>
-          </div>}
+          </details>}
         </>
       )}
     </div>

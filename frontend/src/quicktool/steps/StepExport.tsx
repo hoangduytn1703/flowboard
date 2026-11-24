@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import {
   BGM_DEFAULT_VOLUME, BGM_VOLUMES, COVER_STYLES, MAX_MUSIC_BYTES, MAX_SPEAKERS, VOICES,
   createCover, isGeminiVoice, mediaUrl, parseSpeakers, patchNode, previewVoice, speakerTags, uploadMusic,
-  type CoverStyle, patchBoardData } from "../../api/client";
-import { VoiceOptions, useVoiceGroups } from "../VoiceField";
+  type CoverStyle } from "../../api/client";
+import { VoiceSelect } from "../VoiceField";
 import { useBoardStore, type FlowboardNodeData } from "../../store/board";
 import { useQuicktoolStore } from "../../store/quicktool";
 import { hasMedia, isBusy, type ClipRoles } from "../roles";
@@ -15,6 +15,7 @@ import { ClipArranger, OverlayEditor } from "./ExportEditor";
 import { joinVoice, Smooth60Field, SubtitleField, subChoiceOf, subChoicePatch } from "./JoinOptions";
 import { useSettingsStore } from "../../store/settings";
 import { ScheduleDialog } from "../schedule/ScheduleDialog";
+import { SaveButton } from "../../components/ZipSaveButton";
 
 // ── voice preview ───────────────────────────────────────────────────────────
 // Only one sample plays at a time, whichever button started it.
@@ -111,8 +112,10 @@ function DialogueLine({ text, tags }: { text: string; tags: string[] }) {
 /** Step 5 — voice options, the clip list, the final file. */
 import { useFeature } from "../../lib/features";
 
-export function StepExport({ roles, productName = "", price = "", channelId = null, dubJobId = null, dubPart = null, cutPart = null, voiceless = false }: {
+export function StepExport({ roles, productName = "", price = "", channelId = null, dubJobId = null, dubPart = null, cutPart = null, voiceless = false, videoOnly = false }: {
   roles: ClipRoles; productName?: string; price?: string; channelId?: number | null;
+  /** a video made by the tools: its own screen, no steps — no cover from scene pictures */
+  videoOnly?: boolean;
   /** "🔇 Không lời": joined with the clips' own sound — no voice, no subtitles. */
   voiceless?: boolean;
   /** a clip made by the dubbing tool: it is edited there, not joined here */
@@ -122,7 +125,7 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
   /** a part of a long video cut on the "✂️ Cắt video" page: edited there, dubbed on the dubbing page */
   cutPart?: { job_id: string; run_id: string; index: number; total: number; board_id: number | null; imported?: boolean } | null;
 }) {
-  const voiceGroups = useVoiceGroups();
+
   const navigate = useNavigate();
   const fbOn = useFeature("facebook");
   const postsOn = useFeature("posts");
@@ -273,7 +276,7 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
       {cutPart ? (
         <section className="qt-card qt-dubclip">
           <div className="qt-card__eyebrow">{cutPart.imported ? "Video đã chỉnh sửa" : `Video ${cutPart.index}/${cutPart.total} cắt từ video dài`}</div>
-          <h3 className="qt-card__title">Chỉnh ở trang Chỉnh sửa video</h3>
+          <h3 className="qt-card__title">Chỉnh sửa video này</h3>
           <p className="qt-card__hint">
             {cutPart.imported ? <>Video này làm ở menu <strong>Chỉnh sửa video</strong>, giữ nguyên tiếng gốc.</>
               : <>Video này được <strong>cắt</strong> ra từ một video dài, giữ nguyên tiếng gốc.</>} Chỉnh phụ đề (đúng lời trong video hoặc dịch), khung
@@ -291,32 +294,27 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
       ) : dubJobId ? (
         <section className="qt-card qt-dubclip">
           <div className="qt-card__eyebrow">{dubPart ? `Phần ${dubPart.index}/${dubPart.total} của video lồng tiếng` : "Video lồng tiếng"}</div>
-          <h3 className="qt-card__title">{dubPart ? "Chỉnh hoặc cắt lại ở trang Lồng tiếng" : "Chỉnh phụ đề, giọng đọc, bản dịch"}</h3>
-          {dubPart ? (
-            <p className="qt-card__hint">
-              Clip này được <strong>cắt</strong> từ một video lồng tiếng. Muốn sửa phụ đề, giọng hay đổi chỗ cắt: mở trang chỉnh, sửa rồi
-              "Xuất lại video", sau đó vào tab <strong>✂️ Cắt</strong> bấm cắt lại — clip này tự nhận bản mới.
-            </p>
-          ) : (
-            <p className="qt-card__hint">
-              Clip này làm từ công cụ <strong>Lồng tiếng video</strong>. Vị trí và cỡ phụ đề, kiểu chữ, vùng làm mờ chữ gốc, giọng đọc và
-              từng câu dịch đều chỉnh ở đó — bấm "Áp dụng" / "Render lại" xong thì clip này tự cập nhật bản mới.
-            </p>
+          <h3 className="qt-card__title">Chỉnh phụ đề, giọng đọc, bản dịch</h3>
+          <p className="qt-card__hint">
+            {dubPart
+              ? <>Phần này được <strong>cắt</strong> từ một video lồng tiếng. Sửa phụ đề hay giọng: mở trình chỉnh sửa, sửa rồi “Xuất lại video”,
+                  sau đó vào tab <strong>✂️ Cắt</strong> cắt lại — phần này tự nhận bản mới.</>
+              : <>Mở trình chỉnh sửa để đổi vị trí và kiểu phụ đề, che chữ gốc, đổi giọng, sửa từng câu dịch — “Xuất lại video” xong thì
+                  video này tự dùng bản mới.</>}
+          </p>
+          {(dubOn || cutOn) && dubJobId && (
+            <button type="button" className="qt-btn qt-btn--accent qt-btn--big"
+                    onClick={() => navigate(editPath([dubJobId]), boardId !== null ? { state: { back: `/clips/${boardId}/export` } } : undefined)}>
+              ✏️ Mở trình chỉnh sửa
+            </button>
           )}
-          <ul className="qt-dubclip__list">
-            <li>🎯 Kéo phụ đề, đổi cỡ chữ, kiểu hộp vàng / trắng / viền</li>
-            <li>🌫 Vùng làm mờ che chữ gốc</li>
-            <li>🗣 Đổi giọng đọc, sửa từng câu dịch</li>
-          </ul>
-          {dubOn && <a className="qt-btn qt-btn--accent qt-btn--big" href={`/tools/dub?job=${dubJobId}`}
-             onClick={(e) => { e.preventDefault(); navigate(`/tools/dub?job=${dubJobId}`); }}>✏️ Mở trang chỉnh phụ đề & giọng</a>}
         </section>
       ) : (
       <section className="qt-card">
         <div className="qt-card__eyebrow">Bước 5</div>
-        <h3 className="qt-card__title">{voiceless ? "Ghép clip" : "Ghép & lồng tiếng"}</h3>
+        <h3 className="qt-card__title">{voiceless ? "Ghép các cảnh" : "Ghép cảnh & lồng tiếng"}</h3>
         <div className="qt-stats">
-          <div className="qt-stat"><strong>{clips.length}</strong><span>clip sẵn sàng</span></div>
+          <div className="qt-stat"><strong>{clips.length}</strong><span>cảnh có video</span></div>
           {voiceless
             ? <div className="qt-stat"><strong>🔇</strong><span>không lời</span></div>
             : <div className="qt-stat"><strong>{voiced}</strong><span>có lời thoại</span></div>}
@@ -371,9 +369,7 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
               Giọng đọc
               <VoicePreviewButton voice={voice} style={voiceStyle} />
             </span>
-            <select value={voice} disabled={busy} onChange={(e) => { stopSample(); setOption({ voice: e.target.value }); setFavouriteVoice(e.target.value); }}>
-              <VoiceOptions groups={voiceGroups} />
-            </select>
+            <VoiceSelect value={voice} disabled={busy} onChange={(v) => { stopSample(); setOption({ voice: v }); setFavouriteVoice(v); }} />
           </label>
           {isGeminiVoice(voice) && (
             <>
@@ -403,10 +399,8 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
                 return (
                   <div key={tag} className="qt-speakers__row">
                     <SpeakerChip tag={tag} tags={allTags} />
-                    <select value={picked} disabled={busy} onChange={(e) => setSpeaker(tag, e.target.value)}>
-                      <option value="">giọng chung ({VOICES[voice] ?? voice})</option>
-                      <VoiceOptions groups={voiceGroups} short />
-                    </select>
+                    <VoiceSelect value={picked} disabled={busy} short emptyLabel={`giọng chung (${VOICES[voice] ?? voice})`}
+                                 ariaLabel={`Giọng của nhân vật ${tag}`} onChange={(v) => setSpeaker(tag, v)} />
                     <VoicePreviewButton voice={picked || voice} style={voiceStyle} />
                     {usedTags.includes(tag)
                       ? <span className="qt-speakers__unused" title="Đang dùng trong lời thoại">đang dùng</span>
@@ -489,15 +483,14 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
 
       <section className="qt-card qt-card--result">
         <div className="qt-card__eyebrow">Kết quả</div>
-        <h3 className="qt-card__title">Clip hoàn chỉnh</h3>
+        <h3 className="qt-card__title">{videoOnly ? "Video" : "Clip hoàn chỉnh"}</h3>
         {exp && hasMedia(exp) ? (
           <>
             <video className="qt-result" src={mediaUrl(exp.data.mediaId as string)} controls playsInline />
-            <a className="qt-btn qt-btn--accent" href={mediaUrl(exp.data.mediaId as string)}
-               download={`${boardName || "clip"}.mp4`}
-               onClick={() => { if (boardId !== null) patchBoardData(boardId, { quicktool: { downloaded_at: Date.now() } }).catch(() => {}); }}>
-              ⬇ Tải về đăng TikTok
-            </a>
+            {/* through the clip: the agent saves its final video into the save folder and marks it downloaded */}
+            <SaveButton className="qt-btn qt-btn--accent" label="⬇ Tải về đăng TikTok"
+                        ids={boardId !== null ? [boardId] : []}
+                        media={boardId === null ? [{ media_id: String(exp.data.mediaId), name: boardName || "clip" }] : []} />
             {(fbOn || postsOn) && <div className="qt-result__share">
               {fbOn && <button type="button" className="qt-btn qt-btn--schedule" onClick={() => setScheduling(true)}
                       title="Chọn giờ đăng lên kênh; kênh có Facebook Page kết nối thì tự đăng">📅 Lên lịch đăng</button>}
@@ -515,7 +508,7 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
           </div>
         )}
 
-        <div className="qt-cover">
+        {!videoOnly && <div className="qt-cover">
           <div className="qt-cover__head">
             <h4>Ảnh bìa</h4>
             <small>1080×1920, chữ in lên ảnh cảnh</small>
@@ -580,7 +573,7 @@ export function StepExport({ roles, productName = "", price = "", channelId = nu
               )}
             </>
           )}
-        </div>
+        </div>}
       </section>
     </div>
   );

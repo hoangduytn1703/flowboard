@@ -25,7 +25,7 @@ export function ClipPickDialog({ max, initial, onPick, onClose, everyClip = fals
   const search = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    void listBoardSummaries().then((bs) => setBoards(bs.filter((b) => b.summary.export_media))).catch(() => setBoards([]));
+    void listBoardSummaries().then((bs) => setBoards(bs.filter((b) => b.summary.export_media && b.summary.video !== "missing"))).catch(() => setBoards([]));
     search.current?.focus();
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -57,7 +57,7 @@ export function ClipPickDialog({ max, initial, onPick, onClose, everyClip = fals
         <div className="qt-dubjobs__head">
           <div>
             <h3 className="project-modal__title">🎬 Chọn video từ Clip của tôi</h3>
-            <small className="qt-card__hint">Clip đã có video · chọn tối đa {max} video một lần · mỗi video thành một video lồng tiếng</small>
+            <small className="qt-card__hint">Clip đã xong, có video trên máy này · chọn tối đa {max} video một lần</small>
           </div>
           <button type="button" className="qt-dubjobs__close" aria-label="Đóng" onClick={onClose}>×</button>
         </div>

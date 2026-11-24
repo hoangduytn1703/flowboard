@@ -1,7 +1,7 @@
 import { SetupCard } from "../../components/SetupGuide";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { clipThumbUrl, listBoardSummaries, type BoardSummary } from "../../api/client";
+import { clipReady, clipThumbUrl, listBoardSummaries, type BoardSummary } from "../../api/client";
 import { ZipSaveButton } from "../../components/ZipSaveButton";
 import { getHistorySummary, listHistory, type HistoryRow, type HistorySummary } from "../../api/history";
 import { useFlowCredits } from "../../components/credits";
@@ -164,7 +164,7 @@ export function TodayPage() {
 
   const list = boards ?? [];
   const failed = useMemo(() => list.filter((b) => b.summary.errors > 0), [list]);
-  const toDownload = useMemo(() => list.filter((b) => b.summary.exported && !b.summary.downloaded_at), [list]);
+  const toDownload = useMemo(() => list.filter((b) => clipReady(b.summary) && !b.summary.downloaded_at), [list]);
   const unfinished = useMemo(
     () => list.filter((b) => !b.summary.exported && b.summary.errors === 0 && !running.some((r) => r.board?.id === b.id)),
     [list, running],

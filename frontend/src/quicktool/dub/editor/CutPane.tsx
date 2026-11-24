@@ -8,6 +8,7 @@ import {
 import { toast } from "../../../store/toast";
 import { clock, type EditCue } from "./cues";
 import { askConfirm } from "../../../components/Dialogs";
+import { SaveButton } from "../../../components/ZipSaveButton";
 
 const CUT_MIN = 3;
 const SNAP_S = 2.5;
@@ -269,7 +270,8 @@ export function CutPane({ job, cues, duration, now, dirty, readOnly, onSeek, onP
                 <span className="dx-cut__pt"><b>P{p.index}</b> {p.title}<small>{fmtClock(p.start)} → {fmtClock(p.end)}</small></span>
                 <span className="dx-cut__pbtns">
                   <button type="button" className="qt-btn qt-btn--small" onClick={() => navigate(`/clips/${p.board_id}/export`)}>Mở clip</button>
-                  <a className="qt-btn qt-btn--small qt-btn--ghost" href={`/media/${p.media_id}`} download={`${p.title || `phan-${p.index}`}.mp4`}>⬇</a>
+                  <SaveButton className="qt-btn qt-btn--small qt-btn--ghost" label="⬇"
+                              media={[{ media_id: p.media_id, name: p.title || `phan-${p.index}` }]} title="Lưu video phần này" />
                 </span>
               </li>
             ))}

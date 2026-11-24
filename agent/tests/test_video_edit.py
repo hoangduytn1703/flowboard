@@ -57,7 +57,7 @@ def _asset(media_dir: Path, media_id: str, seconds: float = 3.0) -> str:
 
 
 @needs_ffmpeg
-def test_files_come_in_without_a_clip_and_render_with_no_words(client, media_dir):
+def test_files_come_in_as_clips_and_render_with_no_words(client, media_dir):
     a, b = _asset(media_dir, "edita"), _asset(media_dir, "editb")
     r = client.post("/api/edit/import", json={"media": [{"media_id": a, "name": "Áo khoác 1.mp4"}, {"media_id": b, "name": "b.mp4"},
                                                         {"media_id": "nope", "name": "x.mp4"}]})
@@ -68,9 +68,12 @@ def test_files_come_in_without_a_clip_and_render_with_no_words(client, media_dir
     assert [i["job_id"] for i in items] == made["job_ids"]
     first = items[0]
     assert first["name"] == "Áo khoác 1" and first["origin"] == "import" and first["lines"] == 0
-    assert first["board_id"] is None and not first["edited"] and first["media_id"] == a
-    with get_session() as db:  # nothing in "Clip của tôi" until an export
-        assert db.exec(dub.select(Board)).all() == []
+    assert first["board_id"] and not first["edited"] and first["media_id"] == a
+    with get_session() as db:  # a clip at once: "Clip của tôi" is the one list of videos
+        boards = db.exec(dub.select(Board)).all()
+        assert len(boards) == 2
+        exports = {n.board_id: n.data["mediaId"] for n in db.exec(dub.select(Node).where(Node.type == "export")).all()}
+        assert exports[first["board_id"]] == a
     # the dubbing list leaves them out; the picked-jobs read returns them
     assert client.get("/api/dub/jobs?all=true&brief=true").json() == []
     assert [j["job_id"] for j in client.get("/api/edit/jobs", params={"ids": ",".join(made["job_ids"] + ["gone", made["job_ids"][0]])}).json()] == made["job_ids"]
@@ -83,21 +86,38 @@ def test_files_come_in_without_a_clip_and_render_with_no_words(client, media_dir
     assert job.status == "done", job.error
     out = probe_clip(Path(media_service.cached_path(job.media_id)))
     assert out.width == out.height and out.has_audio and job.media_id != a
-    assert job.board_id
+    assert job.board_id == first["board_id"]  # the same clip, now with the edited video
     with get_session() as db:
         nodes = {n.type: n for n in db.exec(dub.select(Node).where(Node.board_id == job.board_id)).all()}
         assert nodes["export"].data["mediaId"] == job.media_id
     row = next(i for i in client.get("/api/edit/items").json()["items"] if i["job_id"] == job.id)
     assert row["edited"] and row["board_id"] == job.board_id
 
-    # off the list: the untouched import loses its folder, the exported one keeps its clip and project
+    # off the list: both keep their clip and project (they are clips now), and the files that came in stay
     other = dub.JOBS[made["job_ids"][1]]
     other_work = other.work
     gone = client.post("/api/edit/remove", json={"job_ids": made["job_ids"]}).json()
     assert gone["removed"] == made["job_ids"] and client.get("/api/edit/items").json()["items"] == []
-    assert not other_work.exists() and job.id in dub.JOBS and (media_dir / "editb.mp4").is_file()
+    assert other_work.exists() and job.id in dub.JOBS and (media_dir / "editb.mp4").is_file()
     with get_session() as db:
-        assert db.get(Board, job.board_id) is not None
+        assert db.get(Board, job.board_id) is not None and db.get(Board, other.board_id) is not None
+
+
+@needs_ffmpeg
+def test_older_imports_without_a_clip_join_the_library(client, media_dir):
+    """Files brought in before 24/11 had no clip until their first export: the library gives them one."""
+    a = _asset(media_dir, "olda")
+    job_id = client.post("/api/edit/import", json={"media": [{"media_id": a, "name": "Cũ.mp4"}]}).json()["job_ids"][0]
+    job = dub.JOBS[job_id]
+    assert client.delete(f"/api/boards/{job.board_id}").status_code in (200, 204)  # as it was before: no clip
+    job.board_id = None
+    dub.persist(job)
+    video_edit._CLIPS_MADE.clear()
+    rows = client.get("/api/boards", params={"summary": True}).json()
+    assert [r["name"] for r in rows] == ["Cũ"] and rows[0]["summary"]["exported"] and rows[0]["summary"]["video"] == "here"
+    assert dub.JOBS[job_id].board_id == rows[0]["id"]
+    # once per run: a second read does not make another
+    assert len(client.get("/api/boards", params={"summary": True}).json()) == 1
 
 
 @needs_ffmpeg

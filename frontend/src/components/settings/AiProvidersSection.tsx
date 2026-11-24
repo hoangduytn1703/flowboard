@@ -55,29 +55,28 @@ const OPTIONAL_FEATURES: LLMFeature[] = ["chat_agent"];
 
 const FEATURE_META: Record<LLMFeature, { title: string; blurb: string }> = {
   auto_prompt: {
-    title: "Auto-prompt",
-    blurb: "Mở rộng ý tưởng ngắn thành prompt ảnh / video đầy đủ. Chạy thường xuyên — nên ưu tiên tốc độ.",
+    title: "Viết kịch bản, lời thoại, bài đăng",
+    blurb: "Việc chạy nhiều nhất — nên chọn AI nhanh.",
   },
   vision: {
-    title: "Vision",
-    blurb: "Mô tả các ảnh đã tải lên. Chỉ liệt kê provider đọc được ảnh.",
+    title: "Đọc ảnh, video",
+    blurb: "Đọc ảnh sản phẩm, xem video mẫu. Chỉ liệt kê AI đọc được ảnh.",
   },
   planner: {
-    title: "Planner",
-    blurb: "Chia mục tiêu thành một board gồm các node liên kết. Ít khi chạy — nên ưu tiên chất lượng.",
+    title: "Lên kế hoạch",
+    blurb: "Ít khi chạy — nên chọn AI mạnh.",
   },
   chat_agent: {
-    title: "Chat AI",
-    blurb: "Chat agent ở dưới cùng — mỗi tin nhắn gọi nhiều lần. Không bắt buộc: để trống sẽ dùng lựa chọn của Planner.",
+    title: "Trợ lý chat",
+    blurb: "Không bắt buộc: để trống thì dùng AI của mục Lên kế hoạch.",
   },
 };
 
-// Gemini is labelled with its CLI because the binary is `agy`, not
-// `gemini` — users who go looking for the process need that hint.
+// Gemini runs through its `agy` CLI; the seller only needs the name.
 const PROVIDER_LABEL: Record<LLMProviderName, string> = {
   claude: "Claude",
-  gemini: "Gemini (agy)",
-  openai: "OpenAI (Codex)",
+  gemini: "Gemini",
+  openai: "ChatGPT (Codex)",
   muse: "Muse",
 };
 
@@ -245,6 +244,30 @@ export function AiProvidersSection() {
     }));
   }
 
+  /** The simple choice: one AI for everything (reading pictures stays as it is when that AI cannot read them). */
+  async function useEverywhere(name: LLMProviderName) {
+    if (!providers || applying) return;
+    const info = providers.find((p) => p.name === name);
+    if (!info) return;
+    setApplying(true);
+    try {
+      const body: LLMConfigUpdate = {};
+      for (const feature of FEATURES) {
+        if (feature === "vision" && !info.supportsVision) continue;
+        body[feature] = { provider: name, model: info.defaultModel ?? null, effort: defaultEffortFor(info) };
+      }
+      await setLlmConfig(body);
+      toast.success(`Từ giờ ${PROVIDER_LABEL[name]} viết cho bạn.`);
+      const fresh = await refresh(true);
+      if (fresh && aliveRef.current) setDraft(draftFrom(fresh));
+      window.dispatchEvent(new CustomEvent("flowboard:llm-config-changed"));
+    } catch (err) {
+      toast.error(`Không lưu được: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      if (aliveRef.current) setApplying(false);
+    }
+  }
+
   async function handleApply() {
     if (!draft || applying) return;
     setApplying(true);
@@ -261,7 +284,7 @@ export function AiProvidersSection() {
         body[feature] = { provider: pin.provider, model: pin.model, effort: pin.effort };
       }
       await setLlmConfig(body);
-      toast.success("Đã lưu cài đặt AI provider.");
+      toast.success("Đã lưu cài đặt AI.");
       const fresh = await refresh(true);
       if (fresh && aliveRef.current) setDraft(draftFrom(fresh));
       // Broadcast so the badge + ForcedSetupGate refresh immediately
@@ -294,7 +317,7 @@ export function AiProvidersSection() {
     return (
       <div className="ai-providers-section">
         <div className="ai-providers-section__error" role="alert">
-          ⚠ Không tải được trạng thái AI provider.
+          ⚠ Không tải được cài đặt AI.
           <button
             type="button"
             className="ai-providers-section__retry"
@@ -321,13 +344,39 @@ export function AiProvidersSection() {
   );
   const dirty = FEATURES.some((f) => !sameFeature(currentDraft[f], config![f]));
 
+  // the one AI every task uses, when they all agree (else the detailed choice below says who does what)
+  const saved = config!;
+  const mainUses = FEATURES.filter((f) => f !== "chat_agent").map((f) => saved[f].provider);
+  const oneAi = mainUses.every((p) => p && p === mainUses[0]) ? mainUses[0] : null;
   return (
     <div className="ai-providers-section">
       <div className="ai-providers-section__intro">
-        Mỗi tính năng tự chọn provider, model và effort riêng. Chọn loại rẻ
-        và nhanh cho tính năng chạy thường xuyên, loại chậm mà mạnh cho tính
-        năng cần chất lượng.
+        AI viết kịch bản, lời thoại, bài đăng và đọc ảnh sản phẩm cho bạn. Chưa chọn, hoặc AI đã chọn bị lỗi / hết lượt, thì DFlow
+        tự dùng Gemini key bạn đã nhập ở tab 🔑 Gemini key.
       </div>
+
+      <div className="settings-panel__section">
+        <div className="settings-panel__label">AI viết cho bạn</div>
+        <div className="qt-post__actions" role="radiogroup" aria-label="AI viết cho bạn">
+          {ordered.map((p) => (
+            <button key={p.name} type="button" role="radio" aria-checked={oneAi === p.name} disabled={applying || !p.available}
+                    className={`qt-btn qt-btn--small${oneAi === p.name ? " qt-btn--accent" : " qt-btn--ghost"}`}
+                    title={p.available ? `Dùng ${PROVIDER_LABEL[p.name]} cho mọi việc viết` : `${PROVIDER_LABEL[p.name]} chưa cài trên máy này`}
+                    onClick={() => oneAi !== p.name && void useEverywhere(p.name)}>
+              {PROVIDER_LABEL[p.name]}{p.available ? "" : " (chưa cài)"}
+            </button>
+          ))}
+        </div>
+        <div className="settings-panel__hint">
+          {oneAi ? <>Đang dùng <strong>{PROVIDER_LABEL[oneAi]}</strong> cho mọi việc.</>
+            : mainUses.some(Boolean) ? "Mỗi việc đang dùng một AI khác nhau — xem mục Nâng cao bên dưới."
+            : "Chưa chọn — DFlow dùng Gemini key."}
+          {" "}AI “chưa cài” cần cài trên máy trước (bấm “Hướng dẫn cài” trong mục Nâng cao).
+        </div>
+      </div>
+
+      <details className="ai-providers-section__advanced">
+        <summary>Nâng cao: chọn AI, phiên bản, mức suy nghĩ riêng cho từng việc</summary>
 
       {missing.length > 0 && (
         // Setup isn't complete until every feature has a provider —
@@ -335,7 +384,7 @@ export function AiProvidersSection() {
         // forced-setup gate) keys off.
         <div className="ai-providers-section__mixed-notice" role="alert">
           ⓘ Chưa chọn: {missing.map((f) => FEATURE_META[f].title).join(", ")}.
-          Hãy chọn provider cho từng mục, rồi bấm Áp dụng.
+          Chọn AI cho từng mục rồi bấm Áp dụng — hoặc chọn một AI ở trên cho mọi việc.
         </div>
       )}
 
@@ -380,13 +429,14 @@ export function AiProvidersSection() {
           disabled={!dirty || applying}
           title={
             dirty
-              ? "Lưu các lựa chọn provider / model / effort này."
+              ? "Lưu các lựa chọn này."
               : "Chưa có thay đổi nào kể từ lần lưu trước."
           }
         >
           {applying ? "Đang áp dụng…" : dirty ? "Áp dụng thay đổi" : "Đã lưu"}
         </button>
       </div>
+      </details>
 
       <ProviderSetupModal
         provider={helpFor ?? "claude"}

@@ -128,11 +128,38 @@ def _new_job(media_id: str, name: str, *, from_board: Optional[int] = None, chan
     job.work.mkdir(parents=True, exist_ok=True)
     job.src_path = Path(path)
     job.started_at = time.time()
-    # no clip yet: the first export makes it (thirty files dropped in must not flood "Clip của tôi")
     job.board_id = None
     dub.JOBS[job.id] = job
+    # A file from this machine is a clip at once: "Clip của tôi" is the one list of videos (24/11 — a second list
+    # here confused people). A video taken from a clip has that clip already; its first export makes a new one.
+    if not from_board:
+        job.board_id = dub._save_board(job)
     dub.persist(job)
     return job
+
+
+_CLIPS_MADE: set[str] = set()
+
+
+def ensure_clips() -> int:
+    """Files brought in before 24/11 waited for their first export to become clips: give them one now (once per
+    account folder per run — it reads every saved project)."""
+    owner = str(media_service.MEDIA_CACHE_DIR)
+    if owner in _CLIPS_MADE:
+        return 0
+    _CLIPS_MADE.add(owner)
+    made = 0
+    for jid in _ids():
+        job = dub.find_job(jid)
+        if job is None or not is_import(job) or job.board_id or job.cut.get("from_board"):
+            continue
+        if not (job.media_id or job.source_media_id):
+            continue
+        job.media_id = job.media_id or job.source_media_id
+        job.board_id = dub._save_board(job)
+        dub.persist(job)
+        made += 1
+    return made
 
 
 def import_media(media: list[dict[str, Any]]) -> dict[str, Any]:

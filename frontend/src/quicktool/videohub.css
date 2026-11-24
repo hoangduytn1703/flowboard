@@ -1,0 +1,44 @@
+/* "🎞 Xử lý video" → "📥 Thêm video": one door for videos you already have, then what to do with them */
+.vh { position: relative; display: flex; flex-direction: column; gap: 16px; max-width: 980px; }
+.vh .qt-input {
+  width: 100%; padding: 9px 11px; font: inherit; font-size: 14.5px; color: var(--text); outline: none; box-sizing: border-box;
+  background: var(--panel-high); border: 1px solid var(--border); border-radius: 8px;
+}
+.vh .qt-input:focus { border-color: var(--qt-accent); }
+.vh__links { display: flex; flex-direction: column; gap: 6px; }
+.vh__linkrow { display: flex; align-items: center; gap: 6px; }
+.vh__linkrow .qt-input { flex: 1 1 auto; min-width: 0; }
+.vh__sources { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.vh__videos { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.vh__videos li {
+  display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 12px; border-radius: 8px;
+  background: var(--panel-high); border: 1px solid var(--border); font-size: 14px;
+}
+.vh__videos li.is-error { border-color: rgba(248, 113, 113, 0.5); }
+.vh__vname { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vh__videos small { color: var(--muted); white-space: nowrap; }
+.vh__videos li.is-error small { color: #f87171; white-space: normal; }
+
+.vh__actions { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.vh__action {
+  display: flex; align-items: flex-start; gap: 12px; padding: 14px; text-align: left; cursor: pointer; font: inherit; color: var(--text);
+  background: var(--panel-high); border: 1px solid var(--border); border-radius: 12px; transition: border-color 0.15s, transform 0.15s;
+}
+.vh__action:hover:not(:disabled) { border-color: var(--qt-accent); transform: translateY(-1px); }
+.vh__action:disabled { cursor: not-allowed; opacity: 0.55; }
+.vh__action--want { border-color: var(--qt-accent); box-shadow: 0 0 0 2px var(--qt-accent-soft); }
+.vh__aicon {
+  flex: 0 0 auto; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 10px; font-size: 20px;
+  background: var(--qt-accent-soft);
+}
+.vh__atext { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.vh__atext strong { font-size: 15.5px; }
+.vh__atext small { color: var(--muted); font-size: 13px; line-height: 1.4; }
+.vh__atext em { font-style: normal; color: #fbbf24; font-size: 12.5px; line-height: 1.4; }
+
+.vh.is-dropping { outline: 2px dashed var(--qt-accent); outline-offset: 6px; border-radius: 12px; }
+.vh__dropmask {
+  position: absolute; inset: 0; z-index: 5; display: grid; place-items: center; border-radius: 12px;
+  background: rgba(10, 12, 16, 0.78); pointer-events: none; font-size: 18px; font-weight: 700;
+}
+@media (prefers-reduced-motion: reduce) { .vh__action { transition: none; } .vh__action:hover:not(:disabled) { transform: none; } }

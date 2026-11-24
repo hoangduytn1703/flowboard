@@ -4,6 +4,7 @@ import { postHooks, postText, replaceOpening, reviseImagePrompt, splitTags, type
 import { toast } from "../../store/toast";
 import { generateStandaloneImage, generateStandaloneVideo } from "../standaloneImage";
 import { askConfirm } from "../../components/Dialogs";
+import { SaveButton } from "../../components/ZipSaveButton";
 
 const ASPECTS = [
   { key: "IMAGE_ASPECT_RATIO_SQUARE", label: "Vuông 1:1" },
@@ -161,7 +162,7 @@ export function PostEditor({
   async function makeVideo(source: string | null, confirmFirst: boolean) {
     if (!onVideo) return;
     let src = source;
-    if (confirmFirst && !await askConfirm("Tạo video 8 giây bằng Flow (Omni Flash, khoảng 12 credit, 1–3 phút)? Video sẽ thay ảnh khi đăng.")) return;
+    if (confirmFirst && !await askConfirm("Tạo video 8 giây bằng Flow (khoảng 12 credit, 1–3 phút)? Video sẽ thay ảnh khi đăng.")) return;
     setVideoBusy(true);
     try {
       if (!src) {
@@ -346,7 +347,7 @@ export function PostEditor({
 
       {onVideo && !clipVideo && !readOnly && (videoSource || draft.image_prompts.length > 0 || video) && (
         <details className="qt-post__videobox" open={!!video || videoBusy || undefined}>
-          <summary>🎬 Video kèm thay ảnh <small>(Flow Omni 8 s, ~12 credit)</small></summary>
+          <summary>🎬 Video kèm thay ảnh <small>(8 giây, ~12 credit Flow)</small></summary>
           <p className="qt-card__hint">
             Video động từ {images[0] ? "ảnh đầu tiên của bài" : videoSource ? "ảnh sản phẩm" : "ảnh AI của bài (tạo ảnh trước)"} — bài video thường được Facebook đẩy reach tốt hơn ảnh tĩnh.
           </p>
@@ -359,7 +360,7 @@ export function PostEditor({
               {videoBusy ? "Đang tạo video…" : video ? "↻ Tạo lại video" : "🎬 Tạo video 8 giây"}
             </button>
             {video && !videoBusy && <button type="button" className="qt-btn qt-btn--small qt-btn--danger" onClick={() => onVideo("")}>Bỏ video (đăng ảnh)</button>}
-            {video && <a className="qt-btn qt-btn--small qt-btn--ghost" href={mediaUrl(video)} download="video-bai-viet.mp4">⬇ Tải video</a>}
+            {video && <SaveButton className="qt-btn qt-btn--small qt-btn--ghost" label="⬇ Tải video" media={[{ media_id: video, name: "video-bai-viet" }]} />}
           </div>
         </details>
       )}

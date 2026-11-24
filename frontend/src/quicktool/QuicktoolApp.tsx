@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   getTemplates,
+  clipReady,
   clipThumbUrl,
   listBoardSummaries,
   mediaUrl,
@@ -43,6 +44,7 @@ import { DubPage } from "./pages/DubPage";
 import { CutPage } from "./pages/CutPage";
 import { GrabPage } from "./pages/GrabPage";
 import { EditPage } from "./pages/EditPage";
+import { VideoHubPage } from "./pages/VideoHubPage";
 import { ClipChannel } from "./steps/ClipChannel";
 import { ClipPost } from "./steps/ClipPost";
 import { SchedulePage } from "./pages/SchedulePage";
@@ -54,7 +56,7 @@ import { SetupDialog } from "../components/SetupGuide";
 import { useSetupStore } from "../store/setup";
 import { AssistantWidget } from "../components/AssistantWidget";
 import { useFeature } from "../lib/features";
-import { editPath, MAX_EDIT_TOGETHER } from "../api/edit";
+import { editPath, importEditClips, MAX_EDIT_TOGETHER } from "../api/edit";
 import { FeatureGate } from "./FeatureGate";
 import { toast, useToastOn } from "../store/toast";
 import { agoOf } from "../api/grab";
@@ -67,6 +69,18 @@ function cutPartOf(qt: object, boardId: number | null): { job_id: string; run_id
   if (!q.dub?.job_id) return null;
   // origin "edit": a video brought into "🎞 Chỉnh sửa video" (a file, another clip), not a part of a cut
   return { job_id: q.dub.job_id, run_id: q.cut?.run_id ?? "", index: q.cut?.index ?? 1, total: q.cut?.total ?? 1, board_id: boardId, imported: q.cut?.origin === "edit" };
+}
+
+/** A clip made by a video tool rather than the step-by-step maker: what to call it (null = an ordinary clip). */
+function videoKindOf(qt: object): string | null {
+  const q = qt as { template_id?: string; dub?: { mode?: string }; cut?: { origin?: string } };
+  switch (q.template_id) {
+    case "dub": return q.dub?.mode === "sub" ? "Video có phụ đề" : "Video lồng tiếng";
+    case "dub_part": return "Phần cắt từ video lồng tiếng";
+    case "cut_part": return q.cut?.origin === "edit" ? "Video đã chỉnh sửa" : "Video cắt từ video dài";
+    case "capcut": return "Video từ CapCut";
+    default: return null;
+  }
 }
 
 /** Wizard steps and their URL slugs: /clips/:id/<slug>. */
@@ -121,7 +135,11 @@ export function QuicktoolApp() {
   const assistantOn = useFeature("assistant");
   const dubOn = useFeature("dub");
   const cutOn = useFeature("cut");
+  const cleanOn = useFeature("clean");
   const [templates, setTemplates] = useState<BoardTemplate[]>([]);
+  // the video editor gets the whole window: no app menu, no page title (its own bar has "← Quay lại" and the name)
+  const here = useLocation();
+  const focus = here.pathname === "/tools/edit" && /[?&]jobs?=/.test(here.search);
 
   useEffect(() => {
     setUiMode("quicktool");
@@ -129,7 +147,7 @@ export function QuicktoolApp() {
   }, [setUiMode]);
 
   return (
-    <div className="qt-app">
+    <div className={`qt-app${focus ? " qt-app--focus" : ""}`}>
       <QuicktoolSidebar />
       <div className="qt-content">
         <AccountSwitchBanner />
@@ -153,7 +171,8 @@ export function QuicktoolApp() {
           <Route path="/accounts" element={<AccountsPage />} />
           <Route path="/account" element={<AccountPage />} />
           <Route path="/schedule" element={<FeatureGate feature="facebook" title="Lịch đăng"><SchedulePage /></FeatureGate>} />
-          <Route path="/swipes" element={<FeatureGate feature="swipes" title="Mẫu đang hot"><SwipesPage /></FeatureGate>} />
+          <Route path="/swipes" element={<FeatureGate feature="swipes" title="Học bài viral"><SwipesPage /></FeatureGate>} />
+          <Route path="/tools" element={dubOn || cutOn || cleanOn ? <VideoHubPage /> : <FeatureGate feature="dub" title="Xử lý video"><VideoHubPage /></FeatureGate>} />
           <Route path="/tools/dub" element={<FeatureGate feature="dub" title="Lồng tiếng video"><DubPage /></FeatureGate>} />
           {/* Edit auto CapCut is hidden (lib/features HIDDEN): it will come back inside the video editor; pages/CapcutPage.tsx is kept */}
           <Route path="/tools/edit" element={dubOn || cutOn ? <EditPage /> : <FeatureGate feature="cut" title="Chỉnh sửa video"><EditPage /></FeatureGate>} />
@@ -208,6 +227,8 @@ function useGridColumns(ref: React.RefObject<HTMLElement>): number {
 
 /** "Clip của tôi": at most this many rows of cards a page ("Clip mới" counts as one card). */
 const LIBRARY_ROWS = 3;
+type LibraryTab = "done" | "draft" | "missing";
+const LIBRARY_TAB_KEY = "dflow.clips.tab";
 
 function fmtBytes(n: number): string {
   return n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1).replace(".", ",")} GB` : `${Math.max(1, Math.round(n / 1024 ** 2))} MB`;
@@ -233,6 +254,8 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
   const queue = useQuicktoolStore((s) => s.queue);
   const runQueue = useQuicktoolStore((s) => s.runQueue);
   const autoClip = useFeature("auto_clip");
+  const dubOn = useFeature("dub");
+  const cutOn = useFeature("cut");
   const stopQueue = useQuicktoolStore((s) => s.stopQueue);
   const autoMessage = useQuicktoolStore((s) => s.autoMessage);
   const videoModel = useSettingsStore((s) => s.videoModel);
@@ -276,7 +299,31 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
     : null;
   const productParam = params.get("product");
 
-  const list = (summaries ?? []).slice().reverse();
+  const all = (summaries ?? []).slice().reverse();
+  // Only finished clips whose video plays here are "my clips"; the rest wait in their own tabs.
+  const groups = {
+    done: all.filter((b) => clipReady(b.summary)),
+    draft: all.filter((b) => !b.summary.exported),
+    missing: all.filter((b) => b.summary.exported && b.summary.video === "missing"),
+  };
+  const [tabPick, setTabPick] = useState<LibraryTab>(() => {
+    try {
+      const saved = sessionStorage.getItem(LIBRARY_TAB_KEY);
+      return saved === "draft" || saved === "missing" ? saved : "done";
+    } catch {
+      return "done";
+    }
+  });
+  // A tab left empty (its last clip deleted / finished) falls back to the finished clips.
+  const tab: LibraryTab = tabPick !== "done" && summaries !== null && groups[tabPick].length === 0 ? "done" : tabPick;
+  function chooseTab(t: LibraryTab) {
+    setTabPick(t);
+    setPicked(new Set());
+    setConfirmDelete(false);
+    setPage(1);
+    try { sessionStorage.setItem(LIBRARY_TAB_KEY, t); } catch { /* private window */ }
+  }
+  const list = groups[tab];
   // Paged, three rows a page whatever the width: the "Clip mới" card opens every page.
   const gridRef = useRef<HTMLDivElement>(null);
   const cols = useGridColumns(gridRef);
@@ -286,16 +333,40 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
   const current = Math.min(page, pages);
   const shown = list.slice((current - 1) * perPage, current * perPage);
   // Clips that still have something to make: what "run all" would pick.
-  const unfinished = list.filter((b) => !b.summary.exported);
+  const unfinished = groups.draft;
   const pickedList = list.filter((b) => picked.has(b.id));
   const perClip = creditsPerClip(videoModel, videoQuality);
   // Only the unfinished ones among the ticked clips can be run; any ticked clip can be downloaded / deleted.
   const pickedRunnable = pickedList.filter((b) => !b.summary.exported);
-  // the ticked clips made by the dubbing / cutting tools: open in the editor side by side, one look for all
-  const pickedJobs = pickedList.map(dubJobOf).filter((id): id is string => !!id);
+  // the ticked finished clips: open in the editor side by side, one look for all
+  const pickedReady = pickedList.filter((b) => clipReady(b.summary));
+  const editOn = dubOn || cutOn;
+  const [opening, setOpening] = useState<number | null>(null);
+  /** "✏️ Chỉnh" on the ticked clips (or one card): a dubbed / cut clip opens its own project; any other finished clip gets one
+   *  for its video (its edited export becomes a clip of its own). */
+  async function openInEditor(targets: BoardSummary[]) {
+    const own = targets.map(dubJobOf).filter((id): id is string => !!id);
+    const others = targets.filter((b) => !dubJobOf(b)).map((b) => b.id);
+    const ids = [...own];
+    if (others.length) {
+      try {
+        const r = await importEditClips(others);
+        for (const e of r.errors) toast.warning(`${e.name}: ${e.error}`);
+        ids.push(...r.job_ids);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : String(e));
+      }
+    }
+    if (!ids.length) return;
+    if (ids.length > MAX_EDIT_TOGETHER) toast.warning(`Mở ${MAX_EDIT_TOGETHER} video đầu — trình chỉnh sửa nhận tối đa ${MAX_EDIT_TOGETHER} video một lượt.`);
+    navigate(editPath(ids), { state: { back: "/clips" } });
+  }
+  async function editClip(b: BoardSummary) {
+    setOpening(b.id);
+    try { await openInEditor([b]); } finally { setOpening(null); }
+  }
   function editPicked() {
-    if (pickedJobs.length > MAX_EDIT_TOGETHER) toast.warning(`Mở ${MAX_EDIT_TOGETHER} video đầu — trình chỉnh sửa nhận tối đa ${MAX_EDIT_TOGETHER} video một lượt.`);
-    navigate(editPath(pickedJobs), { state: { back: "/clips" } });
+    void openInEditor(pickedList.filter((b) => clipReady(b.summary)));
   }
   const allPicked = list.length > 0 && pickedList.length === list.length;
   const deleteBoardById = useBoardStore((s) => s.deleteBoardById);
@@ -371,7 +442,7 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
         <div className="qt-card__head">
           <div>
             <div className="qt-card__eyebrow">Thư viện</div>
-            <h3 className="qt-card__title">Clip của tôi{summaries ? ` · ${summaries.length}` : ""}</h3>
+            <h3 className="qt-card__title">Clip của tôi{summaries ? ` · ${groups.done.length}` : ""}</h3>
           </div>
           <div className="qt-row">
             {queue.running ? (
@@ -381,12 +452,12 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
                 {pickedList.some((b) => b.summary.exported) && (
                   <ZipSaveButton ids={pickedList.filter((b) => b.summary.exported).map((b) => b.id)}
                                  label={`⬇ Tải ${pickedList.filter((b) => b.summary.exported).length} clip đã ghép`}
-                                 title="Lưu một file .zip các clip đã ghép (tên theo sản phẩm + ngày) vào thư mục Tải về của máy này" />
+                                 title="Lưu các clip đã ghép (tên theo sản phẩm + ngày) vào thư mục lưu video — đổi thư mục ở Cài đặt → 🖥 Máy này" />
                 )}
-                {pickedJobs.length > 0 && (
+                {editOn && pickedReady.length > 0 && (
                   <button type="button" className="qt-btn qt-btn--accent" disabled={deleting} onClick={editPicked}
-                          title="Mở trình chỉnh sửa với các clip lồng tiếng / cắt video trong số đã chọn: chỉnh một clip rồi bấm “⇪ Áp cho cả loạt” để mọi clip cùng kiểu (khung, nền, phụ đề, chữ, nhân vật)">
-                    ✏️ Chỉnh {pickedJobs.length} video
+                          title="Mở trình chỉnh sửa với các clip đã chọn: chỉnh một clip rồi bấm “⇪ Áp cho cả loạt” để mọi clip cùng kiểu (khung, nền, phụ đề, chữ, nhân vật)">
+                    ✏️ Chỉnh {pickedReady.length} video
                   </button>
                 )}
                 {autoClip && pickedRunnable.length > 0 && (
@@ -404,13 +475,13 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
               </>
             ) : (
               <>
-                {autoClip && unfinished.length > 1 && (
+                {autoClip && tab === "draft" && unfinished.length > 1 && (
                   <button type="button" className="qt-btn qt-btn--ghost" onClick={() => startQueue(unfinished)}
                           title="Chạy tự động mọi clip chưa ghép xong, lần lượt từng clip">
                     ⚡ Chạy tất cả {unfinished.length} clip dở
                   </button>
                 )}
-                {list.length > 0 && (
+                {tab === "done" && list.length > 0 && (
                   <button type="button" className="qt-btn qt-btn--ghost" disabled={scanning} onClick={() => void runStorageScan()}
                           title="Đo mỗi clip đang chiếm bao nhiêu dung lượng trên máy này, và còn trống bao nhiêu — có thể chậm một chút nếu thư viện lớn">
                     {scanning ? "Đang quét…" : "🔍 Quét bộ nhớ"}
@@ -434,6 +505,39 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
             ⚠ Ổ đĩa máy này sắp hết chỗ — chỉ còn {fmtBytes(disk.free)} trống. Bấm "🔍 Quét bộ nhớ" để xem clip nào
             đang chiếm nhiều dung lượng rồi xoá bớt clip cũ không cần nữa.
           </div>
+        )}
+        {summaries !== null && (groups.draft.length > 0 || groups.missing.length > 0) && (
+          <div className="qt-libtabs" role="tablist" aria-label="Loại clip">
+            <button type="button" role="tab" aria-selected={tab === "done"} className={`qt-libtabs__tab${tab === "done" ? " qt-libtabs__tab--on" : ""}`}
+                    onClick={() => chooseTab("done")}>✓ Đã xong <span className="qt-libtabs__n">{groups.done.length}</span></button>
+            {groups.draft.length > 0 && (
+              <button type="button" role="tab" aria-selected={tab === "draft"} className={`qt-libtabs__tab${tab === "draft" ? " qt-libtabs__tab--on" : ""}`}
+                      onClick={() => chooseTab("draft")} title="Clip đang làm (chưa ghép thành video) — mở để làm tiếp">
+                ✎ Đang làm dở <span className="qt-libtabs__n">{groups.draft.length}</span>
+              </button>
+            )}
+            {groups.missing.length > 0 && (
+              <button type="button" role="tab" aria-selected={tab === "missing"}
+                      className={`qt-libtabs__tab qt-libtabs__tab--warn${tab === "missing" ? " qt-libtabs__tab--on" : ""}`}
+                      onClick={() => chooseTab("missing")} title="Clip đã xong ở máy khác / ở app cài nhưng video không có trên máy này">
+                ⚠ Video không có trên máy này <span className="qt-libtabs__n">{groups.missing.length}</span>
+              </button>
+            )}
+          </div>
+        )}
+        {tab === "missing" && (
+          <div className="qt-banner qt-banner--warn">
+            Các clip này đã làm xong ở máy khác (hoặc ở app DFlow cài trên máy, app dùng thư mục dữ liệu riêng) nhưng video chưa
+            lên được kho cloud, nên máy này không mở / tải được. Mở chúng bằng đúng máy / app đã làm ra, hoặc chọn rồi xoá khỏi danh sách.
+          </div>
+        )}
+        {summaries !== null && summaries.length > 0 && tab === "done" && list.length === 0 && (
+          <PageEmpty icon="🎬" title="Chưa có clip nào làm xong" compact
+                     actions={groups.draft.length > 0
+                       ? <button type="button" className="qt-btn qt-btn--accent" onClick={() => chooseTab("draft")}>Xem {groups.draft.length} clip đang làm dở</button>
+                       : <button type="button" className="qt-btn qt-btn--accent" onClick={() => navigate("/clips/new")}>+ Clip mới</button>}>
+            Clip chỉ hiện ở đây khi đã ghép xong thành video.
+          </PageEmpty>
         )}
         {list.length > 0 && !queue.running && (
           <div className="qt-clip-bulk">
@@ -461,12 +565,6 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
               <span className="qt-skeleton qt-skeleton--line qt-skeleton--short" />
             </div>
           ))}
-          {summaries !== null && summaries.length > 0 && (
-            <button type="button" className="qt-clip qt-clip--new" onClick={() => navigate("/clips/new")}>
-              <span className="qt-clip__plus">+</span>
-              <span>Clip mới</span>
-            </button>
-          )}
           {shown.map((b) => {
             const st = cardState(b.id);
             const pickable = !queue.running;
@@ -476,6 +574,12 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
                   <label className="qt-clip__pick" title="Chọn để chạy, tải hoặc xoá nhiều clip" onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" checked={picked.has(b.id)} onChange={() => togglePick(b.id)} />
                   </label>
+                )}
+                {tab === "done" && editOn && !queue.running && (
+                  <button type="button" className="qt-clip__edit" disabled={opening === b.id} onClick={() => void editClip(b)}
+                          title="Mở trình chỉnh sửa: khung, nền, chữ, phụ đề, che logo, tốc độ…" aria-label={`Chỉnh sửa “${b.name}”`}>
+                    {opening === b.id ? "…" : "✏️ Chỉnh"}
+                  </button>
                 )}
                 <button type="button" className="qt-clip__open" disabled={queue.running && queue.current !== b.id}
                         onClick={() => navigate(`/clips/${b.id}`)}>
@@ -489,12 +593,18 @@ function Library({ templates }: { templates: BoardTemplate[] }) {
                     {agoOf(b.created_at)}
                     {scan?.by_board[String(b.id)] !== undefined && ` · ${fmtBytes(scan.by_board[String(b.id)])}`}
                   </span>
-                  <span className="qt-clip__meta">
-                    {b.summary.scenes_done}/{b.summary.scenes} ảnh · {b.summary.clips_done}/{b.summary.clips} video
-                  </span>
-                  <span className={`qt-clip__state qt-clip__state--${st ? st.tone : b.summary.exported ? "done" : "idle"}`}>
-                    {st ? st.label : b.summary.exported ? "✓ đã ghép xong" : "chưa ghép"}
-                  </span>
+                  {b.summary.exported ? (
+                    <span className="qt-clip__meta">{videoKindOf((b.data as { quicktool?: object } | undefined)?.quicktool ?? {}) ?? "Clip sản phẩm"}</span>
+                  ) : (
+                    <span className="qt-clip__meta">
+                      {b.summary.scenes_done}/{b.summary.scenes} ảnh cảnh · {b.summary.clips_done}/{b.summary.clips} video cảnh
+                    </span>
+                  )}
+                  {(st || b.summary.video === "missing" || !b.summary.exported) && (
+                    <span className={`qt-clip__state qt-clip__state--${st ? st.tone : b.summary.video === "missing" ? "error" : "idle"}`}>
+                      {st ? st.label : b.summary.video === "missing" ? "⚠ video không có trên máy này" : "chưa ghép thành video"}
+                    </span>
+                  )}
                 </button>
               </div>
             );
@@ -563,6 +673,8 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
   const qt = (boards.find((b) => b.id === routeId)?.data?.quicktool ?? {}) as QuicktoolState;
   const template = templates.find((t) => t.id === qt.template_id) ?? null;
   const isDrama = qt.template_id === "drama";
+  // a video made by the tools (dub, cut, edit, CapCut): one screen — no product, scenes or steps 1–4
+  const videoKind = videoKindOf(qt);
   const kindLabel = template?.title ?? (qt.template_id === "reference_video" ? "Theo video mẫu" : qt.template_id === "product_link" ? "Theo link sản phẩm" : isDrama ? "Drama" : "Clip");
   // Drama clips have no video step: stills are animated at export time, so
   // step 4 is where spliced-in footage is ordered.
@@ -588,7 +700,7 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
   // No saved product (link / video clips): the industry read from the page, else the template's.
   const clipCategory = productCategory ?? qt.reference?.category ?? (template?.category && template.category !== "any" ? template.category : null);
   const { credits: flowCredits } = useFlowCredits();
-  useTitle(loaded && boardName ? `${boardName} · Bước ${step ?? qt.step ?? 1}` : "Đang mở clip…");
+  useTitle(loaded && boardName ? (videoKind ? boardName : `${boardName} · Bước ${step ?? qt.step ?? 1}`) : "Đang mở clip…");
 
   /** The auto run, after saying what it will spend. */
   async function startAuto() {
@@ -709,6 +821,42 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
     );
   }
 
+  const exportProps = {
+    roles, productName: productLabel.name, price: productLabel.price, channelId: qt.channel_id ?? null, voiceless: !!qt.voiceless,
+    dubJobId: qt.template_id === "dub" ? ((qt as { dub?: { job_id?: string } }).dub?.job_id ?? null)
+      : qt.template_id === "dub_part" ? ((qt as { dub_part?: { job_id?: string } }).dub_part?.job_id ?? null) : null,
+    dubPart: qt.template_id === "dub_part" ? ((qt as { dub_part?: { index: number; total: number } }).dub_part ?? null) : null,
+    cutPart: qt.template_id === "cut_part" ? cutPartOf(qt, routeId) : null,
+  };
+
+  if (videoKind) {
+    return (
+      <>
+        <header className="qt-header">
+          <span className="qt-header__crumb">{boardName || videoKind}</span>
+        </header>
+        <div className="qt-project">
+          <div className="qt-project__meta">
+            <div className="qt-card__eyebrow">{videoKind}</div>
+            <button type="button" className="qt-btn qt-btn--ghost qt-btn--small" onClick={() => navigate("/clips")}>← Clip của tôi</button>
+          </div>
+          <div className="qt-project__actions">
+            <button type="button" className="qt-btn qt-btn--ghost" onClick={rename}>Đổi tên</button>
+            <button type="button" className={`qt-btn qt-btn--ghost${confirmDelete ? " qt-btn--danger" : ""}`} onClick={() => void removeClip()}>
+              {confirmDelete ? "Bấm lần nữa để xoá" : "Xoá"}
+            </button>
+          </div>
+        </div>
+        <div className="qt-body qt-body--video">
+          <main className="qt-main">
+            <StepExport {...exportProps} videoOnly />
+            <ClipPost boardId={routeId} productId={qt.product_id ?? null} channelId={qt.channel_id ?? null} />
+          </main>
+        </div>
+      </>
+    );
+  }
+
   return (
     <>
       <header className="qt-header">
@@ -728,7 +876,6 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
           </select>
         </div>
         <div className="qt-project__actions">
-          <button type="button" className="qt-btn qt-btn--ghost" onClick={() => navigate(`/clips/new${qt.template_id && qt.template_id !== "reference_video" && qt.template_id !== "product_link" ? `?template=${qt.template_id}` : ""}`)}>+ Clip mới</button>
           <button type="button" className="qt-btn qt-btn--ghost" onClick={rename} disabled={running}>Đổi tên</button>
           <button type="button" className={`qt-btn qt-btn--ghost${confirmDelete ? " qt-btn--danger" : ""}`} onClick={() => void removeClip()} disabled={running}>
             {confirmDelete ? "Bấm lần nữa để xoá" : "Xoá"}
@@ -774,7 +921,7 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
           {isDrama ? (
             <div className="qt-locked__row"><span>Thứ tự</span><strong>{(qt.sequence ?? []).length} mục</strong></div>
           ) : (
-            <div className="qt-locked__row"><span>Video</span><strong>{roles.scenes.filter((s) => s.video?.data.mediaId).length}/{roles.scenes.length} clip</strong></div>
+            <div className="qt-locked__row"><span>Video cảnh</span><strong>{roles.scenes.filter((s) => s.video?.data.mediaId).length}/{roles.scenes.length}</strong></div>
           )}
           <div className="qt-locked__row"><span>Clip cuối</span><strong>{roles.export?.data.mediaId ? "đã ghép" : "chưa"}</strong></div>
           {roles.products[0]?.data.mediaId && (
@@ -797,12 +944,7 @@ function Wizard({ templates }: { templates: BoardTemplate[] }) {
           {step === 2 && <StepScript roles={roles} category={clipCategory} productId={qt.product_id ?? null} boardId={routeId} voiceless={!!qt.voiceless} />}
           {step === 3 && <StepMedia roles={roles} kind="image" />}
           {step === 4 && (isDrama ? <StepSequence roles={roles} /> : <StepMedia roles={roles} kind="video" productName={productLabel.name} boardName={boardName} voiceless={!!qt.voiceless} />)}
-          {step === 5 && <StepExport roles={roles} productName={productLabel.name} price={productLabel.price} channelId={qt.channel_id ?? null}
-                                     voiceless={!!qt.voiceless}
-                                     dubJobId={qt.template_id === "dub" ? ((qt as { dub?: { job_id?: string } }).dub?.job_id ?? null)
-                                       : qt.template_id === "dub_part" ? ((qt as { dub_part?: { job_id?: string } }).dub_part?.job_id ?? null) : null}
-                                     dubPart={qt.template_id === "dub_part" ? ((qt as { dub_part?: { index: number; total: number } }).dub_part ?? null) : null}
-                                     cutPart={qt.template_id === "cut_part" ? cutPartOf(qt, routeId) : null} />}
+          {step === 5 && <StepExport {...exportProps} />}
           {step === 1 && loaded && <ClipChannel boardId={routeId} channelId={qt.channel_id ?? null} />}
           {step === 5 && loaded && <ClipPost boardId={routeId} productId={qt.product_id ?? null} channelId={qt.channel_id ?? null} />}
           <div className="qt-footer">
